@@ -1,0 +1,33 @@
+#pragma once
+#ifndef NEI_MACROS_NAMESPACE_H
+#define NEI_MACROS_NAMESPACE_H
+
+// 可以由脚本生成
+#define NEI_NAMESPACE nei
+#define NEI_NAMESPACE_PREFIX nei_
+
+#if !defined(NEI_NAMESPACE) || !defined(NEI_NAMESPACE_PREFIX)
+
+#define NEI_NAMESPACE_NAME(name) name
+
+#ifdef __cplusplus
+#define nei
+#define NEI_BEGIN_NAMESPACE
+#define NEI_END_NAMESPACE
+#endif // __cplusplus
+
+#else // !defined(NEI_NAMESPACE) || !defined(NEI_NAMESPACE_PREFIX)
+
+#define _NEI_CONCAT(_1, _2) _1##_2
+#define _NEI_NS_CONCAT(ns, name) _NEI_CONCAT(ns, name)
+#define NEI_NAMESPACE_NAME(name) _NEI_NS_CONCAT(NEI_NAMESPACE_PREFIX, name)
+
+#ifdef __cplusplus
+#define nei ::NEI_NAMESPACE
+#define NEI_BEGIN_NAMESPACE namespace NEI_NAMESPACE {
+#define NEI_END_NAMESPACE }
+#endif // __cplusplus
+
+#endif // !defined(NEI_NAMESPACE) || !defined(NEI_NAMESPACE_PREFIX)
+
+#endif // NEI_MACROS_NAMESPACE_H

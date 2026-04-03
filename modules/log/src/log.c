@@ -1,0 +1,1997 @@
+﻿#include <nei/log/log.h>
+
+#include <assert.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <time.h>
+#include <inttypes.h>
+
+#if defined(_WIN32)
+#include <Windows.h>
+#else
+#include <pthread.h>
+#endif
+
+/// @brief 单条日志可解析的最大可变参数数量。
+#define _NEI_LOG_MAX_VARGS 32
+
+/// @brief 非 verbose 日志的占位值。
+#define _NEI_LOG_NOT_VERBOSE -1
+
+/// @brief 单条日志序列化缓冲区上限（字节）。
+#define _NEI_LOG_RECORD_BUFFER_SIZE 8192U
+
+/// @brief 字符串参数深拷贝上限（字节）。
+#define _NEI_LOG_MAX_STRING_COPY 4096U
+
+/// @brief 全局双缓冲中单个缓冲区容量（字节）。
+#define _NEI_LOG_GLOBAL_BUFFER_CAPACITY (1024U * 1024U)
+#define _NEI_LOG_DEFAULT_FILE_SINK_MAGIC 0x4B4E5346U
+
+/// @brief `%` 轻量扫描时支持的长度修饰符。
+enum _nei_log_length_mod_e {
+  _NEI_LOG_LEN_NONE = 0,
+  _NEI_LOG_LEN_H = 1,
+  _NEI_LOG_LEN_HH = 2,
+  _NEI_LOG_LEN_L = 3,
+  _NEI_LOG_LEN_LL = 4,
+};
+
+/// @brief 紧凑序列化参数类型标签。
+enum _nei_log_payload_type_e {
+  _NEI_LOG_PAYLOAD_I32 = 1,
+  _NEI_LOG_PAYLOAD_U32 = 2,
+  _NEI_LOG_PAYLOAD_I64 = 3,
+  _NEI_LOG_PAYLOAD_U64 = 4,
+  _NEI_LOG_PAYLOAD_DOUBLE = 5,
+  _NEI_LOG_PAYLOAD_CHAR = 6,
+  _NEI_LOG_PAYLOAD_PTR = 7,
+  _NEI_LOG_PAYLOAD_CSTR = 8,
+  _NEI_LOG_PAYLOAD_LONGDOUBLE = 9,
+};
+
+#define _NEI_LOG_LONGDOUBLE_STORAGE 16U
+
+typedef struct _nei_log_fmt_token_t {
+  uint8_t payload_type;
+  uint8_t length_mod;
+  uint8_t spec;
+} nei_log_fmt_token_t;
+
+/**
+ * @brief 紧凑序列化记录头部。
+ * @details 头部后紧跟 payload，可按 total_size 快速跳过整条记录。
+ */
+typedef struct _nei_log_record_header_st {
+  uint32_t total_size;
+  uint64_t timestamp_ns;
+  char config_id[NEI_LOG_CONFIG_ID_MAX_LEN];
+  const char *file_ptr;
+  const char *func_ptr;
+  const char *fmt_ptr;
+  int32_t level;
+  int32_t line;
+  int32_t verbose;
+  uint8_t arg_count;
+  uint8_t reserved[7];
+} nei_log_record_header_t;
+
+typedef struct _nei_log_runtime_st {
+  uint8_t buffer_a[_NEI_LOG_GLOBAL_BUFFER_CAPACITY];
+  uint8_t buffer_b[_NEI_LOG_GLOBAL_BUFFER_CAPACITY];
+  size_t used[2];
+  int active_index;
+  int pending_index;
+  /** Buffer index currently being read by the consumer (-1 if none). */
+  int consuming_index;
+  int stop_requested;
+  int initialized;
+#if defined(_WIN32)
+  CRITICAL_SECTION mutex;
+  CONDITION_VARIABLE cond;
+  HANDLE thread;
+#else
+  pthread_mutex_t mutex;
+  pthread_cond_t cond;
+  pthread_t thread;
+#endif
+} nei_log_runtime_t;
+
+static nei_log_runtime_t s_runtime = {
+    .used = {0U, 0U},
+    .active_index = 0,
+    .pending_index = -1,
+    .consuming_index = -1,
+    .stop_requested = 0,
+    .initialized = 0,
+};
+
+typedef struct _nei_log_internal_config_st {
+  struct _nei_log_internal_config_st *next;
+  NEI_LOG_CONFIG_ID id;
+  nei_log_config_st config;
+} nei_log_internal_config_t;
+
+typedef struct _nei_log_default_file_sink_ctx_st {
+  uint32_t magic;
+  FILE *fp;
+} nei_log_default_file_sink_ctx_t;
+
+// NOTE: This config table is intended to be managed during initialization and
+// is not designed for concurrent add/remove while logging is active.
+#define _NEI_LOG_MAX_CONFIGS 16U // includes default config
+#define _NEI_LOG_CONFIG_ID_CAP NEI_LOG_CONFIG_ID_MAX_LEN
+
+static nei_log_config_st *s_config_ptrs[_NEI_LOG_MAX_CONFIGS];
+static nei_log_config_st s_custom_configs[_NEI_LOG_MAX_CONFIGS];
+static char s_config_ids[_NEI_LOG_MAX_CONFIGS][_NEI_LOG_CONFIG_ID_CAP];
+static uint8_t s_config_used[_NEI_LOG_MAX_CONFIGS];
+
+// Hash table (open addressing) mapping id -> slot index in [0, _NEI_LOG_MAX_CONFIGS).
+// Rebuilt after every add/remove.
+static int8_t s_config_id_index[_NEI_LOG_MAX_CONFIGS];
+static int s_config_table_initialized = 0;
+#if defined(_WIN32)
+static SRWLOCK s_config_lock = SRWLOCK_INIT;
+#else
+static pthread_rwlock_t s_config_lock = PTHREAD_RWLOCK_INITIALIZER;
+#endif
+
+#pragma region level string tables
+
+// clang-format off
+#define _NEI_LOG_LVL_TAGS \
+  _NEI_LOG_LVL_STR_PAIRS("VERBOSE", "V"), \
+  _NEI_LOG_LVL_STR_PAIRS("TRACE",   "T"), \
+  _NEI_LOG_LVL_STR_PAIRS("DEBUG",   "D"), \
+  _NEI_LOG_LVL_STR_PAIRS("INFO",    "I"), \
+  _NEI_LOG_LVL_STR_PAIRS("WARN",    "W"), \
+  _NEI_LOG_LVL_STR_PAIRS("ERROR",   "E"), \
+  _NEI_LOG_LVL_STR_PAIRS("FATAL",   "F")
+// clang-format on
+#define _NEI_LOG_LVL_STR_PAIRS(_longstr, _shortstr) _longstr
+/** @brief 完整日志级别标签表。 */
+static const char *s_level_strings[] = {_NEI_LOG_LVL_TAGS};
+#undef _NEI_LOG_LVL_STR_PAIRS
+#define _NEI_LOG_LVL_STR_PAIRS(_longstr, _shortstr) _shortstr
+/** @brief 简短日志级别标签表。 */
+static const char *s_level_short_strings[] = {_NEI_LOG_LVL_TAGS};
+#undef _NEI_LOG_LVL_STR_PAIRS
+#undef _NEI_LOG_LVL_TAGS
+
+/** @brief 获取完整日志级别标签。 */
+static inline const char *_get_level_string(nei_log_level_e level) {
+  assert(level >= NEI_LOG_LEVEL_VERBOSE && level <= NEI_LOG_LEVEL_FATAL);
+  return s_level_strings[level];
+}
+
+/** @brief 获取简短日志级别标签。 */
+static inline const char *_get_level_short_string(nei_log_level_e level) {
+  assert(level >= NEI_LOG_LEVEL_VERBOSE && level <= NEI_LOG_LEVEL_FATAL);
+  return s_level_short_strings[level];
+}
+
+#pragma endregion
+
+#pragma region static forward declarations
+
+/* Config table */
+static int _nei_log_is_valid_config_id(const char *id);
+static void _nei_log_config_id_copy(char dst[_NEI_LOG_CONFIG_ID_CAP], const char *id);
+static uint32_t _nei_log_hash_config_id(const char *id);
+static void _nei_log_rebuild_config_id_index(void);
+static void _nei_log_ensure_config_table_initialized(void);
+static int _nei_log_find_slot_by_id(const char *id);
+static void _nei_log_fill_default_config(nei_log_config_st *cfg);
+static void _nei_log_reset_default_config(void);
+static void _nei_log_config_lock_read(void);
+static void _nei_log_config_lock_write(void);
+static void _nei_log_config_unlock_read(void);
+static void _nei_log_config_unlock_write(void);
+
+/* Sink */
+static void
+_nei_log_default_file_llog(const nei_log_sink_st *sink, nei_log_level_e level, const char *message, size_t length);
+static void _nei_log_default_file_vlog(const nei_log_sink_st *sink, int verbose, const char *message, size_t length);
+
+/* Log core (serialization, runtime, consumer) */
+static inline size_t _nei_log_align_up_8(size_t n);
+static int _nei_log_is_flag_char(char c);
+static int _nei_log_is_digit_char(char c);
+static int _nei_log_scan_next_token(const char **fmt_ptr, nei_log_fmt_token_t *token);
+static size_t _nei_log_serialize_record(uint8_t *out,
+                                        size_t out_cap,
+                                        const char *config_id,
+                                        const char *file,
+                                        int32_t line,
+                                        const char *func,
+                                        int32_t level,
+                                        int32_t verbose,
+                                        const char *fmt,
+                                        va_list args);
+static int _nei_log_payload_write_u8(uint8_t *out, size_t out_cap, size_t *used, uint8_t value);
+static int _nei_log_payload_write_u16(uint8_t *out, size_t out_cap, size_t *used, uint16_t value);
+static int _nei_log_payload_write_bytes(uint8_t *out, size_t out_cap, size_t *used, const void *src, size_t len);
+static int _nei_log_payload_write_padded_zero(uint8_t *out, size_t out_cap, size_t *used, size_t target_size);
+static int _nei_log_append_char(char *out, size_t cap, size_t *used, char c);
+static int _nei_log_append_cstr(char *out, size_t cap, size_t *used, const char *s);
+static int _nei_log_append_nstr(char *out, size_t cap, size_t *used, const char *s, size_t n);
+static int _nei_log_read_u16(const uint8_t **cursor, const uint8_t *end, uint16_t *out_value);
+static int _nei_log_read_bytes(const uint8_t **cursor, const uint8_t *end, void *dst, size_t n);
+static void _nei_log_snprintf_i64(const char *spec, char *tmp, size_t tcap, int64_t v);
+static void _nei_log_snprintf_u64(const char *spec, char *tmp, size_t tcap, uint64_t v);
+static int _nei_log_build_runtime_conversion_spec(const char *scan,
+                                                  const char **after,
+                                                  const uint8_t **cursor,
+                                                  const uint8_t *end,
+                                                  uint8_t *parsed_args,
+                                                  char *spec,
+                                                  size_t spec_cap);
+static const char *_nei_log_basename(const char *path);
+static int _nei_log_format_record(const nei_log_record_header_t *header,
+                                  const nei_log_config_st *effective_config,
+                                  const uint8_t *payload,
+                                  size_t payload_size,
+                                  char *out,
+                                  size_t out_cap);
+static uint64_t _nei_log_now_ns(void);
+static void _nei_log_format_timestamp(uint64_t timestamp_ns, const char *fmt, char *out, size_t out_size);
+static void _nei_log_emit_message(
+    const nei_log_config_st *config, int32_t level, int32_t verbose, const char *message, size_t length);
+static int _nei_log_ensure_runtime_initialized(void);
+static void _nei_log_shutdown_runtime(void);
+static int _nei_log_enqueue_record(const uint8_t *record, size_t len);
+static void _nei_log_ensure_active_not_consuming(nei_log_runtime_t *rt);
+static void _nei_log_process_records(const uint8_t *buf, size_t size);
+#if defined(_WIN32)
+static DWORD WINAPI _nei_log_consumer_thread(LPVOID arg);
+#else
+static void *_nei_log_consumer_thread(void *arg);
+#endif
+
+#pragma endregion
+
+#pragma region public API
+
+nei_log_config_st *nei_log_get_config(NEI_LOG_CONFIG_ID config_id) {
+  nei_log_config_st *cfg = NULL;
+  const char *id = (const char *)config_id;
+  int slot = -1;
+  _nei_log_config_lock_read();
+  slot = _nei_log_find_slot_by_id(id);
+  if (slot < 0) {
+    _nei_log_config_unlock_read();
+    return NULL;
+  }
+  cfg = s_config_ptrs[(size_t)slot];
+  _nei_log_config_unlock_read();
+  return cfg;
+}
+
+nei_log_config_st *nei_log_default_config(void) {
+  nei_log_config_st *cfg = NULL;
+  _nei_log_config_lock_write();
+  _nei_log_ensure_config_table_initialized();
+  cfg = s_config_ptrs[0];
+  if (cfg == NULL) {
+    s_config_used[0] = 1U;
+    s_config_ptrs[0] = &s_custom_configs[0];
+    cfg = s_config_ptrs[0];
+    _nei_log_config_id_copy(s_config_ids[0], NEI_LOG_DEFAULT_CONFIG_ID);
+    _nei_log_fill_default_config(cfg);
+    _nei_log_rebuild_config_id_index();
+  }
+  _nei_log_config_unlock_write();
+  return cfg;
+}
+
+int nei_log_add_config(NEI_LOG_CONFIG_ID id, const nei_log_config_st *config) {
+  const char *cid = (const char *)id;
+  if (config == NULL || !_nei_log_is_valid_config_id(cid)) {
+    return -1;
+  }
+
+  _nei_log_config_lock_write();
+  _nei_log_ensure_config_table_initialized();
+
+  // If the id already exists, overwrite the existing slot.
+  const int existing_slot = _nei_log_find_slot_by_id(cid);
+  if (existing_slot >= 0) {
+    if ((size_t)existing_slot == 0U) {
+      memcpy(&s_custom_configs[0], config, sizeof(*config));
+    } else {
+      memcpy(&s_custom_configs[(size_t)existing_slot], config, sizeof(*config));
+    }
+    // Id index doesn't change.
+    _nei_log_config_unlock_write();
+    return 0;
+  }
+
+  // Find a free slot for new config (slot 0 is reserved for default).
+  size_t free_slot = (size_t)-1;
+  for (size_t slot = 1U; slot < _NEI_LOG_MAX_CONFIGS; ++slot) {
+    if (s_config_used[slot] == 0U) {
+      free_slot = slot;
+      break;
+    }
+  }
+  if (free_slot == (size_t)-1) {
+    _nei_log_config_unlock_write();
+    return -1;
+  }
+
+  s_config_used[free_slot] = 1U;
+  _nei_log_config_id_copy(s_config_ids[free_slot], cid);
+  memcpy(&s_custom_configs[free_slot], config, sizeof(*config));
+  s_config_ptrs[free_slot] = &s_custom_configs[free_slot];
+
+  _nei_log_rebuild_config_id_index();
+  _nei_log_config_unlock_write();
+  return 0;
+}
+
+void nei_log_remove_config(NEI_LOG_CONFIG_ID id) {
+  const char *cid = (const char *)id;
+  if (!_nei_log_is_valid_config_id(cid)) {
+    return;
+  }
+
+  _nei_log_config_lock_write();
+  _nei_log_ensure_config_table_initialized();
+
+  const int slot = _nei_log_find_slot_by_id(cid);
+  if (slot < 0) {
+    _nei_log_config_unlock_write();
+    return;
+  }
+
+  if ((size_t)slot == 0U) {
+    _nei_log_reset_default_config();
+    // Rebuild isn't strictly necessary but keeps the state consistent.
+    _nei_log_rebuild_config_id_index();
+    _nei_log_config_unlock_write();
+    return;
+  }
+
+  s_config_used[(size_t)slot] = 0U;
+  s_config_ids[(size_t)slot][0] = '\0';
+  s_config_ptrs[(size_t)slot] = NULL;
+  // Do not clear s_custom_configs to keep any already-queued records safe.
+  _nei_log_rebuild_config_id_index();
+  _nei_log_config_unlock_write();
+}
+
+nei_log_sink_st *nei_log_create_default_file_sink(const char *filename) {
+  nei_log_sink_st *sink = NULL;
+  nei_log_default_file_sink_ctx_t *ctx = NULL;
+  FILE *fp = NULL;
+
+  if (filename == NULL || filename[0] == '\0') {
+    return NULL;
+  }
+
+#if defined(_WIN32)
+  if (fopen_s(&fp, filename, "ab") != 0) {
+    fp = NULL;
+  }
+#else
+  fp = fopen(filename, "ab");
+#endif
+  if (fp == NULL) {
+    return NULL;
+  }
+
+  sink = (nei_log_sink_st *)calloc(1U, sizeof(*sink));
+  ctx = (nei_log_default_file_sink_ctx_t *)calloc(1U, sizeof(*ctx));
+  if (sink == NULL || ctx == NULL) {
+    if (fp != NULL) {
+      fclose(fp);
+    }
+    free(ctx);
+    free(sink);
+    return NULL;
+  }
+
+  ctx->magic = _NEI_LOG_DEFAULT_FILE_SINK_MAGIC;
+  ctx->fp = fp;
+
+  sink->llog = _nei_log_default_file_llog;
+  sink->vlog = _nei_log_default_file_vlog;
+  sink->opaque = ctx;
+  return sink;
+}
+
+void nei_log_destroy_sink(nei_log_sink_st *sink) {
+  nei_log_default_file_sink_ctx_t *ctx = NULL;
+  if (sink == NULL) {
+    return;
+  }
+
+  if (sink->opaque != NULL && sink->llog == _nei_log_default_file_llog && sink->vlog == _nei_log_default_file_vlog) {
+    ctx = (nei_log_default_file_sink_ctx_t *)sink->opaque;
+    if (ctx->magic == _NEI_LOG_DEFAULT_FILE_SINK_MAGIC) {
+      if (ctx->fp != NULL) {
+        fclose(ctx->fp);
+      }
+      ctx->fp = NULL;
+      ctx->magic = 0U;
+      free(ctx);
+    }
+  }
+  free(sink);
+}
+
+void nei_llog(NEI_LOG_CONFIG_ID config_id,
+              nei_log_level_e level,
+              const char *file,
+              int32_t line,
+              const char *func,
+              const char *fmt,
+              ...) {
+  va_list args;
+  va_list scan_args;
+  uint8_t record[_NEI_LOG_RECORD_BUFFER_SIZE];
+
+  (void)_nei_log_ensure_runtime_initialized();
+  va_start(args, fmt);
+  va_copy(scan_args, args);
+  {
+    const size_t serialized_len = _nei_log_serialize_record(record,
+                                                            sizeof(record),
+                                                            (const char *)config_id,
+                                                            file,
+                                                            line,
+                                                            func,
+                                                            (int32_t)level,
+                                                            _NEI_LOG_NOT_VERBOSE,
+                                                            fmt,
+                                                            scan_args);
+    if (serialized_len > 0U) {
+      (void)_nei_log_enqueue_record(record, serialized_len);
+    }
+  }
+  va_end(scan_args);
+  va_end(args);
+}
+
+void nei_vlog(
+    NEI_LOG_CONFIG_ID config_id, int verbose, const char *file, int32_t line, const char *func, const char *fmt, ...) {
+  va_list args;
+  va_list scan_args;
+  uint8_t record[_NEI_LOG_RECORD_BUFFER_SIZE];
+
+  (void)_nei_log_ensure_runtime_initialized();
+  va_start(args, fmt);
+  va_copy(scan_args, args);
+  {
+    const size_t serialized_len = _nei_log_serialize_record(record,
+                                                            sizeof(record),
+                                                            (const char *)config_id,
+                                                            file,
+                                                            line,
+                                                            func,
+                                                            (int32_t)NEI_LOG_LEVEL_VERBOSE,
+                                                            (int32_t)verbose,
+                                                            fmt,
+                                                            scan_args);
+    if (serialized_len > 0U) {
+      (void)_nei_log_enqueue_record(record, serialized_len);
+    }
+  }
+  va_end(scan_args);
+  va_end(args);
+}
+
+void nei_log_flush(void) {
+  if (!s_runtime.initialized) {
+    return;
+  }
+
+#if defined(_WIN32)
+  EnterCriticalSection(&s_runtime.mutex);
+  for (;;) {
+    if (s_runtime.pending_index == -1 && s_runtime.used[s_runtime.active_index] > 0U) {
+      const int active = s_runtime.active_index;
+      s_runtime.pending_index = active;
+      s_runtime.active_index = 1 - active;
+      _nei_log_ensure_active_not_consuming(&s_runtime);
+      WakeAllConditionVariable(&s_runtime.cond);
+    }
+    if (s_runtime.pending_index == -1 && s_runtime.consuming_index == -1
+        && s_runtime.used[s_runtime.active_index] == 0U) {
+      break;
+    }
+    SleepConditionVariableCS(&s_runtime.cond, &s_runtime.mutex, INFINITE);
+  }
+  LeaveCriticalSection(&s_runtime.mutex);
+#else
+  pthread_mutex_lock(&s_runtime.mutex);
+  for (;;) {
+    if (s_runtime.pending_index == -1 && s_runtime.used[s_runtime.active_index] > 0U) {
+      const int active = s_runtime.active_index;
+      s_runtime.pending_index = active;
+      s_runtime.active_index = 1 - active;
+      _nei_log_ensure_active_not_consuming(&s_runtime);
+      pthread_cond_broadcast(&s_runtime.cond);
+    }
+    if (s_runtime.pending_index == -1 && s_runtime.consuming_index == -1
+        && s_runtime.used[s_runtime.active_index] == 0U) {
+      break;
+    }
+    pthread_cond_wait(&s_runtime.cond, &s_runtime.mutex);
+  }
+  pthread_mutex_unlock(&s_runtime.mutex);
+#endif
+}
+
+#pragma endregion
+
+#pragma region log config table implementation
+
+static int _nei_log_is_valid_config_id(const char *id) {
+  if (id == NULL) {
+    return 0;
+  }
+
+  const size_t len = strnlen(id, _NEI_LOG_CONFIG_ID_CAP);
+  // Must be non-empty and must have '\0' within the capacity.
+  return (len > 0U) && (len < _NEI_LOG_CONFIG_ID_CAP);
+}
+
+static void _nei_log_config_id_copy(char dst[_NEI_LOG_CONFIG_ID_CAP], const char *id) {
+  if (dst == NULL) {
+    return;
+  }
+  if (id == NULL) {
+    dst[0] = '\0';
+    return;
+  }
+  const size_t len = strnlen(id, _NEI_LOG_CONFIG_ID_CAP);
+  if (len >= _NEI_LOG_CONFIG_ID_CAP) {
+    dst[0] = '\0';
+    return;
+  }
+  memcpy(dst, id, len + 1U);
+  dst[_NEI_LOG_CONFIG_ID_CAP - 1U] = '\0';
+}
+
+static uint32_t _nei_log_hash_config_id(const char *id) {
+  // FNV-1a 32-bit
+  uint32_t h = 2166136261u;
+  if (id == NULL) {
+    return h;
+  }
+  while (*id) {
+    h ^= (uint8_t)(*id);
+    h *= 16777619u;
+    ++id;
+  }
+  return h;
+}
+
+static void _nei_log_rebuild_config_id_index(void) {
+  for (size_t i = 0U; i < _NEI_LOG_MAX_CONFIGS; ++i) {
+    s_config_id_index[i] = -1;
+  }
+
+  for (size_t slot = 0U; slot < _NEI_LOG_MAX_CONFIGS; ++slot) {
+    if (s_config_used[slot] == 0U) {
+      continue;
+    }
+
+    const char *id = s_config_ids[slot];
+    if (id == NULL || id[0] == '\0') {
+      continue;
+    }
+
+    const uint32_t h = _nei_log_hash_config_id(id);
+    const size_t base = (size_t)(h % (uint32_t)_NEI_LOG_MAX_CONFIGS);
+
+    for (size_t probe = 0U; probe < _NEI_LOG_MAX_CONFIGS; ++probe) {
+      const size_t idx = (base + probe) % (size_t)_NEI_LOG_MAX_CONFIGS;
+      if (s_config_id_index[idx] == -1) {
+        s_config_id_index[idx] = (int8_t)slot;
+        break;
+      }
+
+      // If the same id is already present, keep the slot. This should not
+      // happen in normal usage but avoids silent lookup failures.
+      {
+        const int8_t existing_slot = s_config_id_index[idx];
+        if (existing_slot >= 0 && strcmp(s_config_ids[(size_t)existing_slot], id) == 0) {
+          s_config_id_index[idx] = (int8_t)slot;
+          break;
+        }
+      }
+    }
+  }
+}
+
+static void _nei_log_ensure_config_table_initialized(void) {
+  if (s_config_table_initialized) {
+    return;
+  }
+
+  memset(s_config_ptrs, 0, sizeof(s_config_ptrs));
+  memset(s_custom_configs, 0, sizeof(s_custom_configs));
+  memset(s_config_ids, 0, sizeof(s_config_ids));
+  memset(s_config_used, 0, sizeof(s_config_used));
+
+  for (size_t i = 0U; i < _NEI_LOG_MAX_CONFIGS; ++i) {
+    s_config_id_index[i] = -1;
+  }
+
+  // Slot 0 is the default config.
+  s_config_used[0] = 1U;
+  _nei_log_config_id_copy(s_config_ids[0], NEI_LOG_DEFAULT_CONFIG_ID);
+  _nei_log_fill_default_config(&s_custom_configs[0]);
+  s_config_ptrs[0] = &s_custom_configs[0];
+
+  _nei_log_rebuild_config_id_index();
+  s_config_table_initialized = 1;
+}
+
+static int _nei_log_find_slot_by_id(const char *id) {
+  if (!_nei_log_is_valid_config_id(id)) {
+    return -1;
+  }
+
+  _nei_log_ensure_config_table_initialized();
+
+  const uint32_t h = _nei_log_hash_config_id(id);
+  const size_t base = (size_t)(h % (uint32_t)_NEI_LOG_MAX_CONFIGS);
+
+  for (size_t probe = 0U; probe < _NEI_LOG_MAX_CONFIGS; ++probe) {
+    const size_t idx = (base + probe) % (size_t)_NEI_LOG_MAX_CONFIGS;
+    const int8_t slot = s_config_id_index[idx];
+    if (slot == -1) {
+      return -1;
+    }
+    if (strcmp(s_config_ids[(size_t)slot], id) == 0) {
+      return (int)slot;
+    }
+  }
+  return -1;
+}
+
+static void _nei_log_fill_default_config(nei_log_config_st *cfg) {
+  if (cfg == NULL) {
+    return;
+  }
+  // Keep sinks NULL by clearing the whole structure.
+  memset(cfg, 0, sizeof(*cfg));
+  cfg->level_flags.all = 0xFFFFFFFFu;
+  cfg->verbose_threshold = -1;
+  cfg->short_level_tag = 1;
+  cfg->short_path = 1;
+  cfg->log_to_console = 0;
+  cfg->datetime_format = "%Y-%m-%d %H:%M:%S";
+}
+
+static void _nei_log_reset_default_config(void) {
+  _nei_log_fill_default_config(&s_custom_configs[0]);
+}
+
+static void _nei_log_config_lock_read(void) {
+#if defined(_WIN32)
+  AcquireSRWLockShared(&s_config_lock);
+#else
+  (void)pthread_rwlock_rdlock(&s_config_lock);
+#endif
+}
+
+static void _nei_log_config_lock_write(void) {
+#if defined(_WIN32)
+  AcquireSRWLockExclusive(&s_config_lock);
+#else
+  (void)pthread_rwlock_wrlock(&s_config_lock);
+#endif
+}
+
+static void _nei_log_config_unlock_read(void) {
+#if defined(_WIN32)
+  ReleaseSRWLockShared(&s_config_lock);
+#else
+  (void)pthread_rwlock_unlock(&s_config_lock);
+#endif
+}
+
+static void _nei_log_config_unlock_write(void) {
+#if defined(_WIN32)
+  ReleaseSRWLockExclusive(&s_config_lock);
+#else
+  (void)pthread_rwlock_unlock(&s_config_lock);
+#endif
+}
+
+#pragma endregion
+
+#pragma region log sink implementation
+
+static void
+_nei_log_default_file_llog(const nei_log_sink_st *sink, nei_log_level_e level, const char *message, size_t length) {
+  nei_log_default_file_sink_ctx_t *ctx = NULL;
+  (void)level;
+  if (sink == NULL || message == NULL) {
+    return;
+  }
+  ctx = (nei_log_default_file_sink_ctx_t *)sink->opaque;
+  if (ctx == NULL || ctx->magic != _NEI_LOG_DEFAULT_FILE_SINK_MAGIC || ctx->fp == NULL) {
+    return;
+  }
+  (void)fwrite(message, 1U, length, ctx->fp);
+  (void)fputc('\n', ctx->fp);
+  (void)fflush(ctx->fp);
+}
+
+static void _nei_log_default_file_vlog(const nei_log_sink_st *sink, int verbose, const char *message, size_t length) {
+  nei_log_default_file_sink_ctx_t *ctx = NULL;
+  if (sink == NULL || message == NULL) {
+    return;
+  }
+  ctx = (nei_log_default_file_sink_ctx_t *)sink->opaque;
+  if (ctx == NULL || ctx->magic != _NEI_LOG_DEFAULT_FILE_SINK_MAGIC || ctx->fp == NULL) {
+    return;
+  }
+  (void)verbose;
+  (void)fwrite(message, 1U, length, ctx->fp);
+  (void)fputc('\n', ctx->fp);
+  (void)fflush(ctx->fp);
+}
+
+#pragma endregion
+
+#pragma region log core (time)
+
+#if defined(_WIN32)
+typedef VOID(WINAPI *_nei_pfn_GetSystemTimePreciseAsFileTime)(LPFILETIME);
+
+static INIT_ONCE s_nei_log_win_time_once = INIT_ONCE_STATIC_INIT;
+static _nei_pfn_GetSystemTimePreciseAsFileTime s_nei_log_pfn_GetSystemTimePreciseAsFileTime;
+
+static BOOL CALLBACK _nei_log_win_time_init_once(PINIT_ONCE init_once, PVOID parameter, PVOID *context) {
+  HMODULE k32;
+  (void)init_once;
+  (void)parameter;
+  (void)context;
+  k32 = GetModuleHandleW(L"kernel32.dll");
+  if (k32 != NULL) {
+    s_nei_log_pfn_GetSystemTimePreciseAsFileTime =
+        (_nei_pfn_GetSystemTimePreciseAsFileTime)(void *)GetProcAddress(k32, "GetSystemTimePreciseAsFileTime");
+  }
+  return TRUE;
+}
+
+static void _nei_log_win32_get_system_time_as_filetime(LPFILETIME ft) {
+  (void)InitOnceExecuteOnce(&s_nei_log_win_time_once, _nei_log_win_time_init_once, NULL, NULL);
+  if (s_nei_log_pfn_GetSystemTimePreciseAsFileTime != NULL) {
+    s_nei_log_pfn_GetSystemTimePreciseAsFileTime(ft);
+  } else {
+    GetSystemTimeAsFileTime(ft);
+  }
+}
+#endif
+
+static uint64_t _nei_log_now_ns(void) {
+#if defined(_WIN32)
+  FILETIME ft;
+  ULARGE_INTEGER uli;
+  const uint64_t EPOCH_DIFF_100NS = 116444736000000000ULL;
+  _nei_log_win32_get_system_time_as_filetime(&ft);
+  uli.LowPart = ft.dwLowDateTime;
+  uli.HighPart = ft.dwHighDateTime;
+  if (uli.QuadPart <= EPOCH_DIFF_100NS) {
+    return 0;
+  }
+  return (uli.QuadPart - EPOCH_DIFF_100NS) * 100ULL;
+#else
+  struct timespec ts;
+  if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
+    return 0;
+  }
+  return ((uint64_t)ts.tv_sec * 1000000000ULL) + (uint64_t)ts.tv_nsec;
+#endif
+}
+
+#pragma endregion /* log core (time) */
+
+#pragma region log core (serialization)
+
+static inline size_t _nei_log_align_up_8(size_t n) {
+  return (n + 7U) & ~(size_t)7U;
+}
+
+static int _nei_log_is_flag_char(char c) {
+  return (c == '-') || (c == '+') || (c == ' ') || (c == '#') || (c == '0');
+}
+
+static int _nei_log_is_digit_char(char c) {
+  return (c >= '0') && (c <= '9');
+}
+
+static int _nei_log_scan_next_token(const char **fmt_ptr, nei_log_fmt_token_t *token) {
+  const char *p;
+  if (fmt_ptr == NULL || *fmt_ptr == NULL || token == NULL) {
+    return 0;
+  }
+
+  p = *fmt_ptr;
+  while (*p) {
+    if (*p != '%') {
+      ++p;
+      continue;
+    }
+    ++p;
+    if (*p == '%') {
+      ++p;
+      continue;
+    }
+
+    while (*p && _nei_log_is_flag_char(*p)) {
+      ++p;
+    }
+    while (*p && _nei_log_is_digit_char(*p)) {
+      ++p;
+    }
+    if (*p == '.') {
+      ++p;
+      while (*p && _nei_log_is_digit_char(*p)) {
+        ++p;
+      }
+    }
+    if (*p == '*') {
+      ++p;
+    }
+
+    token->length_mod = _NEI_LOG_LEN_NONE;
+    if (*p == 'h') {
+      ++p;
+      if (*p == 'h') {
+        token->length_mod = _NEI_LOG_LEN_HH;
+        ++p;
+      } else {
+        token->length_mod = _NEI_LOG_LEN_H;
+      }
+    } else if (*p == 'l') {
+      ++p;
+      if (*p == 'l') {
+        token->length_mod = _NEI_LOG_LEN_LL;
+        ++p;
+      } else {
+        token->length_mod = _NEI_LOG_LEN_L;
+      }
+    }
+
+    token->payload_type = 0;
+    token->spec = (uint8_t)*p;
+    switch (*p) {
+    case 'd':
+    case 'i':
+      token->payload_type = (token->length_mod == _NEI_LOG_LEN_L || token->length_mod == _NEI_LOG_LEN_LL)
+                                ? _NEI_LOG_PAYLOAD_I64
+                                : _NEI_LOG_PAYLOAD_I32;
+      break;
+    case 'u':
+    case 'x':
+    case 'X':
+    case 'o':
+      token->payload_type = (token->length_mod == _NEI_LOG_LEN_L || token->length_mod == _NEI_LOG_LEN_LL)
+                                ? _NEI_LOG_PAYLOAD_U64
+                                : _NEI_LOG_PAYLOAD_U32;
+      break;
+    case 'f':
+    case 'F':
+    case 'e':
+    case 'E':
+    case 'g':
+    case 'G':
+    case 'a':
+    case 'A':
+      token->payload_type = _NEI_LOG_PAYLOAD_DOUBLE;
+      break;
+    case 'c':
+      token->payload_type = _NEI_LOG_PAYLOAD_CHAR;
+      break;
+    case 's':
+      token->payload_type = _NEI_LOG_PAYLOAD_CSTR;
+      break;
+    case 'p':
+      token->payload_type = _NEI_LOG_PAYLOAD_PTR;
+      break;
+    default:
+      token->payload_type = 0;
+      break;
+    }
+
+    if (*p) {
+      ++p;
+    }
+    *fmt_ptr = p;
+    return token->payload_type != 0;
+  }
+
+  *fmt_ptr = p;
+  return 0;
+}
+
+static int _nei_log_payload_write_u8(uint8_t *out, size_t out_cap, size_t *used, uint8_t value) {
+  if (out == NULL || used == NULL || *used + 1U > out_cap) {
+    return -1;
+  }
+  out[*used] = value;
+  *used += 1U;
+  return 0;
+}
+
+static int _nei_log_payload_write_u16(uint8_t *out, size_t out_cap, size_t *used, uint16_t value) {
+  if (out == NULL || used == NULL || *used + sizeof(uint16_t) > out_cap) {
+    return -1;
+  }
+  memcpy(out + *used, &value, sizeof(uint16_t));
+  *used += sizeof(uint16_t);
+  return 0;
+}
+
+static int _nei_log_payload_write_bytes(uint8_t *out, size_t out_cap, size_t *used, const void *src, size_t len) {
+  if (out == NULL || used == NULL || src == NULL || *used + len > out_cap) {
+    return -1;
+  }
+  memcpy(out + *used, src, len);
+  *used += len;
+  return 0;
+}
+
+static int _nei_log_payload_write_padded_zero(uint8_t *out, size_t out_cap, size_t *used, size_t target_size) {
+  if (out == NULL || used == NULL || target_size < *used || target_size > out_cap) {
+    return -1;
+  }
+  while (*used < target_size) {
+    out[*used] = 0;
+    *used += 1U;
+  }
+  return 0;
+}
+
+static size_t _nei_log_serialize_record(uint8_t *out,
+                                        size_t out_cap,
+                                        const char *config_id,
+                                        const char *file,
+                                        int32_t line,
+                                        const char *func,
+                                        int32_t level,
+                                        int32_t verbose,
+                                        const char *fmt,
+                                        va_list args) {
+  size_t used;
+  size_t aligned_size;
+  uint8_t arg_count = 0;
+  const char *scan_ptr;
+  nei_log_record_header_t header;
+
+  if (out == NULL || fmt == NULL || out_cap < sizeof(nei_log_record_header_t)) {
+    return 0;
+  }
+
+  memset(&header, 0, sizeof(header));
+  header.timestamp_ns = _nei_log_now_ns();
+  _nei_log_config_id_copy(header.config_id, config_id);
+  header.file_ptr = file;
+  header.func_ptr = func;
+  header.fmt_ptr = fmt;
+  header.level = level;
+  header.line = line;
+  header.verbose = verbose;
+  header.arg_count = 0;
+
+  memcpy(out, &header, sizeof(header));
+  used = sizeof(header);
+  scan_ptr = fmt;
+
+  while (*scan_ptr && arg_count < (uint8_t)_NEI_LOG_MAX_VARGS) {
+    const char *p = scan_ptr;
+    uint8_t payload_type = 0;
+    int conv_lm = 0;
+    if (*p != '%') {
+      ++scan_ptr;
+      continue;
+    }
+    ++p;
+    if (*p == '%') {
+      scan_ptr = p + 1;
+      continue;
+    }
+    while (*p && _nei_log_is_flag_char(*p))
+      ++p;
+    if (*p == '*') {
+      int32_t v = va_arg(args, int);
+      if (_nei_log_payload_write_u8(out, out_cap, &used, _NEI_LOG_PAYLOAD_I32) != 0)
+        return 0;
+      if (_nei_log_payload_write_bytes(out, out_cap, &used, &v, sizeof(v)) != 0)
+        return 0;
+      ++arg_count;
+      ++p;
+    } else {
+      while (*p && _nei_log_is_digit_char(*p))
+        ++p;
+    }
+    if (*p == '.') {
+      ++p;
+      if (*p == '*') {
+        int32_t v = va_arg(args, int);
+        if (_nei_log_payload_write_u8(out, out_cap, &used, _NEI_LOG_PAYLOAD_I32) != 0)
+          return 0;
+        if (_nei_log_payload_write_bytes(out, out_cap, &used, &v, sizeof(v)) != 0)
+          return 0;
+        ++arg_count;
+        ++p;
+      } else {
+        while (*p && _nei_log_is_digit_char(*p))
+          ++p;
+      }
+    }
+    if (*p == 'h') {
+      ++p;
+      if (*p == 'h') {
+        ++p;
+        conv_lm = 1;
+      } else {
+        conv_lm = 2;
+      }
+    } else if (*p == 'l') {
+      ++p;
+      if (*p == 'l') {
+        ++p;
+        conv_lm = 4;
+      } else {
+        conv_lm = 3;
+      }
+    } else if (*p == 'j') {
+      ++p;
+      conv_lm = 5;
+    } else if (*p == 'z') {
+      ++p;
+      conv_lm = 6;
+    } else if (*p == 't') {
+      ++p;
+      conv_lm = 7;
+    } else if (*p == 'L') {
+      ++p;
+      conv_lm = 8;
+    }
+    if (*p == '\0') {
+      break;
+    }
+    /* Reject %n: writing through a captured pointer is unsafe for async/binary logs. */
+    if (*p == 'n') {
+      return 0;
+    }
+    switch (*p) {
+    case 'f':
+    case 'F':
+    case 'e':
+    case 'E':
+    case 'g':
+    case 'G':
+    case 'a':
+    case 'A':
+      payload_type = (conv_lm == 8) ? _NEI_LOG_PAYLOAD_LONGDOUBLE : _NEI_LOG_PAYLOAD_DOUBLE;
+      break;
+    case 'd':
+    case 'i':
+      if (conv_lm == 0 || conv_lm == 1 || conv_lm == 2) {
+        payload_type = _NEI_LOG_PAYLOAD_I32;
+      } else {
+        payload_type = _NEI_LOG_PAYLOAD_I64;
+      }
+      break;
+    case 'u':
+    case 'x':
+    case 'X':
+    case 'o':
+      if (conv_lm == 0 || conv_lm == 1 || conv_lm == 2) {
+        payload_type = _NEI_LOG_PAYLOAD_U32;
+      } else {
+        payload_type = _NEI_LOG_PAYLOAD_U64;
+      }
+      break;
+    case 'c':
+      payload_type = _NEI_LOG_PAYLOAD_CHAR;
+      break;
+    case 's':
+      payload_type = _NEI_LOG_PAYLOAD_CSTR;
+      break;
+    case 'p':
+      payload_type = _NEI_LOG_PAYLOAD_PTR;
+      break;
+    default:
+      payload_type = 0;
+      break;
+    }
+    if (payload_type != 0) {
+      if (_nei_log_payload_write_u8(out, out_cap, &used, payload_type) != 0)
+        return 0;
+      switch (payload_type) {
+      case _NEI_LOG_PAYLOAD_I32: {
+        int32_t v = (int32_t)va_arg(args, int);
+        if (_nei_log_payload_write_bytes(out, out_cap, &used, &v, sizeof(v)) != 0)
+          return 0;
+        break;
+      }
+      case _NEI_LOG_PAYLOAD_U32: {
+        uint32_t v = (uint32_t)va_arg(args, unsigned int);
+        if (_nei_log_payload_write_bytes(out, out_cap, &used, &v, sizeof(v)) != 0)
+          return 0;
+        break;
+      }
+      case _NEI_LOG_PAYLOAD_I64: {
+        int64_t v64 = 0;
+        if (conv_lm == 3) {
+          v64 = (int64_t)va_arg(args, long);
+        } else if (conv_lm == 4) {
+          v64 = (int64_t)va_arg(args, long long);
+        } else if (conv_lm == 5) {
+          v64 = (int64_t)va_arg(args, intmax_t);
+        } else if (conv_lm == 6) {
+          v64 = (int64_t)va_arg(args, ptrdiff_t);
+        } else if (conv_lm == 7) {
+          v64 = (int64_t)va_arg(args, ptrdiff_t);
+        } else {
+          v64 = (int64_t)va_arg(args, long long);
+        }
+        if (_nei_log_payload_write_bytes(out, out_cap, &used, &v64, sizeof(v64)) != 0)
+          return 0;
+        break;
+      }
+      case _NEI_LOG_PAYLOAD_U64: {
+        uint64_t v64 = 0;
+        if (conv_lm == 3) {
+          v64 = (uint64_t)va_arg(args, unsigned long);
+        } else if (conv_lm == 4) {
+          v64 = (uint64_t)va_arg(args, unsigned long long);
+        } else if (conv_lm == 5) {
+          v64 = (uint64_t)va_arg(args, uintmax_t);
+        } else if (conv_lm == 6 || conv_lm == 7) {
+          v64 = (uint64_t)va_arg(args, size_t);
+        } else {
+          v64 = (uint64_t)va_arg(args, unsigned long long);
+        }
+        if (_nei_log_payload_write_bytes(out, out_cap, &used, &v64, sizeof(v64)) != 0)
+          return 0;
+        break;
+      }
+      case _NEI_LOG_PAYLOAD_DOUBLE: {
+        double v = va_arg(args, double);
+        if (_nei_log_payload_write_bytes(out, out_cap, &used, &v, sizeof(v)) != 0)
+          return 0;
+        break;
+      }
+      case _NEI_LOG_PAYLOAD_LONGDOUBLE: {
+        long double ld = va_arg(args, long double);
+        uint8_t raw[_NEI_LOG_LONGDOUBLE_STORAGE];
+        memset(raw, 0, sizeof(raw));
+        memcpy(raw, &ld, sizeof(ld) < sizeof(raw) ? sizeof(ld) : sizeof(raw));
+        if (_nei_log_payload_write_bytes(out, out_cap, &used, raw, sizeof(raw)) != 0)
+          return 0;
+        break;
+      }
+      case _NEI_LOG_PAYLOAD_CHAR: {
+        char ch = (char)va_arg(args, int);
+        if (_nei_log_payload_write_bytes(out, out_cap, &used, &ch, sizeof(ch)) != 0)
+          return 0;
+        break;
+      }
+      case _NEI_LOG_PAYLOAD_PTR: {
+        uintptr_t raw = (uintptr_t)va_arg(args, const void *);
+        if (_nei_log_payload_write_bytes(out, out_cap, &used, &raw, sizeof(raw)) != 0)
+          return 0;
+        break;
+      }
+      case _NEI_LOG_PAYLOAD_CSTR: {
+        const char *s = va_arg(args, const char *);
+        uint16_t len16;
+        size_t len;
+        if (s == NULL)
+          s = "(null)";
+        len = strlen(s);
+        if (len > _NEI_LOG_MAX_STRING_COPY)
+          len = _NEI_LOG_MAX_STRING_COPY;
+        len16 = (uint16_t)len;
+        if (_nei_log_payload_write_u16(out, out_cap, &used, len16) != 0)
+          return 0;
+        if (_nei_log_payload_write_bytes(out, out_cap, &used, s, len) != 0)
+          return 0;
+        break;
+      }
+      default:
+        return 0;
+      }
+      ++arg_count;
+    }
+    scan_ptr = (*p) ? (p + 1) : p;
+  }
+
+  aligned_size = _nei_log_align_up_8(used);
+  if (_nei_log_payload_write_padded_zero(out, out_cap, &used, aligned_size) != 0) {
+    return 0;
+  }
+
+  header.total_size = (uint32_t)used;
+  header.arg_count = arg_count;
+  memcpy(out, &header, sizeof(header));
+  return used;
+}
+
+#pragma endregion /* log core (serialization) */
+
+#pragma region log core (formatting)
+
+static void _nei_log_format_timestamp(uint64_t timestamp_ns, const char *fmt, char *out, size_t out_size) {
+  time_t sec;
+  unsigned millis;
+  struct tm tm_buf;
+  size_t n;
+  if (out == NULL || out_size == 0U) {
+    return;
+  }
+  sec = (time_t)(timestamp_ns / 1000000000ULL);
+  millis = (unsigned)((timestamp_ns % 1000000000ULL) / 1000000ULL);
+#if defined(_WIN32)
+  localtime_s(&tm_buf, &sec);
+#else
+  localtime_r(&sec, &tm_buf);
+#endif
+  if (fmt == NULL || *fmt == '\0') {
+    fmt = "%Y-%m-%d %H:%M:%S";
+  }
+  n = strftime(out, out_size, fmt, &tm_buf);
+  if (n == 0U) {
+    snprintf(out,
+             out_size,
+             "%04d-%02d-%02d %02d:%02d:%02d",
+             tm_buf.tm_year + 1900,
+             tm_buf.tm_mon + 1,
+             tm_buf.tm_mday,
+             tm_buf.tm_hour,
+             tm_buf.tm_min,
+             tm_buf.tm_sec);
+    n = strlen(out);
+  }
+  if (n + 5U < out_size) {
+    snprintf(out + n, out_size - n, ".%03u", millis);
+  }
+}
+
+static int _nei_log_append_char(char *out, size_t cap, size_t *used, char c) {
+  if (out == NULL || used == NULL || *used + 1U >= cap) {
+    return -1;
+  }
+  out[*used] = c;
+  *used += 1U;
+  out[*used] = '\0';
+  return 0;
+}
+
+static int _nei_log_append_nstr(char *out, size_t cap, size_t *used, const char *s, size_t n) {
+  if (out == NULL || used == NULL || s == NULL || *used + n >= cap) {
+    return -1;
+  }
+  memcpy(out + *used, s, n);
+  *used += n;
+  out[*used] = '\0';
+  return 0;
+}
+
+static int _nei_log_append_cstr(char *out, size_t cap, size_t *used, const char *s) {
+  return _nei_log_append_nstr(out, cap, used, s, strlen(s));
+}
+
+static int _nei_log_read_u16(const uint8_t **cursor, const uint8_t *end, uint16_t *out_value) {
+  if (cursor == NULL || *cursor == NULL || end == NULL || out_value == NULL || *cursor + sizeof(uint16_t) > end) {
+    return -1;
+  }
+  memcpy(out_value, *cursor, sizeof(uint16_t));
+  *cursor += sizeof(uint16_t);
+  return 0;
+}
+
+static int _nei_log_read_bytes(const uint8_t **cursor, const uint8_t *end, void *dst, size_t n) {
+  if (cursor == NULL || *cursor == NULL || end == NULL || dst == NULL || *cursor + n > end) {
+    return -1;
+  }
+  memcpy(dst, *cursor, n);
+  *cursor += n;
+  return 0;
+}
+
+static void _nei_log_snprintf_i64(const char *spec, char *tmp, size_t tcap, int64_t v) {
+  if (strstr(spec, "ll") != NULL) {
+    snprintf(tmp, tcap, spec, (long long)v);
+  } else if (strchr(spec, 'j')) {
+    snprintf(tmp, tcap, spec, (intmax_t)v);
+  } else if (strchr(spec, 'z') && strchr(spec, 'u')) {
+    snprintf(tmp, tcap, spec, (size_t)(uint64_t)v);
+  } else if (strchr(spec, 'z')) {
+    snprintf(tmp, tcap, spec, (ptrdiff_t)v);
+  } else if (strchr(spec, 't')) {
+    if (strchr(spec, 'u') || strchr(spec, 'x') || strchr(spec, 'X') || strchr(spec, 'o')) {
+      snprintf(tmp, tcap, spec, (size_t)(uint64_t)v);
+    } else {
+      snprintf(tmp, tcap, spec, (ptrdiff_t)v);
+    }
+  } else if (strchr(spec, 'l')) {
+    snprintf(tmp, tcap, spec, (long)v);
+  } else {
+    snprintf(tmp, tcap, spec, (int)v);
+  }
+}
+
+static void _nei_log_snprintf_u64(const char *spec, char *tmp, size_t tcap, uint64_t v) {
+  if (strstr(spec, "ll") != NULL) {
+    snprintf(tmp, tcap, spec, (unsigned long long)v);
+  } else if (strchr(spec, 'j')) {
+    snprintf(tmp, tcap, spec, (uintmax_t)v);
+  } else if (strchr(spec, 'z')) {
+    snprintf(tmp, tcap, spec, (size_t)v);
+  } else if (strchr(spec, 't')) {
+    snprintf(tmp, tcap, spec, (size_t)v);
+  } else if (strchr(spec, 'l')) {
+    snprintf(tmp, tcap, spec, (unsigned long)v);
+  } else {
+    snprintf(tmp, tcap, spec, (unsigned int)v);
+  }
+}
+
+static int _nei_log_build_runtime_conversion_spec(const char *scan,
+                                                  const char **after,
+                                                  const uint8_t **cursor,
+                                                  const uint8_t *end,
+                                                  uint8_t *parsed_args,
+                                                  char *spec,
+                                                  size_t spec_cap) {
+  const char *p;
+  size_t n = 0U;
+  if (scan == NULL || after == NULL || cursor == NULL || *cursor == NULL || end == NULL || parsed_args == NULL
+      || spec == NULL || spec_cap < 3U || *scan != '%') {
+    return -1;
+  }
+
+  p = scan;
+  spec[n++] = *p++;
+  if (*p == '%') {
+    if (n + 2U >= spec_cap) {
+      return -1;
+    }
+    spec[n++] = *p++;
+    spec[n] = '\0';
+    *after = p;
+    return 0;
+  }
+
+  while (*p && _nei_log_is_flag_char(*p)) {
+    if (n + 2U >= spec_cap)
+      return -1;
+    spec[n++] = *p++;
+  }
+  if (*p == '*') {
+    int32_t width = 0;
+    char tmp[16];
+    uint8_t payload_type;
+    if (*cursor >= end || *parsed_args >= (uint8_t)_NEI_LOG_MAX_VARGS)
+      return -1;
+    payload_type = **cursor;
+    (*cursor)++;
+    if (payload_type != _NEI_LOG_PAYLOAD_I32)
+      return -1;
+    if (_nei_log_read_bytes(cursor, end, &width, sizeof(width)) != 0)
+      return -1;
+    (*parsed_args)++;
+    snprintf(tmp, sizeof(tmp), "%d", (int)width);
+    if (n + strlen(tmp) + 2U >= spec_cap)
+      return -1;
+    memcpy(spec + n, tmp, strlen(tmp));
+    n += strlen(tmp);
+    ++p;
+  } else {
+    while (*p && _nei_log_is_digit_char(*p)) {
+      if (n + 2U >= spec_cap)
+        return -1;
+      spec[n++] = *p++;
+    }
+  }
+  if (*p == '.') {
+    if (n + 2U >= spec_cap)
+      return -1;
+    spec[n++] = *p++;
+    if (*p == '*') {
+      int32_t precision = 0;
+      char tmp[16];
+      uint8_t payload_type;
+      if (*cursor >= end || *parsed_args >= (uint8_t)_NEI_LOG_MAX_VARGS)
+        return -1;
+      payload_type = **cursor;
+      (*cursor)++;
+      if (payload_type != _NEI_LOG_PAYLOAD_I32)
+        return -1;
+      if (_nei_log_read_bytes(cursor, end, &precision, sizeof(precision)) != 0)
+        return -1;
+      (*parsed_args)++;
+      if (precision < 0) {
+        precision = 0;
+      }
+      snprintf(tmp, sizeof(tmp), "%d", (int)precision);
+      if (n + strlen(tmp) + 2U >= spec_cap)
+        return -1;
+      memcpy(spec + n, tmp, strlen(tmp));
+      n += strlen(tmp);
+      ++p;
+    } else {
+      while (*p && _nei_log_is_digit_char(*p)) {
+        if (n + 2U >= spec_cap)
+          return -1;
+        spec[n++] = *p++;
+      }
+    }
+  }
+  if (*p == 'h' || *p == 'l') {
+    char first = *p;
+    if (n + 2U >= spec_cap)
+      return -1;
+    spec[n++] = *p++;
+    if (*p == first) {
+      if (n + 2U >= spec_cap)
+        return -1;
+      spec[n++] = *p++;
+    }
+  } else if (*p == 'j' || *p == 'z' || *p == 't') {
+    if (n + 2U >= spec_cap)
+      return -1;
+    spec[n++] = *p++;
+  } else if (*p == 'L') {
+    if (n + 2U >= spec_cap)
+      return -1;
+    spec[n++] = *p++;
+  }
+  if (*p == '\0') {
+    return -1;
+  }
+  if (n + 2U >= spec_cap) {
+    return -1;
+  }
+  spec[n++] = *p++;
+  spec[n] = '\0';
+  *after = p;
+  return 0;
+}
+
+static const char *_nei_log_basename(const char *path) {
+  const char *slash;
+  const char *backslash;
+  if (path == NULL) {
+    return NULL;
+  }
+  slash = strrchr(path, '/');
+  backslash = strrchr(path, '\\');
+  if (slash == NULL && backslash == NULL) {
+    return path;
+  }
+  if (slash == NULL) {
+    return backslash + 1;
+  }
+  if (backslash == NULL) {
+    return slash + 1;
+  }
+  return (slash > backslash) ? (slash + 1) : (backslash + 1);
+}
+
+static int _nei_log_format_record(const nei_log_record_header_t *header,
+                                  const nei_log_config_st *effective_config,
+                                  const uint8_t *payload,
+                                  size_t payload_size,
+                                  char *out,
+                                  size_t out_cap) {
+  const char *fmt;
+  const char *scan;
+  const uint8_t *cursor = payload;
+  const uint8_t *end = payload + payload_size;
+  size_t used = 0U;
+  uint8_t parsed_args = 0U;
+  int short_level_tag;
+  int short_path;
+  const char *dt_format;
+
+  if (header == NULL || effective_config == NULL || payload == NULL || out == NULL || out_cap == 0U
+      || header->fmt_ptr == NULL) {
+    return -1;
+  }
+  short_level_tag = effective_config->short_level_tag;
+  short_path = effective_config->short_path;
+  dt_format = effective_config->datetime_format;
+  out[0] = '\0';
+  {
+    char ts[64];
+    _nei_log_format_timestamp(header->timestamp_ns, dt_format, ts, sizeof(ts));
+    if (_nei_log_append_char(out, out_cap, &used, '[') != 0)
+      return -1;
+    if (_nei_log_append_cstr(out, out_cap, &used, ts) != 0)
+      return -1;
+    if (_nei_log_append_cstr(out, out_cap, &used, "] ") != 0)
+      return -1;
+  }
+
+  if (header->verbose == _NEI_LOG_NOT_VERBOSE) {
+    if (_nei_log_append_char(out, out_cap, &used, '[') != 0)
+      return -1;
+    if (_nei_log_append_cstr(out,
+                             out_cap,
+                             &used,
+                             short_level_tag ? _get_level_short_string((nei_log_level_e)header->level)
+                                             : _get_level_string((nei_log_level_e)header->level))
+        != 0)
+      return -1;
+    if (_nei_log_append_cstr(out, out_cap, &used, "] ") != 0)
+      return -1;
+  } else {
+    if (_nei_log_append_cstr(out, out_cap, &used, "[V] ") != 0)
+      return -1;
+  }
+  if (header->file_ptr != NULL) {
+    const char *path = short_path ? _nei_log_basename(header->file_ptr) : header->file_ptr;
+    if (_nei_log_append_cstr(out, out_cap, &used, path) != 0)
+      return -1;
+    if (_nei_log_append_char(out, out_cap, &used, ':') != 0)
+      return -1;
+    {
+      char line_buf[16];
+      snprintf(line_buf, sizeof(line_buf), "%d", (int)header->line);
+      if (_nei_log_append_cstr(out, out_cap, &used, line_buf) != 0)
+        return -1;
+      if (_nei_log_append_cstr(out, out_cap, &used, " ") != 0)
+        return -1;
+    }
+  }
+  if (header->func_ptr != NULL) {
+    if (_nei_log_append_cstr(out, out_cap, &used, header->func_ptr) != 0)
+      return -1;
+    if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
+      return -1;
+  }
+
+  fmt = header->fmt_ptr;
+  scan = fmt;
+  while (*scan) {
+    if (*scan != '%') {
+      if (_nei_log_append_char(out, out_cap, &used, *scan) != 0)
+        return -1;
+      ++scan;
+      continue;
+    }
+    {
+      char conv_spec[64];
+      const char *after = NULL;
+      if (_nei_log_build_runtime_conversion_spec(scan, &after, &cursor, end, &parsed_args, conv_spec, sizeof(conv_spec))
+          != 0) {
+        return -1;
+      }
+      if (strcmp(conv_spec, "%%") == 0) {
+        if (_nei_log_append_char(out, out_cap, &used, '%') != 0)
+          return -1;
+        scan = after;
+        continue;
+      }
+      if (cursor >= end || parsed_args >= header->arg_count) {
+        return -1;
+      }
+      {
+        const uint8_t payload_type = *cursor++;
+        char tmp[256];
+        switch (payload_type) {
+        case _NEI_LOG_PAYLOAD_I32: {
+          int32_t v = 0;
+          if (_nei_log_read_bytes(&cursor, end, &v, sizeof(v)) != 0)
+            return -1;
+          snprintf(tmp, sizeof(tmp), conv_spec, (int)v);
+          if (_nei_log_append_cstr(out, out_cap, &used, tmp) != 0)
+            return -1;
+          break;
+        }
+        case _NEI_LOG_PAYLOAD_U32: {
+          uint32_t v = 0;
+          if (_nei_log_read_bytes(&cursor, end, &v, sizeof(v)) != 0)
+            return -1;
+          snprintf(tmp, sizeof(tmp), conv_spec, (unsigned int)v);
+          if (_nei_log_append_cstr(out, out_cap, &used, tmp) != 0)
+            return -1;
+          break;
+        }
+        case _NEI_LOG_PAYLOAD_I64: {
+          int64_t v = 0;
+          if (_nei_log_read_bytes(&cursor, end, &v, sizeof(v)) != 0)
+            return -1;
+          _nei_log_snprintf_i64(conv_spec, tmp, sizeof(tmp), v);
+          if (_nei_log_append_cstr(out, out_cap, &used, tmp) != 0)
+            return -1;
+          break;
+        }
+        case _NEI_LOG_PAYLOAD_U64: {
+          uint64_t v = 0;
+          if (_nei_log_read_bytes(&cursor, end, &v, sizeof(v)) != 0)
+            return -1;
+          _nei_log_snprintf_u64(conv_spec, tmp, sizeof(tmp), v);
+          if (_nei_log_append_cstr(out, out_cap, &used, tmp) != 0)
+            return -1;
+          break;
+        }
+        case _NEI_LOG_PAYLOAD_DOUBLE: {
+          double v = 0.0;
+          if (_nei_log_read_bytes(&cursor, end, &v, sizeof(v)) != 0)
+            return -1;
+          snprintf(tmp, sizeof(tmp), conv_spec, v);
+          if (_nei_log_append_cstr(out, out_cap, &used, tmp) != 0)
+            return -1;
+          break;
+        }
+        case _NEI_LOG_PAYLOAD_LONGDOUBLE: {
+          uint8_t raw[_NEI_LOG_LONGDOUBLE_STORAGE];
+          long double ld = 0.0L;
+          if (_nei_log_read_bytes(&cursor, end, raw, sizeof(raw)) != 0)
+            return -1;
+          memset(&ld, 0, sizeof(ld));
+          memcpy(&ld, raw, sizeof(ld) < sizeof(raw) ? sizeof(ld) : sizeof(raw));
+          snprintf(tmp, sizeof(tmp), conv_spec, ld);
+          if (_nei_log_append_cstr(out, out_cap, &used, tmp) != 0)
+            return -1;
+          break;
+        }
+        case _NEI_LOG_PAYLOAD_CHAR: {
+          char v = '\0';
+          if (_nei_log_read_bytes(&cursor, end, &v, sizeof(v)) != 0)
+            return -1;
+          snprintf(tmp, sizeof(tmp), conv_spec, (int)v);
+          if (_nei_log_append_cstr(out, out_cap, &used, tmp) != 0)
+            return -1;
+          break;
+        }
+        case _NEI_LOG_PAYLOAD_PTR: {
+          uintptr_t raw = 0U;
+          void *ptr = NULL;
+          if (_nei_log_read_bytes(&cursor, end, &raw, sizeof(raw)) != 0)
+            return -1;
+          ptr = (void *)raw;
+          snprintf(tmp, sizeof(tmp), conv_spec, ptr);
+          if (_nei_log_append_cstr(out, out_cap, &used, tmp) != 0)
+            return -1;
+          break;
+        }
+        case _NEI_LOG_PAYLOAD_CSTR: {
+          uint16_t len16 = 0;
+          char strbuf[_NEI_LOG_MAX_STRING_COPY + 1U];
+          if (_nei_log_read_u16(&cursor, end, &len16) != 0)
+            return -1;
+          if (len16 > _NEI_LOG_MAX_STRING_COPY || cursor + len16 > end)
+            return -1;
+          memcpy(strbuf, cursor, len16);
+          strbuf[len16] = '\0';
+          cursor += len16;
+          snprintf(tmp, sizeof(tmp), conv_spec, strbuf);
+          if (_nei_log_append_cstr(out, out_cap, &used, tmp) != 0)
+            return -1;
+          break;
+        }
+        default:
+          return -1;
+        }
+        ++parsed_args;
+      }
+      scan = after;
+      continue;
+    }
+  }
+  return 0;
+}
+
+#pragma endregion /* log core (formatting) */
+
+#pragma region log core (emit)
+
+static void _nei_log_emit_message(
+    const nei_log_config_st *config, int32_t level, int32_t verbose, const char *message, size_t length) {
+  const nei_log_config_st *effective = config;
+  size_t i;
+  int emitted = 0;
+  if (config == NULL || message == NULL) {
+    return;
+  }
+  if (verbose == _NEI_LOG_NOT_VERBOSE) {
+    const uint32_t mask = (uint32_t)(1U << (uint32_t)level);
+    if (level < (int32_t)NEI_LOG_LEVEL_VERBOSE || level > (int32_t)NEI_LOG_LEVEL_FATAL) {
+      return;
+    }
+    if ((effective->level_flags.all & mask) == 0U) {
+      return;
+    }
+  } else if (effective->verbose_threshold >= 0 && verbose > effective->verbose_threshold) {
+    return;
+  }
+  for (i = 0; i < NEI_LOG_MAX_SINKS_OF_CONFIG; ++i) {
+    nei_log_sink_st *sink = effective->sinks[i];
+    if (sink == NULL) {
+      break;
+    }
+    if (verbose != _NEI_LOG_NOT_VERBOSE) {
+      if (sink->vlog != NULL) {
+        sink->vlog(sink, verbose, message, length);
+        emitted = 1;
+      }
+    } else {
+      if (sink->llog != NULL) {
+        sink->llog(sink, (nei_log_level_e)level, message, length);
+        emitted = 1;
+      }
+    }
+  }
+  (void)emitted;
+  if (effective->log_to_console) {
+    (void)fwrite(message, 1U, length, stdout);
+    (void)fputc('\n', stdout);
+  }
+}
+
+#pragma endregion /* log core (emit) */
+
+#pragma region log core (runtime)
+
+static int _nei_log_ensure_runtime_initialized(void) {
+  if (s_runtime.initialized) {
+    return 0;
+  }
+
+#if defined(_WIN32)
+  InitializeCriticalSection(&s_runtime.mutex);
+  InitializeConditionVariable(&s_runtime.cond);
+  s_runtime.thread = CreateThread(NULL, 0, _nei_log_consumer_thread, &s_runtime, 0, NULL);
+  if (s_runtime.thread == NULL) {
+    DeleteCriticalSection(&s_runtime.mutex);
+    return -1;
+  }
+#else
+  if (pthread_mutex_init(&s_runtime.mutex, NULL) != 0) {
+    return -1;
+  }
+  if (pthread_cond_init(&s_runtime.cond, NULL) != 0) {
+    pthread_mutex_destroy(&s_runtime.mutex);
+    return -1;
+  }
+  if (pthread_create(&s_runtime.thread, NULL, _nei_log_consumer_thread, &s_runtime) != 0) {
+    pthread_cond_destroy(&s_runtime.cond);
+    pthread_mutex_destroy(&s_runtime.mutex);
+    return -1;
+  }
+#endif
+
+  s_runtime.initialized = 1;
+  atexit(_nei_log_shutdown_runtime);
+  return 0;
+}
+
+static void _nei_log_shutdown_runtime(void) {
+  if (!s_runtime.initialized) {
+    return;
+  }
+
+#if defined(_WIN32)
+  EnterCriticalSection(&s_runtime.mutex);
+  s_runtime.stop_requested = 1;
+  WakeAllConditionVariable(&s_runtime.cond);
+  LeaveCriticalSection(&s_runtime.mutex);
+  WaitForSingleObject(s_runtime.thread, INFINITE);
+  CloseHandle(s_runtime.thread);
+  DeleteCriticalSection(&s_runtime.mutex);
+#else
+  pthread_mutex_lock(&s_runtime.mutex);
+  s_runtime.stop_requested = 1;
+  pthread_cond_broadcast(&s_runtime.cond);
+  pthread_mutex_unlock(&s_runtime.mutex);
+  pthread_join(s_runtime.thread, NULL);
+  pthread_cond_destroy(&s_runtime.cond);
+  pthread_mutex_destroy(&s_runtime.mutex);
+#endif
+  s_runtime.initialized = 0;
+}
+
+static void _nei_log_ensure_active_not_consuming(nei_log_runtime_t *rt) {
+  while (rt->consuming_index >= 0 && rt->active_index == rt->consuming_index) {
+#if defined(_WIN32)
+    SleepConditionVariableCS(&rt->cond, &rt->mutex, INFINITE);
+#else
+    pthread_cond_wait(&rt->cond, &rt->mutex);
+#endif
+  }
+}
+
+static int _nei_log_enqueue_record(const uint8_t *record, size_t len) {
+  if (record == NULL || len == 0U || len > _NEI_LOG_GLOBAL_BUFFER_CAPACITY || !s_runtime.initialized) {
+    return -1;
+  }
+
+#if defined(_WIN32)
+  EnterCriticalSection(&s_runtime.mutex);
+#else
+  pthread_mutex_lock(&s_runtime.mutex);
+#endif
+
+  for (;;) {
+    const int active = s_runtime.active_index;
+    const size_t free_space = _NEI_LOG_GLOBAL_BUFFER_CAPACITY - s_runtime.used[active];
+    if (free_space >= len) {
+      uint8_t *dst = (active == 0) ? s_runtime.buffer_a : s_runtime.buffer_b;
+      memcpy(dst + s_runtime.used[active], record, len);
+      s_runtime.used[active] += len;
+      if (s_runtime.pending_index == -1) {
+        s_runtime.pending_index = active;
+        s_runtime.active_index = 1 - active;
+        _nei_log_ensure_active_not_consuming(&s_runtime);
+#if defined(_WIN32)
+        WakeAllConditionVariable(&s_runtime.cond);
+#else
+        pthread_cond_broadcast(&s_runtime.cond);
+#endif
+      }
+      break;
+    }
+
+    if (s_runtime.pending_index == -1 && s_runtime.used[active] > 0U) {
+      s_runtime.pending_index = active;
+      s_runtime.active_index = 1 - active;
+      _nei_log_ensure_active_not_consuming(&s_runtime);
+#if defined(_WIN32)
+      WakeAllConditionVariable(&s_runtime.cond);
+#else
+      pthread_cond_broadcast(&s_runtime.cond);
+#endif
+      continue;
+    }
+
+#if defined(_WIN32)
+    SleepConditionVariableCS(&s_runtime.cond, &s_runtime.mutex, INFINITE);
+#else
+    pthread_cond_wait(&s_runtime.cond, &s_runtime.mutex);
+#endif
+  }
+
+#if defined(_WIN32)
+  LeaveCriticalSection(&s_runtime.mutex);
+#else
+  pthread_mutex_unlock(&s_runtime.mutex);
+#endif
+  return 0;
+}
+
+#pragma endregion /* log core (runtime) */
+
+#pragma region log core (consumer)
+
+static void _nei_log_process_records(const uint8_t *buf, size_t size) {
+  size_t offset = 0U;
+  char message[2048];
+  while (offset + sizeof(nei_log_record_header_t) <= size) {
+    const nei_log_config_st *config = NULL;
+    char config_id[NEI_LOG_CONFIG_ID_MAX_LEN];
+    const nei_log_record_header_t *header = (const nei_log_record_header_t *)(buf + offset);
+    const size_t payload_size = (size_t)header->total_size - sizeof(nei_log_record_header_t);
+    const uint8_t *payload = buf + offset + sizeof(nei_log_record_header_t);
+    if (header->total_size == 0U || offset + header->total_size > size) {
+      break;
+    }
+    memcpy(config_id, header->config_id, sizeof(config_id));
+    config_id[NEI_LOG_CONFIG_ID_MAX_LEN - 1U] = '\0';
+    config = nei_log_get_config(config_id);
+    if (config != NULL
+        && _nei_log_format_record(header, config, payload, payload_size, message, sizeof(message)) == 0) {
+      _nei_log_emit_message(config, header->level, header->verbose, message, strlen(message));
+    }
+    offset += header->total_size;
+  }
+}
+
+#if defined(_WIN32)
+static DWORD WINAPI _nei_log_consumer_thread(LPVOID arg) {
+#else
+static void *_nei_log_consumer_thread(void *arg) {
+#endif
+  nei_log_runtime_t *rt = (nei_log_runtime_t *)arg;
+  if (rt == NULL) {
+#if defined(_WIN32)
+    return 0;
+#else
+    return NULL;
+#endif
+  }
+
+  for (;;) {
+    int consume_index = -1;
+    size_t consume_size = 0U;
+    uint8_t *consume_buf = NULL;
+
+#if defined(_WIN32)
+    EnterCriticalSection(&rt->mutex);
+    while (rt->pending_index == -1 && !rt->stop_requested) {
+      SleepConditionVariableCS(&rt->cond, &rt->mutex, INFINITE);
+    }
+    if (rt->pending_index == -1 && rt->stop_requested) {
+      if (rt->used[rt->active_index] > 0U) {
+        rt->pending_index = rt->active_index;
+        rt->active_index = 1 - rt->active_index;
+        _nei_log_ensure_active_not_consuming(rt);
+      } else {
+        LeaveCriticalSection(&rt->mutex);
+        break;
+      }
+    }
+#else
+    pthread_mutex_lock(&rt->mutex);
+    while (rt->pending_index == -1 && !rt->stop_requested) {
+      pthread_cond_wait(&rt->cond, &rt->mutex);
+    }
+    if (rt->pending_index == -1 && rt->stop_requested) {
+      if (rt->used[rt->active_index] > 0U) {
+        rt->pending_index = rt->active_index;
+        rt->active_index = 1 - rt->active_index;
+        _nei_log_ensure_active_not_consuming(rt);
+      } else {
+        pthread_mutex_unlock(&rt->mutex);
+        break;
+      }
+    }
+#endif
+
+    consume_index = rt->pending_index;
+    rt->pending_index = -1;
+    rt->consuming_index = consume_index;
+    consume_size = rt->used[consume_index];
+    consume_buf = (consume_index == 0) ? rt->buffer_a : rt->buffer_b;
+
+#if defined(_WIN32)
+    LeaveCriticalSection(&rt->mutex);
+#else
+    pthread_mutex_unlock(&rt->mutex);
+#endif
+
+    if (consume_size > 0U) {
+      _nei_log_process_records(consume_buf, consume_size);
+    }
+
+#if defined(_WIN32)
+    EnterCriticalSection(&rt->mutex);
+    rt->used[consume_index] = 0U;
+    rt->consuming_index = -1;
+    WakeAllConditionVariable(&rt->cond);
+    LeaveCriticalSection(&rt->mutex);
+#else
+    pthread_mutex_lock(&rt->mutex);
+    rt->used[consume_index] = 0U;
+    rt->consuming_index = -1;
+    pthread_cond_broadcast(&rt->cond);
+    pthread_mutex_unlock(&rt->mutex);
+#endif
+  }
+
+#if defined(_WIN32)
+  return 0;
+#else
+  return NULL;
+#endif
+}
+
+static int nei_log_vsnprintf(char *buf, size_t size, const char *fmt, va_list args) {
+  (void)args;
+  if (buf == NULL || size == 0 || fmt == NULL) {
+    return -1;
+  }
+  return 0;
+}
+
+#pragma endregion /* log core (consumer) */

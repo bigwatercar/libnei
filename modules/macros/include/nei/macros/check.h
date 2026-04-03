@@ -1,0 +1,4 @@
+#ifndef NEI_MACROS_CHECK_H
+#define NEI_MACROS_CHECK_H
+
+#endif // NEI_MACROS_CHECK_H

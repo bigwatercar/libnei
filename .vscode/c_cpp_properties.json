@@ -1,0 +1,39 @@
+{
+  "version": 4,
+  "configurations": [
+    {
+      "name": "Win32",
+      "intelliSenseMode": "windows-msvc-x64",
+      "cStandard": "c99",
+      "cppStandard": "c++17",
+      "includePath": [
+        "${workspaceFolder}/modules/core/include",
+        "${workspaceFolder}/modules/log/include",
+        "${workspaceFolder}/modules/macros/include",
+        "${workspaceFolder}/modules/utils/include",
+        "${workspaceFolder}/modules/xdr/include",
+        "${workspaceFolder}/tests",
+        "${workspaceFolder}/build/_deps/googletest-src/googletest/include",
+        "${workspaceFolder}/build/_deps/googletest-src/googlemock/include"
+      ],
+      "defines": [
+        "_DEBUG",
+        "UNICODE",
+        "_UNICODE"
+      ],
+      "browse": {
+        "path": [
+          "${workspaceFolder}/modules/core/include",
+          "${workspaceFolder}/modules/log/include",
+          "${workspaceFolder}/modules/macros/include",
+          "${workspaceFolder}/modules/utils/include",
+          "${workspaceFolder}/modules/xdr/include",
+          "${workspaceFolder}/tests",
+          "${workspaceFolder}/build/_deps/googletest-src/googletest/include",
+          "${workspaceFolder}/build/_deps/googletest-src/googlemock/include"
+        ],
+        "limitSymbolsToIncludedHeaders": true
+      }
+    }
+  ]
+}

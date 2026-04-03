@@ -1,0 +1,26 @@
+# If build/compile_commands.json exists (e.g. Ninja or a generator that exports it),
+# add: CompilationDatabase: build
+# MSVC multi-config builds often omit it; compile_flags.txt supplies include paths for clangd.
+
+CompileFlags:
+  Add:
+    - -I
+    - modules/core/include
+    - -I
+    - modules/log/include
+    - -I
+    - modules/macros/include
+    - -I
+    - modules/utils/include
+    - -I
+    - modules/xdr/include
+    - -I
+    - tests
+    - -I
+    - build/_deps/googletest-src/googletest/include
+    - -I
+    - build/_deps/googletest-src/googlemock/include
+    - -D_DEBUG
+    - -DUNICODE
+    - -D_UNICODE
+    - -DNEI_EXPORTS

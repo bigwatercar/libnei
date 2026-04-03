@@ -1,0 +1,19 @@
+---
+Language:        Cpp
+# BasedOnStyle:  LLVM
+AllowShortFunctionsOnASingleLine: false
+AlwaysBreakAfterReturnType: None
+AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments: false
+BinPackParameters: false
+BraceWrapping:
+  BeforeElse:      true
+BreakBeforeBinaryOperators: NonAssignment
+BreakConstructorInitializersBeforeComma: true
+ColumnLimit:     120
+DeriveLineEnding: true
+DerivePointerAlignment: false
+DisableFormat:   false
+SortIncludes:    false
+SortUsingDeclarations: false
+SeparateDefinitionBlocks: Always

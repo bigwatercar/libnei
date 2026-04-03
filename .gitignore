@@ -39,3 +39,11 @@
 
 # debug information files
 *.dwo
+
+# CMake build directories
+/build/
+build/
+
+# Local clangd/CMake generated artifacts
+build-clangd/
+compile_commands.json
