@@ -56,11 +56,11 @@ enum _nei_log_payload_type_e {
 
 #define _NEI_LOG_LONGDOUBLE_STORAGE 16U
 
-typedef struct _nei_log_fmt_token_t {
+typedef struct _nei_log_fmt_token_st {
   uint8_t payload_type;
   uint8_t length_mod;
   uint8_t spec;
-} nei_log_fmt_token_t;
+} nei_log_fmt_token_st;
 
 /**
  * @brief 紧凑序列化记录头部。
@@ -78,7 +78,7 @@ typedef struct _nei_log_record_header_st {
   int32_t verbose;
   uint8_t arg_count;
   uint8_t reserved[7];
-} nei_log_record_header_t;
+} nei_log_record_header_st;
 
 typedef struct _nei_log_runtime_st {
   uint8_t buffer_a[_NEI_LOG_GLOBAL_BUFFER_CAPACITY];
@@ -99,9 +99,9 @@ typedef struct _nei_log_runtime_st {
   pthread_cond_t cond;
   pthread_t thread;
 #endif
-} nei_log_runtime_t;
+} nei_log_runtime_st;
 
-static nei_log_runtime_t s_runtime = {
+static nei_log_runtime_st s_runtime = {
     .used = {0U, 0U},
     .active_index = 0,
     .pending_index = -1,
@@ -114,12 +114,12 @@ typedef struct _nei_log_internal_config_st {
   struct _nei_log_internal_config_st *next;
   NEI_LOG_CONFIG_ID id;
   nei_log_config_st config;
-} nei_log_internal_config_t;
+} nei_log_internal_config_st;
 
 typedef struct _nei_log_default_file_sink_ctx_st {
   uint32_t magic;
   FILE *fp;
-} nei_log_default_file_sink_ctx_t;
+} nei_log_default_file_sink_ctx_st;
 
 // NOTE: This config table is intended to be managed during initialization and
 // is not designed for concurrent add/remove while logging is active.
@@ -202,7 +202,7 @@ static void _nei_log_default_file_vlog(const nei_log_sink_st *sink, int verbose,
 static inline size_t _nei_log_align_up_8(size_t n);
 static int _nei_log_is_flag_char(char c);
 static int _nei_log_is_digit_char(char c);
-static int _nei_log_scan_next_token(const char **fmt_ptr, nei_log_fmt_token_t *token);
+static int _nei_log_scan_next_token(const char **fmt_ptr, nei_log_fmt_token_st *token);
 static size_t _nei_log_serialize_record(uint8_t *out,
                                         size_t out_cap,
                                         const char *config_id,
@@ -232,7 +232,7 @@ static int _nei_log_build_runtime_conversion_spec(const char *scan,
                                                   char *spec,
                                                   size_t spec_cap);
 static const char *_nei_log_basename(const char *path);
-static int _nei_log_format_record(const nei_log_record_header_t *header,
+static int _nei_log_format_record(const nei_log_record_header_st *header,
                                   const nei_log_config_st *effective_config,
                                   const uint8_t *payload,
                                   size_t payload_size,
@@ -245,7 +245,7 @@ static void _nei_log_emit_message(
 static int _nei_log_ensure_runtime_initialized(void);
 static void _nei_log_shutdown_runtime(void);
 static int _nei_log_enqueue_record(const uint8_t *record, size_t len);
-static void _nei_log_ensure_active_not_consuming(nei_log_runtime_t *rt);
+static void _nei_log_ensure_active_not_consuming(nei_log_runtime_st *rt);
 static void _nei_log_process_records(const uint8_t *buf, size_t size);
 #if defined(_WIN32)
 static DWORD WINAPI _nei_log_consumer_thread(LPVOID arg);
@@ -367,7 +367,7 @@ void nei_log_remove_config(NEI_LOG_CONFIG_ID id) {
 
 nei_log_sink_st *nei_log_create_default_file_sink(const char *filename) {
   nei_log_sink_st *sink = NULL;
-  nei_log_default_file_sink_ctx_t *ctx = NULL;
+  nei_log_default_file_sink_ctx_st *ctx = NULL;
   FILE *fp = NULL;
 
   if (filename == NULL || filename[0] == '\0') {
@@ -386,7 +386,7 @@ nei_log_sink_st *nei_log_create_default_file_sink(const char *filename) {
   }
 
   sink = (nei_log_sink_st *)calloc(1U, sizeof(*sink));
-  ctx = (nei_log_default_file_sink_ctx_t *)calloc(1U, sizeof(*ctx));
+  ctx = (nei_log_default_file_sink_ctx_st *)calloc(1U, sizeof(*ctx));
   if (sink == NULL || ctx == NULL) {
     if (fp != NULL) {
       fclose(fp);
@@ -406,13 +406,13 @@ nei_log_sink_st *nei_log_create_default_file_sink(const char *filename) {
 }
 
 void nei_log_destroy_sink(nei_log_sink_st *sink) {
-  nei_log_default_file_sink_ctx_t *ctx = NULL;
+  nei_log_default_file_sink_ctx_st *ctx = NULL;
   if (sink == NULL) {
     return;
   }
 
   if (sink->opaque != NULL && sink->llog == _nei_log_default_file_llog && sink->vlog == _nei_log_default_file_vlog) {
-    ctx = (nei_log_default_file_sink_ctx_t *)sink->opaque;
+    ctx = (nei_log_default_file_sink_ctx_st *)sink->opaque;
     if (ctx->magic == _NEI_LOG_DEFAULT_FILE_SINK_MAGIC) {
       if (ctx->fp != NULL) {
         fclose(ctx->fp);
@@ -714,12 +714,12 @@ static void _nei_log_config_unlock_write(void) {
 
 static void
 _nei_log_default_file_llog(const nei_log_sink_st *sink, nei_log_level_e level, const char *message, size_t length) {
-  nei_log_default_file_sink_ctx_t *ctx = NULL;
+  nei_log_default_file_sink_ctx_st *ctx = NULL;
   (void)level;
   if (sink == NULL || message == NULL) {
     return;
   }
-  ctx = (nei_log_default_file_sink_ctx_t *)sink->opaque;
+  ctx = (nei_log_default_file_sink_ctx_st *)sink->opaque;
   if (ctx == NULL || ctx->magic != _NEI_LOG_DEFAULT_FILE_SINK_MAGIC || ctx->fp == NULL) {
     return;
   }
@@ -729,11 +729,11 @@ _nei_log_default_file_llog(const nei_log_sink_st *sink, nei_log_level_e level, c
 }
 
 static void _nei_log_default_file_vlog(const nei_log_sink_st *sink, int verbose, const char *message, size_t length) {
-  nei_log_default_file_sink_ctx_t *ctx = NULL;
+  nei_log_default_file_sink_ctx_st *ctx = NULL;
   if (sink == NULL || message == NULL) {
     return;
   }
-  ctx = (nei_log_default_file_sink_ctx_t *)sink->opaque;
+  ctx = (nei_log_default_file_sink_ctx_st *)sink->opaque;
   if (ctx == NULL || ctx->magic != _NEI_LOG_DEFAULT_FILE_SINK_MAGIC || ctx->fp == NULL) {
     return;
   }
@@ -813,7 +813,7 @@ static int _nei_log_is_digit_char(char c) {
   return (c >= '0') && (c <= '9');
 }
 
-static int _nei_log_scan_next_token(const char **fmt_ptr, nei_log_fmt_token_t *token) {
+static int _nei_log_scan_next_token(const char **fmt_ptr, nei_log_fmt_token_st *token) {
   const char *p;
   if (fmt_ptr == NULL || *fmt_ptr == NULL || token == NULL) {
     return 0;
@@ -970,9 +970,9 @@ static size_t _nei_log_serialize_record(uint8_t *out,
   size_t aligned_size;
   uint8_t arg_count = 0;
   const char *scan_ptr;
-  nei_log_record_header_t header;
+  nei_log_record_header_st header;
 
-  if (out == NULL || fmt == NULL || out_cap < sizeof(nei_log_record_header_t)) {
+  if (out == NULL || fmt == NULL || out_cap < sizeof(nei_log_record_header_st)) {
     return 0;
   }
 
@@ -1487,7 +1487,7 @@ static const char *_nei_log_basename(const char *path) {
   return (slash > backslash) ? (slash + 1) : (backslash + 1);
 }
 
-static int _nei_log_format_record(const nei_log_record_header_t *header,
+static int _nei_log_format_record(const nei_log_record_header_st *header,
                                   const nei_log_config_st *effective_config,
                                   const uint8_t *payload,
                                   size_t payload_size,
@@ -1802,7 +1802,7 @@ static void _nei_log_shutdown_runtime(void) {
   s_runtime.initialized = 0;
 }
 
-static void _nei_log_ensure_active_not_consuming(nei_log_runtime_t *rt) {
+static void _nei_log_ensure_active_not_consuming(nei_log_runtime_st *rt) {
   while (rt->consuming_index >= 0 && rt->active_index == rt->consuming_index) {
 #if defined(_WIN32)
     SleepConditionVariableCS(&rt->cond, &rt->mutex, INFINITE);
@@ -1877,12 +1877,12 @@ static int _nei_log_enqueue_record(const uint8_t *record, size_t len) {
 static void _nei_log_process_records(const uint8_t *buf, size_t size) {
   size_t offset = 0U;
   char message[2048];
-  while (offset + sizeof(nei_log_record_header_t) <= size) {
+  while (offset + sizeof(nei_log_record_header_st) <= size) {
     const nei_log_config_st *config = NULL;
     char config_id[NEI_LOG_CONFIG_ID_MAX_LEN];
-    const nei_log_record_header_t *header = (const nei_log_record_header_t *)(buf + offset);
-    const size_t payload_size = (size_t)header->total_size - sizeof(nei_log_record_header_t);
-    const uint8_t *payload = buf + offset + sizeof(nei_log_record_header_t);
+    const nei_log_record_header_st *header = (const nei_log_record_header_st *)(buf + offset);
+    const size_t payload_size = (size_t)header->total_size - sizeof(nei_log_record_header_st);
+    const uint8_t *payload = buf + offset + sizeof(nei_log_record_header_st);
     if (header->total_size == 0U || offset + header->total_size > size) {
       break;
     }
@@ -1902,7 +1902,7 @@ static DWORD WINAPI _nei_log_consumer_thread(LPVOID arg) {
 #else
 static void *_nei_log_consumer_thread(void *arg) {
 #endif
-  nei_log_runtime_t *rt = (nei_log_runtime_t *)arg;
+  nei_log_runtime_st *rt = (nei_log_runtime_st *)arg;
   if (rt == NULL) {
 #if defined(_WIN32)
     return 0;
