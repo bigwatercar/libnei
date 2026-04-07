@@ -90,6 +90,132 @@ TEST(LogCTest, AsyncPipelineDeepCopiesStringPayload) {
   nei_log_remove_config(cfg_id);
 }
 
+TEST(LogCTest, LiteralApisPassMessageWithoutPrintfExpansion) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  const char cfg_id[] = "cfg-literal";
+  ASSERT_EQ(nei_log_add_config(cfg_id, &config), 0);
+
+  const char raw[] = "user fmt: %d %% not expanded";
+  nei_llog_literal(cfg_id, NEI_LOG_LEVEL_INFO, "lit.c", 5, "f", raw, sizeof(raw) - 1U);
+  nei_log_flush();
+  {
+    std::lock_guard<std::mutex> lock(collector.mu);
+    ASSERT_EQ(collector.messages.size(), 1U);
+    EXPECT_NE(collector.messages[0].find("user fmt: %d %% not expanded"), std::string::npos);
+  }
+  collector.messages.clear();
+
+  sink.llog = nullptr;
+  sink.vlog = CollectVerboseLog;
+  nei_vlog_literal(cfg_id, 3, "lit.c", 6, "g", "verbose-bodyXX", 12U);
+  nei_log_flush();
+  {
+    std::lock_guard<std::mutex> lock(collector.mu);
+    ASSERT_EQ(collector.messages.size(), 1U);
+    EXPECT_EQ(collector.last_verbose, 3);
+    EXPECT_NE(collector.messages[0].find("verbose-body"), std::string::npos);
+    EXPECT_EQ(collector.messages[0].find("verbose-bodyXX"), std::string::npos);
+  }
+  nei_log_remove_config(cfg_id);
+}
+
+TEST(LogCTest, LiteralApi_EmptyAndNullMessageEmitPrefixOnly) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  const char cfg_id[] = "cfg-lit-empty";
+  ASSERT_EQ(nei_log_add_config(cfg_id, &config), 0);
+
+  nei_llog_literal(cfg_id, NEI_LOG_LEVEL_INFO, "empty.c", 10, "fn", "", 0);
+  nei_llog_literal(cfg_id, NEI_LOG_LEVEL_WARN, "empty.c", 11, "fn", nullptr, 100);
+  nei_log_flush();
+  {
+    std::lock_guard<std::mutex> lock(collector.mu);
+    ASSERT_EQ(collector.messages.size(), 2U);
+    EXPECT_NE(collector.messages[0].find("[I]"), std::string::npos);
+    EXPECT_NE(collector.messages[0].find("empty.c:10"), std::string::npos);
+    EXPECT_NE(collector.messages[1].find("[W]"), std::string::npos);
+    EXPECT_NE(collector.messages[1].find("empty.c:11"), std::string::npos);
+  }
+
+  collector.messages.clear();
+  sink.llog = nullptr;
+  sink.vlog = CollectVerboseLog;
+  nei_vlog_literal(cfg_id, 2, "empty.c", 12, "fn", "", 0);
+  nei_log_flush();
+  {
+    std::lock_guard<std::mutex> lock(collector.mu);
+    ASSERT_EQ(collector.messages.size(), 1U);
+    EXPECT_EQ(collector.last_verbose, 2);
+    EXPECT_NE(collector.messages[0].find("empty.c:12"), std::string::npos);
+  }
+  nei_log_remove_config(cfg_id);
+}
+
+TEST(LogCTest, LiteralApi_IncludesFileLineAndBodyInFormattedOutput) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  const char cfg_id[] = "cfg-lit-prefix";
+  ASSERT_EQ(nei_log_add_config(cfg_id, &config), 0);
+
+  nei_llog_literal(cfg_id, NEI_LOG_LEVEL_WARN, "unit_literal.c", 77, "lf", "payload-bytes", 13);
+  nei_log_flush();
+  std::lock_guard<std::mutex> lock(collector.mu);
+  ASSERT_EQ(collector.messages.size(), 1U);
+  const std::string &msg = collector.messages[0];
+  EXPECT_NE(msg.find("[W]"), std::string::npos);
+  EXPECT_NE(msg.find("unit_literal.c:77"), std::string::npos);
+  EXPECT_NE(msg.find("payload-bytes"), std::string::npos);
+  nei_log_remove_config(cfg_id);
+}
+
+TEST(LogCTest, LiteralApi_RespectsLevelAndVerboseFilters) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.vlog = CollectVerboseLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.level_flags.all = 0xFFFFFFFFu & ~((uint32_t)1U << (uint32_t)NEI_LOG_LEVEL_INFO);
+  config.verbose_threshold = 2;
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  const char cfg_id[] = "cfg-lit-filter";
+  ASSERT_EQ(nei_log_add_config(cfg_id, &config), 0);
+
+  nei_llog_literal(cfg_id, NEI_LOG_LEVEL_INFO, "f.c", 1, "x", "no", 2);
+  nei_llog_literal(cfg_id, NEI_LOG_LEVEL_WARN, "f.c", 2, "x", "yes", 3);
+  nei_vlog_literal(cfg_id, 5, "f.c", 3, "x", "v-no", 4);
+  nei_vlog_literal(cfg_id, 1, "f.c", 4, "x", "v-yes", 5);
+  nei_log_flush();
+  std::lock_guard<std::mutex> lock(collector.mu);
+  ASSERT_EQ(collector.messages.size(), 2U);
+  EXPECT_NE(collector.messages[0].find("[W]"), std::string::npos);
+  EXPECT_NE(collector.messages[0].find("yes"), std::string::npos);
+  EXPECT_EQ(collector.last_verbose, 1);
+  EXPECT_NE(collector.messages[1].find("v-yes"), std::string::npos);
+  nei_log_remove_config(cfg_id);
+}
+
 TEST(LogCTest, AsyncPipelineFormatsTimestampAndFileLinePrefix) {
   LogCollector collector;
   nei_log_sink_st sink = {};

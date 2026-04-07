@@ -52,6 +52,8 @@ enum _nei_log_payload_type_e {
   _NEI_LOG_PAYLOAD_PTR = 7,
   _NEI_LOG_PAYLOAD_CSTR = 8,
   _NEI_LOG_PAYLOAD_LONGDOUBLE = 9,
+  /** Entire user message as length-prefixed bytes; no printf/fmt processing (nei_llog_literal / nei_vlog_literal). */
+  _NEI_LOG_PAYLOAD_LITERAL_MSG = 10,
 };
 
 #define _NEI_LOG_LONGDOUBLE_STORAGE 16U
@@ -213,6 +215,16 @@ static size_t _nei_log_serialize_record(uint8_t *out,
                                         int32_t verbose,
                                         const char *fmt,
                                         va_list args);
+static size_t _nei_log_serialize_literal_msg(uint8_t *out,
+                                             size_t out_cap,
+                                             const char *config_id,
+                                             const char *file,
+                                             int32_t line,
+                                             const char *func,
+                                             int32_t level,
+                                             int32_t verbose,
+                                             const char *message,
+                                             size_t message_length);
 static int _nei_log_payload_write_u8(uint8_t *out, size_t out_cap, size_t *used, uint8_t value);
 static int _nei_log_payload_write_u16(uint8_t *out, size_t out_cap, size_t *used, uint16_t value);
 static int _nei_log_payload_write_bytes(uint8_t *out, size_t out_cap, size_t *used, const void *src, size_t len);
@@ -484,6 +496,60 @@ void nei_vlog(
   }
   va_end(scan_args);
   va_end(args);
+}
+
+void nei_llog_literal(NEI_LOG_CONFIG_ID config_id,
+                      nei_log_level_e level,
+                      const char *file,
+                      int32_t line,
+                      const char *func,
+                      const char *message,
+                      size_t length) {
+  uint8_t record[_NEI_LOG_RECORD_BUFFER_SIZE];
+
+  (void)_nei_log_ensure_runtime_initialized();
+  {
+    const size_t serialized_len = _nei_log_serialize_literal_msg(record,
+                                                                 sizeof(record),
+                                                                 (const char *)config_id,
+                                                                 file,
+                                                                 line,
+                                                                 func,
+                                                                 (int32_t)level,
+                                                                 _NEI_LOG_NOT_VERBOSE,
+                                                                 message,
+                                                                 length);
+    if (serialized_len > 0U) {
+      (void)_nei_log_enqueue_record(record, serialized_len);
+    }
+  }
+}
+
+void nei_vlog_literal(NEI_LOG_CONFIG_ID config_id,
+                      int verbose,
+                      const char *file,
+                      int32_t line,
+                      const char *func,
+                      const char *message,
+                      size_t length) {
+  uint8_t record[_NEI_LOG_RECORD_BUFFER_SIZE];
+
+  (void)_nei_log_ensure_runtime_initialized();
+  {
+    const size_t serialized_len = _nei_log_serialize_literal_msg(record,
+                                                                 sizeof(record),
+                                                                 (const char *)config_id,
+                                                                 file,
+                                                                 line,
+                                                                 func,
+                                                                 (int32_t)NEI_LOG_LEVEL_VERBOSE,
+                                                                 (int32_t)verbose,
+                                                                 message,
+                                                                 length);
+    if (serialized_len > 0U) {
+      (void)_nei_log_enqueue_record(record, serialized_len);
+    }
+  }
 }
 
 void nei_log_flush(void) {
@@ -1225,6 +1291,70 @@ static size_t _nei_log_serialize_record(uint8_t *out,
   return used;
 }
 
+static size_t _nei_log_serialize_literal_msg(uint8_t *out,
+                                             size_t out_cap,
+                                             const char *config_id,
+                                             const char *file,
+                                             int32_t line,
+                                             const char *func,
+                                             int32_t level,
+                                             int32_t verbose,
+                                             const char *message,
+                                             size_t message_length) {
+  nei_log_record_header_st header;
+  size_t used;
+  size_t aligned_size;
+  size_t copy_len;
+  uint16_t len16;
+
+  if (out == NULL || out_cap < sizeof(nei_log_record_header_st)) {
+    return 0;
+  }
+
+  copy_len = message_length;
+  if (message == NULL) {
+    copy_len = 0U;
+  } else if (copy_len > _NEI_LOG_MAX_STRING_COPY) {
+    copy_len = _NEI_LOG_MAX_STRING_COPY;
+  }
+  len16 = (uint16_t)copy_len;
+
+  memset(&header, 0, sizeof(header));
+  header.timestamp_ns = _nei_log_now_ns();
+  _nei_log_config_id_copy(header.config_id, config_id);
+  header.file_ptr = file;
+  header.func_ptr = func;
+  header.fmt_ptr = NULL;
+  header.level = level;
+  header.line = line;
+  header.verbose = verbose;
+  header.arg_count = 1U;
+
+  memcpy(out, &header, sizeof(header));
+  used = sizeof(header);
+
+  if (_nei_log_payload_write_u8(out, out_cap, &used, _NEI_LOG_PAYLOAD_LITERAL_MSG) != 0) {
+    return 0;
+  }
+  if (_nei_log_payload_write_u16(out, out_cap, &used, len16) != 0) {
+    return 0;
+  }
+  if (copy_len > 0U && message != NULL) {
+    if (_nei_log_payload_write_bytes(out, out_cap, &used, message, copy_len) != 0) {
+      return 0;
+    }
+  }
+
+  aligned_size = _nei_log_align_up_8(used);
+  if (_nei_log_payload_write_padded_zero(out, out_cap, &used, aligned_size) != 0) {
+    return 0;
+  }
+
+  header.total_size = (uint32_t)used;
+  memcpy(out, &header, sizeof(header));
+  return used;
+}
+
 #pragma endregion /* log core (serialization) */
 
 #pragma region log core (formatting)
@@ -1503,8 +1633,7 @@ static int _nei_log_format_record(const nei_log_record_header_st *header,
   int short_path;
   const char *dt_format;
 
-  if (header == NULL || effective_config == NULL || payload == NULL || out == NULL || out_cap == 0U
-      || header->fmt_ptr == NULL) {
+  if (header == NULL || effective_config == NULL || payload == NULL || out == NULL || out_cap == 0U) {
     return -1;
   }
   short_level_tag = effective_config->short_level_tag;
@@ -1558,6 +1687,32 @@ static int _nei_log_format_record(const nei_log_record_header_st *header,
       return -1;
     if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
       return -1;
+  }
+
+  if (header->fmt_ptr == NULL) {
+    if (header->arg_count != 1U) {
+      return -1;
+    }
+    if (cursor >= end) {
+      return -1;
+    }
+    if (*cursor != _NEI_LOG_PAYLOAD_LITERAL_MSG) {
+      return -1;
+    }
+    ++cursor;
+    {
+      uint16_t len16 = 0;
+      if (_nei_log_read_u16(&cursor, end, &len16) != 0) {
+        return -1;
+      }
+      if (len16 > _NEI_LOG_MAX_STRING_COPY || cursor + len16 > end) {
+        return -1;
+      }
+      if (len16 > 0U && _nei_log_append_nstr(out, out_cap, &used, (const char *)cursor, len16) != 0) {
+        return -1;
+      }
+    }
+    return 0;
   }
 
   fmt = header->fmt_ptr;

@@ -91,6 +91,13 @@ extern "C" void nei_collect_only(const nei_log_sink_st *sink, nei_log_level_e le
   static_cast<NeiCollector *>(sink->opaque)->record_count.fetch_add(1U, std::memory_order_relaxed);
 }
 
+extern "C" void nei_collect_vlog_only(const nei_log_sink_st *sink, int verbose, const char *msg, size_t len) {
+  (void)verbose;
+  (void)msg;
+  (void)len;
+  static_cast<NeiCollector *>(sink->opaque)->record_count.fetch_add(1U, std::memory_order_relaxed);
+}
+
 struct NeiConfigGuard {
   nei_log_sink_st *saved[NEI_LOG_MAX_SINKS_OF_CONFIG]{};
 
@@ -126,6 +133,23 @@ int64_t time_nei_memory_ms(F &&f, int iters) {
   NeiCollector col;
   nei_log_sink_st sink{};
   sink.llog = nei_collect_only;
+  sink.opaque = &col;
+  NeiConfigGuard guard;
+  guard.set_primary(&sink);
+  const auto t0 = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < iters; ++i) {
+    f();
+  }
+  nei_log_flush();
+  const auto t1 = std::chrono::high_resolution_clock::now();
+  return std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+}
+
+template <class F>
+int64_t time_nei_memory_vlog_ms(F &&f, int iters) {
+  NeiCollector col;
+  nei_log_sink_st sink{};
+  sink.vlog = nei_collect_vlog_only;
   sink.opaque = &col;
   NeiConfigGuard guard;
   guard.set_primary(&sink);
@@ -307,16 +331,41 @@ int main() {
                   kMemoryIters));
 
   print_stats(
-      "[NEI]  literal only",
+      "[NEI]  llog_literal (opaque body)",
       kMemoryIters,
       time_nei_memory_ms(
-          [] { nei_llog(NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "bench", "info-only"); },
+          [] {
+            static const char body[] = "info-only";
+            nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_ID,
+                             NEI_LOG_LEVEL_INFO,
+                             __FILE__,
+                             __LINE__,
+                             "bench",
+                             body,
+                             sizeof(body) - 1U);
+          },
           kMemoryIters));
 
   print_stats(
       "[spdlog] literal only",
       kMemoryIters,
       time_spdlog_memory_ms([](const std::shared_ptr<spdlog::logger> &log) { log->info("info-only"); }, kMemoryIters));
+
+  print_stats(
+      "[NEI]  vlog_literal (opaque body)",
+      kMemoryIters,
+      time_nei_memory_vlog_ms(
+          [] {
+            static const char body[] = "verbose-literal";
+            nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_ID,
+                             1,
+                             __FILE__,
+                             __LINE__,
+                             "bench",
+                             body,
+                             sizeof(body) - 1U);
+          },
+          kMemoryIters));
 
   std::cout << "--- File (async file sink) ---\n\n";
   ensure_out_dir();
@@ -383,6 +432,53 @@ int main() {
     print_file_size(spd_multi);
   }
 
+  const std::string nei_lit = out_file("nei_cmp_literal.log");
+  const std::string nei_vlit = out_file("nei_cmp_vlog_literal.log");
+
+  {
+    const int64_t us = time_nei_file_ms(
+        [] {
+          static const char body[] = "file literal body";
+          nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_ID,
+                           NEI_LOG_LEVEL_INFO,
+                           __FILE__,
+                           __LINE__,
+                           "bench",
+                           body,
+                           sizeof(body) - 1U);
+        },
+        kFileIters,
+        nei_lit.c_str());
+    if (us < 0) {
+      std::cout << "[NEI] file llog_literal: failed to create sink\n\n";
+    } else {
+      print_stats("[NEI] file llog_literal", kFileIters, us);
+      print_file_size(nei_lit);
+    }
+  }
+
+  {
+    const int64_t us = time_nei_file_ms(
+        [] {
+          static const char body[] = "file vlog literal";
+          nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_ID,
+                           1,
+                           __FILE__,
+                           __LINE__,
+                           "bench",
+                           body,
+                           sizeof(body) - 1U);
+        },
+        kFileIters,
+        nei_vlit.c_str());
+    if (us < 0) {
+      std::cout << "[NEI] file vlog_literal: failed to create sink\n\n";
+    } else {
+      print_stats("[NEI] file vlog_literal", kFileIters, us);
+      print_file_size(nei_vlit);
+    }
+  }
+
   std::cout << "--- File (sync: per-call delivery / caller-thread write) ---\n\n";
 
   const std::string nei_simple_sync = out_file("nei_cmp_simple_sync.log");
@@ -445,6 +541,53 @@ int main() {
         spd_multi_sync);
     print_stats("[spdlog] file sync multi (sync logger)", kFileSyncIters, us);
     print_file_size(spd_multi_sync);
+  }
+
+  const std::string nei_lit_sync = out_file("nei_cmp_literal_sync.log");
+  const std::string nei_vlit_sync = out_file("nei_cmp_vlog_literal_sync.log");
+
+  {
+    const int64_t us = time_nei_file_sync_ms(
+        [] {
+          static const char body[] = "sync literal body";
+          nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_ID,
+                           NEI_LOG_LEVEL_INFO,
+                           __FILE__,
+                           __LINE__,
+                           "bench",
+                           body,
+                           sizeof(body) - 1U);
+        },
+        kFileSyncIters,
+        nei_lit_sync.c_str());
+    if (us < 0) {
+      std::cout << "[NEI] file sync llog_literal: failed to create sink\n\n";
+    } else {
+      print_stats("[NEI] file sync llog_literal (flush each log)", kFileSyncIters, us);
+      print_file_size(nei_lit_sync);
+    }
+  }
+
+  {
+    const int64_t us = time_nei_file_sync_ms(
+        [] {
+          static const char body[] = "sync vlog literal";
+          nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_ID,
+                           1,
+                           __FILE__,
+                           __LINE__,
+                           "bench",
+                           body,
+                           sizeof(body) - 1U);
+        },
+        kFileSyncIters,
+        nei_vlit_sync.c_str());
+    if (us < 0) {
+      std::cout << "[NEI] file sync vlog_literal: failed to create sink\n\n";
+    } else {
+      print_stats("[NEI] file sync vlog_literal (flush each log)", kFileSyncIters, us);
+      print_file_size(nei_vlit_sync);
+    }
   }
 
   return 0;

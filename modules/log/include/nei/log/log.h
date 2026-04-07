@@ -319,6 +319,37 @@ NEI_API void nei_vlog(
     PRINTF_LIKE(6, 7);
 
 /**
+ * @brief Write a level-based log entry with a pre-formatted literal message
+ *
+ * @details No format string and no variadic arguments: @p message and @p length are serialized as a
+ * single payload. The consumer appends the bytes to the line without printf-style expansion, so you
+ * can format elsewhere (e.g. fmt, std::format) and pass the result here.
+ *
+ * @param[in] message Message bytes (not required to be '\\0'-terminated)
+ * @param[in] length Message length in bytes (longer segments are truncated to an internal copy limit)
+ */
+NEI_API void nei_llog_literal(NEI_LOG_CONFIG_ID config_id,
+                              nei_log_level_e level,
+                              const char *file,
+                              int32_t line,
+                              const char *func,
+                              const char *message,
+                              size_t length);
+
+/**
+ * @brief Write a verbose log entry with a pre-formatted literal message
+ *
+ * @copydetails nei_llog_literal
+ */
+NEI_API void nei_vlog_literal(NEI_LOG_CONFIG_ID config_id,
+                              int verbose,
+                              const char *file,
+                              int32_t line,
+                              const char *func,
+                              const char *message,
+                              size_t length);
+
+/**
  * @brief Wait until all asynchronously queued records have been delivered to sinks
  *
  * @details Promotes any partial fill of the active buffer and blocks until the
@@ -328,7 +359,7 @@ NEI_API void nei_vlog(
  * library's consumer thread): @ref nei_log_flush waits until consumption
  * completes while the callback is still part of that consumption, which
  * deadlocks. Calling from other threads is fine subject to your own locking
- * discipline with @ref nei_llog / @ref nei_vlog.
+ * discipline with @ref nei_llog / @ref nei_vlog / @ref nei_llog_literal / @ref nei_vlog_literal.
  */
 NEI_API void nei_log_flush(void);
 
