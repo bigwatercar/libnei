@@ -16,9 +16,6 @@
 #include <pthread.h>
 #endif
 
-/// @brief 单条日志可解析的最大可变参数数量。
-#define _NEI_LOG_MAX_VARGS 32
-
 /// @brief 非 verbose 日志的占位值。
 #define _NEI_LOG_NOT_VERBOSE -1
 
@@ -78,8 +75,7 @@ typedef struct _nei_log_record_header_st {
   int32_t level;
   int32_t line;
   int32_t verbose;
-  uint8_t arg_count;
-  uint8_t reserved[7];
+  uint8_t reserved[8];
 } nei_log_record_header_st;
 
 typedef struct _nei_log_runtime_st {
@@ -1034,7 +1030,6 @@ static size_t _nei_log_serialize_record(uint8_t *out,
                                         va_list args) {
   size_t used;
   size_t aligned_size;
-  uint8_t arg_count = 0;
   const char *scan_ptr;
   nei_log_record_header_st header;
 
@@ -1051,13 +1046,12 @@ static size_t _nei_log_serialize_record(uint8_t *out,
   header.level = level;
   header.line = line;
   header.verbose = verbose;
-  header.arg_count = 0;
 
   memcpy(out, &header, sizeof(header));
   used = sizeof(header);
   scan_ptr = fmt;
 
-  while (*scan_ptr && arg_count < (uint8_t)_NEI_LOG_MAX_VARGS) {
+  while (*scan_ptr) {
     const char *p = scan_ptr;
     uint8_t payload_type = 0;
     int conv_lm = 0;
@@ -1078,7 +1072,6 @@ static size_t _nei_log_serialize_record(uint8_t *out,
         return 0;
       if (_nei_log_payload_write_bytes(out, out_cap, &used, &v, sizeof(v)) != 0)
         return 0;
-      ++arg_count;
       ++p;
     } else {
       while (*p && _nei_log_is_digit_char(*p))
@@ -1092,7 +1085,6 @@ static size_t _nei_log_serialize_record(uint8_t *out,
           return 0;
         if (_nei_log_payload_write_bytes(out, out_cap, &used, &v, sizeof(v)) != 0)
           return 0;
-        ++arg_count;
         ++p;
       } else {
         while (*p && _nei_log_is_digit_char(*p))
@@ -1275,7 +1267,6 @@ static size_t _nei_log_serialize_record(uint8_t *out,
       default:
         return 0;
       }
-      ++arg_count;
     }
     scan_ptr = (*p) ? (p + 1) : p;
   }
@@ -1286,7 +1277,6 @@ static size_t _nei_log_serialize_record(uint8_t *out,
   }
 
   header.total_size = (uint32_t)used;
-  header.arg_count = arg_count;
   memcpy(out, &header, sizeof(header));
   return used;
 }
@@ -1328,7 +1318,6 @@ static size_t _nei_log_serialize_literal_msg(uint8_t *out,
   header.level = level;
   header.line = line;
   header.verbose = verbose;
-  header.arg_count = 1U;
 
   memcpy(out, &header, sizeof(header));
   used = sizeof(header);
@@ -1510,7 +1499,7 @@ static int _nei_log_build_runtime_conversion_spec(const char *scan,
     int32_t width = 0;
     char tmp[16];
     uint8_t payload_type;
-    if (*cursor >= end || *parsed_args >= (uint8_t)_NEI_LOG_MAX_VARGS)
+    if (*cursor >= end || *parsed_args == UINT8_MAX)
       return -1;
     payload_type = **cursor;
     (*cursor)++;
@@ -1540,7 +1529,7 @@ static int _nei_log_build_runtime_conversion_spec(const char *scan,
       int32_t precision = 0;
       char tmp[16];
       uint8_t payload_type;
-      if (*cursor >= end || *parsed_args >= (uint8_t)_NEI_LOG_MAX_VARGS)
+      if (*cursor >= end || *parsed_args == UINT8_MAX)
         return -1;
       payload_type = **cursor;
       (*cursor)++;
@@ -1690,9 +1679,6 @@ static int _nei_log_format_record(const nei_log_record_header_st *header,
   }
 
   if (header->fmt_ptr == NULL) {
-    if (header->arg_count != 1U) {
-      return -1;
-    }
     if (cursor >= end) {
       return -1;
     }
@@ -1737,7 +1723,7 @@ static int _nei_log_format_record(const nei_log_record_header_st *header,
         scan = after;
         continue;
       }
-      if (cursor >= end || parsed_args >= header->arg_count) {
+      if (cursor >= end) {
         return -1;
       }
       {
