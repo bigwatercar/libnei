@@ -46,7 +46,11 @@ add_executable(log_test2 log_test2.c)
 target_link_libraries(log_test2 PRIVATE nei::nei)
 
 include(GoogleTest)
-gtest_discover_tests(nei_tests)
+#
+# Avoid running the test executable during build time on Windows shared builds
+# (DLLs may not be staged yet). Discover tests at test time instead.
+#
+gtest_discover_tests(nei_tests DISCOVERY_MODE PRE_TEST)
 
 # MSVC + shared libs: put nei.dll and googletest DLLs next to nei_tests.exe (and
 # sync googletest DLLs to nei.dll's output dir) so gtest_discover_tests and
