@@ -1047,7 +1047,7 @@ static size_t _nei_log_serialize_record(uint8_t *out,
   header.line = line;
   header.verbose = verbose;
 
-  memcpy(out, &header, sizeof(header));
+  /* Reserve header space; write header once after total_size is known. */
   used = sizeof(header);
   scan_ptr = fmt;
 
@@ -1319,7 +1319,7 @@ static size_t _nei_log_serialize_literal_msg(uint8_t *out,
   header.line = line;
   header.verbose = verbose;
 
-  memcpy(out, &header, sizeof(header));
+  /* Reserve header space; write header once after total_size is known. */
   used = sizeof(header);
 
   if (_nei_log_payload_write_u8(out, out_cap, &used, _NEI_LOG_PAYLOAD_LITERAL_MSG) != 0) {
