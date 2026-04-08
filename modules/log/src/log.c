@@ -2141,12 +2141,4 @@ static void *_nei_log_consumer_thread(void *arg) {
 #endif
 }
 
-static int nei_log_vsnprintf(char *buf, size_t size, const char *fmt, va_list args) {
-  (void)args;
-  if (buf == NULL || size == 0 || fmt == NULL) {
-    return -1;
-  }
-  return 0;
-}
-
 #pragma endregion /* log core (consumer) */
