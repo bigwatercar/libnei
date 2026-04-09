@@ -63,13 +63,13 @@ extern "C" {
 /* --- Config-related types --- */
 
 /**
- * @brief Type for a log configuration ID
- * @details A non-empty, NUL-terminated string whose length (excluding the
- * terminator) is strictly less than @ref NEI_LOG_CONFIG_ID_MAX_LEN (i.e. at
- * most @c NEI_LOG_CONFIG_ID_MAX_LEN - 1 characters).
+ * @brief Opaque configuration handle
+ * @details Pointer-width integer token returned by the logging library.
+ * Treat as opaque; do not infer internal layout or perform arithmetic.
  */
-#define NEI_LOG_CONFIG_ID_MAX_LEN 16u
-typedef const char NEI_LOG_CONFIG_ID[NEI_LOG_CONFIG_ID_MAX_LEN];
+typedef uintptr_t nei_log_config_handle_t;
+#define NEI_LOG_INVALID_CONFIG_HANDLE ((nei_log_config_handle_t)0u)
+#define NEI_LOG_DEFAULT_CONFIG_HANDLE ((nei_log_config_handle_t)1u)
 
 /// @brief Maximum number of sinks in a configuration
 #define NEI_LOG_MAX_SINKS_OF_CONFIG 8
@@ -188,21 +188,19 @@ typedef void (*nei_pfn_vlog)(const nei_log_sink_st *sink, int verbose, const cha
  */
 
 /**
- * @brief Get a log configuration by ID
+ * @brief Get a log configuration by handle
  *
- * @param[in] config_id Configuration ID
+ * @param[in] handle Configuration handle
  * @return Pointer to the library-owned configuration, or NULL if not found.
  * The object may be modified in place (same caveats as
  * @ref nei_log_default_config regarding thread safety).
  */
-NEI_API nei_log_config_st *nei_log_get_config(NEI_LOG_CONFIG_ID config_id);
-
-#define NEI_LOG_DEFAULT_CONFIG_ID "default"
+NEI_API nei_log_config_st *nei_log_get_config(nei_log_config_handle_t handle);
 
 /**
  * @brief Get the default log configuration
- * @details Returns the default configuration with ID `NEI_LOG_DEFAULT_CONFIG_ID`
- * (slot 0 of the internal config table).
+ * @details Returns the default configuration (slot 0 of the internal config
+ * table, handle @ref NEI_LOG_DEFAULT_CONFIG_HANDLE).
  *
  * The returned pointer is managed by the logging library and remains valid for
  * the lifetime of the process. Callers may override fields in-place (e.g.
@@ -214,23 +212,22 @@ NEI_API nei_log_config_st *nei_log_get_config(NEI_LOG_CONFIG_ID config_id);
 NEI_API nei_log_config_st *nei_log_default_config(void);
 
 /**
- * @brief Add a log configuration identified by @p id
+ * @brief Add a log configuration and return its handle
  *
- * @param[in] id Configuration identifier
  * @param[in] config Configuration to add. The logging library will copy the
  * configuration; ownership of @p config is not transferred.
+ * @param[out] out_handle Returned handle (optional; can be NULL)
  *
- * @return @c 0 on success, @c -1 on failure (invalid ID, NULL @p config, or
- * config table full)
+ * @return @c 0 on success, @c -1 on failure (NULL @p config or config table full)
  */
-NEI_API int nei_log_add_config(NEI_LOG_CONFIG_ID id, const nei_log_config_st *config);
+NEI_API int nei_log_add_config(const nei_log_config_st *config, nei_log_config_handle_t *out_handle);
 
 /**
- * @brief Remove a log configuration identified by @p id
+ * @brief Remove a log configuration by handle
  *
- * @param[in] id Configuration identifier
+ * @param[in] handle Configuration handle
  */
-NEI_API void nei_log_remove_config(NEI_LOG_CONFIG_ID id);
+NEI_API void nei_log_remove_config(nei_log_config_handle_t handle);
 
 /** @} */ /* end of nei_log_api_config */
 
@@ -287,7 +284,7 @@ NEI_API void nei_log_destroy_sink(nei_log_sink_st *sink);
 /**
  * @brief Write a level-based log entry
  *
- * @param[in] config_id Log configuration ID (typically @ref NEI_LOG_DEFAULT_CONFIG_ID)
+ * @param[in] config_handle Log configuration handle (typically @ref NEI_LOG_DEFAULT_CONFIG_HANDLE)
  * @param[in] level Log level
  * @param[in] file Source file path (typically @c __FILE__)
  * @param[in] line Source line number (typically @c __LINE__)
@@ -295,7 +292,7 @@ NEI_API void nei_log_destroy_sink(nei_log_sink_st *sink);
  * @param[in] fmt printf-style format string
  * @param[in] ... printf-style variadic arguments (must match @p fmt)
  */
-NEI_API void nei_llog(NEI_LOG_CONFIG_ID config_id,
+NEI_API void nei_llog(nei_log_config_handle_t config_handle,
                       nei_log_level_e level,
                       const char *file,
                       int32_t line,
@@ -306,7 +303,7 @@ NEI_API void nei_llog(NEI_LOG_CONFIG_ID config_id,
 /**
  * @brief Write a verbose log entry
  *
- * @param[in] config_id Log configuration ID (typically @ref NEI_LOG_DEFAULT_CONFIG_ID)
+ * @param[in] config_handle Log configuration handle (typically @ref NEI_LOG_DEFAULT_CONFIG_HANDLE)
  * @param[in] verbose Verbose sub-level (for finer-grained verbose output)
  * @param[in] file Source file path (typically @c __FILE__)
  * @param[in] line Source line number (typically @c __LINE__)
@@ -315,7 +312,7 @@ NEI_API void nei_llog(NEI_LOG_CONFIG_ID config_id,
  * @param[in] ... printf-style variadic arguments (must match @p fmt)
  */
 NEI_API void nei_vlog(
-    NEI_LOG_CONFIG_ID config_id, int verbose, const char *file, int32_t line, const char *func, const char *fmt, ...)
+    nei_log_config_handle_t config_handle, int verbose, const char *file, int32_t line, const char *func, const char *fmt, ...)
     PRINTF_LIKE(6, 7);
 
 /**
@@ -328,7 +325,7 @@ NEI_API void nei_vlog(
  * @param[in] message Message bytes (not required to be '\\0'-terminated)
  * @param[in] length Message length in bytes (longer segments are truncated to an internal copy limit)
  */
-NEI_API void nei_llog_literal(NEI_LOG_CONFIG_ID config_id,
+NEI_API void nei_llog_literal(nei_log_config_handle_t config_handle,
                               nei_log_level_e level,
                               const char *file,
                               int32_t line,
@@ -341,7 +338,7 @@ NEI_API void nei_llog_literal(NEI_LOG_CONFIG_ID config_id,
  *
  * @copydetails nei_llog_literal
  */
-NEI_API void nei_vlog_literal(NEI_LOG_CONFIG_ID config_id,
+NEI_API void nei_vlog_literal(nei_log_config_handle_t config_handle,
                               int verbose,
                               const char *file,
                               int32_t line,
@@ -378,7 +375,7 @@ NEI_API void nei_log_flush(void);
  * @param ... printf-style variadic arguments
  */
 #define NEI_LOG_TRACE(fmt, ...)                                                                                        \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_TRACE, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_TRACE, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log a DEBUG message (convenience macro)
@@ -386,7 +383,7 @@ NEI_API void nei_log_flush(void);
  * @param ... printf-style variadic arguments
  */
 #define NEI_LOG_DEBUG(fmt, ...)                                                                                        \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_DEBUG, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_DEBUG, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log an INFO message (convenience macro)
@@ -394,7 +391,7 @@ NEI_API void nei_log_flush(void);
  * @param ... printf-style variadic arguments
  */
 #define NEI_LOG_INFO(fmt, ...)                                                                                         \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log a WARN message (convenience macro)
@@ -402,7 +399,7 @@ NEI_API void nei_log_flush(void);
  * @param ... printf-style variadic arguments
  */
 #define NEI_LOG_WARN(fmt, ...)                                                                                         \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_WARN, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_WARN, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log an ERROR message (convenience macro)
@@ -410,7 +407,7 @@ NEI_API void nei_log_flush(void);
  * @param ... printf-style variadic arguments
  */
 #define NEI_LOG_ERROR(fmt, ...)                                                                                        \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_ERROR, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_ERROR, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log a FATAL message (convenience macro)
@@ -418,7 +415,7 @@ NEI_API void nei_log_flush(void);
  * @param ... printf-style variadic arguments
  */
 #define NEI_LOG_FATAL(fmt, ...)                                                                                        \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_FATAL, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_FATAL, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log a VERBOSE message (convenience macro)
@@ -427,7 +424,7 @@ NEI_API void nei_log_flush(void);
  * @param ... printf-style variadic arguments
  */
 #define NEI_LOG_VERBOSE(verbose, fmt, ...)                                                                             \
-  nei_vlog(NEI_LOG_DEFAULT_CONFIG_ID, verbose, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+  nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, verbose, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /** @} */ /* end of nei_log_macros */
 

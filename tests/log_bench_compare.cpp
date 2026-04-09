@@ -296,7 +296,13 @@ int main() {
       time_nei_memory_ms(
           [] {
             nei_llog(
-                NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "bench", "test message %s", "test");
+                NEI_LOG_DEFAULT_CONFIG_HANDLE,
+                NEI_LOG_LEVEL_INFO,
+                __FILE__,
+                __LINE__,
+                "bench",
+                "test message %s",
+                "test");
           },
           kMemoryIters));
 
@@ -310,7 +316,7 @@ int main() {
               kMemoryIters,
               time_nei_memory_ms(
                   [] {
-                    nei_llog(NEI_LOG_DEFAULT_CONFIG_ID,
+                    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
                              NEI_LOG_LEVEL_INFO,
                              __FILE__,
                              __LINE__,
@@ -336,7 +342,7 @@ int main() {
       time_nei_memory_ms(
           [] {
             static const char body[] = "info-only";
-            nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_ID,
+            nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,
                              NEI_LOG_LEVEL_INFO,
                              __FILE__,
                              __LINE__,
@@ -357,7 +363,7 @@ int main() {
       time_nei_memory_vlog_ms(
           [] {
             static const char body[] = "verbose-literal";
-            nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_ID,
+            nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,
                              1,
                              __FILE__,
                              __LINE__,
@@ -379,7 +385,13 @@ int main() {
     const int64_t us = time_nei_file_ms(
         [] {
           nei_llog(
-              NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "bench", "test message %s", "test");
+              NEI_LOG_DEFAULT_CONFIG_HANDLE,
+              NEI_LOG_LEVEL_INFO,
+              __FILE__,
+              __LINE__,
+              "bench",
+              "test message %s",
+              "test");
         },
         kFileIters,
         nei_simple.c_str());
@@ -403,7 +415,7 @@ int main() {
   {
     const int64_t us = time_nei_file_ms(
         [] {
-          nei_llog(NEI_LOG_DEFAULT_CONFIG_ID,
+          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
                    NEI_LOG_LEVEL_INFO,
                    __FILE__,
                    __LINE__,
@@ -439,7 +451,7 @@ int main() {
     const int64_t us = time_nei_file_ms(
         [] {
           static const char body[] = "file literal body";
-          nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_ID,
+          nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,
                            NEI_LOG_LEVEL_INFO,
                            __FILE__,
                            __LINE__,
@@ -461,7 +473,7 @@ int main() {
     const int64_t us = time_nei_file_ms(
         [] {
           static const char body[] = "file vlog literal";
-          nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_ID,
+          nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,
                            1,
                            __FILE__,
                            __LINE__,
@@ -490,7 +502,13 @@ int main() {
     const int64_t us = time_nei_file_sync_ms(
         [] {
           nei_llog(
-              NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "bench", "test message %s", "test");
+              NEI_LOG_DEFAULT_CONFIG_HANDLE,
+              NEI_LOG_LEVEL_INFO,
+              __FILE__,
+              __LINE__,
+              "bench",
+              "test message %s",
+              "test");
         },
         kFileSyncIters,
         nei_simple_sync.c_str());
@@ -514,7 +532,7 @@ int main() {
   {
     const int64_t us = time_nei_file_sync_ms(
         [] {
-          nei_llog(NEI_LOG_DEFAULT_CONFIG_ID,
+          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
                    NEI_LOG_LEVEL_INFO,
                    __FILE__,
                    __LINE__,
@@ -550,7 +568,7 @@ int main() {
     const int64_t us = time_nei_file_sync_ms(
         [] {
           static const char body[] = "sync literal body";
-          nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_ID,
+          nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,
                            NEI_LOG_LEVEL_INFO,
                            __FILE__,
                            __LINE__,
@@ -572,7 +590,7 @@ int main() {
     const int64_t us = time_nei_file_sync_ms(
         [] {
           static const char body[] = "sync vlog literal";
-          nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_ID,
+          nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,
                            1,
                            __FILE__,
                            __LINE__,

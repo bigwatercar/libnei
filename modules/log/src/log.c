@@ -68,7 +68,7 @@ typedef struct _nei_log_fmt_token_st {
 typedef struct _nei_log_record_header_st {
   uint32_t total_size;
   uint64_t timestamp_ns;
-  char config_id[NEI_LOG_CONFIG_ID_MAX_LEN];
+  nei_log_config_handle_t config_handle;
   const char *file_ptr;
   const char *func_ptr;
   const char *fmt_ptr;
@@ -108,12 +108,6 @@ static nei_log_runtime_st s_runtime = {
     .initialized = 0,
 };
 
-typedef struct _nei_log_internal_config_st {
-  struct _nei_log_internal_config_st *next;
-  NEI_LOG_CONFIG_ID id;
-  nei_log_config_st config;
-} nei_log_internal_config_st;
-
 typedef struct _nei_log_default_file_sink_ctx_st {
   uint32_t magic;
   FILE *fp;
@@ -122,16 +116,10 @@ typedef struct _nei_log_default_file_sink_ctx_st {
 // NOTE: This config table is intended to be managed during initialization and
 // is not designed for concurrent add/remove while logging is active.
 #define _NEI_LOG_MAX_CONFIGS 16U // includes default config
-#define _NEI_LOG_CONFIG_ID_CAP NEI_LOG_CONFIG_ID_MAX_LEN
 
 static nei_log_config_st *s_config_ptrs[_NEI_LOG_MAX_CONFIGS];
 static nei_log_config_st s_custom_configs[_NEI_LOG_MAX_CONFIGS];
-static char s_config_ids[_NEI_LOG_MAX_CONFIGS][_NEI_LOG_CONFIG_ID_CAP];
 static uint8_t s_config_used[_NEI_LOG_MAX_CONFIGS];
-
-// Hash table (open addressing) mapping id -> slot index in [0, _NEI_LOG_MAX_CONFIGS).
-// Rebuilt after every add/remove.
-static int8_t s_config_id_index[_NEI_LOG_MAX_CONFIGS];
 static int s_config_table_initialized = 0;
 #if defined(_WIN32)
 static SRWLOCK s_config_lock = SRWLOCK_INIT;
@@ -178,18 +166,15 @@ static inline const char *_get_level_short_string(nei_log_level_e level) {
 #pragma region static forward declarations
 
 /* Config table */
-static int _nei_log_is_valid_config_id(const char *id);
-static void _nei_log_config_id_copy(char dst[_NEI_LOG_CONFIG_ID_CAP], const char *id);
-static uint32_t _nei_log_hash_config_id(const char *id);
-static void _nei_log_rebuild_config_id_index(void);
 static void _nei_log_ensure_config_table_initialized(void);
-static int _nei_log_find_slot_by_id(const char *id);
 static void _nei_log_fill_default_config(nei_log_config_st *cfg);
 static void _nei_log_reset_default_config(void);
 static void _nei_log_config_lock_read(void);
 static void _nei_log_config_lock_write(void);
 static void _nei_log_config_unlock_read(void);
 static void _nei_log_config_unlock_write(void);
+static nei_log_config_handle_t _nei_log_make_handle_from_slot(size_t slot);
+static int _nei_log_slot_from_handle(nei_log_config_handle_t handle, size_t *out_slot);
 
 /* Sink */
 static void
@@ -203,7 +188,7 @@ static int _nei_log_is_digit_char(char c);
 static int _nei_log_scan_next_token(const char **fmt_ptr, nei_log_fmt_token_st *token);
 static size_t _nei_log_serialize_record(uint8_t *out,
                                         size_t out_cap,
-                                        const char *config_id,
+                                        nei_log_config_handle_t config_handle,
                                         const char *file,
                                         int32_t line,
                                         const char *func,
@@ -213,7 +198,7 @@ static size_t _nei_log_serialize_record(uint8_t *out,
                                         va_list args);
 static size_t _nei_log_serialize_literal_msg(uint8_t *out,
                                              size_t out_cap,
-                                             const char *config_id,
+                                             nei_log_config_handle_t config_handle,
                                              const char *file,
                                              int32_t line,
                                              const char *func,
@@ -265,17 +250,16 @@ static void *_nei_log_consumer_thread(void *arg);
 
 #pragma region public API
 
-nei_log_config_st *nei_log_get_config(NEI_LOG_CONFIG_ID config_id) {
+nei_log_config_st *nei_log_get_config(nei_log_config_handle_t handle) {
   nei_log_config_st *cfg = NULL;
-  const char *id = (const char *)config_id;
-  int slot = -1;
+  size_t slot = 0U;
   _nei_log_config_lock_read();
-  slot = _nei_log_find_slot_by_id(id);
-  if (slot < 0) {
+  _nei_log_ensure_config_table_initialized();
+  if (_nei_log_slot_from_handle(handle, &slot) != 0 || s_config_used[slot] == 0U) {
     _nei_log_config_unlock_read();
     return NULL;
   }
-  cfg = s_config_ptrs[(size_t)slot];
+  cfg = s_config_ptrs[slot];
   _nei_log_config_unlock_read();
   return cfg;
 }
@@ -289,35 +273,19 @@ nei_log_config_st *nei_log_default_config(void) {
     s_config_used[0] = 1U;
     s_config_ptrs[0] = &s_custom_configs[0];
     cfg = s_config_ptrs[0];
-    _nei_log_config_id_copy(s_config_ids[0], NEI_LOG_DEFAULT_CONFIG_ID);
     _nei_log_fill_default_config(cfg);
-    _nei_log_rebuild_config_id_index();
   }
   _nei_log_config_unlock_write();
   return cfg;
 }
 
-int nei_log_add_config(NEI_LOG_CONFIG_ID id, const nei_log_config_st *config) {
-  const char *cid = (const char *)id;
-  if (config == NULL || !_nei_log_is_valid_config_id(cid)) {
+int nei_log_add_config(const nei_log_config_st *config, nei_log_config_handle_t *out_handle) {
+  if (config == NULL) {
     return -1;
   }
 
   _nei_log_config_lock_write();
   _nei_log_ensure_config_table_initialized();
-
-  // If the id already exists, overwrite the existing slot.
-  const int existing_slot = _nei_log_find_slot_by_id(cid);
-  if (existing_slot >= 0) {
-    if ((size_t)existing_slot == 0U) {
-      memcpy(&s_custom_configs[0], config, sizeof(*config));
-    } else {
-      memcpy(&s_custom_configs[(size_t)existing_slot], config, sizeof(*config));
-    }
-    // Id index doesn't change.
-    _nei_log_config_unlock_write();
-    return 0;
-  }
 
   // Find a free slot for new config (slot 0 is reserved for default).
   size_t free_slot = (size_t)-1;
@@ -333,43 +301,31 @@ int nei_log_add_config(NEI_LOG_CONFIG_ID id, const nei_log_config_st *config) {
   }
 
   s_config_used[free_slot] = 1U;
-  _nei_log_config_id_copy(s_config_ids[free_slot], cid);
   memcpy(&s_custom_configs[free_slot], config, sizeof(*config));
   s_config_ptrs[free_slot] = &s_custom_configs[free_slot];
+  if (out_handle != NULL) {
+    *out_handle = _nei_log_make_handle_from_slot(free_slot);
+  }
 
-  _nei_log_rebuild_config_id_index();
   _nei_log_config_unlock_write();
   return 0;
 }
 
-void nei_log_remove_config(NEI_LOG_CONFIG_ID id) {
-  const char *cid = (const char *)id;
-  if (!_nei_log_is_valid_config_id(cid)) {
-    return;
-  }
-
+void nei_log_remove_config(nei_log_config_handle_t handle) {
+  size_t slot = 0U;
   _nei_log_config_lock_write();
   _nei_log_ensure_config_table_initialized();
-
-  const int slot = _nei_log_find_slot_by_id(cid);
-  if (slot < 0) {
+  if (_nei_log_slot_from_handle(handle, &slot) != 0 || s_config_used[slot] == 0U) {
     _nei_log_config_unlock_write();
     return;
   }
-
-  if ((size_t)slot == 0U) {
+  if (slot == 0U) {
     _nei_log_reset_default_config();
-    // Rebuild isn't strictly necessary but keeps the state consistent.
-    _nei_log_rebuild_config_id_index();
     _nei_log_config_unlock_write();
     return;
   }
-
-  s_config_used[(size_t)slot] = 0U;
-  s_config_ids[(size_t)slot][0] = '\0';
-  s_config_ptrs[(size_t)slot] = NULL;
-  // Do not clear s_custom_configs to keep any already-queued records safe.
-  _nei_log_rebuild_config_id_index();
+  s_config_used[slot] = 0U;
+  s_config_ptrs[slot] = NULL;
   _nei_log_config_unlock_write();
 }
 
@@ -433,7 +389,7 @@ void nei_log_destroy_sink(nei_log_sink_st *sink) {
   free(sink);
 }
 
-void nei_llog(NEI_LOG_CONFIG_ID config_id,
+void nei_llog(nei_log_config_handle_t config_handle,
               nei_log_level_e level,
               const char *file,
               int32_t line,
@@ -450,7 +406,7 @@ void nei_llog(NEI_LOG_CONFIG_ID config_id,
   {
     const size_t serialized_len = _nei_log_serialize_record(record,
                                                             sizeof(record),
-                                                            (const char *)config_id,
+                                                            config_handle,
                                                             file,
                                                             line,
                                                             func,
@@ -466,8 +422,13 @@ void nei_llog(NEI_LOG_CONFIG_ID config_id,
   va_end(args);
 }
 
-void nei_vlog(
-    NEI_LOG_CONFIG_ID config_id, int verbose, const char *file, int32_t line, const char *func, const char *fmt, ...) {
+void nei_vlog(nei_log_config_handle_t config_handle,
+              int verbose,
+              const char *file,
+              int32_t line,
+              const char *func,
+              const char *fmt,
+              ...) {
   va_list args;
   va_list scan_args;
   uint8_t record[_NEI_LOG_RECORD_BUFFER_SIZE];
@@ -478,7 +439,7 @@ void nei_vlog(
   {
     const size_t serialized_len = _nei_log_serialize_record(record,
                                                             sizeof(record),
-                                                            (const char *)config_id,
+                                                            config_handle,
                                                             file,
                                                             line,
                                                             func,
@@ -494,7 +455,7 @@ void nei_vlog(
   va_end(args);
 }
 
-void nei_llog_literal(NEI_LOG_CONFIG_ID config_id,
+void nei_llog_literal(nei_log_config_handle_t config_handle,
                       nei_log_level_e level,
                       const char *file,
                       int32_t line,
@@ -507,7 +468,7 @@ void nei_llog_literal(NEI_LOG_CONFIG_ID config_id,
   {
     const size_t serialized_len = _nei_log_serialize_literal_msg(record,
                                                                  sizeof(record),
-                                                                 (const char *)config_id,
+                                                                 config_handle,
                                                                  file,
                                                                  line,
                                                                  func,
@@ -521,7 +482,7 @@ void nei_llog_literal(NEI_LOG_CONFIG_ID config_id,
   }
 }
 
-void nei_vlog_literal(NEI_LOG_CONFIG_ID config_id,
+void nei_vlog_literal(nei_log_config_handle_t config_handle,
                       int verbose,
                       const char *file,
                       int32_t line,
@@ -534,7 +495,7 @@ void nei_vlog_literal(NEI_LOG_CONFIG_ID config_id,
   {
     const size_t serialized_len = _nei_log_serialize_literal_msg(record,
                                                                  sizeof(record),
-                                                                 (const char *)config_id,
+                                                                 config_handle,
                                                                  file,
                                                                  line,
                                                                  func,
@@ -594,85 +555,6 @@ void nei_log_flush(void) {
 
 #pragma region log config table implementation
 
-static int _nei_log_is_valid_config_id(const char *id) {
-  if (id == NULL) {
-    return 0;
-  }
-
-  const size_t len = strnlen(id, _NEI_LOG_CONFIG_ID_CAP);
-  // Must be non-empty and must have '\0' within the capacity.
-  return (len > 0U) && (len < _NEI_LOG_CONFIG_ID_CAP);
-}
-
-static void _nei_log_config_id_copy(char dst[_NEI_LOG_CONFIG_ID_CAP], const char *id) {
-  if (dst == NULL) {
-    return;
-  }
-  if (id == NULL) {
-    dst[0] = '\0';
-    return;
-  }
-  const size_t len = strnlen(id, _NEI_LOG_CONFIG_ID_CAP);
-  if (len >= _NEI_LOG_CONFIG_ID_CAP) {
-    dst[0] = '\0';
-    return;
-  }
-  memcpy(dst, id, len + 1U);
-  dst[_NEI_LOG_CONFIG_ID_CAP - 1U] = '\0';
-}
-
-static uint32_t _nei_log_hash_config_id(const char *id) {
-  // FNV-1a 32-bit
-  uint32_t h = 2166136261u;
-  if (id == NULL) {
-    return h;
-  }
-  while (*id) {
-    h ^= (uint8_t)(*id);
-    h *= 16777619u;
-    ++id;
-  }
-  return h;
-}
-
-static void _nei_log_rebuild_config_id_index(void) {
-  for (size_t i = 0U; i < _NEI_LOG_MAX_CONFIGS; ++i) {
-    s_config_id_index[i] = -1;
-  }
-
-  for (size_t slot = 0U; slot < _NEI_LOG_MAX_CONFIGS; ++slot) {
-    if (s_config_used[slot] == 0U) {
-      continue;
-    }
-
-    const char *id = s_config_ids[slot];
-    if (id == NULL || id[0] == '\0') {
-      continue;
-    }
-
-    const uint32_t h = _nei_log_hash_config_id(id);
-    const size_t base = (size_t)(h % (uint32_t)_NEI_LOG_MAX_CONFIGS);
-
-    for (size_t probe = 0U; probe < _NEI_LOG_MAX_CONFIGS; ++probe) {
-      const size_t idx = (base + probe) % (size_t)_NEI_LOG_MAX_CONFIGS;
-      if (s_config_id_index[idx] == -1) {
-        s_config_id_index[idx] = (int8_t)slot;
-        break;
-      }
-
-      // If the same id is already present, keep the slot. This should not
-      // happen in normal usage but avoids silent lookup failures.
-      {
-        const int8_t existing_slot = s_config_id_index[idx];
-        if (existing_slot >= 0 && strcmp(s_config_ids[(size_t)existing_slot], id) == 0) {
-          s_config_id_index[idx] = (int8_t)slot;
-          break;
-        }
-      }
-    }
-  }
-}
-
 static void _nei_log_ensure_config_table_initialized(void) {
   if (s_config_table_initialized) {
     return;
@@ -680,44 +562,14 @@ static void _nei_log_ensure_config_table_initialized(void) {
 
   memset(s_config_ptrs, 0, sizeof(s_config_ptrs));
   memset(s_custom_configs, 0, sizeof(s_custom_configs));
-  memset(s_config_ids, 0, sizeof(s_config_ids));
   memset(s_config_used, 0, sizeof(s_config_used));
-
-  for (size_t i = 0U; i < _NEI_LOG_MAX_CONFIGS; ++i) {
-    s_config_id_index[i] = -1;
-  }
 
   // Slot 0 is the default config.
   s_config_used[0] = 1U;
-  _nei_log_config_id_copy(s_config_ids[0], NEI_LOG_DEFAULT_CONFIG_ID);
   _nei_log_fill_default_config(&s_custom_configs[0]);
   s_config_ptrs[0] = &s_custom_configs[0];
 
-  _nei_log_rebuild_config_id_index();
   s_config_table_initialized = 1;
-}
-
-static int _nei_log_find_slot_by_id(const char *id) {
-  if (!_nei_log_is_valid_config_id(id)) {
-    return -1;
-  }
-
-  _nei_log_ensure_config_table_initialized();
-
-  const uint32_t h = _nei_log_hash_config_id(id);
-  const size_t base = (size_t)(h % (uint32_t)_NEI_LOG_MAX_CONFIGS);
-
-  for (size_t probe = 0U; probe < _NEI_LOG_MAX_CONFIGS; ++probe) {
-    const size_t idx = (base + probe) % (size_t)_NEI_LOG_MAX_CONFIGS;
-    const int8_t slot = s_config_id_index[idx];
-    if (slot == -1) {
-      return -1;
-    }
-    if (strcmp(s_config_ids[(size_t)slot], id) == 0) {
-      return (int)slot;
-    }
-  }
-  return -1;
 }
 
 static void _nei_log_fill_default_config(nei_log_config_st *cfg) {
@@ -768,6 +620,26 @@ static void _nei_log_config_unlock_write(void) {
 #else
   (void)pthread_rwlock_unlock(&s_config_lock);
 #endif
+}
+
+static nei_log_config_handle_t _nei_log_make_handle_from_slot(size_t slot) {
+  if (slot >= _NEI_LOG_MAX_CONFIGS) {
+    return NEI_LOG_INVALID_CONFIG_HANDLE;
+  }
+  return (nei_log_config_handle_t)(slot + 1U);
+}
+
+static int _nei_log_slot_from_handle(nei_log_config_handle_t handle, size_t *out_slot) {
+  size_t slot = 0U;
+  if (out_slot == NULL || handle == NEI_LOG_INVALID_CONFIG_HANDLE) {
+    return -1;
+  }
+  slot = (size_t)(handle - (nei_log_config_handle_t)1U);
+  if (slot >= _NEI_LOG_MAX_CONFIGS) {
+    return -1;
+  }
+  *out_slot = slot;
+  return 0;
 }
 
 #pragma endregion
@@ -1020,7 +892,7 @@ static int _nei_log_payload_write_padded_zero(uint8_t *out, size_t out_cap, size
 
 static size_t _nei_log_serialize_record(uint8_t *out,
                                         size_t out_cap,
-                                        const char *config_id,
+                                        nei_log_config_handle_t config_handle,
                                         const char *file,
                                         int32_t line,
                                         const char *func,
@@ -1039,7 +911,7 @@ static size_t _nei_log_serialize_record(uint8_t *out,
 
   memset(&header, 0, sizeof(header));
   header.timestamp_ns = _nei_log_now_ns();
-  _nei_log_config_id_copy(header.config_id, config_id);
+  header.config_handle = config_handle;
   header.file_ptr = file;
   header.func_ptr = func;
   header.fmt_ptr = fmt;
@@ -1283,7 +1155,7 @@ static size_t _nei_log_serialize_record(uint8_t *out,
 
 static size_t _nei_log_serialize_literal_msg(uint8_t *out,
                                              size_t out_cap,
-                                             const char *config_id,
+                                             nei_log_config_handle_t config_handle,
                                              const char *file,
                                              int32_t line,
                                              const char *func,
@@ -1311,7 +1183,7 @@ static size_t _nei_log_serialize_literal_msg(uint8_t *out,
 
   memset(&header, 0, sizeof(header));
   header.timestamp_ns = _nei_log_now_ns();
-  _nei_log_config_id_copy(header.config_id, config_id);
+  header.config_handle = config_handle;
   header.file_ptr = file;
   header.func_ptr = func;
   header.fmt_ptr = NULL;
@@ -2020,16 +1892,13 @@ static void _nei_log_process_records(const uint8_t *buf, size_t size) {
   char message[2048];
   while (offset + sizeof(nei_log_record_header_st) <= size) {
     const nei_log_config_st *config = NULL;
-    char config_id[NEI_LOG_CONFIG_ID_MAX_LEN];
     const nei_log_record_header_st *header = (const nei_log_record_header_st *)(buf + offset);
     const size_t payload_size = (size_t)header->total_size - sizeof(nei_log_record_header_st);
     const uint8_t *payload = buf + offset + sizeof(nei_log_record_header_st);
     if (header->total_size == 0U || offset + header->total_size > size) {
       break;
     }
-    memcpy(config_id, header->config_id, sizeof(config_id));
-    config_id[NEI_LOG_CONFIG_ID_MAX_LEN - 1U] = '\0';
-    config = nei_log_get_config(config_id);
+    config = nei_log_get_config(header->config_handle);
     if (config != NULL
         && _nei_log_format_record(header, config, payload, payload_size, message, sizeof(message)) == 0) {
       _nei_log_emit_message(config, header->level, header->verbose, message, strlen(message));

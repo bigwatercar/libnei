@@ -185,21 +185,23 @@ int main(int argc, char **argv) {
 
   // Benchmark different log levels
   run_log_benchmark("Log Info", []() {
-    nei_llog(NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "benchmark", "test message %s", "test");
+    nei_llog(
+        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "benchmark", "test message %s", "test");
   });
 
   run_log_benchmark("Log Warn", []() {
-    nei_llog(NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_WARN, __FILE__, __LINE__, "benchmark", "test message %s", "test");
+    nei_llog(
+        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_WARN, __FILE__, __LINE__, "benchmark", "test message %s", "test");
   });
 
   run_log_benchmark("Log Error", []() {
     nei_llog(
-        NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_ERROR, __FILE__, __LINE__, "benchmark", "test message %s", "test");
+        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_ERROR, __FILE__, __LINE__, "benchmark", "test message %s", "test");
   });
 
   // Benchmark with formatting
   run_log_benchmark("Log with Formatting", []() {
-    nei_llog(NEI_LOG_DEFAULT_CONFIG_ID,
+    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
              NEI_LOG_LEVEL_INFO,
              __FILE__,
              __LINE__,
@@ -213,7 +215,7 @@ int main(int argc, char **argv) {
   run_log_benchmark("Log Info (literal)", []() {
     static const char body[] = "literal message no printf";
     nei_llog_literal(
-        NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "benchmark", body, sizeof(body) - 1U);
+        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "benchmark", body, sizeof(body) - 1U);
   });
 
   // Benchmark verbose logging
@@ -228,7 +230,7 @@ int main(int argc, char **argv) {
   auto start = std::chrono::high_resolution_clock::now();
   const int iterations = 1000000;
   for (int i = 0; i < iterations; ++i) {
-    nei_vlog(NEI_LOG_DEFAULT_CONFIG_ID, 1, __FILE__, __LINE__, "benchmark", "verbose message %s", "verbose");
+    nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", "verbose message %s", "verbose");
   }
   nei_log_flush();
   auto end = std::chrono::high_resolution_clock::now();
@@ -245,7 +247,7 @@ int main(int argc, char **argv) {
   run_vlog_benchmark("Log Verbose (literal)", []() {
     static const char body[] = "verbose literal body";
     nei_vlog_literal(
-        NEI_LOG_DEFAULT_CONFIG_ID, 1, __FILE__, __LINE__, "benchmark", body, sizeof(body) - 1U);
+        NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", body, sizeof(body) - 1U);
   });
 
   std::cout << "File-based Log Performance Benchmark (SSD)\n";
@@ -256,7 +258,13 @@ int main(int argc, char **argv) {
       "File Log Info",
       []() {
         nei_llog(
-            NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "benchmark", "test message %s", "test");
+            NEI_LOG_DEFAULT_CONFIG_HANDLE,
+            NEI_LOG_LEVEL_INFO,
+            __FILE__,
+            __LINE__,
+            "benchmark",
+            "test message %s",
+            "test");
       },
       "C:\\var\\log_bench_info.log");
 
@@ -264,7 +272,13 @@ int main(int argc, char **argv) {
       "File Log Warn",
       []() {
         nei_llog(
-            NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_WARN, __FILE__, __LINE__, "benchmark", "test message %s", "test");
+            NEI_LOG_DEFAULT_CONFIG_HANDLE,
+            NEI_LOG_LEVEL_WARN,
+            __FILE__,
+            __LINE__,
+            "benchmark",
+            "test message %s",
+            "test");
       },
       "C:\\var\\log_bench_warn.log");
 
@@ -272,14 +286,20 @@ int main(int argc, char **argv) {
       "File Log Error",
       []() {
         nei_llog(
-            NEI_LOG_DEFAULT_CONFIG_ID, NEI_LOG_LEVEL_ERROR, __FILE__, __LINE__, "benchmark", "test message %s", "test");
+            NEI_LOG_DEFAULT_CONFIG_HANDLE,
+            NEI_LOG_LEVEL_ERROR,
+            __FILE__,
+            __LINE__,
+            "benchmark",
+            "test message %s",
+            "test");
       },
       "C:\\var\\log_bench_error.log");
 
   run_file_log_benchmark(
       "File Log with Formatting",
       []() {
-        nei_llog(NEI_LOG_DEFAULT_CONFIG_ID,
+        nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
                  NEI_LOG_LEVEL_INFO,
                  __FILE__,
                  __LINE__,
@@ -294,7 +314,7 @@ int main(int argc, char **argv) {
   run_file_log_benchmark(
       "File Log Verbose",
       []() {
-        nei_vlog(NEI_LOG_DEFAULT_CONFIG_ID, 1, __FILE__, __LINE__, "benchmark", "verbose message %s", "verbose");
+        nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", "verbose message %s", "verbose");
       },
       "C:\\var\\log_bench_verbose.log");
 
@@ -302,7 +322,7 @@ int main(int argc, char **argv) {
       "File Log Info (literal)",
       []() {
         static const char body[] = "literal line no printf";
-        nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_ID,
+        nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,
                          NEI_LOG_LEVEL_INFO,
                          __FILE__,
                          __LINE__,
@@ -316,7 +336,7 @@ int main(int argc, char **argv) {
       "File Log Verbose (literal)",
       []() {
         static const char body[] = "verbose literal line";
-        nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_ID,
+        nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,
                          1,
                          __FILE__,
                          __LINE__,
