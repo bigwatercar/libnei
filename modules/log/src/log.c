@@ -404,16 +404,8 @@ void nei_llog(nei_log_config_handle_t config_handle,
   va_start(args, fmt);
   va_copy(scan_args, args);
   {
-    const size_t serialized_len = _nei_log_serialize_record(record,
-                                                            sizeof(record),
-                                                            config_handle,
-                                                            file,
-                                                            line,
-                                                            func,
-                                                            (int32_t)level,
-                                                            _NEI_LOG_NOT_VERBOSE,
-                                                            fmt,
-                                                            scan_args);
+    const size_t serialized_len = _nei_log_serialize_record(
+        record, sizeof(record), config_handle, file, line, func, (int32_t)level, _NEI_LOG_NOT_VERBOSE, fmt, scan_args);
     if (serialized_len > 0U) {
       (void)_nei_log_enqueue_record(record, serialized_len);
     }
@@ -466,16 +458,8 @@ void nei_llog_literal(nei_log_config_handle_t config_handle,
 
   (void)_nei_log_ensure_runtime_initialized();
   {
-    const size_t serialized_len = _nei_log_serialize_literal_msg(record,
-                                                                 sizeof(record),
-                                                                 config_handle,
-                                                                 file,
-                                                                 line,
-                                                                 func,
-                                                                 (int32_t)level,
-                                                                 _NEI_LOG_NOT_VERBOSE,
-                                                                 message,
-                                                                 length);
+    const size_t serialized_len = _nei_log_serialize_literal_msg(
+        record, sizeof(record), config_handle, file, line, func, (int32_t)level, _NEI_LOG_NOT_VERBOSE, message, length);
     if (serialized_len > 0U) {
       (void)_nei_log_enqueue_record(record, serialized_len);
     }

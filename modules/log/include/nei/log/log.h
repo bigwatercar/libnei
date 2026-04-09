@@ -311,9 +311,13 @@ NEI_API void nei_llog(nei_log_config_handle_t config_handle,
  * @param[in] fmt printf-style format string
  * @param[in] ... printf-style variadic arguments (must match @p fmt)
  */
-NEI_API void nei_vlog(
-    nei_log_config_handle_t config_handle, int verbose, const char *file, int32_t line, const char *func, const char *fmt, ...)
-    PRINTF_LIKE(6, 7);
+NEI_API void nei_vlog(nei_log_config_handle_t config_handle,
+                      int verbose,
+                      const char *file,
+                      int32_t line,
+                      const char *func,
+                      const char *fmt,
+                      ...) PRINTF_LIKE(6, 7);
 
 /**
  * @brief Write a level-based log entry with a pre-formatted literal message

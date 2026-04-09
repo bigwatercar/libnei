@@ -246,8 +246,7 @@ int main(int argc, char **argv) {
 
   run_vlog_benchmark("Log Verbose (literal)", []() {
     static const char body[] = "verbose literal body";
-    nei_vlog_literal(
-        NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", body, sizeof(body) - 1U);
+    nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", body, sizeof(body) - 1U);
   });
 
   std::cout << "File-based Log Performance Benchmark (SSD)\n";
@@ -257,42 +256,39 @@ int main(int argc, char **argv) {
   run_file_log_benchmark(
       "File Log Info",
       []() {
-        nei_llog(
-            NEI_LOG_DEFAULT_CONFIG_HANDLE,
-            NEI_LOG_LEVEL_INFO,
-            __FILE__,
-            __LINE__,
-            "benchmark",
-            "test message %s",
-            "test");
+        nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
+                 NEI_LOG_LEVEL_INFO,
+                 __FILE__,
+                 __LINE__,
+                 "benchmark",
+                 "test message %s",
+                 "test");
       },
       "C:\\var\\log_bench_info.log");
 
   run_file_log_benchmark(
       "File Log Warn",
       []() {
-        nei_llog(
-            NEI_LOG_DEFAULT_CONFIG_HANDLE,
-            NEI_LOG_LEVEL_WARN,
-            __FILE__,
-            __LINE__,
-            "benchmark",
-            "test message %s",
-            "test");
+        nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
+                 NEI_LOG_LEVEL_WARN,
+                 __FILE__,
+                 __LINE__,
+                 "benchmark",
+                 "test message %s",
+                 "test");
       },
       "C:\\var\\log_bench_warn.log");
 
   run_file_log_benchmark(
       "File Log Error",
       []() {
-        nei_llog(
-            NEI_LOG_DEFAULT_CONFIG_HANDLE,
-            NEI_LOG_LEVEL_ERROR,
-            __FILE__,
-            __LINE__,
-            "benchmark",
-            "test message %s",
-            "test");
+        nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
+                 NEI_LOG_LEVEL_ERROR,
+                 __FILE__,
+                 __LINE__,
+                 "benchmark",
+                 "test message %s",
+                 "test");
       },
       "C:\\var\\log_bench_error.log");
 
@@ -336,13 +332,7 @@ int main(int argc, char **argv) {
       "File Log Verbose (literal)",
       []() {
         static const char body[] = "verbose literal line";
-        nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                         1,
-                         __FILE__,
-                         __LINE__,
-                         "benchmark",
-                         body,
-                         sizeof(body) - 1U);
+        nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", body, sizeof(body) - 1U);
       },
       "C:\\var\\log_bench_verbose_literal.log");
 
