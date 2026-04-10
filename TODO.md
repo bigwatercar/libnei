@@ -83,11 +83,11 @@ void nei_log_flush(void) {
 
 #### #10 - Config 指针 TOCTOU（释锁后并发修改）
 **严重性**：🔴 **高** | **类型**：数据竞争 | **触发难度**：高（需特定时序）
-**代码位置**：`_nei_log_process_records()` L1905-1925 & `nei_log_add_config()` L356-396
+**代码位置**：`_nei_log_process_events()` L1905-1925 & `nei_log_add_config()` L356-396
 
 **根本原因**：
 ```c
-//消费线程 - _nei_log_process_records()
+//消费线程 - _nei_log_process_events()
 config = nei_log_get_config(config_handle);  // 获得读锁 → handle 映射 slot → 释放读锁
                                              // ← 返回指向 s_custom_configs[slot] 的指针
 if (config != NULL) {
@@ -188,7 +188,7 @@ nei_log_get_config      nei_log_get_config
 
 #### #2 - 入队时持锁进行大块 memcpy
 **严重性**：🟡 **中** | **类型**：性能 | **触发难度**：高QPS
-**代码位置**：`_nei_log_enqueue_record()` L1847-1902
+**代码位置**：`_nei_log_enqueue_event()` L1847-1902
 
 **问题**：
 ```c
@@ -215,7 +215,7 @@ LeaveCriticalSection(&s_runtime.mutex);
 
 #### #3 - 双缓冲满导致背压（单消费者瓶颈）
 **严重性**：🟡 **中** | **类型**：吞吐 | **触发难度**：高产出
-**代码位置**：`_nei_log_enqueue_record()` backoff L1883-1891
+**代码位置**：`_nei_log_enqueue_event()` backoff L1883-1891
 
 **问题**：
 ```c
@@ -261,7 +261,7 @@ WakeAllConditionVariable(&s_runtime.cond);  // ← 所有生产者同时醒来
 
 #### #5 - 每条日志查询一次 Config RWLock（累积开销）
 **严重性**：🟡 **中** | **类型**：性能 | **触发难度**：QPS > 100k
-**代码位置**：`_nei_log_process_records()` L1913
+**代码位置**：`_nei_log_process_events()` L1913
 
 **问题**：
 ```c
@@ -348,7 +348,7 @@ _nei_log_config_unlock_write();  // ← 释放
 
 **代码改动**：
 ```c
-typedef struct _nei_log_record_header_st {
+typedef struct _nei_log_event_header_st {
   uint32_t total_size;
   uint64_t timestamp_ns;
   nei_log_config_handle_t config_handle;
@@ -361,7 +361,7 @@ typedef struct _nei_log_record_header_st {
 
   const char *file_ptr;
   // ...
-} nei_log_record_header_t;
+} nei_log_event_header_t;
 ```
 
 **优点**：
@@ -498,13 +498,13 @@ void nei_log_add_config(...) {
 | 组件 | 位置 | 函数/结构 |
 |------|------|----------|
 | Runtime 初始化 | L80-101 | `nei_log_runtime_t s_runtime` |
-| 入队逻辑 | L1847-1902 | `_nei_log_enqueue_record()` |
+| 入队逻辑 | L1847-1902 | `_nei_log_enqueue_event()` |
 | 消费线程 | L1927-2011 | `_nei_log_consumer_thread()` |
 | Config 查询 | handle路径 | `nei_log_get_config()` |
 | Config 更新 | handle路径 | `nei_log_add_config()` |
 | Config 初始化 | config表初始化 | `_nei_log_ensure_config_table_initialized()` |
 | Flush 逻辑 | L500-540 | `nei_log_flush()` |
-| 格式化 | L1496-1699 | `_nei_log_format_record()` |
+| 格式化 | L1496-1699 | `_nei_log_format_event()` |
 
 ---
 

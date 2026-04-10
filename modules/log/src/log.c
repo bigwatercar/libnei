@@ -20,7 +20,7 @@
 #define _NEI_LOG_NOT_VERBOSE -1
 
 /// @brief 单条日志序列化缓冲区上限（字节）。
-#define _NEI_LOG_RECORD_BUFFER_SIZE 8192U
+#define _NEI_LOG_EVENT_BUFFER_SIZE 8192U
 
 /// @brief 字符串参数深拷贝上限（字节）。
 #define _NEI_LOG_MAX_STRING_COPY 4096U
@@ -65,7 +65,7 @@ typedef struct _nei_log_fmt_token_st {
  * @brief 紧凑序列化记录头部。
  * @details 头部后紧跟 payload，可按 total_size 快速跳过整条记录。
  */
-typedef struct _nei_log_record_header_st {
+typedef struct _nei_log_event_header_st {
   uint32_t total_size;
   uint64_t timestamp_ns;
   nei_log_config_handle_t config_handle;
@@ -76,7 +76,7 @@ typedef struct _nei_log_record_header_st {
   int32_t line;
   int32_t verbose;
   uint8_t reserved[8];
-} nei_log_record_header_st;
+} nei_log_event_header_st;
 
 typedef struct _nei_log_runtime_st {
   uint8_t buffer_a[_NEI_LOG_GLOBAL_BUFFER_CAPACITY];
@@ -186,16 +186,16 @@ static inline size_t _nei_log_align_up_8(size_t n);
 static int _nei_log_is_flag_char(char c);
 static int _nei_log_is_digit_char(char c);
 static int _nei_log_scan_next_token(const char **fmt_ptr, nei_log_fmt_token_st *token);
-static size_t _nei_log_serialize_record(uint8_t *out,
-                                        size_t out_cap,
-                                        nei_log_config_handle_t config_handle,
-                                        const char *file,
-                                        int32_t line,
-                                        const char *func,
-                                        int32_t level,
-                                        int32_t verbose,
-                                        const char *fmt,
-                                        va_list args);
+static size_t _nei_log_serialize_event(uint8_t *out,
+                                       size_t out_cap,
+                                       nei_log_config_handle_t config_handle,
+                                       const char *file,
+                                       int32_t line,
+                                       const char *func,
+                                       int32_t level,
+                                       int32_t verbose,
+                                       const char *fmt,
+                                       va_list args);
 static size_t _nei_log_serialize_literal_msg(uint8_t *out,
                                              size_t out_cap,
                                              nei_log_config_handle_t config_handle,
@@ -225,21 +225,21 @@ static int _nei_log_build_runtime_conversion_spec(const char *scan,
                                                   char *spec,
                                                   size_t spec_cap);
 static const char *_nei_log_basename(const char *path);
-static int _nei_log_format_record(const nei_log_record_header_st *header,
-                                  const nei_log_config_st *effective_config,
-                                  const uint8_t *payload,
-                                  size_t payload_size,
-                                  char *out,
-                                  size_t out_cap);
+static int _nei_log_format_event(const nei_log_event_header_st *header,
+                                 const nei_log_config_st *effective_config,
+                                 const uint8_t *payload,
+                                 size_t payload_size,
+                                 char *out,
+                                 size_t out_cap);
 static uint64_t _nei_log_now_ns(void);
 static void _nei_log_format_timestamp(uint64_t timestamp_ns, const char *fmt, char *out, size_t out_size);
 static void _nei_log_emit_message(
     const nei_log_config_st *config, int32_t level, int32_t verbose, const char *message, size_t length);
 static int _nei_log_ensure_runtime_initialized(void);
 static void _nei_log_shutdown_runtime(void);
-static int _nei_log_enqueue_record(const uint8_t *record, size_t len);
+static int _nei_log_enqueue_event(const uint8_t *event, size_t len);
 static void _nei_log_ensure_active_not_consuming(nei_log_runtime_st *rt);
-static void _nei_log_process_records(const uint8_t *buf, size_t size);
+static void _nei_log_process_events(const uint8_t *buf, size_t size);
 #if defined(_WIN32)
 static DWORD WINAPI _nei_log_consumer_thread(LPVOID arg);
 #else
@@ -398,16 +398,16 @@ void nei_llog(nei_log_config_handle_t config_handle,
               ...) {
   va_list args;
   va_list scan_args;
-  uint8_t record[_NEI_LOG_RECORD_BUFFER_SIZE];
+  uint8_t event[_NEI_LOG_EVENT_BUFFER_SIZE];
 
   (void)_nei_log_ensure_runtime_initialized();
   va_start(args, fmt);
   va_copy(scan_args, args);
   {
-    const size_t serialized_len = _nei_log_serialize_record(
-        record, sizeof(record), config_handle, file, line, func, (int32_t)level, _NEI_LOG_NOT_VERBOSE, fmt, scan_args);
+    const size_t serialized_len = _nei_log_serialize_event(
+        event, sizeof(event), config_handle, file, line, func, (int32_t)level, _NEI_LOG_NOT_VERBOSE, fmt, scan_args);
     if (serialized_len > 0U) {
-      (void)_nei_log_enqueue_record(record, serialized_len);
+      (void)_nei_log_enqueue_event(event, serialized_len);
     }
   }
   va_end(scan_args);
@@ -423,24 +423,24 @@ void nei_vlog(nei_log_config_handle_t config_handle,
               ...) {
   va_list args;
   va_list scan_args;
-  uint8_t record[_NEI_LOG_RECORD_BUFFER_SIZE];
+  uint8_t event[_NEI_LOG_EVENT_BUFFER_SIZE];
 
   (void)_nei_log_ensure_runtime_initialized();
   va_start(args, fmt);
   va_copy(scan_args, args);
   {
-    const size_t serialized_len = _nei_log_serialize_record(record,
-                                                            sizeof(record),
-                                                            config_handle,
-                                                            file,
-                                                            line,
-                                                            func,
-                                                            (int32_t)NEI_LOG_LEVEL_VERBOSE,
-                                                            (int32_t)verbose,
-                                                            fmt,
-                                                            scan_args);
+    const size_t serialized_len = _nei_log_serialize_event(event,
+                                                           sizeof(event),
+                                                           config_handle,
+                                                           file,
+                                                           line,
+                                                           func,
+                                                           (int32_t)NEI_LOG_LEVEL_VERBOSE,
+                                                           (int32_t)verbose,
+                                                           fmt,
+                                                           scan_args);
     if (serialized_len > 0U) {
-      (void)_nei_log_enqueue_record(record, serialized_len);
+      (void)_nei_log_enqueue_event(event, serialized_len);
     }
   }
   va_end(scan_args);
@@ -454,14 +454,14 @@ void nei_llog_literal(nei_log_config_handle_t config_handle,
                       const char *func,
                       const char *message,
                       size_t length) {
-  uint8_t record[_NEI_LOG_RECORD_BUFFER_SIZE];
+  uint8_t event[_NEI_LOG_EVENT_BUFFER_SIZE];
 
   (void)_nei_log_ensure_runtime_initialized();
   {
     const size_t serialized_len = _nei_log_serialize_literal_msg(
-        record, sizeof(record), config_handle, file, line, func, (int32_t)level, _NEI_LOG_NOT_VERBOSE, message, length);
+        event, sizeof(event), config_handle, file, line, func, (int32_t)level, _NEI_LOG_NOT_VERBOSE, message, length);
     if (serialized_len > 0U) {
-      (void)_nei_log_enqueue_record(record, serialized_len);
+      (void)_nei_log_enqueue_event(event, serialized_len);
     }
   }
 }
@@ -473,12 +473,12 @@ void nei_vlog_literal(nei_log_config_handle_t config_handle,
                       const char *func,
                       const char *message,
                       size_t length) {
-  uint8_t record[_NEI_LOG_RECORD_BUFFER_SIZE];
+  uint8_t event[_NEI_LOG_EVENT_BUFFER_SIZE];
 
   (void)_nei_log_ensure_runtime_initialized();
   {
-    const size_t serialized_len = _nei_log_serialize_literal_msg(record,
-                                                                 sizeof(record),
+    const size_t serialized_len = _nei_log_serialize_literal_msg(event,
+                                                                 sizeof(event),
                                                                  config_handle,
                                                                  file,
                                                                  line,
@@ -488,7 +488,7 @@ void nei_vlog_literal(nei_log_config_handle_t config_handle,
                                                                  message,
                                                                  length);
     if (serialized_len > 0U) {
-      (void)_nei_log_enqueue_record(record, serialized_len);
+      (void)_nei_log_enqueue_event(event, serialized_len);
     }
   }
 }
@@ -874,22 +874,22 @@ static int _nei_log_payload_write_padded_zero(uint8_t *out, size_t out_cap, size
   return 0;
 }
 
-static size_t _nei_log_serialize_record(uint8_t *out,
-                                        size_t out_cap,
-                                        nei_log_config_handle_t config_handle,
-                                        const char *file,
-                                        int32_t line,
-                                        const char *func,
-                                        int32_t level,
-                                        int32_t verbose,
-                                        const char *fmt,
-                                        va_list args) {
+static size_t _nei_log_serialize_event(uint8_t *out,
+                                       size_t out_cap,
+                                       nei_log_config_handle_t config_handle,
+                                       const char *file,
+                                       int32_t line,
+                                       const char *func,
+                                       int32_t level,
+                                       int32_t verbose,
+                                       const char *fmt,
+                                       va_list args) {
   size_t used;
   size_t aligned_size;
   const char *scan_ptr;
-  nei_log_record_header_st header;
+  nei_log_event_header_st header;
 
-  if (out == NULL || fmt == NULL || out_cap < sizeof(nei_log_record_header_st)) {
+  if (out == NULL || fmt == NULL || out_cap < sizeof(nei_log_event_header_st)) {
     return 0;
   }
 
@@ -1147,13 +1147,13 @@ static size_t _nei_log_serialize_literal_msg(uint8_t *out,
                                              int32_t verbose,
                                              const char *message,
                                              size_t message_length) {
-  nei_log_record_header_st header;
+  nei_log_event_header_st header;
   size_t used;
   size_t aligned_size;
   size_t copy_len;
   uint16_t len16;
 
-  if (out == NULL || out_cap < sizeof(nei_log_record_header_st)) {
+  if (out == NULL || out_cap < sizeof(nei_log_event_header_st)) {
     return 0;
   }
 
@@ -1462,12 +1462,12 @@ static const char *_nei_log_basename(const char *path) {
   return (slash > backslash) ? (slash + 1) : (backslash + 1);
 }
 
-static int _nei_log_format_record(const nei_log_record_header_st *header,
-                                  const nei_log_config_st *effective_config,
-                                  const uint8_t *payload,
-                                  size_t payload_size,
-                                  char *out,
-                                  size_t out_cap) {
+static int _nei_log_format_event(const nei_log_event_header_st *header,
+                                 const nei_log_config_st *effective_config,
+                                 const uint8_t *payload,
+                                 size_t payload_size,
+                                 char *out,
+                                 size_t out_cap) {
   const char *fmt;
   const char *scan;
   const uint8_t *cursor = payload;
@@ -1809,8 +1809,8 @@ static void _nei_log_ensure_active_not_consuming(nei_log_runtime_st *rt) {
   }
 }
 
-static int _nei_log_enqueue_record(const uint8_t *record, size_t len) {
-  if (record == NULL || len == 0U || len > _NEI_LOG_GLOBAL_BUFFER_CAPACITY || !s_runtime.initialized) {
+static int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
+  if (event == NULL || len == 0U || len > _NEI_LOG_GLOBAL_BUFFER_CAPACITY || !s_runtime.initialized) {
     return -1;
   }
 
@@ -1825,7 +1825,7 @@ static int _nei_log_enqueue_record(const uint8_t *record, size_t len) {
     const size_t free_space = _NEI_LOG_GLOBAL_BUFFER_CAPACITY - s_runtime.used[active];
     if (free_space >= len) {
       uint8_t *dst = (active == 0) ? s_runtime.buffer_a : s_runtime.buffer_b;
-      memcpy(dst + s_runtime.used[active], record, len);
+      memcpy(dst + s_runtime.used[active], event, len);
       s_runtime.used[active] += len;
       if (s_runtime.pending_index == -1) {
         s_runtime.pending_index = active;
@@ -1871,20 +1871,19 @@ static int _nei_log_enqueue_record(const uint8_t *record, size_t len) {
 
 #pragma region log core (consumer)
 
-static void _nei_log_process_records(const uint8_t *buf, size_t size) {
+static void _nei_log_process_events(const uint8_t *buf, size_t size) {
   size_t offset = 0U;
   char message[2048];
-  while (offset + sizeof(nei_log_record_header_st) <= size) {
+  while (offset + sizeof(nei_log_event_header_st) <= size) {
     const nei_log_config_st *config = NULL;
-    const nei_log_record_header_st *header = (const nei_log_record_header_st *)(buf + offset);
-    const size_t payload_size = (size_t)header->total_size - sizeof(nei_log_record_header_st);
-    const uint8_t *payload = buf + offset + sizeof(nei_log_record_header_st);
+    const nei_log_event_header_st *header = (const nei_log_event_header_st *)(buf + offset);
+    const size_t payload_size = (size_t)header->total_size - sizeof(nei_log_event_header_st);
+    const uint8_t *payload = buf + offset + sizeof(nei_log_event_header_st);
     if (header->total_size == 0U || offset + header->total_size > size) {
       break;
     }
     config = nei_log_get_config(header->config_handle);
-    if (config != NULL
-        && _nei_log_format_record(header, config, payload, payload_size, message, sizeof(message)) == 0) {
+    if (config != NULL && _nei_log_format_event(header, config, payload, payload_size, message, sizeof(message)) == 0) {
       _nei_log_emit_message(config, header->level, header->verbose, message, strlen(message));
     }
     offset += header->total_size;
@@ -1955,7 +1954,7 @@ static void *_nei_log_consumer_thread(void *arg) {
 #endif
 
     if (consume_size > 0U) {
-      _nei_log_process_records(consume_buf, consume_size);
+      _nei_log_process_events(consume_buf, consume_size);
     }
 
 #if defined(_WIN32)

@@ -351,7 +351,7 @@ NEI_API void nei_vlog_literal(nei_log_config_handle_t config_handle,
                               size_t length);
 
 /**
- * @brief Wait until all asynchronously queued records have been delivered to sinks
+ * @brief Wait until all asynchronously queued events have been delivered to sinks
  *
  * @details Promotes any partial fill of the active buffer and blocks until the
  * consumer has finished processing all pending data.
