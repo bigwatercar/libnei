@@ -188,6 +188,24 @@ typedef void (*nei_pfn_vlog)(const nei_log_sink_st *sink, int verbose, const cha
  */
 
 /**
+ * @brief Add a log configuration and return its handle
+ *
+ * @param[in] config Configuration to add. The logging library will copy the
+ * configuration; ownership of @p config is not transferred.
+ * @param[out] out_handle Returned handle (optional; can be NULL)
+ *
+ * @return @c 0 on success, @c -1 on failure (NULL @p config or config table full)
+ */
+NEI_API int nei_log_add_config(const nei_log_config_st *config, nei_log_config_handle_t *out_handle);
+
+/**
+ * @brief Remove a log configuration by handle
+ *
+ * @param[in] handle Configuration handle
+ */
+NEI_API void nei_log_remove_config(nei_log_config_handle_t handle);
+
+/**
  * @brief Get a log configuration by handle
  *
  * @param[in] handle Configuration handle
@@ -210,24 +228,6 @@ NEI_API nei_log_config_st *nei_log_get_config(nei_log_config_handle_t handle);
  * @return Pointer to the default configuration.
  */
 NEI_API nei_log_config_st *nei_log_default_config(void);
-
-/**
- * @brief Add a log configuration and return its handle
- *
- * @param[in] config Configuration to add. The logging library will copy the
- * configuration; ownership of @p config is not transferred.
- * @param[out] out_handle Returned handle (optional; can be NULL)
- *
- * @return @c 0 on success, @c -1 on failure (NULL @p config or config table full)
- */
-NEI_API int nei_log_add_config(const nei_log_config_st *config, nei_log_config_handle_t *out_handle);
-
-/**
- * @brief Remove a log configuration by handle
- *
- * @param[in] handle Configuration handle
- */
-NEI_API void nei_log_remove_config(nei_log_config_handle_t handle);
 
 /** @} */ /* end of nei_log_api_config */
 

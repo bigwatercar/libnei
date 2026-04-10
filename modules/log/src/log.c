@@ -250,35 +250,6 @@ static void *_nei_log_consumer_thread(void *arg);
 
 #pragma region public API
 
-nei_log_config_st *nei_log_get_config(nei_log_config_handle_t handle) {
-  nei_log_config_st *cfg = NULL;
-  size_t slot = 0U;
-  _nei_log_config_lock_read();
-  _nei_log_ensure_config_table_initialized();
-  if (_nei_log_slot_from_handle(handle, &slot) != 0 || s_config_used[slot] == 0U) {
-    _nei_log_config_unlock_read();
-    return NULL;
-  }
-  cfg = s_config_ptrs[slot];
-  _nei_log_config_unlock_read();
-  return cfg;
-}
-
-nei_log_config_st *nei_log_default_config(void) {
-  nei_log_config_st *cfg = NULL;
-  _nei_log_config_lock_write();
-  _nei_log_ensure_config_table_initialized();
-  cfg = s_config_ptrs[0];
-  if (cfg == NULL) {
-    s_config_used[0] = 1U;
-    s_config_ptrs[0] = &s_custom_configs[0];
-    cfg = s_config_ptrs[0];
-    _nei_log_fill_default_config(cfg);
-  }
-  _nei_log_config_unlock_write();
-  return cfg;
-}
-
 int nei_log_add_config(const nei_log_config_st *config, nei_log_config_handle_t *out_handle) {
   if (config == NULL) {
     return -1;
@@ -327,6 +298,35 @@ void nei_log_remove_config(nei_log_config_handle_t handle) {
   s_config_used[slot] = 0U;
   s_config_ptrs[slot] = NULL;
   _nei_log_config_unlock_write();
+}
+
+nei_log_config_st *nei_log_get_config(nei_log_config_handle_t handle) {
+  nei_log_config_st *cfg = NULL;
+  size_t slot = 0U;
+  _nei_log_config_lock_read();
+  _nei_log_ensure_config_table_initialized();
+  if (_nei_log_slot_from_handle(handle, &slot) != 0 || s_config_used[slot] == 0U) {
+    _nei_log_config_unlock_read();
+    return NULL;
+  }
+  cfg = s_config_ptrs[slot];
+  _nei_log_config_unlock_read();
+  return cfg;
+}
+
+nei_log_config_st *nei_log_default_config(void) {
+  nei_log_config_st *cfg = NULL;
+  _nei_log_config_lock_write();
+  _nei_log_ensure_config_table_initialized();
+  cfg = s_config_ptrs[0];
+  if (cfg == NULL) {
+    s_config_used[0] = 1U;
+    s_config_ptrs[0] = &s_custom_configs[0];
+    cfg = s_config_ptrs[0];
+    _nei_log_fill_default_config(cfg);
+  }
+  _nei_log_config_unlock_write();
+  return cfg;
 }
 
 nei_log_sink_st *nei_log_create_default_file_sink(const char *filename) {
