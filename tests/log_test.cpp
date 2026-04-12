@@ -34,8 +34,8 @@ extern "C" void CollectVerboseLog(const nei_log_sink_st *sink, int verbose, cons
   collector->messages.emplace_back(message, length);
 }
 
-extern "C" void FlushInsideSinkLevelLog(const nei_log_sink_st *sink, nei_log_level_e level, const char *message,
-                                        size_t length) {
+extern "C" void
+FlushInsideSinkLevelLog(const nei_log_sink_st *sink, nei_log_level_e level, const char *message, size_t length) {
   (void)level;
   (void)message;
   (void)length;
@@ -45,8 +45,8 @@ extern "C" void FlushInsideSinkLevelLog(const nei_log_sink_st *sink, nei_log_lev
   collector->messages.emplace_back(message, length);
 }
 
-extern "C" void FlushInsideSinkVerboseLog(const nei_log_sink_st *sink, int verbose, const char *message,
-                                          size_t length) {
+extern "C" void
+FlushInsideSinkVerboseLog(const nei_log_sink_st *sink, int verbose, const char *message, size_t length) {
   (void)message;
   (void)length;
   auto *collector = static_cast<LogCollector *>(sink->opaque);
