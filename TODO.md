@@ -1,6 +1,6 @@
 # libnei 日志子系统 — 完整问题分析与修复方案
 
-**文档版本**：v2.1 | **日期**：2026-04-08
+**文档版本**：v2.2 | **日期**：2026-04-12
 **分析范围**：`modules/log/src/log.c` 及公开 API
 **总问题数**：15项（含新发现）
 
@@ -12,13 +12,13 @@
 
 | 严重性 | 数量 | 问题ID | 影响范围 |
 |--------|------|--------|----------|
-| 🔴 **高** | 2 | #8, #10, #11 | 死锁、UAF、数据竞争 |
+| 🔴 **高** | 2 | #10、#11（#8 死锁已缓解） | UAF、数据竞争（#8 见正文） |
 | 🟡 **中** | 5 | #2-5, B | 性能下降、响应延迟 |
 | 🟢 **低** | 8 | #1, #6, #7, #9, #12, A, C | 优化机会、边界情况 |
 
 ### 关键发现
 
-1. **🔴 最严重**：`nei_log_flush()` 在 sink 内调用导致死锁 → 死结 Lock（#8）
+1. **🔴 #8（已缓解）**：`nei_log_flush()` 在消费线程 / sink 内调用曾导致死锁；现已通过消费线程识别 + `log.h` 说明避免无限自等（见 #8 节）
 2. **🔴 次严重**：Config 指针的 TOCTOU 竞争导致 UAF（#10、#11）
 3. **🟡 需关注**：全局 mutex 与 RWLock 粒度问题导致竞争（#1-5、B）
 
@@ -58,24 +58,22 @@ void my_sink(const nei_log_sink_st *sink, ..., const char *msg, size_t len) {
 4. 消费线程无法继续 → 永远不会把 `consuming_index` 改为 -1
 5. **死锁**
 
-**当前状态**：✅ 代码按设计可工作，但无文档警告 → **API 陷阱**
+**当前状态**：✅ **已落地**（2026-04-12）：`log.h` 已说明消费线程上 flush 为无等待返回；`log.c` 中 `nei_log_flush()` 在消费线程上直接返回（Windows：`consumer_thread_id`；POSIX：`pthread_equal(pthread_self(), s_runtime.thread)`）。`tests/log_test.cpp` 新增 `LogCTest.FlushFromSinkCallbackDoesNotDeadlock`。
 
-**修复优先级**：🚨 **P0 立即（<1周）**
+**修复优先级**：~~P0~~ **已完成（止血）**
 
 **推荐修复**：
-- [ ] **短期**（文档）：在 `log.h` 中明确标记 `nei_log_flush()` 禁止在 sink/消费者回调中调用
-- [ ] **中期**（防御）：实现 `nei_log_drain()` 检测当前线程是否为消费线程，安全返回
-- [ ] **代码**：使用 TLS 存储消费线程 ID
+- [x] **短期**（文档）：在 `log.h` 中说明 `nei_log_flush` 在消费线程上的行为及勿依赖在 sink 内“真正排空”
+- [x] **中期**（防御）：消费线程上 `nei_log_flush` 安全返回（实现上为运行时记录的消费线程标识，非 TLS；效果等价于原计划）
+- [ ] **可选**：独立 API `nei_log_drain()` 若需与 `flush` 语义区分，可后续再定
 
-**参考代码**：
+**参考代码**（已实现思路）：
 ```c
-// 推荐的安全版本
 void nei_log_flush(void) {
-  // 如果当前线程就是消费线程，直接返回（避免死锁）
-  if (pthread_self() == s_consumer_thread_id) {
-    return;
+  if (_nei_log_is_consumer_thread()) {
+    return; /* 避免消费线程自等 consuming_index */
   }
-  // 正常 flush 逻辑...
+  /* 正常 flush 逻辑... */
 }
 ```
 
@@ -464,9 +462,9 @@ void nei_log_add_config(...) {
 
 | 任务 | 优先级 | 工作量 | 负责 | 状态 |
 |------|--------|--------|------|------|
-| [x] #8 文档 | P0 | 1-2h | ? | ⏳ |
-| [x] #8 TLS 防御 | P0 | 2-4h | ? | ⏳ |
-| [x] #12 压力测试框架 | P0 | 1天 | ? | ⏳ |
+| [x] #8 文档 | P0 | 1-2h | — | ✅ 已完成 |
+| [x] #8 消费线程检测（原 TLS 方案） | P0 | 2-4h | — | ✅ 已完成 |
+| [ ] #12 压力测试框架 | P0 | 1天 | ? | ⏳ 待办（#8 已有单测，全场景压力仍缺） |
 
 ### 第二阶段：短期（1-2周）—— **P1 核心修复**
 
@@ -497,24 +495,25 @@ void nei_log_add_config(...) {
 
 | 组件 | 位置 | 函数/结构 |
 |------|------|----------|
-| Runtime 初始化 | L80-101 | `nei_log_runtime_t s_runtime` |
-| 入队逻辑 | L1847-1902 | `_nei_log_enqueue_event()` |
-| 消费线程 | L1927-2011 | `_nei_log_consumer_thread()` |
+| Runtime 初始化 | 约 L81–101 | `nei_log_runtime_st s_runtime` |
+| 入队逻辑 | 约 L1829+ | `_nei_log_enqueue_event()` |
+| 消费线程 | 约 L1912+ | `_nei_log_consumer_thread()` |
+| 事件处理 | 约 L1891+ | `_nei_log_process_events()` |
 | Config 查询 | handle路径 | `nei_log_get_config()` |
 | Config 更新 | handle路径 | `nei_log_add_config()` |
 | Config 初始化 | config表初始化 | `_nei_log_ensure_config_table_initialized()` |
-| Flush 逻辑 | L500-540 | `nei_log_flush()` |
-| 格式化 | L1496-1699 | `_nei_log_format_event()` |
+| Flush / 消费线程自避 | 约 L498–540 | `_nei_log_is_consumer_thread()`、`nei_log_flush()` |
+| 格式化 | 约 L1481+ | `_nei_log_format_event()` |
 
 ---
 
 ## ✅ 验收清单
 
-- [ ] #8 文档警告已添加到 `log.h`
-- [ ] #8 防御代码（TLS 消费线程检测）已实现
+- [x] #8 文档说明已更新 `log.h`（消费线程上 flush 行为）
+- [x] #8 防御代码已实现（消费线程识别；POSIX 非 TLS，与 `pthread_t` / Win32 线程 ID 比对）
 - [ ] #10 Config 快照已在序列化/反序列化中实现
 - [ ] #11 初始化竞争已消除（写锁或 pthread_once）
-- [ ] #12 并发压力测试覆盖 #8、#10、#11 场景
+- [ ] #12 并发压力测试覆盖 #8、#10、#11 场景（#8 已有 `FlushFromSinkCallbackDoesNotDeadlock` 回归用例）
 - [ ] 所有修改已合并到 `main` 分支
 - [ ] 代码审查通过
 - [ ] 回归测试通过
@@ -522,6 +521,5 @@ void nei_log_add_config(...) {
 ---
 
 **下一步**：
-1. 审查本文档，确认理解
-2. 选择第一阶段任务进行实施
-3. 每周更新进度并标记完成的项目
+1. 推进 **#12**（并发压力 / 多场景）与 **#10 / #11**（P1 核心修复）
+2. 每周更新本文档进度与验收勾选

@@ -34,6 +34,28 @@ extern "C" void CollectVerboseLog(const nei_log_sink_st *sink, int verbose, cons
   collector->messages.emplace_back(message, length);
 }
 
+extern "C" void FlushInsideSinkLevelLog(const nei_log_sink_st *sink, nei_log_level_e level, const char *message,
+                                        size_t length) {
+  (void)level;
+  (void)message;
+  (void)length;
+  auto *collector = static_cast<LogCollector *>(sink->opaque);
+  nei_log_flush();
+  std::lock_guard<std::mutex> lock(collector->mu);
+  collector->messages.emplace_back(message, length);
+}
+
+extern "C" void FlushInsideSinkVerboseLog(const nei_log_sink_st *sink, int verbose, const char *message,
+                                          size_t length) {
+  (void)message;
+  (void)length;
+  auto *collector = static_cast<LogCollector *>(sink->opaque);
+  nei_log_flush();
+  std::lock_guard<std::mutex> lock(collector->mu);
+  collector->last_verbose = verbose;
+  collector->messages.emplace_back(message, length);
+}
+
 struct DefaultConfigSinkGuard {
   nei_log_sink_st *saved[NEI_LOG_MAX_SINKS_OF_CONFIG]{};
 
@@ -64,6 +86,47 @@ struct DefaultConfigSinkGuard {
   DefaultConfigSinkGuard &operator=(const DefaultConfigSinkGuard &) = delete;
 };
 } // namespace
+
+TEST(LogCTest, FlushFromSinkCallbackDoesNotDeadlock) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = FlushInsideSinkLevelLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+
+  nei_llog(cfg_handle, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "flush-in-sink", "first=%d", 1);
+  nei_llog(cfg_handle, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "flush-in-sink", "second=%d", 2);
+  nei_log_flush();
+  {
+    std::lock_guard<std::mutex> lock(collector.mu);
+    ASSERT_EQ(collector.messages.size(), 2U);
+    EXPECT_NE(collector.messages[0].find("first=1"), std::string::npos);
+    EXPECT_NE(collector.messages[1].find("second=2"), std::string::npos);
+  }
+  nei_log_remove_config(cfg_handle);
+
+  collector.messages.clear();
+  sink.llog = nullptr;
+  sink.vlog = FlushInsideSinkVerboseLog;
+  config = *nei_log_default_config();
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+  nei_vlog(cfg_handle, 1, __FILE__, __LINE__, "flush-in-sink-v", "v=%d", 3);
+  nei_log_flush();
+  {
+    std::lock_guard<std::mutex> lock(collector.mu);
+    ASSERT_EQ(collector.messages.size(), 1U);
+    EXPECT_EQ(collector.last_verbose, 1);
+    EXPECT_NE(collector.messages[0].find("v=3"), std::string::npos);
+  }
+  nei_log_remove_config(cfg_handle);
+}
 
 TEST(LogCTest, AsyncPipelineDeepCopiesStringPayload) {
   LogCollector collector;

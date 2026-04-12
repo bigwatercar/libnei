@@ -356,11 +356,14 @@ NEI_API void nei_vlog_literal(nei_log_config_handle_t config_handle,
  * @details Promotes any partial fill of the active buffer and blocks until the
  * consumer has finished processing all pending data.
  *
- * @warning Do not call from a sink callback (or any code running on the
- * library's consumer thread): @ref nei_log_flush waits until consumption
- * completes while the callback is still part of that consumption, which
- * deadlocks. Calling from other threads is fine subject to your own locking
- * discipline with @ref nei_llog / @ref nei_vlog / @ref nei_llog_literal / @ref nei_vlog_literal.
+ * @warning Do not rely on draining the queue from a sink callback (or any code
+ * running on the library's consumer thread): a blocking flush would wait until
+ * consumption completes while the callback is still part of that consumption,
+ * which deadlocks. For safety, @ref nei_log_flush detects the consumer thread
+ * and returns immediately without waiting (a no-op with respect to ordering);
+ * pending records are still processed after the callback returns. Calling from
+ * other threads is fine subject to your own locking discipline with @ref nei_llog
+ * / @ref nei_vlog / @ref nei_llog_literal / @ref nei_vlog_literal.
  */
 NEI_API void nei_log_flush(void);
 

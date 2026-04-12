@@ -89,6 +89,8 @@ typedef struct _nei_log_runtime_st {
   int stop_requested;
   int initialized;
 #if defined(_WIN32)
+  /** Set by the consumer thread on entry; used to make @ref nei_log_flush a no-op on that thread. */
+  DWORD consumer_thread_id;
   CRITICAL_SECTION mutex;
   CONDITION_VARIABLE cond;
   HANDLE thread;
@@ -493,8 +495,22 @@ void nei_vlog_literal(nei_log_config_handle_t config_handle,
   }
 }
 
+static int _nei_log_is_consumer_thread(void) {
+  if (!s_runtime.initialized) {
+    return 0;
+  }
+#if defined(_WIN32)
+  return s_runtime.consumer_thread_id != 0U && GetCurrentThreadId() == s_runtime.consumer_thread_id;
+#else
+  return pthread_equal(pthread_self(), s_runtime.thread) != 0;
+#endif
+}
+
 void nei_log_flush(void) {
   if (!s_runtime.initialized) {
+    return;
+  }
+  if (_nei_log_is_consumer_thread()) {
     return;
   }
 
@@ -1786,6 +1802,7 @@ static void _nei_log_shutdown_runtime(void) {
   LeaveCriticalSection(&s_runtime.mutex);
   WaitForSingleObject(s_runtime.thread, INFINITE);
   CloseHandle(s_runtime.thread);
+  s_runtime.consumer_thread_id = 0U;
   DeleteCriticalSection(&s_runtime.mutex);
 #else
   pthread_mutex_lock(&s_runtime.mutex);
@@ -1903,6 +1920,10 @@ static void *_nei_log_consumer_thread(void *arg) {
     return NULL;
 #endif
   }
+
+#if defined(_WIN32)
+  rt->consumer_thread_id = GetCurrentThreadId();
+#endif
 
   for (;;) {
     int consume_index = -1;
