@@ -665,7 +665,7 @@ static void _nei_log_fill_default_config(nei_log_config_st *cfg) {
   cfg->verbose_threshold = -1;
   cfg->short_level_tag = 1;
   cfg->short_path = 1;
-  cfg->log_thread_id = 0;
+  cfg->log_thread_id = 1;
   cfg->log_to_console = 0;
   cfg->datetime_format = "%Y-%m-%d %H:%M:%S";
 }
