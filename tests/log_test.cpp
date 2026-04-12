@@ -279,6 +279,50 @@ TEST(LogCTest, LiteralApi_RespectsLevelAndVerboseFilters) {
   nei_log_remove_config(cfg_handle);
 }
 
+TEST(LogCTest, LogThreadIdPrefixWhenConfigEnabled) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.log_thread_id = 1;
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+
+  nei_llog(cfg_handle, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "tid-test", "body=%d", 1);
+  nei_log_flush();
+  {
+    std::lock_guard<std::mutex> lock(collector.mu);
+    ASSERT_EQ(collector.messages.size(), 1U);
+    EXPECT_NE(collector.messages[0].find("tid="), std::string::npos);
+    EXPECT_NE(collector.messages[0].find("body=1"), std::string::npos);
+  }
+  nei_log_remove_config(cfg_handle);
+
+  collector.messages.clear();
+  sink.llog = nullptr;
+  sink.vlog = CollectVerboseLog;
+  config = *nei_log_default_config();
+  config.log_thread_id = 1;
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+  nei_vlog(cfg_handle, 2, __FILE__, __LINE__, "tid-v", "vb=%d", 3);
+  nei_log_flush();
+  {
+    std::lock_guard<std::mutex> lock(collector.mu);
+    ASSERT_EQ(collector.messages.size(), 1U);
+    EXPECT_EQ(collector.last_verbose, 2);
+    EXPECT_NE(collector.messages[0].find("tid="), std::string::npos);
+    EXPECT_NE(collector.messages[0].find("vb=3"), std::string::npos);
+  }
+
+  nei_log_remove_config(cfg_handle);
+}
+
 TEST(LogCTest, AsyncPipelineFormatsTimestampAndFileLinePrefix) {
   LogCollector collector;
   nei_log_sink_st sink = {};
