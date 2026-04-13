@@ -243,8 +243,8 @@ static int _nei_log_format_event(const nei_log_event_header_st *header,
                                  char *out,
                                  size_t out_cap);
 static uint64_t _nei_log_now_ns(void);
-static void _nei_log_format_timestamp(
-    uint64_t timestamp_ns, nei_log_timestamp_style_e style, char *out, size_t out_size);
+static void
+_nei_log_format_timestamp(uint64_t timestamp_ns, nei_log_timestamp_style_e style, char *out, size_t out_size);
 static void _nei_log_emit_message(
     const nei_log_config_st *config, int32_t level, int32_t verbose, const char *message, size_t length);
 static int _nei_log_ensure_runtime_initialized(void);
@@ -1307,6 +1307,18 @@ static size_t _nei_log_serialize_literal_msg(uint8_t *out,
 
 #pragma region log core (formatting)
 
+typedef struct _nei_log_ts_cache_st {
+  int ready;
+  time_t sec;
+  nei_log_timestamp_style_e style;
+  char datetime[48];
+  size_t datetime_len;
+  char tz[16];
+  int has_tz;
+} nei_log_ts_cache_st;
+
+static _NEI_LOG_TLS nei_log_ts_cache_st s_tls_ts_cache;
+
 static int _nei_log_format_tz_offset(time_t sec, char *out, size_t out_size) {
   struct tm gm_tm;
   time_t gm_as_local;
@@ -1335,15 +1347,15 @@ static int _nei_log_format_tz_offset(time_t sec, char *out, size_t out_size) {
   return 0;
 }
 
-static void _nei_log_format_timestamp(
-    uint64_t timestamp_ns, nei_log_timestamp_style_e style, char *out, size_t out_size) {
+static void
+_nei_log_format_timestamp(uint64_t timestamp_ns, nei_log_timestamp_style_e style, char *out, size_t out_size) {
   time_t sec;
   unsigned millis;
   unsigned nanos;
   struct tm tm_buf;
-  char datetime[48];
-  char tzbuf[16];
   size_t n = 0U;
+  int cache_hit;
+  nei_log_ts_cache_st *cache = &s_tls_ts_cache;
 
   if (out == NULL || out_size == 0U) {
     return;
@@ -1357,47 +1369,108 @@ static void _nei_log_format_timestamp(
   sec = (time_t)(timestamp_ns / 1000000000ULL);
   millis = (unsigned)((timestamp_ns % 1000000000ULL) / 1000000ULL);
   nanos = (unsigned)(timestamp_ns % 1000000000ULL);
+
+  cache_hit = cache->ready && cache->sec == sec && cache->style == style;
+  if (!cache_hit) {
+#if defined(_WIN32)
+    localtime_s(&tm_buf, &sec);
+#else
+    localtime_r(&sec, &tm_buf);
+#endif
+    cache->has_tz = 0;
+    cache->tz[0] = '\0';
+    cache->datetime_len = 0U;
+
+    switch (style) {
+    case NEI_LOG_TIMESTAMP_STYLE_ISO8601_MS:
+      n = strftime(cache->datetime, sizeof(cache->datetime), "%Y-%m-%dT%H:%M:%S", &tm_buf);
+      break;
+    case NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS:
+    case NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS_NSEC:
+      n = strftime(cache->datetime, sizeof(cache->datetime), "%Y-%m-%dT%H:%M:%S", &tm_buf);
+      if (n > 0U) {
+        if (_nei_log_format_tz_offset(sec, cache->tz, sizeof(cache->tz)) != 0) {
+          (void)snprintf(cache->tz, sizeof(cache->tz), "+00:00");
+        }
+        cache->has_tz = 1;
+      }
+      break;
+    case NEI_LOG_TIMESTAMP_STYLE_DEFAULT:
+    default:
+      n = strftime(cache->datetime, sizeof(cache->datetime), "%Y-%m-%d %H:%M:%S", &tm_buf);
+      break;
+    }
+    if (n > 0U) {
+      cache->datetime_len = n;
+      cache->sec = sec;
+      cache->style = style;
+      cache->ready = 1;
+    }
+  }
+
+  if (cache->ready && cache->sec == sec && cache->style == style) {
+    if (cache->has_tz) {
+      if (style == NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS_NSEC) {
+        (void)snprintf(out, out_size, "%s.%09u%s", cache->datetime, nanos, cache->tz);
+      } else {
+        (void)snprintf(out, out_size, "%s.%03u%s", cache->datetime, millis, cache->tz);
+      }
+    } else {
+      (void)snprintf(out, out_size, "%s.%03u", cache->datetime, millis);
+    }
+    return;
+  }
+
+  /* Conservative fallback when cache fill/formatting fails. */
 #if defined(_WIN32)
   localtime_s(&tm_buf, &sec);
 #else
   localtime_r(&sec, &tm_buf);
 #endif
-
-  switch (style) {
-  case NEI_LOG_TIMESTAMP_STYLE_ISO8601_MS:
-    n = strftime(datetime, sizeof(datetime), "%Y-%m-%dT%H:%M:%S", &tm_buf);
-    if (n > 0U) {
-      (void)snprintf(out, out_size, "%s.%03u", datetime, millis);
+  if (style == NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS || style == NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS_NSEC) {
+    char tzbuf[16];
+    if (_nei_log_format_tz_offset(sec, tzbuf, sizeof(tzbuf)) != 0) {
+      (void)snprintf(tzbuf, sizeof(tzbuf), "+00:00");
     }
-    break;
-  case NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS:
-    n = strftime(datetime, sizeof(datetime), "%Y-%m-%dT%H:%M:%S", &tm_buf);
-    if (n > 0U) {
-      if (_nei_log_format_tz_offset(sec, tzbuf, sizeof(tzbuf)) != 0) {
-        (void)snprintf(tzbuf, sizeof(tzbuf), "+00:00");
-      }
-      (void)snprintf(out, out_size, "%s.%03u%s", datetime, millis, tzbuf);
+    if (style == NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS_NSEC) {
+      (void)snprintf(out,
+                     out_size,
+                     "%04d-%02d-%02dT%02d:%02d:%02d.%09u%s",
+                     tm_buf.tm_year + 1900,
+                     tm_buf.tm_mon + 1,
+                     tm_buf.tm_mday,
+                     tm_buf.tm_hour,
+                     tm_buf.tm_min,
+                     tm_buf.tm_sec,
+                     nanos,
+                     tzbuf);
+    } else {
+      (void)snprintf(out,
+                     out_size,
+                     "%04d-%02d-%02dT%02d:%02d:%02d.%03u%s",
+                     tm_buf.tm_year + 1900,
+                     tm_buf.tm_mon + 1,
+                     tm_buf.tm_mday,
+                     tm_buf.tm_hour,
+                     tm_buf.tm_min,
+                     tm_buf.tm_sec,
+                     millis,
+                     tzbuf);
     }
-    break;
-  case NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS_NSEC:
-    n = strftime(datetime, sizeof(datetime), "%Y-%m-%dT%H:%M:%S", &tm_buf);
-    if (n > 0U) {
-      if (_nei_log_format_tz_offset(sec, tzbuf, sizeof(tzbuf)) != 0) {
-        (void)snprintf(tzbuf, sizeof(tzbuf), "+00:00");
-      }
-      (void)snprintf(out, out_size, "%s.%09u%s", datetime, nanos, tzbuf);
-    }
-    break;
-  case NEI_LOG_TIMESTAMP_STYLE_DEFAULT:
-  default:
-    n = strftime(datetime, sizeof(datetime), "%Y-%m-%d %H:%M:%S", &tm_buf);
-    if (n > 0U) {
-      (void)snprintf(out, out_size, "%s.%03u", datetime, millis);
-    }
-    break;
+    return;
   }
-
-  if (out[0] == '\0') {
+  if (style == NEI_LOG_TIMESTAMP_STYLE_ISO8601_MS) {
+    (void)snprintf(out,
+                   out_size,
+                   "%04d-%02d-%02dT%02d:%02d:%02d.%03u",
+                   tm_buf.tm_year + 1900,
+                   tm_buf.tm_mon + 1,
+                   tm_buf.tm_mday,
+                   tm_buf.tm_hour,
+                   tm_buf.tm_min,
+                   tm_buf.tm_sec,
+                   millis);
+  } else {
     (void)snprintf(out,
                    out_size,
                    "%04d-%02d-%02d %02d:%02d:%02d.%03u",
