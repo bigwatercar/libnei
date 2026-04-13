@@ -4,12 +4,10 @@
  * Methodology (read before interpreting numbers):
  * - Memory: both libraries enqueue asynchronously; sink does only an atomic increment (no I/O, no
  *   full string retention). Timings include producer loop + flush that drains the async pipeline.
- * - File (async): async file sink; main thread mostly enqueues — flush at end drains queues (still not
- *   equivalent to fsync-per-line).
- * - File (sync): NEI calls nei_log_flush() after every log so each call waits for the async pipeline
- *   to deliver that record; spdlog uses a plain logger + basic_file_sink (no async thread pool) so
- *   formatting + sink write run on the caller thread. Uses fewer iterations (kFileSyncIters) because
- *   per-call flush is expensive.
+ * - File (async): both sides use async file logging; benchmark deletes target files before each run so
+ *   results are not skewed by append growth.
+ * - File (per-call delivery): both sides use async logger + flush after each log call, so each iteration
+ *   includes per-call delivery pressure on the async pipeline.
  * - Single-threaded producer; not a multi-writer contention test.
  * - spdlog uses fmt-style "{}" formatting; NEI uses printf-style "%" formatting — work split
  *   between caller formatting vs binary serialization differs by design.
@@ -18,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -100,9 +99,16 @@ extern "C" void nei_collect_vlog_only(const nei_log_sink_st *sink, int verbose, 
 
 struct NeiConfigGuard {
   nei_log_sink_st *saved[NEI_LOG_MAX_SINKS_OF_CONFIG]{};
+  int saved_log_thread_id = 0;
+  int saved_log_to_console = 0;
 
   NeiConfigGuard() {
     nei_log_config_st *cfg = nei_log_default_config();
+    saved_log_thread_id = cfg->log_thread_id;
+    saved_log_to_console = cfg->log_to_console;
+    // Fair-compare mode: do not inject tid= payload by default.
+    cfg->log_thread_id = 0;
+    cfg->log_to_console = 0;
     for (size_t i = 0; i < NEI_LOG_MAX_SINKS_OF_CONFIG; ++i) {
       saved[i] = cfg->sinks[i];
       cfg->sinks[i] = nullptr;
@@ -119,6 +125,8 @@ struct NeiConfigGuard {
 
   ~NeiConfigGuard() {
     nei_log_config_st *cfg = nei_log_default_config();
+    cfg->log_thread_id = saved_log_thread_id;
+    cfg->log_to_console = saved_log_to_console;
     for (size_t i = 0; i < NEI_LOG_MAX_SINKS_OF_CONFIG; ++i) {
       cfg->sinks[i] = saved[i];
     }
@@ -164,6 +172,7 @@ int64_t time_nei_memory_vlog_ms(F &&f, int iters) {
 
 template <class F>
 int64_t time_nei_file_ms(F &&f, int iters, const char *path) {
+  (void)std::remove(path);
   nei_log_sink_st *fs = nei_log_create_default_file_sink(path);
   if (!fs) {
     return -1;
@@ -187,6 +196,7 @@ int64_t time_nei_file_ms(F &&f, int iters, const char *path) {
 /** NEI file sink + nei_log_flush() after each log (caller blocks until that record is processed). */
 template <class F>
 int64_t time_nei_file_sync_ms(F &&f, int iters, const char *path) {
+  (void)std::remove(path);
   nei_log_sink_st *fs = nei_log_create_default_file_sink(path);
   if (!fs) {
     return -1;
@@ -250,6 +260,7 @@ int64_t time_spdlog_memory_ms(F &&f, int iters) {
 
 template <class F>
 int64_t time_spdlog_file_ms(F &&f, int iters, const std::string &path) {
+  (void)std::remove(path.c_str());
   spdlog::init_thread_pool(32768, 1);
   auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path, true);
   auto logger = std::make_shared<spdlog::async_logger>(
@@ -265,18 +276,24 @@ int64_t time_spdlog_file_ms(F &&f, int iters, const std::string &path) {
   return micros;
 }
 
-/** Synchronous file: no thread_pool; logger formats and writes on caller thread. */
+/** Async file + flush each log call (parity with NEI per-call flush pressure). */
 template <class F>
 int64_t time_spdlog_file_sync_ms(F &&f, int iters, const std::string &path) {
+  (void)std::remove(path.c_str());
+  spdlog::init_thread_pool(32768, 1);
   auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path, true);
-  auto logger = std::make_shared<spdlog::logger>("nei_cmp_sync", sink);
+  auto logger = std::make_shared<spdlog::async_logger>(
+      "nei_cmp_sync", spdlog::sinks_init_list{sink}, spdlog::thread_pool(), spdlog::async_overflow_policy::block);
   const auto t0 = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iters; ++i) {
     f(logger);
+    logger->flush();
   }
   logger->flush();
   const auto t1 = std::chrono::high_resolution_clock::now();
-  return std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+  const int64_t micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+  spdlog::shutdown();
+  return micros;
 }
 
 } // namespace
@@ -285,8 +302,11 @@ int main() {
   std::cout << "NEI vs spdlog — aligned benchmark scaffold\n";
   std::cout << "==========================================\n";
   std::cout << "Memory:     " << kMemoryIters << " iters; sink = atomic++ only; time includes flush.\n";
-  std::cout << "File async: " << kFileIters << " iters; async + file sink; spdlog truncates file.\n";
-  std::cout << "File sync:  " << kFileSyncIters << " iters; NEI flush after each log; spdlog sync logger.\n\n";
+  std::cout << "File async: " << kFileIters
+            << " iters; async + file sink; both sides delete old files before run.\n";
+  std::cout << "Per-call:   " << kFileSyncIters
+            << " iters; async logger + flush after each log on both sides.\n";
+  std::cout << "Fairness knobs: NEI log_thread_id forced OFF during benchmark.\n\n";
 
   std::cout << "--- Memory (async, minimal sink) ---\n\n";
 
@@ -470,7 +490,7 @@ int main() {
     }
   }
 
-  std::cout << "--- File (sync: per-call delivery / caller-thread write) ---\n\n";
+  std::cout << "--- File (per-call delivery over async pipeline) ---\n\n";
 
   const std::string nei_simple_sync = out_file("nei_cmp_simple_sync.log");
   const std::string spd_simple_sync = out_file("spdlog_cmp_simple_sync.log");
@@ -503,7 +523,7 @@ int main() {
         [](const std::shared_ptr<spdlog::logger> &log) { log->info("test message {}", "test"); },
         kFileSyncIters,
         spd_simple_sync);
-    print_stats("[spdlog] file sync simple (sync logger)", kFileSyncIters, us);
+    print_stats("[spdlog] file sync simple (async logger + flush each log)", kFileSyncIters, us);
     print_file_size(spd_simple_sync);
   }
 
@@ -535,7 +555,7 @@ int main() {
         [](const std::shared_ptr<spdlog::logger> &log) { log->info("number={}, string={}, count={}", 42, "hello", 3); },
         kFileSyncIters,
         spd_multi_sync);
-    print_stats("[spdlog] file sync multi (sync logger)", kFileSyncIters, us);
+    print_stats("[spdlog] file sync multi (async logger + flush each log)", kFileSyncIters, us);
     print_file_size(spd_multi_sync);
   }
 
