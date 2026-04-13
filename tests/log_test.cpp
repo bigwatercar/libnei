@@ -349,6 +349,31 @@ TEST(LogCTest, AsyncPipelineFormatsTimestampAndFileLinePrefix) {
   nei_log_remove_config(cfg_handle);
 }
 
+TEST(LogCTest, LogLocationDisabledOmitsFileLineAndFunction) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.log_location = 0;
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+
+  nei_llog(cfg_handle, NEI_LOG_LEVEL_INFO, "hide_file.c", 99, "hidden-func", "payload=%d", 7);
+  nei_log_flush();
+  std::lock_guard<std::mutex> lock(collector.mu);
+  ASSERT_EQ(collector.messages.size(), 1U);
+  const std::string &msg = collector.messages[0];
+  EXPECT_NE(msg.find("[I]"), std::string::npos);
+  EXPECT_NE(msg.find("payload=7"), std::string::npos);
+  EXPECT_EQ(msg.find("hide_file.c:99"), std::string::npos);
+  EXPECT_EQ(msg.find("hidden-func - "), std::string::npos);
+  nei_log_remove_config(cfg_handle);
+}
+
 TEST(LogCTest, AsyncPipelineHonorsWidthPrecisionAndConfigFlags) {
   LogCollector collector;
   nei_log_sink_st sink = {};

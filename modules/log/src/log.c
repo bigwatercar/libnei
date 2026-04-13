@@ -666,6 +666,7 @@ static void _nei_log_fill_default_config(nei_log_config_st *cfg) {
   cfg->verbose_threshold = -1;
   cfg->short_level_tag = 1;
   cfg->short_path = 1;
+  cfg->log_location = 1;
   cfg->log_thread_id = 1;
   cfg->log_to_console = 0;
   cfg->timestamp_style = NEI_LOG_TIMESTAMP_STYLE_DEFAULT;
@@ -1720,6 +1721,7 @@ static int _nei_log_format_event(const nei_log_event_header_st *header,
   uint8_t parsed_args = 0U;
   int short_level_tag;
   int short_path;
+  int log_location;
   nei_log_timestamp_style_e ts_style;
 
   if (header == NULL || effective_config == NULL || payload == NULL || out == NULL || out_cap == 0U) {
@@ -1727,6 +1729,7 @@ static int _nei_log_format_event(const nei_log_event_header_st *header,
   }
   short_level_tag = effective_config->short_level_tag;
   short_path = effective_config->short_path;
+  log_location = effective_config->log_location;
   ts_style = effective_config->timestamp_style;
   out[0] = '\0';
   {
@@ -1766,7 +1769,7 @@ static int _nei_log_format_event(const nei_log_event_header_st *header,
     if (_nei_log_append_cstr(out, out_cap, &used, " ") != 0)
       return -1;
   }
-  if (header->file_ptr != NULL) {
+  if (log_location != 0 && header->file_ptr != NULL) {
     const char *path = short_path ? _nei_log_basename(header->file_ptr) : header->file_ptr;
     if (_nei_log_append_cstr(out, out_cap, &used, path) != 0)
       return -1;
@@ -1781,7 +1784,7 @@ static int _nei_log_format_event(const nei_log_event_header_st *header,
         return -1;
     }
   }
-  if (header->func_ptr != NULL) {
+  if (log_location != 0 && header->func_ptr != NULL) {
     if (_nei_log_append_cstr(out, out_cap, &used, header->func_ptr) != 0)
       return -1;
     if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)

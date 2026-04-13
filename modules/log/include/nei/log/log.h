@@ -151,6 +151,9 @@ typedef struct nei_log_sink_st nei_log_sink_st;
  * - @c short_level_tag: Whether to use short level tags
  * - @c short_path: Whether to use a short file path (file name only, no
  * directories)
+ * - @c log_location: When non-zero, include source location prefix
+ * (`file:line func - `). Set to @c 0 to emit message body without source
+ * location text.
  * - @c log_thread_id: When non-zero, each emitted line includes a @c tid=
  * prefix (after the level tag) with the originating OS thread id. The id string
  * is formatted once per thread in thread-local storage on the producer and
@@ -169,6 +172,7 @@ typedef struct nei_log_config_st {
   int short_path;
   int log_thread_id;
   int log_to_console;
+  int log_location;
   nei_log_timestamp_style_e timestamp_style;
   nei_log_sink_st *sinks[NEI_LOG_MAX_SINKS_OF_CONFIG];
 } nei_log_config_st;
