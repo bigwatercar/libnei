@@ -75,6 +75,35 @@ typedef uintptr_t nei_log_config_handle_t;
 #define NEI_LOG_MAX_SINKS_OF_CONFIG 8
 
 /**
+ * @brief Timestamp rendering style for log prefixes.
+ *
+ * @details Selects how `nei` converts internal nanosecond timestamps into
+ * textual output. This enum defines formatting intent for current and future
+ * formatter implementations.
+ *
+ * @par Format examples
+ * Assuming local time is 2026-04-10 16:20:31.123456789 (+08:00):
+ * - @ref NEI_LOG_TIMESTAMP_STYLE_NONE: @c ""
+ * - @ref NEI_LOG_TIMESTAMP_STYLE_DEFAULT: @c "2026-04-10 16:20:31.123"
+ * - @ref NEI_LOG_TIMESTAMP_STYLE_ISO8601_MS: @c "2026-04-10T16:20:31.123"
+ * - @ref NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS: @c "2026-04-10T16:20:31.123+08:00"
+ * - @ref NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS_NSEC:
+ *   @c "2026-04-10T16:20:31.123456789+08:00"
+ */
+typedef enum nei_log_timestamp_style_e {
+  /** Do not emit a timestamp prefix. */
+  NEI_LOG_TIMESTAMP_STYLE_NONE,
+  /** Library default style (implementation-defined, backward-compatible). */
+  NEI_LOG_TIMESTAMP_STYLE_DEFAULT,
+  /** ISO 8601 style with millisecond precision. */
+  NEI_LOG_TIMESTAMP_STYLE_ISO8601_MS,
+  /** RFC 3339 full style with millisecond precision. */
+  NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS,
+  /** RFC 3339 full style with sub-second precision up to nanoseconds. */
+  NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS_NSEC,
+} nei_log_timestamp_style_e;
+
+/**
  * @brief Log level
  * @details From low to high. Typically used for filtering and tagging output.
  */
@@ -127,8 +156,8 @@ typedef struct nei_log_sink_st nei_log_sink_st;
  * is formatted once per thread in thread-local storage on the producer and
  * copied into the async event buffer. The default configuration enables this;
  * set to @c 0 to omit @c tid= from output.
- * - @c datetime_format: Format string passed to @c strftime for the
- * timestamp; milliseconds may be appended when output space allows.
+ * - @c timestamp_style: Predefined timestamp rendering style used by the
+ * formatter.
  * - @c sinks: Registered sinks in array order. Dispatch stops at the first
  * NULL entry, or after @ref NEI_LOG_MAX_SINKS_OF_CONFIG non-NULL entries. Do
  * not place NULL between active sinks.
@@ -140,7 +169,7 @@ typedef struct nei_log_config_st {
   int short_path;
   int log_thread_id;
   int log_to_console;
-  const char *datetime_format;
+  nei_log_timestamp_style_e timestamp_style;
   nei_log_sink_st *sinks[NEI_LOG_MAX_SINKS_OF_CONFIG];
 } nei_log_config_st;
 

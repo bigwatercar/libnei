@@ -358,7 +358,7 @@ TEST(LogCTest, AsyncPipelineHonorsWidthPrecisionAndConfigFlags) {
   nei_log_config_st config = *nei_log_default_config();
   config.short_level_tag = 0;
   config.short_path = 1;
-  config.datetime_format = "%Y/%m/%d %H:%M:%S";
+  config.timestamp_style = NEI_LOG_TIMESTAMP_STYLE_ISO8601_MS;
   config.sinks[0] = &sink;
   config.sinks[1] = nullptr;
   nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;

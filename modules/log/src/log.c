@@ -243,7 +243,8 @@ static int _nei_log_format_event(const nei_log_event_header_st *header,
                                  char *out,
                                  size_t out_cap);
 static uint64_t _nei_log_now_ns(void);
-static void _nei_log_format_timestamp(uint64_t timestamp_ns, const char *fmt, char *out, size_t out_size);
+static void _nei_log_format_timestamp(
+    uint64_t timestamp_ns, nei_log_timestamp_style_e style, char *out, size_t out_size);
 static void _nei_log_emit_message(
     const nei_log_config_st *config, int32_t level, int32_t verbose, const char *message, size_t length);
 static int _nei_log_ensure_runtime_initialized(void);
@@ -667,7 +668,7 @@ static void _nei_log_fill_default_config(nei_log_config_st *cfg) {
   cfg->short_path = 1;
   cfg->log_thread_id = 1;
   cfg->log_to_console = 0;
-  cfg->datetime_format = "%Y-%m-%d %H:%M:%S";
+  cfg->timestamp_style = NEI_LOG_TIMESTAMP_STYLE_DEFAULT;
 }
 
 static void _nei_log_reset_default_config(void) {
@@ -1306,39 +1307,107 @@ static size_t _nei_log_serialize_literal_msg(uint8_t *out,
 
 #pragma region log core (formatting)
 
-static void _nei_log_format_timestamp(uint64_t timestamp_ns, const char *fmt, char *out, size_t out_size) {
+static int _nei_log_format_tz_offset(time_t sec, char *out, size_t out_size) {
+  struct tm gm_tm;
+  time_t gm_as_local;
+  long offset_sec;
+  long abs_sec;
+  long hh;
+  long mm;
+
+  if (out == NULL || out_size < 7U) {
+    return -1;
+  }
+#if defined(_WIN32)
+  gmtime_s(&gm_tm, &sec);
+#else
+  gmtime_r(&sec, &gm_tm);
+#endif
+  gm_as_local = mktime(&gm_tm);
+  if (gm_as_local == (time_t)-1) {
+    return -1;
+  }
+  offset_sec = (long)difftime(sec, gm_as_local);
+  abs_sec = labs(offset_sec);
+  hh = abs_sec / 3600L;
+  mm = (abs_sec % 3600L) / 60L;
+  (void)snprintf(out, out_size, "%c%02ld:%02ld", (offset_sec >= 0L) ? '+' : '-', hh, mm);
+  return 0;
+}
+
+static void _nei_log_format_timestamp(
+    uint64_t timestamp_ns, nei_log_timestamp_style_e style, char *out, size_t out_size) {
   time_t sec;
   unsigned millis;
+  unsigned nanos;
   struct tm tm_buf;
-  size_t n;
+  char datetime[48];
+  char tzbuf[16];
+  size_t n = 0U;
+
   if (out == NULL || out_size == 0U) {
     return;
   }
+  out[0] = '\0';
+
+  if (style == NEI_LOG_TIMESTAMP_STYLE_NONE) {
+    return;
+  }
+
   sec = (time_t)(timestamp_ns / 1000000000ULL);
   millis = (unsigned)((timestamp_ns % 1000000000ULL) / 1000000ULL);
+  nanos = (unsigned)(timestamp_ns % 1000000000ULL);
 #if defined(_WIN32)
   localtime_s(&tm_buf, &sec);
 #else
   localtime_r(&sec, &tm_buf);
 #endif
-  if (fmt == NULL || *fmt == '\0') {
-    fmt = "%Y-%m-%d %H:%M:%S";
+
+  switch (style) {
+  case NEI_LOG_TIMESTAMP_STYLE_ISO8601_MS:
+    n = strftime(datetime, sizeof(datetime), "%Y-%m-%dT%H:%M:%S", &tm_buf);
+    if (n > 0U) {
+      (void)snprintf(out, out_size, "%s.%03u", datetime, millis);
+    }
+    break;
+  case NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS:
+    n = strftime(datetime, sizeof(datetime), "%Y-%m-%dT%H:%M:%S", &tm_buf);
+    if (n > 0U) {
+      if (_nei_log_format_tz_offset(sec, tzbuf, sizeof(tzbuf)) != 0) {
+        (void)snprintf(tzbuf, sizeof(tzbuf), "+00:00");
+      }
+      (void)snprintf(out, out_size, "%s.%03u%s", datetime, millis, tzbuf);
+    }
+    break;
+  case NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS_NSEC:
+    n = strftime(datetime, sizeof(datetime), "%Y-%m-%dT%H:%M:%S", &tm_buf);
+    if (n > 0U) {
+      if (_nei_log_format_tz_offset(sec, tzbuf, sizeof(tzbuf)) != 0) {
+        (void)snprintf(tzbuf, sizeof(tzbuf), "+00:00");
+      }
+      (void)snprintf(out, out_size, "%s.%09u%s", datetime, nanos, tzbuf);
+    }
+    break;
+  case NEI_LOG_TIMESTAMP_STYLE_DEFAULT:
+  default:
+    n = strftime(datetime, sizeof(datetime), "%Y-%m-%d %H:%M:%S", &tm_buf);
+    if (n > 0U) {
+      (void)snprintf(out, out_size, "%s.%03u", datetime, millis);
+    }
+    break;
   }
-  n = strftime(out, out_size, fmt, &tm_buf);
-  if (n == 0U) {
-    snprintf(out,
-             out_size,
-             "%04d-%02d-%02d %02d:%02d:%02d",
-             tm_buf.tm_year + 1900,
-             tm_buf.tm_mon + 1,
-             tm_buf.tm_mday,
-             tm_buf.tm_hour,
-             tm_buf.tm_min,
-             tm_buf.tm_sec);
-    n = strlen(out);
-  }
-  if (n + 5U < out_size) {
-    snprintf(out + n, out_size - n, ".%03u", millis);
+
+  if (out[0] == '\0') {
+    (void)snprintf(out,
+                   out_size,
+                   "%04d-%02d-%02d %02d:%02d:%02d.%03u",
+                   tm_buf.tm_year + 1900,
+                   tm_buf.tm_mon + 1,
+                   tm_buf.tm_mday,
+                   tm_buf.tm_hour,
+                   tm_buf.tm_min,
+                   tm_buf.tm_sec,
+                   millis);
   }
 }
 
@@ -1578,24 +1647,26 @@ static int _nei_log_format_event(const nei_log_event_header_st *header,
   uint8_t parsed_args = 0U;
   int short_level_tag;
   int short_path;
-  const char *dt_format;
+  nei_log_timestamp_style_e ts_style;
 
   if (header == NULL || effective_config == NULL || payload == NULL || out == NULL || out_cap == 0U) {
     return -1;
   }
   short_level_tag = effective_config->short_level_tag;
   short_path = effective_config->short_path;
-  dt_format = effective_config->datetime_format;
+  ts_style = effective_config->timestamp_style;
   out[0] = '\0';
   {
-    char ts[64];
-    _nei_log_format_timestamp(header->timestamp_ns, dt_format, ts, sizeof(ts));
-    if (_nei_log_append_char(out, out_cap, &used, '[') != 0)
-      return -1;
-    if (_nei_log_append_cstr(out, out_cap, &used, ts) != 0)
-      return -1;
-    if (_nei_log_append_cstr(out, out_cap, &used, "] ") != 0)
-      return -1;
+    char ts[80];
+    _nei_log_format_timestamp(header->timestamp_ns, ts_style, ts, sizeof(ts));
+    if (ts[0] != '\0') {
+      if (_nei_log_append_char(out, out_cap, &used, '[') != 0)
+        return -1;
+      if (_nei_log_append_cstr(out, out_cap, &used, ts) != 0)
+        return -1;
+      if (_nei_log_append_cstr(out, out_cap, &used, "] ") != 0)
+        return -1;
+    }
   }
 
   if (header->verbose == _NEI_LOG_NOT_VERBOSE) {
