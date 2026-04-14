@@ -667,6 +667,7 @@ static void _nei_log_fill_default_config(nei_log_config_st *cfg) {
   cfg->short_level_tag = 1;
   cfg->short_path = 1;
   cfg->log_location = 1;
+  cfg->log_location_after_message = 1;
   cfg->log_thread_id = 1;
   cfg->log_to_console = 0;
   cfg->timestamp_style = NEI_LOG_TIMESTAMP_STYLE_DEFAULT;
@@ -1707,6 +1708,41 @@ static const char *_nei_log_basename(const char *path) {
   return (slash > backslash) ? (slash + 1) : (backslash + 1);
 }
 
+static int _nei_log_append_location_block(const nei_log_event_header_st *header,
+                                          int short_path,
+                                          char *out,
+                                          size_t out_cap,
+                                          size_t *used) {
+  if (header == NULL || out == NULL || used == NULL) {
+    return -1;
+  }
+
+  if (header->file_ptr != NULL) {
+    const char *path = short_path ? _nei_log_basename(header->file_ptr) : header->file_ptr;
+    if (_nei_log_append_cstr(out, out_cap, used, path) != 0)
+      return -1;
+    if (_nei_log_append_char(out, out_cap, used, ':') != 0)
+      return -1;
+    {
+      char line_buf[16];
+      snprintf(line_buf, sizeof(line_buf), "%d", (int)header->line);
+      if (_nei_log_append_cstr(out, out_cap, used, line_buf) != 0)
+        return -1;
+    }
+  }
+
+  if (header->func_ptr != NULL) {
+    if (header->file_ptr != NULL) {
+      if (_nei_log_append_char(out, out_cap, used, ' ') != 0)
+        return -1;
+    }
+    if (_nei_log_append_cstr(out, out_cap, used, header->func_ptr) != 0)
+      return -1;
+  }
+
+  return 0;
+}
+
 static int _nei_log_format_event(const nei_log_event_header_st *header,
                                  const nei_log_config_st *effective_config,
                                  const uint8_t *payload,
@@ -1722,6 +1758,7 @@ static int _nei_log_format_event(const nei_log_event_header_st *header,
   int short_level_tag;
   int short_path;
   int log_location;
+  int log_location_after_message;
   nei_log_timestamp_style_e ts_style;
 
   if (header == NULL || effective_config == NULL || payload == NULL || out == NULL || out_cap == 0U) {
@@ -1730,6 +1767,7 @@ static int _nei_log_format_event(const nei_log_event_header_st *header,
   short_level_tag = effective_config->short_level_tag;
   short_path = effective_config->short_path;
   log_location = effective_config->log_location;
+  log_location_after_message = effective_config->log_location_after_message;
   ts_style = effective_config->timestamp_style;
   out[0] = '\0';
   {
@@ -1769,25 +1807,10 @@ static int _nei_log_format_event(const nei_log_event_header_st *header,
     if (_nei_log_append_cstr(out, out_cap, &used, " ") != 0)
       return -1;
   }
-  if (log_location != 0 && header->file_ptr != NULL) {
-    const char *path = short_path ? _nei_log_basename(header->file_ptr) : header->file_ptr;
-    if (_nei_log_append_cstr(out, out_cap, &used, path) != 0)
+  if (log_location != 0 && log_location_after_message == 0) {
+    if (_nei_log_append_location_block(header, short_path, out, out_cap, &used) != 0)
       return -1;
-    if (_nei_log_append_char(out, out_cap, &used, ':') != 0)
-      return -1;
-    {
-      char line_buf[16];
-      snprintf(line_buf, sizeof(line_buf), "%d", (int)header->line);
-      if (_nei_log_append_cstr(out, out_cap, &used, line_buf) != 0)
-        return -1;
-      if (_nei_log_append_cstr(out, out_cap, &used, " ") != 0)
-        return -1;
-    }
-  }
-  if (log_location != 0 && header->func_ptr != NULL) {
-    if (_nei_log_append_cstr(out, out_cap, &used, header->func_ptr) != 0)
-      return -1;
-    if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
+    if ((header->file_ptr != NULL || header->func_ptr != NULL) && _nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
       return -1;
   }
 
@@ -1810,6 +1833,12 @@ static int _nei_log_format_event(const nei_log_event_header_st *header,
       if (len16 > 0U && _nei_log_append_nstr(out, out_cap, &used, (const char *)cursor, len16) != 0) {
         return -1;
       }
+    }
+    if (log_location != 0 && log_location_after_message != 0 && (header->file_ptr != NULL || header->func_ptr != NULL)) {
+      if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
+        return -1;
+      if (_nei_log_append_location_block(header, short_path, out, out_cap, &used) != 0)
+        return -1;
     }
     return 0;
   }
@@ -1943,6 +1972,13 @@ static int _nei_log_format_event(const nei_log_event_header_st *header,
       scan = after;
       continue;
     }
+  }
+
+  if (log_location != 0 && log_location_after_message != 0 && (header->file_ptr != NULL || header->func_ptr != NULL)) {
+    if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
+      return -1;
+    if (_nei_log_append_location_block(header, short_path, out, out_cap, &used) != 0)
+      return -1;
   }
   return 0;
 }

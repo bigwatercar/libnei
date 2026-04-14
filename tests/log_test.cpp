@@ -323,7 +323,7 @@ TEST(LogCTest, LogThreadIdPrefixWhenConfigEnabled) {
   nei_log_remove_config(cfg_handle);
 }
 
-TEST(LogCTest, AsyncPipelineFormatsTimestampAndFileLinePrefix) {
+TEST(LogCTest, AsyncPipelineFormatsTimestampAndFileLineAfterMessageByDefault) {
   LogCollector collector;
   nei_log_sink_st sink = {};
   sink.llog = CollectLevelLog;
@@ -342,10 +342,40 @@ TEST(LogCTest, AsyncPipelineFormatsTimestampAndFileLinePrefix) {
   ASSERT_EQ(collector.messages.size(), 1U);
   ASSERT_FALSE(collector.messages.empty());
   const std::string &msg = collector.messages[0];
+  const size_t answer_pos = msg.find("answer=42");
+  const size_t file_pos = msg.find("unit_test_file.c:123");
   EXPECT_TRUE(!msg.empty() && msg.front() == '[');
   EXPECT_NE(msg.find("[W]"), std::string::npos);
-  EXPECT_NE(msg.find("unit_test_file.c:123"), std::string::npos);
-  EXPECT_NE(msg.find("answer=42"), std::string::npos);
+  EXPECT_NE(file_pos, std::string::npos);
+  EXPECT_NE(answer_pos, std::string::npos);
+  EXPECT_LT(answer_pos, file_pos);
+  nei_log_remove_config(cfg_handle);
+}
+
+TEST(LogCTest, LogLocationCanBePlacedBeforeMessage) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.log_location_after_message = 0;
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+
+  nei_llog(cfg_handle, NEI_L_WARN, "unit_test_file.c", 123, "test-func", "answer=%d", 42);
+
+  nei_log_flush();
+  std::lock_guard<std::mutex> lock(collector.mu);
+  ASSERT_EQ(collector.messages.size(), 1U);
+  const std::string &msg = collector.messages[0];
+  const size_t answer_pos = msg.find("answer=42");
+  const size_t file_pos = msg.find("unit_test_file.c:123");
+  EXPECT_NE(file_pos, std::string::npos);
+  EXPECT_NE(answer_pos, std::string::npos);
+  EXPECT_LT(file_pos, answer_pos);
   nei_log_remove_config(cfg_handle);
 }
 
@@ -406,13 +436,16 @@ TEST(LogCTest, AsyncPipelineHonorsWidthPrecisionAndConfigFlags) {
   ASSERT_EQ(collector.messages.size(), 1U);
   ASSERT_FALSE(collector.messages.empty());
   const std::string &msg = collector.messages[0];
+  const size_t dyn_pos = msg.find("dyn=   3.142");
+  const size_t file_pos = msg.find("test_path.c:77");
   EXPECT_NE(msg.find("[ERROR]"), std::string::npos);
   EXPECT_EQ(msg.find("dir/subdir/test_path.c:77"), std::string::npos);
-  EXPECT_NE(msg.find("test_path.c:77"), std::string::npos);
-  EXPECT_NE(msg.find("test-func - "), std::string::npos);
+  EXPECT_NE(file_pos, std::string::npos);
+  EXPECT_NE(msg.find("test-func"), std::string::npos);
   EXPECT_NE(msg.find("x=0007"), std::string::npos);
   EXPECT_NE(msg.find("pi=3.14"), std::string::npos);
-  EXPECT_NE(msg.find("dyn=   3.142"), std::string::npos);
+  EXPECT_NE(dyn_pos, std::string::npos);
+  EXPECT_LT(dyn_pos, file_pos);
   nei_log_remove_config(cfg_handle);
 }
 

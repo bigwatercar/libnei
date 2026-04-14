@@ -148,32 +148,38 @@ typedef struct nei_log_sink_st nei_log_sink_st;
  * - @c verbose_threshold: Maximum verbose sub-level emitted to sinks and
  * console; messages with a greater sub-level are dropped. A value @c < 0
  * disables verbose filtering (all verbose levels are emitted).
+ * - @c timestamp_style: Predefined timestamp rendering style used by the
+ * formatter.
  * - @c short_level_tag: Whether to use short level tags
  * - @c short_path: Whether to use a short file path (file name only, no
  * directories)
- * - @c log_location: When non-zero, include source location prefix
- * (`file:line func - `). Set to @c 0 to emit message body without source
- * location text.
+ * - @c log_location: When non-zero, include source location text
+ * (`file:line func`). Set to @c 0 to emit message body without source location
+ * text.
+ * - @c log_location_after_message: Controls where location text is placed when
+ * @c log_location is enabled. Non-zero appends location after message body
+ * (default); @c 0 keeps location before message.
  * - @c log_thread_id: When non-zero, each emitted line includes a @c tid=
  * prefix (after the level tag) with the originating OS thread id. The id string
  * is formatted once per thread in thread-local storage on the producer and
  * copied into the async event buffer. The default configuration enables this;
  * set to @c 0 to omit @c tid= from output.
- * - @c timestamp_style: Predefined timestamp rendering style used by the
- * formatter.
+ * - @c log_to_console: When non-zero, mirror formatted output to the process
+ * console/stdout sink in addition to configured sinks.
  * - @c sinks: Registered sinks in array order. Dispatch stops at the first
  * NULL entry, or after @ref NEI_LOG_MAX_SINKS_OF_CONFIG non-NULL entries. Do
  * not place NULL between active sinks.
  */
 typedef struct nei_log_config_st {
   nei_log_level_flags_u level_flags;
-  int verbose_threshold;
-  int short_level_tag;
-  int short_path;
-  int log_thread_id;
-  int log_to_console;
-  int log_location;
+  int32_t verbose_threshold;
   nei_log_timestamp_style_e timestamp_style;
+  uint32_t short_level_tag : 1;
+  uint32_t short_path : 1;
+  uint32_t log_location : 1;
+  uint32_t log_location_after_message : 1;
+  uint32_t log_thread_id : 1;
+  uint32_t log_to_console : 1;
   nei_log_sink_st *sinks[NEI_LOG_MAX_SINKS_OF_CONFIG];
 } nei_log_config_st;
 
