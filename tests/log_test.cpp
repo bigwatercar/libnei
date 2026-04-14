@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <cwchar>
 #include <atomic>
 #include <chrono>
 #include <fstream>
@@ -11,6 +12,10 @@
 #include <vector>
 
 #include "nei/log/log.h"
+
+#if defined(_WIN32)
+#include <Windows.h>
+#endif
 
 namespace {
 struct LogCollector {
@@ -85,6 +90,64 @@ struct DefaultConfigSinkGuard {
   DefaultConfigSinkGuard(const DefaultConfigSinkGuard &) = delete;
   DefaultConfigSinkGuard &operator=(const DefaultConfigSinkGuard &) = delete;
 };
+
+#if !defined(_WIN32)
+static void AppendCodepointAsUtf8(std::string *out, char32_t cp) {
+  if (out == nullptr || cp > 0x10FFFFu || (cp >= 0xD800u && cp <= 0xDFFFu)) {
+    return;
+  }
+  if (cp <= 0x7Fu) {
+    out->push_back(static_cast<char>(cp));
+  } else if (cp <= 0x7FFu) {
+    out->push_back(static_cast<char>(0xC0u | ((cp >> 6) & 0x1Fu)));
+    out->push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
+  } else if (cp <= 0xFFFFu) {
+    out->push_back(static_cast<char>(0xE0u | ((cp >> 12) & 0x0Fu)));
+    out->push_back(static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu)));
+    out->push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
+  } else {
+    out->push_back(static_cast<char>(0xF0u | ((cp >> 18) & 0x07u)));
+    out->push_back(static_cast<char>(0x80u | ((cp >> 12) & 0x3Fu)));
+    out->push_back(static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu)));
+    out->push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
+  }
+}
+#endif
+
+/** Matches log.c non-Windows path: UTF-8 from native wchar_t (WCHAR_T / Unicode scalar values). */
+static std::string ExpectedMbFromWideForLogCTest(const wchar_t *ws) {
+  if (ws == nullptr) {
+    return "(null)";
+  }
+#if defined(_WIN32)
+  const int nchars = static_cast<int>(std::wcslen(ws));
+  if (nchars == 0) {
+    return {};
+  }
+  const int nb = WideCharToMultiByte(CP_ACP, 0, ws, nchars, nullptr, 0, nullptr, nullptr);
+  if (nb <= 0) {
+    return "[encoding error]";
+  }
+  std::string out(static_cast<size_t>(nb), '\0');
+  const int wr = WideCharToMultiByte(CP_ACP, 0, ws, nchars, out.data(), nb, nullptr, nullptr);
+  if (wr <= 0) {
+    return "[encoding error]";
+  }
+  out.resize(static_cast<size_t>(wr));
+  return out;
+#else
+  std::string out;
+  while (*ws != L'\0') {
+    char32_t cp = static_cast<char32_t>(*ws++);
+    if (sizeof(wchar_t) == 2u && cp >= 0xD800u && cp <= 0xDBFFu && *ws >= 0xDC00u && *ws <= 0xDFFFu) {
+      const char32_t lo = static_cast<char32_t>(*ws++);
+      cp = 0x10000u + ((cp - 0xD800u) << 10) + (lo - 0xDC00u);
+    }
+    AppendCodepointAsUtf8(&out, cp);
+  }
+  return out;
+#endif
+}
 } // namespace
 
 TEST(LogCTest, FlushFromSinkCallbackDoesNotDeadlock) {
@@ -782,3 +845,134 @@ TEST(LogCTest, ConfigAddRemoveIsThreadSafeAtRuntime) {
   std::lock_guard<std::mutex> lock(collector.mu);
   EXPECT_GT(collector.messages.size(), 0U);
 }
+
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat"
+#endif
+
+TEST(LogCTest, WsFormat_NullUsesPlaceholder) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "ws-null", "wide=%ws!", static_cast<const wchar_t *>(nullptr));
+  nei_log_flush();
+  std::lock_guard<std::mutex> lock(collector.mu);
+  ASSERT_EQ(collector.messages.size(), 1U);
+  EXPECT_NE(collector.messages[0].find("wide=(null)!"), std::string::npos);
+  nei_log_remove_config(cfg_handle);
+}
+
+TEST(LogCTest, WsFormat_EmptyWideString) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+
+  static const wchar_t kEmpty[] = {L'\0'};
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "ws-empty", "wide=%ws|end", kEmpty);
+  nei_log_flush();
+  std::lock_guard<std::mutex> lock(collector.mu);
+  ASSERT_EQ(collector.messages.size(), 1U);
+  EXPECT_NE(collector.messages[0].find("wide=|end"), std::string::npos);
+  nei_log_remove_config(cfg_handle);
+}
+
+TEST(LogCTest, WsFormat_CjkHiraganaKatakanaHangulAndExtensionB) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+
+  static const wchar_t kWide[] =
+      L"\u4E2D\u6587"
+      L"\u3042\u3044"
+      L"\u30A2\u30FC"
+      L"\uD55C\uAE00"
+      L"\U00020000";
+
+  const std::string expected_body = ExpectedMbFromWideForLogCTest(kWide);
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "ws-cjk", "payload=%ws!", kWide);
+  nei_log_flush();
+  std::lock_guard<std::mutex> lock(collector.mu);
+  ASSERT_EQ(collector.messages.size(), 1U);
+  const std::string needle = "payload=" + expected_body + "!";
+  EXPECT_NE(collector.messages[0].find(needle), std::string::npos) << "formatted=" << collector.messages[0];
+  nei_log_remove_config(cfg_handle);
+}
+
+TEST(LogCTest, WsFormat_VlogSameCjkPayload) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.vlog = CollectVerboseLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+
+  static const wchar_t kWide[] = L"\u97F3\u8AAD\u307F\U00024B62";
+  const std::string expected_body = ExpectedMbFromWideForLogCTest(kWide);
+  nei_vlog(cfg_handle, 1, __FILE__, __LINE__, "ws-v", "v=%ws.", kWide);
+  nei_log_flush();
+  std::lock_guard<std::mutex> lock(collector.mu);
+  ASSERT_EQ(collector.messages.size(), 1U);
+  EXPECT_EQ(collector.last_verbose, 1);
+  const std::string needle = "v=" + expected_body + ".";
+  EXPECT_NE(collector.messages[0].find(needle), std::string::npos) << "formatted=" << collector.messages[0];
+  nei_log_remove_config(cfg_handle);
+}
+
+TEST(LogCTest, WsFormat_ConvertedPayloadNotAffectedByLaterWideBufferMutation) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+
+  wchar_t mutable_wide[8] = {};
+  mutable_wide[0] = L'\u4E2D';
+  mutable_wide[1] = L'\u6587';
+  mutable_wide[2] = L'\0';
+
+  const std::string expected_before = ExpectedMbFromWideForLogCTest(mutable_wide);
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "ws-mut", "w=%ws", mutable_wide);
+  mutable_wide[0] = L'X';
+  mutable_wide[1] = L'Y';
+  nei_log_flush();
+  std::lock_guard<std::mutex> lock(collector.mu);
+  ASSERT_EQ(collector.messages.size(), 1U);
+  EXPECT_NE(collector.messages[0].find("w=" + expected_before), std::string::npos) << collector.messages[0];
+  nei_log_remove_config(cfg_handle);
+}
+
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif

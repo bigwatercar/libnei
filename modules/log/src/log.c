@@ -9,11 +9,15 @@
 #include <stdlib.h>
 #include <time.h>
 #include <inttypes.h>
+#include <limits.h>
+#include <wchar.h>
 
 #if defined(_WIN32)
 #include <Windows.h>
 #else
 #include <pthread.h>
+#include <errno.h>
+#include <iconv.h>
 #endif
 
 #if defined(_WIN32)
@@ -35,15 +39,6 @@
 #define _NEI_LOG_GLOBAL_BUFFER_CAPACITY (1024U * 1024U)
 #define _NEI_LOG_DEFAULT_FILE_SINK_MAGIC 0x4B4E5346U
 
-/// @brief `%` 轻量扫描时支持的长度修饰符。
-enum _nei_log_length_mod_e {
-  _NEI_LOG_LEN_NONE = 0,
-  _NEI_LOG_LEN_H = 1,
-  _NEI_LOG_LEN_HH = 2,
-  _NEI_LOG_LEN_L = 3,
-  _NEI_LOG_LEN_LL = 4,
-};
-
 /// @brief 紧凑序列化参数类型标签。
 enum _nei_log_payload_type_e {
   _NEI_LOG_PAYLOAD_I32 = 1,
@@ -60,12 +55,6 @@ enum _nei_log_payload_type_e {
 };
 
 #define _NEI_LOG_LONGDOUBLE_STORAGE 16U
-
-typedef struct _nei_log_fmt_token_st {
-  uint8_t payload_type;
-  uint8_t length_mod;
-  uint8_t spec;
-} nei_log_fmt_token_st;
 
 /**
  * @brief 紧凑序列化记录头部。
@@ -174,7 +163,7 @@ static inline const char *_get_level_short_string(nei_log_level_e level) {
 
 #pragma endregion
 
-#pragma region static forward declarations
+#pragma region static prototypes (late-defined helpers)
 
 /* Config table */
 static void _nei_log_ensure_config_table_initialized(void);
@@ -192,11 +181,7 @@ static void
 _nei_log_default_file_llog(const nei_log_sink_st *sink, nei_log_level_e level, const char *message, size_t length);
 static void _nei_log_default_file_vlog(const nei_log_sink_st *sink, int verbose, const char *message, size_t length);
 
-/* Log core (serialization, runtime, consumer) */
-static inline size_t _nei_log_align_up_8(size_t n);
-static int _nei_log_is_flag_char(char c);
-static int _nei_log_is_digit_char(char c);
-static int _nei_log_scan_next_token(const char **fmt_ptr, nei_log_fmt_token_st *token);
+/* Serialization + runtime (called from public API / flush before these definitions appear). */
 static size_t _nei_log_serialize_event(uint8_t *out,
                                        size_t out_cap,
                                        nei_log_config_handle_t config_handle,
@@ -217,41 +202,10 @@ static size_t _nei_log_serialize_literal_msg(uint8_t *out,
                                              int32_t verbose,
                                              const char *message,
                                              size_t message_length);
-static int _nei_log_payload_write_u8(uint8_t *out, size_t out_cap, size_t *used, uint8_t value);
-static int _nei_log_payload_write_u16(uint8_t *out, size_t out_cap, size_t *used, uint16_t value);
-static int _nei_log_payload_write_bytes(uint8_t *out, size_t out_cap, size_t *used, const void *src, size_t len);
-static int _nei_log_payload_write_padded_zero(uint8_t *out, size_t out_cap, size_t *used, size_t target_size);
-static int _nei_log_append_char(char *out, size_t cap, size_t *used, char c);
-static int _nei_log_append_cstr(char *out, size_t cap, size_t *used, const char *s);
-static int _nei_log_append_nstr(char *out, size_t cap, size_t *used, const char *s, size_t n);
-static int _nei_log_read_u16(const uint8_t **cursor, const uint8_t *end, uint16_t *out_value);
-static int _nei_log_read_bytes(const uint8_t **cursor, const uint8_t *end, void *dst, size_t n);
-static void _nei_log_snprintf_i64(const char *spec, char *tmp, size_t tcap, int64_t v);
-static void _nei_log_snprintf_u64(const char *spec, char *tmp, size_t tcap, uint64_t v);
-static int _nei_log_build_runtime_conversion_spec(const char *scan,
-                                                  const char **after,
-                                                  const uint8_t **cursor,
-                                                  const uint8_t *end,
-                                                  uint8_t *parsed_args,
-                                                  char *spec,
-                                                  size_t spec_cap);
-static const char *_nei_log_basename(const char *path);
-static int _nei_log_format_event(const nei_log_event_header_st *header,
-                                 const nei_log_config_st *effective_config,
-                                 const uint8_t *payload,
-                                 size_t payload_size,
-                                 char *out,
-                                 size_t out_cap);
-static uint64_t _nei_log_now_ns(void);
-static void
-_nei_log_format_timestamp(uint64_t timestamp_ns, nei_log_timestamp_style_e style, char *out, size_t out_size);
-static void _nei_log_emit_message(
-    const nei_log_config_st *config, int32_t level, int32_t verbose, const char *message, size_t length);
 static int _nei_log_ensure_runtime_initialized(void);
 static void _nei_log_shutdown_runtime(void);
 static int _nei_log_enqueue_event(const uint8_t *event, size_t len);
 static void _nei_log_ensure_active_not_consuming(nei_log_runtime_st *rt);
-static void _nei_log_process_events(const uint8_t *buf, size_t size);
 #if defined(_WIN32)
 static DWORD WINAPI _nei_log_consumer_thread(LPVOID arg);
 #else
@@ -834,111 +788,6 @@ static int _nei_log_is_digit_char(char c) {
   return (c >= '0') && (c <= '9');
 }
 
-static int _nei_log_scan_next_token(const char **fmt_ptr, nei_log_fmt_token_st *token) {
-  const char *p;
-  if (fmt_ptr == NULL || *fmt_ptr == NULL || token == NULL) {
-    return 0;
-  }
-
-  p = *fmt_ptr;
-  while (*p) {
-    if (*p != '%') {
-      ++p;
-      continue;
-    }
-    ++p;
-    if (*p == '%') {
-      ++p;
-      continue;
-    }
-
-    while (*p && _nei_log_is_flag_char(*p)) {
-      ++p;
-    }
-    while (*p && _nei_log_is_digit_char(*p)) {
-      ++p;
-    }
-    if (*p == '.') {
-      ++p;
-      while (*p && _nei_log_is_digit_char(*p)) {
-        ++p;
-      }
-    }
-    if (*p == '*') {
-      ++p;
-    }
-
-    token->length_mod = _NEI_LOG_LEN_NONE;
-    if (*p == 'h') {
-      ++p;
-      if (*p == 'h') {
-        token->length_mod = _NEI_LOG_LEN_HH;
-        ++p;
-      } else {
-        token->length_mod = _NEI_LOG_LEN_H;
-      }
-    } else if (*p == 'l') {
-      ++p;
-      if (*p == 'l') {
-        token->length_mod = _NEI_LOG_LEN_LL;
-        ++p;
-      } else {
-        token->length_mod = _NEI_LOG_LEN_L;
-      }
-    }
-
-    token->payload_type = 0;
-    token->spec = (uint8_t)*p;
-    switch (*p) {
-    case 'd':
-    case 'i':
-      token->payload_type = (token->length_mod == _NEI_LOG_LEN_L || token->length_mod == _NEI_LOG_LEN_LL)
-                                ? _NEI_LOG_PAYLOAD_I64
-                                : _NEI_LOG_PAYLOAD_I32;
-      break;
-    case 'u':
-    case 'x':
-    case 'X':
-    case 'o':
-      token->payload_type = (token->length_mod == _NEI_LOG_LEN_L || token->length_mod == _NEI_LOG_LEN_LL)
-                                ? _NEI_LOG_PAYLOAD_U64
-                                : _NEI_LOG_PAYLOAD_U32;
-      break;
-    case 'f':
-    case 'F':
-    case 'e':
-    case 'E':
-    case 'g':
-    case 'G':
-    case 'a':
-    case 'A':
-      token->payload_type = _NEI_LOG_PAYLOAD_DOUBLE;
-      break;
-    case 'c':
-      token->payload_type = _NEI_LOG_PAYLOAD_CHAR;
-      break;
-    case 's':
-      token->payload_type = _NEI_LOG_PAYLOAD_CSTR;
-      break;
-    case 'p':
-      token->payload_type = _NEI_LOG_PAYLOAD_PTR;
-      break;
-    default:
-      token->payload_type = 0;
-      break;
-    }
-
-    if (*p) {
-      ++p;
-    }
-    *fmt_ptr = p;
-    return token->payload_type != 0;
-  }
-
-  *fmt_ptr = p;
-  return 0;
-}
-
 static int _nei_log_payload_write_u8(uint8_t *out, size_t out_cap, size_t *used, uint8_t value) {
   if (out == NULL || used == NULL || *used + 1U > out_cap) {
     return -1;
@@ -975,6 +824,128 @@ static int _nei_log_payload_write_padded_zero(uint8_t *out, size_t out_cap, size
     *used += 1U;
   }
   return 0;
+}
+
+/** Windows: ACP (ANSI code page). POSIX: UTF-8 via iconv from WCHAR_T. */
+static const char *_nei_log_wstr_to_mbs_or_placeholder(const wchar_t *ws, char *buf, size_t buf_cap) {
+  static const char s_null_placeholder[] = "(null)";
+  static const char s_encoding_error_placeholder[] = "[encoding error]";
+
+  if (ws == NULL) {
+    return s_null_placeholder;
+  }
+  if (buf == NULL || buf_cap == 0U) {
+    return s_encoding_error_placeholder;
+  }
+
+  buf[0] = '\0';
+  if (*ws == L'\0') {
+    return buf;
+  }
+
+#if defined(_WIN32)
+  size_t wlen = 0U;
+  size_t lo;
+  size_t hi;
+  size_t best = 0U;
+  int out_bytes = 0;
+
+  while (ws[wlen] != L'\0') {
+    ++wlen;
+  }
+  if (wlen > (size_t)INT_MAX) {
+    return s_encoding_error_placeholder;
+  }
+
+  /* Use system ANSI code page (ACP), not UTF-8, so log text matches typical console/file encodings. */
+  out_bytes = WideCharToMultiByte(CP_ACP, 0, ws, (int)wlen, NULL, 0, NULL, NULL);
+  if (out_bytes > 0 && (size_t)out_bytes <= (buf_cap - 1U)) {
+    int written = WideCharToMultiByte(CP_ACP, 0, ws, (int)wlen, buf, (int)(buf_cap - 1U), NULL, NULL);
+    if (written <= 0) {
+      return s_encoding_error_placeholder;
+    }
+    buf[written] = '\0';
+    return buf;
+  }
+
+  lo = 0U;
+  hi = wlen;
+  while (lo <= hi) {
+    size_t mid = lo + (hi - lo) / 2U;
+    int need = 0;
+    if (mid > 0U) {
+      if (mid > (size_t)INT_MAX) {
+        need = -1;
+      } else {
+        need = WideCharToMultiByte(CP_ACP, 0, ws, (int)mid, NULL, 0, NULL, NULL);
+      }
+    }
+    if (need >= 0 && (size_t)need <= (buf_cap - 1U)) {
+      best = mid;
+      lo = mid + 1U;
+    } else {
+      if (mid == 0U) {
+        break;
+      }
+      hi = mid - 1U;
+    }
+  }
+  if (best == 0U) {
+    return s_encoding_error_placeholder;
+  }
+  if (best > (size_t)INT_MAX) {
+    return s_encoding_error_placeholder;
+  }
+  out_bytes = WideCharToMultiByte(CP_ACP, 0, ws, (int)best, buf, (int)(buf_cap - 1U), NULL, NULL);
+  if (out_bytes <= 0) {
+    return s_encoding_error_placeholder;
+  }
+  buf[out_bytes] = '\0';
+  return buf;
+#else
+  size_t wlen = 0U;
+  iconv_t cd;
+  size_t in_left;
+  size_t out_left;
+  char *in_ptr;
+  char *out_ptr;
+
+  while (ws[wlen] != L'\0') {
+    ++wlen;
+  }
+  if (wlen == 0U) {
+    return buf;
+  }
+  if (wlen > (SIZE_MAX / sizeof(wchar_t))) {
+    return s_encoding_error_placeholder;
+  }
+
+  cd = iconv_open("UTF-8", "WCHAR_T");
+  if (cd == (iconv_t)-1) {
+    return s_encoding_error_placeholder;
+  }
+
+  in_left = wlen * sizeof(wchar_t);
+  out_left = buf_cap - 1U;
+  in_ptr = (char *)(void *)ws;
+  out_ptr = buf;
+
+  while (in_left > 0U) {
+    size_t rc = iconv(cd, &in_ptr, &in_left, &out_ptr, &out_left);
+    if (rc != (size_t)-1) {
+      break;
+    }
+    if (errno == E2BIG) {
+      break;
+    }
+    (void)iconv_close(cd);
+    return s_encoding_error_placeholder;
+  }
+
+  (void)iconv_close(cd);
+  *out_ptr = '\0';
+  return buf;
+#endif
 }
 
 static size_t _nei_log_serialize_event(uint8_t *out,
@@ -1079,6 +1050,9 @@ static size_t _nei_log_serialize_event(uint8_t *out,
     } else if (*p == 'L') {
       ++p;
       conv_lm = 8;
+    } else if (*p == 'w') {
+      ++p;
+      conv_lm = 9;
     }
     if (*p == '\0') {
       break;
@@ -1209,11 +1183,18 @@ static size_t _nei_log_serialize_event(uint8_t *out,
         break;
       }
       case _NEI_LOG_PAYLOAD_CSTR: {
-        const char *s = va_arg(args, const char *);
+        const char *s = NULL;
+        char ws_buf[_NEI_LOG_MAX_STRING_COPY + 1U];
         uint16_t len16;
         size_t len;
-        if (s == NULL)
-          s = "(null)";
+        if (conv_lm == 9) {
+          const wchar_t *ws = va_arg(args, const wchar_t *);
+          s = _nei_log_wstr_to_mbs_or_placeholder(ws, ws_buf, sizeof(ws_buf));
+        } else {
+          s = va_arg(args, const char *);
+          if (s == NULL)
+            s = "(null)";
+        }
         len = strlen(s);
         if (len > _NEI_LOG_MAX_STRING_COPY)
           len = _NEI_LOG_MAX_STRING_COPY;
@@ -1657,7 +1638,9 @@ static int _nei_log_build_runtime_conversion_spec(const char *scan,
       }
     }
   }
-  if (*p == 'h' || *p == 'l') {
+  if (*p == 'w') {
+    ++p;
+  } else if (*p == 'h' || *p == 'l') {
     char first = *p;
     if (n + 2U >= spec_cap)
       return -1;
@@ -1991,7 +1974,6 @@ static void _nei_log_emit_message(
     const nei_log_config_st *config, int32_t level, int32_t verbose, const char *message, size_t length) {
   const nei_log_config_st *effective = config;
   size_t i;
-  int emitted = 0;
   if (config == NULL || message == NULL) {
     return;
   }
@@ -2014,16 +1996,13 @@ static void _nei_log_emit_message(
     if (verbose != _NEI_LOG_NOT_VERBOSE) {
       if (sink->vlog != NULL) {
         sink->vlog(sink, verbose, message, length);
-        emitted = 1;
       }
     } else {
       if (sink->llog != NULL) {
         sink->llog(sink, (nei_log_level_e)level, message, length);
-        emitted = 1;
       }
     }
   }
-  (void)emitted;
   if (effective->log_to_console) {
     (void)fwrite(message, 1U, length, stdout);
     (void)fputc('\n', stdout);
