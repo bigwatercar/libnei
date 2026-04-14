@@ -68,6 +68,7 @@ add_subdirectory(modules/log)
 add_subdirectory(modules/utils)
 add_subdirectory(modules/xdr)
 add_subdirectory(modules/core)
+add_subdirectory(modules/task)
 
 if(NEI_BUILD_TESTS)
     add_subdirectory(tests)
