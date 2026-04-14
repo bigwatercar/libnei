@@ -420,84 +420,48 @@ NEI_API void nei_log_flush(void);
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_TRACE(fmt, ...) \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, \
-           NEI_L_TRACE, \
-           __FILE__, \
-           __LINE__, \
-           NEI_FUNC, \
-           fmt, \
-           ##__VA_ARGS__)
+#define NEI_LOG_TRACE(fmt, ...)                                                                                        \
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_TRACE, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log a DEBUG message (convenience macro)
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_DEBUG(fmt, ...) \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, \
-           NEI_L_DEBUG, \
-           __FILE__, \
-           __LINE__, \
-           NEI_FUNC, \
-           fmt, \
-           ##__VA_ARGS__)
+#define NEI_LOG_DEBUG(fmt, ...)                                                                                        \
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_DEBUG, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log an INFO message (convenience macro)
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_INFO(fmt, ...) \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, \
-           NEI_L_INFO, \
-           __FILE__, \
-           __LINE__, \
-           NEI_FUNC, \
-           fmt, \
-           ##__VA_ARGS__)
+#define NEI_LOG_INFO(fmt, ...)                                                                                         \
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log a WARN message (convenience macro)
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_WARN(fmt, ...) \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, \
-           NEI_L_WARN, \
-           __FILE__, \
-           __LINE__, \
-           NEI_FUNC, \
-           fmt, \
-           ##__VA_ARGS__)
+#define NEI_LOG_WARN(fmt, ...)                                                                                         \
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_WARN, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log an ERROR message (convenience macro)
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_ERROR(fmt, ...) \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, \
-           NEI_L_ERROR, \
-           __FILE__, \
-           __LINE__, \
-           NEI_FUNC, \
-           fmt, \
-           ##__VA_ARGS__)
+#define NEI_LOG_ERROR(fmt, ...)                                                                                        \
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_ERROR, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log a FATAL message (convenience macro)
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_FATAL(fmt, ...) \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, \
-           NEI_L_FATAL, \
-           __FILE__, \
-           __LINE__, \
-           NEI_FUNC, \
-           fmt, \
-           ##__VA_ARGS__)
+#define NEI_LOG_FATAL(fmt, ...)                                                                                        \
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_FATAL, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log a VERBOSE message (convenience macro)
@@ -505,14 +469,8 @@ NEI_API void nei_log_flush(void);
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_VERBOSE(verbose, fmt, ...) \
-  nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, \
-           verbose, \
-           __FILE__, \
-           __LINE__, \
-           NEI_FUNC, \
-           fmt, \
-           ##__VA_ARGS__)
+#define NEI_LOG_VERBOSE(verbose, fmt, ...)                                                                             \
+  nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, verbose, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /** @} */ /* end of nei_log_macros */
 
