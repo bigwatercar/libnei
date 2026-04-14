@@ -186,23 +186,23 @@ int main(int argc, char **argv) {
   // Benchmark different log levels
   run_log_benchmark("Log Info", []() {
     nei_llog(
-        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "benchmark", "test message %s", "test");
+        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", "test message %s", "test");
   });
 
   run_log_benchmark("Log Warn", []() {
     nei_llog(
-        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_WARN, __FILE__, __LINE__, "benchmark", "test message %s", "test");
+        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_WARN, __FILE__, __LINE__, "benchmark", "test message %s", "test");
   });
 
   run_log_benchmark("Log Error", []() {
     nei_llog(
-        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_ERROR, __FILE__, __LINE__, "benchmark", "test message %s", "test");
+        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_ERROR, __FILE__, __LINE__, "benchmark", "test message %s", "test");
   });
 
   // Benchmark with formatting
   run_log_benchmark("Log with Formatting", []() {
     nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-             NEI_LOG_LEVEL_INFO,
+             NEI_L_INFO,
              __FILE__,
              __LINE__,
              "benchmark",
@@ -215,7 +215,7 @@ int main(int argc, char **argv) {
   run_log_benchmark("Log Info (literal)", []() {
     static const char body[] = "literal message no printf";
     nei_llog_literal(
-        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "benchmark", body, sizeof(body) - 1U);
+        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", body, sizeof(body) - 1U);
   });
 
   // Benchmark verbose logging
@@ -257,7 +257,7 @@ int main(int argc, char **argv) {
       "File Log Info",
       []() {
         nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                 NEI_LOG_LEVEL_INFO,
+                 NEI_L_INFO,
                  __FILE__,
                  __LINE__,
                  "benchmark",
@@ -270,7 +270,7 @@ int main(int argc, char **argv) {
       "File Log Warn",
       []() {
         nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                 NEI_LOG_LEVEL_WARN,
+                 NEI_L_WARN,
                  __FILE__,
                  __LINE__,
                  "benchmark",
@@ -283,7 +283,7 @@ int main(int argc, char **argv) {
       "File Log Error",
       []() {
         nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                 NEI_LOG_LEVEL_ERROR,
+                 NEI_L_ERROR,
                  __FILE__,
                  __LINE__,
                  "benchmark",
@@ -296,7 +296,7 @@ int main(int argc, char **argv) {
       "File Log with Formatting",
       []() {
         nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                 NEI_LOG_LEVEL_INFO,
+                 NEI_L_INFO,
                  __FILE__,
                  __LINE__,
                  "benchmark",
@@ -319,7 +319,7 @@ int main(int argc, char **argv) {
       []() {
         static const char body[] = "literal line no printf";
         nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                         NEI_LOG_LEVEL_INFO,
+                         NEI_L_INFO,
                          __FILE__,
                          __LINE__,
                          "benchmark",

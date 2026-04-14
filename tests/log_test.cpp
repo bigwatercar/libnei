@@ -99,8 +99,8 @@ TEST(LogCTest, FlushFromSinkCallbackDoesNotDeadlock) {
   nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
   ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
 
-  nei_llog(cfg_handle, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "flush-in-sink", "first=%d", 1);
-  nei_llog(cfg_handle, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "flush-in-sink", "second=%d", 2);
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "flush-in-sink", "first=%d", 1);
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "flush-in-sink", "second=%d", 2);
   nei_log_flush();
   {
     std::lock_guard<std::mutex> lock(collector.mu);
@@ -141,7 +141,7 @@ TEST(LogCTest, AsyncPipelineDeepCopiesStringPayload) {
   ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
 
   char mutable_text[64] = "first-message";
-  nei_llog(cfg_handle, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "test-func", "value=%s", mutable_text);
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "test-func", "value=%s", mutable_text);
   std::memcpy(mutable_text, "mutated-after-log", sizeof("mutated-after-log"));
 
   nei_log_flush();
@@ -166,7 +166,7 @@ TEST(LogCTest, LiteralApisPassMessageWithoutPrintfExpansion) {
   ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
 
   const char raw[] = "user fmt: %d %% not expanded";
-  nei_llog_literal(cfg_handle, NEI_LOG_LEVEL_INFO, "lit.c", 5, "f", raw, sizeof(raw) - 1U);
+  nei_llog_literal(cfg_handle, NEI_L_INFO, "lit.c", 5, "f", raw, sizeof(raw) - 1U);
   nei_log_flush();
   {
     std::lock_guard<std::mutex> lock(collector.mu);
@@ -201,8 +201,8 @@ TEST(LogCTest, LiteralApi_EmptyAndNullMessageEmitPrefixOnly) {
   nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
   ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
 
-  nei_llog_literal(cfg_handle, NEI_LOG_LEVEL_INFO, "empty.c", 10, "fn", "", 0);
-  nei_llog_literal(cfg_handle, NEI_LOG_LEVEL_WARN, "empty.c", 11, "fn", nullptr, 100);
+  nei_llog_literal(cfg_handle, NEI_L_INFO, "empty.c", 10, "fn", "", 0);
+  nei_llog_literal(cfg_handle, NEI_L_WARN, "empty.c", 11, "fn", nullptr, 100);
   nei_log_flush();
   {
     std::lock_guard<std::mutex> lock(collector.mu);
@@ -239,7 +239,7 @@ TEST(LogCTest, LiteralApi_IncludesFileLineAndBodyInFormattedOutput) {
   nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
   ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
 
-  nei_llog_literal(cfg_handle, NEI_LOG_LEVEL_WARN, "unit_literal.c", 77, "lf", "payload-bytes", 13);
+  nei_llog_literal(cfg_handle, NEI_L_WARN, "unit_literal.c", 77, "lf", "payload-bytes", 13);
   nei_log_flush();
   std::lock_guard<std::mutex> lock(collector.mu);
   ASSERT_EQ(collector.messages.size(), 1U);
@@ -258,15 +258,15 @@ TEST(LogCTest, LiteralApi_RespectsLevelAndVerboseFilters) {
   sink.opaque = &collector;
 
   nei_log_config_st config = *nei_log_default_config();
-  config.level_flags.all = 0xFFFFFFFFu & ~((uint32_t)1U << (uint32_t)NEI_LOG_LEVEL_INFO);
+  config.level_flags.all = 0xFFFFFFFFu & ~((uint32_t)1U << (uint32_t)NEI_L_INFO);
   config.verbose_threshold = 2;
   config.sinks[0] = &sink;
   config.sinks[1] = nullptr;
   nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
   ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
 
-  nei_llog_literal(cfg_handle, NEI_LOG_LEVEL_INFO, "f.c", 1, "x", "no", 2);
-  nei_llog_literal(cfg_handle, NEI_LOG_LEVEL_WARN, "f.c", 2, "x", "yes", 3);
+  nei_llog_literal(cfg_handle, NEI_L_INFO, "f.c", 1, "x", "no", 2);
+  nei_llog_literal(cfg_handle, NEI_L_WARN, "f.c", 2, "x", "yes", 3);
   nei_vlog_literal(cfg_handle, 5, "f.c", 3, "x", "v-no", 4);
   nei_vlog_literal(cfg_handle, 1, "f.c", 4, "x", "v-yes", 5);
   nei_log_flush();
@@ -292,7 +292,7 @@ TEST(LogCTest, LogThreadIdPrefixWhenConfigEnabled) {
   nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
   ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
 
-  nei_llog(cfg_handle, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "tid-test", "body=%d", 1);
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "tid-test", "body=%d", 1);
   nei_log_flush();
   {
     std::lock_guard<std::mutex> lock(collector.mu);
@@ -335,7 +335,7 @@ TEST(LogCTest, AsyncPipelineFormatsTimestampAndFileLinePrefix) {
   nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
   ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
 
-  nei_llog(cfg_handle, NEI_LOG_LEVEL_WARN, "unit_test_file.c", 123, "test-func", "answer=%d", 42);
+  nei_llog(cfg_handle, NEI_L_WARN, "unit_test_file.c", 123, "test-func", "answer=%d", 42);
 
   nei_log_flush();
   std::lock_guard<std::mutex> lock(collector.mu);
@@ -362,7 +362,7 @@ TEST(LogCTest, LogLocationDisabledOmitsFileLineAndFunction) {
   nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
   ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
 
-  nei_llog(cfg_handle, NEI_LOG_LEVEL_INFO, "hide_file.c", 99, "hidden-func", "payload=%d", 7);
+  nei_llog(cfg_handle, NEI_L_INFO, "hide_file.c", 99, "hidden-func", "payload=%d", 7);
   nei_log_flush();
   std::lock_guard<std::mutex> lock(collector.mu);
   ASSERT_EQ(collector.messages.size(), 1U);
@@ -390,7 +390,7 @@ TEST(LogCTest, AsyncPipelineHonorsWidthPrecisionAndConfigFlags) {
   ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
 
   nei_llog(cfg_handle,
-           NEI_LOG_LEVEL_ERROR,
+           NEI_L_ERROR,
            "dir/subdir/test_path.c",
            77,
            "test-func",
@@ -433,7 +433,7 @@ TEST(LogCTest, AsyncPipelineLengthModifiersLdJzLf) {
   const size_t zv = 8;
   const long double ldv = static_cast<long double>(2.5);
 
-  nei_llog(cfg_handle, NEI_LOG_LEVEL_DEBUG, "fmt_test.c", 1, "fn", "ld=%ld jd=%jd zu=%zu Lf=%.3Lf", lv, jv, zv, ldv);
+  nei_llog(cfg_handle, NEI_L_DEBUG, "fmt_test.c", 1, "fn", "ld=%ld jd=%jd zu=%zu Lf=%.3Lf", lv, jv, zv, ldv);
 
   nei_log_flush();
   std::lock_guard<std::mutex> lock(collector.mu);
@@ -456,7 +456,7 @@ TEST(LogCTest, DirectLlogWithDefaultConfigUsesSink) {
   DefaultConfigSinkGuard guard;
   guard.set_primary_sink(&sink);
 
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "direct-fn", "x=%d", 1);
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_DEBUG, __FILE__, __LINE__, "direct-fn", "x=%d", 1);
 
   nei_log_flush();
   std::lock_guard<std::mutex> lock(collector.mu);
@@ -535,7 +535,7 @@ TEST(LogCTest, AsyncBurstThenFlushDeliversEveryMessage) {
 
   constexpr int kCount = 200;
   for (int i = 0; i < kCount; ++i) {
-    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "burst", "burst id=%d", i);
+    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "burst", "burst id=%d", i);
   }
   nei_log_flush();
 
@@ -565,7 +565,7 @@ TEST(LogCTest, ConfigAddGetByIdAndEmit) {
   const nei_log_config_st *got = nei_log_get_config(handle);
   ASSERT_NE(got, nullptr);
 
-  nei_llog(handle, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "config-test", "hello=%d", 42);
+  nei_llog(handle, NEI_L_INFO, __FILE__, __LINE__, "config-test", "hello=%d", 42);
 
   nei_log_flush();
 
@@ -610,7 +610,7 @@ TEST(LogCTest, ConfigHandleApiAddGetRemoveWorks) {
   EXPECT_NE(handle, NEI_LOG_INVALID_CONFIG_HANDLE);
   EXPECT_NE(nei_log_get_config(handle), nullptr);
 
-  nei_llog(handle, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "cfg-handle", "hello=%d", 7);
+  nei_llog(handle, NEI_L_INFO, __FILE__, __LINE__, "cfg-handle", "hello=%d", 7);
   nei_log_flush();
   {
     std::lock_guard<std::mutex> lock(collector.mu);
@@ -674,8 +674,8 @@ TEST(LogCTest, BuiltinFileSinkOwnsFileHandleLifecycle) {
   nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
   ASSERT_EQ(nei_log_add_config(&cfg, &cfg_handle), 0);
 
-  nei_llog(cfg_handle, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "file-sink", "info=%d", 11);
-  nei_llog(cfg_handle, NEI_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "file-sink", "debug=%d", 22);
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "file-sink", "info=%d", 11);
+  nei_llog(cfg_handle, NEI_L_DEBUG, __FILE__, __LINE__, "file-sink", "debug=%d", 22);
   nei_vlog(cfg_handle, 1, __FILE__, __LINE__, "file-sink", "verbose=%d", 33);
   nei_vlog(cfg_handle, 4, __FILE__, __LINE__, "file-sink", "verbose_drop=%d", 44);
   nei_log_flush();
@@ -714,7 +714,7 @@ TEST(LogCTest, ConfigAddRemoveIsThreadSafeAtRuntime) {
     while (stop.load(std::memory_order_relaxed) == 0) {
       const nei_log_config_handle_t h = active_handle.load(std::memory_order_relaxed);
       if (h != NEI_LOG_INVALID_CONFIG_HANDLE) {
-        nei_llog(h, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "race", "runtime=%d", i);
+        nei_llog(h, NEI_L_INFO, __FILE__, __LINE__, "race", "runtime=%d", i);
       }
       ++i;
     }

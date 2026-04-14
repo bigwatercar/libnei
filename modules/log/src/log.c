@@ -162,13 +162,13 @@ static const char *s_level_short_strings[] = {_NEI_LOG_LVL_TAGS};
 
 /** @brief 获取完整日志级别标签。 */
 static inline const char *_get_level_string(nei_log_level_e level) {
-  assert(level >= NEI_LOG_LEVEL_VERBOSE && level <= NEI_LOG_LEVEL_FATAL);
+  assert(level >= NEI_L_VERBOSE && level <= NEI_L_FATAL);
   return s_level_strings[level];
 }
 
 /** @brief 获取简短日志级别标签。 */
 static inline const char *_get_level_short_string(nei_log_level_e level) {
-  assert(level >= NEI_LOG_LEVEL_VERBOSE && level <= NEI_LOG_LEVEL_FATAL);
+  assert(level >= NEI_L_VERBOSE && level <= NEI_L_FATAL);
   return s_level_short_strings[level];
 }
 
@@ -521,7 +521,7 @@ void nei_vlog(nei_log_config_handle_t config_handle,
                                                            file,
                                                            line,
                                                            func,
-                                                           (int32_t)NEI_LOG_LEVEL_VERBOSE,
+                                                           (int32_t)NEI_L_VERBOSE,
                                                            (int32_t)verbose,
                                                            fmt,
                                                            scan_args);
@@ -569,7 +569,7 @@ void nei_vlog_literal(nei_log_config_handle_t config_handle,
                                                                  file,
                                                                  line,
                                                                  func,
-                                                                 (int32_t)NEI_LOG_LEVEL_VERBOSE,
+                                                                 (int32_t)NEI_L_VERBOSE,
                                                                  (int32_t)verbose,
                                                                  message,
                                                                  length);
@@ -1961,7 +1961,7 @@ static void _nei_log_emit_message(
   }
   if (verbose == _NEI_LOG_NOT_VERBOSE) {
     const uint32_t mask = (uint32_t)(1U << (uint32_t)level);
-    if (level < (int32_t)NEI_LOG_LEVEL_VERBOSE || level > (int32_t)NEI_LOG_LEVEL_FATAL) {
+    if (level < (int32_t)NEI_L_VERBOSE || level > (int32_t)NEI_L_FATAL) {
       return;
     }
     if ((effective->level_flags.all & mask) == 0U) {

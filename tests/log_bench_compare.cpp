@@ -315,7 +315,7 @@ int main() {
               time_nei_memory_ms(
                   [] {
                     nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                             NEI_LOG_LEVEL_INFO,
+                             NEI_L_INFO,
                              __FILE__,
                              __LINE__,
                              "bench",
@@ -335,7 +335,7 @@ int main() {
               time_nei_memory_ms(
                   [] {
                     nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                             NEI_LOG_LEVEL_INFO,
+                             NEI_L_INFO,
                              __FILE__,
                              __LINE__,
                              "bench",
@@ -360,7 +360,7 @@ int main() {
                   [] {
                     static const char body[] = "info-only";
                     nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                                     NEI_LOG_LEVEL_INFO,
+                                     NEI_L_INFO,
                                      __FILE__,
                                      __LINE__,
                                      "bench",
@@ -396,7 +396,7 @@ int main() {
     const int64_t us = time_nei_file_ms(
         [] {
           nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                   NEI_LOG_LEVEL_INFO,
+                   NEI_L_INFO,
                    __FILE__,
                    __LINE__,
                    "bench",
@@ -426,7 +426,7 @@ int main() {
     const int64_t us = time_nei_file_ms(
         [] {
           nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                   NEI_LOG_LEVEL_INFO,
+                   NEI_L_INFO,
                    __FILE__,
                    __LINE__,
                    "bench",
@@ -462,7 +462,7 @@ int main() {
         [] {
           static const char body[] = "file literal body";
           nei_llog_literal(
-              NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "bench", body, sizeof(body) - 1U);
+              NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", body, sizeof(body) - 1U);
         },
         kFileIters,
         nei_lit.c_str());
@@ -501,7 +501,7 @@ int main() {
     const int64_t us = time_nei_file_sync_ms(
         [] {
           nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                   NEI_LOG_LEVEL_INFO,
+                   NEI_L_INFO,
                    __FILE__,
                    __LINE__,
                    "bench",
@@ -531,7 +531,7 @@ int main() {
     const int64_t us = time_nei_file_sync_ms(
         [] {
           nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                   NEI_LOG_LEVEL_INFO,
+                   NEI_L_INFO,
                    __FILE__,
                    __LINE__,
                    "bench",
@@ -567,7 +567,7 @@ int main() {
         [] {
           static const char body[] = "sync literal body";
           nei_llog_literal(
-              NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_LOG_LEVEL_INFO, __FILE__, __LINE__, "bench", body, sizeof(body) - 1U);
+              NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", body, sizeof(body) - 1U);
         },
         kFileSyncIters,
         nei_lit_sync.c_str());
