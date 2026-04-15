@@ -15,7 +15,8 @@ public:
     class Impl;
 
     explicit SingleThreadTaskRunner(
-        std::function<void(const Location&, OnceClosure, std::chrono::milliseconds)> enqueue);
+        std::function<void(const Location&, const TaskTraits&, OnceClosure, std::chrono::milliseconds)>
+            enqueue);
     ~SingleThreadTaskRunner() override;
 
     SingleThreadTaskRunner(const SingleThreadTaskRunner&) = delete;
@@ -24,9 +25,13 @@ public:
     SingleThreadTaskRunner(SingleThreadTaskRunner&&) noexcept;
     SingleThreadTaskRunner& operator=(SingleThreadTaskRunner&&) noexcept;
 
-    void PostTask(const Location& from_here, OnceClosure task) override;
-    void PostDelayedTask(
+    void PostTaskWithTraits(
         const Location& from_here,
+        const TaskTraits& traits,
+        OnceClosure task) override;
+    void PostDelayedTaskWithTraits(
+        const Location& from_here,
+        const TaskTraits& traits,
         OnceClosure task,
         std::chrono::milliseconds delay) override;
 

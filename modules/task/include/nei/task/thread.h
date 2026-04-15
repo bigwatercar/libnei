@@ -23,6 +23,9 @@ public:
     Thread(Thread&&) noexcept;
     Thread& operator=(Thread&&) noexcept;
 
+    void StartShutdown();
+    void Shutdown();
+
     std::shared_ptr<TaskRunner> GetTaskRunner();
 
 private:

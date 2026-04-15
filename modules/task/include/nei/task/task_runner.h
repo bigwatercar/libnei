@@ -8,6 +8,7 @@
 #include <nei/macros/nei_export.h>
 #include <nei/task/location.h>
 #include <nei/task/once_callback.h>
+#include <nei/task/task_traits.h>
 
 namespace nei {
 
@@ -17,9 +18,19 @@ class NEI_API TaskRunner {
 public:
     virtual ~TaskRunner();
 
-    virtual void PostTask(const Location& from_here, OnceClosure task) = 0;
-    virtual void PostDelayedTask(
+    void PostTask(const Location& from_here, OnceClosure task);
+    void PostDelayedTask(
         const Location& from_here,
+        OnceClosure task,
+        std::chrono::milliseconds delay);
+
+    virtual void PostTaskWithTraits(
+        const Location& from_here,
+        const TaskTraits& traits,
+        OnceClosure task) = 0;
+    virtual void PostDelayedTaskWithTraits(
+        const Location& from_here,
+        const TaskTraits& traits,
         OnceClosure task,
         std::chrono::milliseconds delay) = 0;
 };

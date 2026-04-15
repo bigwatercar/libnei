@@ -31,9 +31,13 @@ public:
     static std::shared_ptr<SequencedTaskRunner> Create(ThreadPool& thread_pool);
     static std::shared_ptr<SequencedTaskRunner> Create();
 
-    void PostTask(const Location& from_here, OnceClosure task) override;
-    void PostDelayedTask(
+    void PostTaskWithTraits(
         const Location& from_here,
+        const TaskTraits& traits,
+        OnceClosure task) override;
+    void PostDelayedTaskWithTraits(
+        const Location& from_here,
+        const TaskTraits& traits,
         OnceClosure task,
         std::chrono::milliseconds delay) override;
 

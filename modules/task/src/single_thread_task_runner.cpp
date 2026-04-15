@@ -6,26 +6,34 @@ namespace nei {
 
 class SingleThreadTaskRunner::Impl {
 public:
-    explicit Impl(std::function<void(const Location&, OnceClosure, std::chrono::milliseconds)> enqueue)
+    explicit Impl(
+        std::function<void(const Location&, const TaskTraits&, OnceClosure, std::chrono::milliseconds)>
+            enqueue)
         : enqueue_(std::move(enqueue)) {}
 
-    void PostTask(const Location& from_here, OnceClosure task) {
-        enqueue_(from_here, std::move(task), std::chrono::milliseconds(0));
+    void PostTaskWithTraits(
+        const Location& from_here,
+        const TaskTraits& traits,
+        OnceClosure task) {
+        enqueue_(from_here, traits, std::move(task), std::chrono::milliseconds(0));
     }
 
-    void PostDelayedTask(
+    void PostDelayedTaskWithTraits(
         const Location& from_here,
+        const TaskTraits& traits,
         OnceClosure task,
         std::chrono::milliseconds delay) {
-        enqueue_(from_here, std::move(task), delay);
+        enqueue_(from_here, traits, std::move(task), delay);
     }
 
 private:
-    std::function<void(const Location&, OnceClosure, std::chrono::milliseconds)> enqueue_;
+    std::function<void(const Location&, const TaskTraits&, OnceClosure, std::chrono::milliseconds)>
+        enqueue_;
 };
 
 SingleThreadTaskRunner::SingleThreadTaskRunner(
-    std::function<void(const Location&, OnceClosure, std::chrono::milliseconds)> enqueue)
+    std::function<void(const Location&, const TaskTraits&, OnceClosure, std::chrono::milliseconds)>
+        enqueue)
     : impl_(std::make_unique<Impl>(std::move(enqueue))) {}
 
 SingleThreadTaskRunner::~SingleThreadTaskRunner() = default;
@@ -35,15 +43,19 @@ SingleThreadTaskRunner::SingleThreadTaskRunner(SingleThreadTaskRunner&&) noexcep
 SingleThreadTaskRunner& SingleThreadTaskRunner::operator=(
     SingleThreadTaskRunner&&) noexcept = default;
 
-void SingleThreadTaskRunner::PostTask(const Location& from_here, OnceClosure task) {
-    impl_->PostTask(from_here, std::move(task));
+void SingleThreadTaskRunner::PostTaskWithTraits(
+    const Location& from_here,
+    const TaskTraits& traits,
+    OnceClosure task) {
+    impl_->PostTaskWithTraits(from_here, traits, std::move(task));
 }
 
-void SingleThreadTaskRunner::PostDelayedTask(
+void SingleThreadTaskRunner::PostDelayedTaskWithTraits(
     const Location& from_here,
+    const TaskTraits& traits,
     OnceClosure task,
     std::chrono::milliseconds delay) {
-    impl_->PostDelayedTask(from_here, std::move(task), delay);
+    impl_->PostDelayedTaskWithTraits(from_here, traits, std::move(task), delay);
 }
 
 } // namespace nei

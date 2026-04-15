@@ -19,12 +19,16 @@ public:
         Shutdown();
     }
 
-    void PostTask(const Location& from_here, OnceClosure task) {
-        PostDelayedTask(from_here, std::move(task), std::chrono::milliseconds(0));
+    void PostTaskWithTraits(
+        const Location& from_here,
+        const TaskTraits& traits,
+        OnceClosure task) {
+        PostDelayedTaskWithTraits(from_here, traits, std::move(task), std::chrono::milliseconds(0));
     }
 
-    void PostDelayedTask(
+    void PostDelayedTaskWithTraits(
         const Location& from_here,
+        const TaskTraits& traits,
         OnceClosure task,
         std::chrono::milliseconds delay) {
         bool needs_schedule = false;
@@ -33,7 +37,7 @@ public:
             if (state_->shutdown) {
                 return;
             }
-            state_->tasks.push(ScheduledEntry{from_here, std::move(task), delay});
+            state_->tasks.push(ScheduledEntry{from_here, traits, std::move(task), delay});
             if (!state_->scheduled) {
                 state_->scheduled = true;
                 needs_schedule = true;
@@ -57,6 +61,7 @@ private:
     struct State {
         struct ScheduledEntry {
             Location from_here;
+            TaskTraits traits;
             OnceClosure task;
             std::chrono::milliseconds delay = std::chrono::milliseconds(0);
         };
@@ -108,6 +113,7 @@ private:
     static void ScheduleOne(const std::shared_ptr<State>& state, ThreadPool* thread_pool) {
         std::chrono::milliseconds delay(0);
         Location from_here = Location::Unknown();
+        TaskTraits traits = TaskTraits::UserVisible();
         {
             std::lock_guard<std::mutex> lock(state->mutex);
             if (state->shutdown || state->tasks.empty()) {
@@ -116,9 +122,11 @@ private:
             }
             delay = state->tasks.front().delay;
             from_here = state->tasks.front().from_here;
+            traits = state->tasks.front().traits;
         }
-        thread_pool->PostDelayedTask(
+        thread_pool->PostDelayedTaskWithTraits(
             from_here,
+            traits,
             BindOnce(
                 [](const std::shared_ptr<State>& inner_state, ThreadPool* inner_pool) {
                     RunOneTask(inner_state, inner_pool);
@@ -153,15 +161,19 @@ std::shared_ptr<SequencedTaskRunner> SequencedTaskRunner::Create() {
     return std::make_shared<SequencedTaskRunner>(ThreadPool::GetInstance());
 }
 
-void SequencedTaskRunner::PostTask(const Location& from_here, OnceClosure task) {
-    impl_->PostTask(from_here, std::move(task));
+void SequencedTaskRunner::PostTaskWithTraits(
+    const Location& from_here,
+    const TaskTraits& traits,
+    OnceClosure task) {
+    impl_->PostTaskWithTraits(from_here, traits, std::move(task));
 }
 
-void SequencedTaskRunner::PostDelayedTask(
+void SequencedTaskRunner::PostDelayedTaskWithTraits(
     const Location& from_here,
+    const TaskTraits& traits,
     OnceClosure task,
     std::chrono::milliseconds delay) {
-    impl_->PostDelayedTask(from_here, std::move(task), delay);
+    impl_->PostDelayedTaskWithTraits(from_here, traits, std::move(task), delay);
 }
 
 } // namespace nei

@@ -54,6 +54,15 @@ target_link_libraries(task_weak_ptr_demo PRIVATE nei::nei)
 add_executable(task_location_delay_demo task_location_delay_demo.cpp)
 target_link_libraries(task_location_delay_demo PRIVATE nei::nei)
 
+add_executable(task_priority_demo task_priority_demo.cpp)
+target_link_libraries(task_priority_demo PRIVATE nei::nei)
+
+add_executable(task_shutdown_demo task_shutdown_demo.cpp)
+target_link_libraries(task_shutdown_demo PRIVATE nei::nei)
+
+add_executable(task_may_block_demo task_may_block_demo.cpp)
+target_link_libraries(task_may_block_demo PRIVATE nei::nei)
+
 include(GoogleTest)
 #
 # Avoid running the test executable during build time on Windows shared builds
@@ -99,6 +108,24 @@ if(WIN32 AND BUILD_SHARED_LIBS)
     TARGET task_location_delay_demo
     POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:task_location_delay_demo> $<TARGET_FILE_DIR:task_location_delay_demo>
+    COMMAND_EXPAND_LISTS
+  )
+  add_custom_command(
+    TARGET task_priority_demo
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:task_priority_demo> $<TARGET_FILE_DIR:task_priority_demo>
+    COMMAND_EXPAND_LISTS
+  )
+  add_custom_command(
+    TARGET task_shutdown_demo
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:task_shutdown_demo> $<TARGET_FILE_DIR:task_shutdown_demo>
+    COMMAND_EXPAND_LISTS
+  )
+  add_custom_command(
+    TARGET task_may_block_demo
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:task_may_block_demo> $<TARGET_FILE_DIR:task_may_block_demo>
     COMMAND_EXPAND_LISTS
   )
   if(NEI_BENCHMARK_SPDLOG AND TARGET log_bench_compare)
