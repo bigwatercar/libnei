@@ -1,6 +1,7 @@
 target_sources(
     nei
     PRIVATE
+        src/callback.cpp
         src/internal_flag.cpp
         src/task_tracer.cpp
         src/time_source.cpp
