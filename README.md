@@ -53,7 +53,30 @@ libnei-src/
 
 ## Task module status
 
+
 The `task` module has evolved into a production-oriented async execution layer inspired by Chromium base.
+
+### Blocking region support (ScopedBlockingCall)
+
+- **ScopedBlockingCall**: RAII 工具类，用于标记当前线程进入/退出阻塞区，自动通知调度器（ThreadPool）进行补偿 worker 管理，提升并发任务在 I/O 等场景下的吞吐。
+- 支持嵌套调用，线程安全。
+- 典型用法：
+
+  ```cpp
+  {
+    ScopedBlockingCall blocking;
+    // ...执行阻塞操作...
+  } // 离开作用域自动恢复
+  ```
+
+- 观测API：
+  - `ThreadPool::ActiveBlockingCallCountForTesting()`：当前活跃阻塞区线程数
+  - `ThreadPool::SpawnedCompensationWorkersForTesting()`：已补偿 worker 数
+
+- 相关测试：
+  - `scoped_blocking_call_test.cpp`（单元/嵌套/补偿/计数）
+  - `scoped_blocking_call_shutdown_test.cpp`（高频阻塞、shutdown/race、取消等）
+  - `mixed_load_test.cpp`（集成/补偿/延迟/尾延迟等）
 
 ### Architecture
 
@@ -72,9 +95,14 @@ The `task` module has evolved into a production-oriented async execution layer i
 
 ### Testing and demos
 
-- Automated tests include deterministic task-environment coverage and scheduler stress/race regression.
+
+- Automated tests include deterministic task-environment coverage, scheduler stress/race regression, and blocking region (ScopedBlockingCall) correctness/robustness：
   - `TaskEnvironmentTest.*`
   - `TaskSchedulerTest.*`
+  - `scoped_blocking_call_test.cpp`
+  - `scoped_blocking_call_shutdown_test.cpp`
+  - `mixed_load_test.cpp`
+
 - Demos remain available for exploratory runs:
   - `task_thread_demo`, `task_location_delay_demo`, `task_priority_demo`, `task_shutdown_demo`, `task_may_block_demo`, `task_weak_ptr_demo`
 
