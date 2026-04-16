@@ -15,6 +15,7 @@ A modular C/C++ library built with CMake. Sources live under `modules/`, but the
 | `utils`  | C++ string utilities (`nei/utils/strings.h`). |
 | `xdr`    | XDR-style packing helpers (`nei/xdr/xdr.h`, `xdr.c`). |
 | `log`    | Async-oriented C logger (`nei/log/log.h`, `log.c`). |
+| `task`   | C++ async task framework (TaskRunner / SequencedTaskRunner / ThreadPool / WeakPtr / TaskEnvironment). |
 
 Include paths follow `include/nei/...` under each module; after install, use `#include <nei/log/log.h>` etc.
 
@@ -31,15 +32,51 @@ libnei-src/
     utils/include/nei/utils/   src/strings.cpp
     xdr/include/nei/xdr/       src/xdr.c
     log/include/nei/log/       src/log.c
+    task/include/nei/task/     src/*.cpp
   tests/
     CMakeLists.txt
     core_test.cpp
     log_test.cpp
     log_test2.c
+    task_environment_test.cpp
+    task_scheduler_test.cpp
     xdr_test.cpp
+    task_thread_demo.cpp
+    task_location_delay_demo.cpp
+    task_priority_demo.cpp
+    task_shutdown_demo.cpp
+    task_may_block_demo.cpp
+    task_weak_ptr_demo.cpp
     log_bench.cpp
     log_bench_compare.cpp   # optional, see below
 ```
+
+## Task module status
+
+The `task` module has evolved into a production-oriented async execution layer inspired by Chromium base.
+
+### Architecture
+
+- API layer: `TaskRunner`, `Location`, `FROM_HERE` tracing helpers.
+- Logic layer: `SequencedTaskRunner` guarantees in-order execution without requiring user locks.
+- Scheduler layer: `ThreadPool` with delayed tasks, task priorities, and may-block compensation workers.
+- Safety layer: `WeakPtr` / `WeakPtrFactory` for use-after-free-safe async callbacks.
+
+### Implemented capabilities
+
+- Priority-aware scheduling: `USER_BLOCKING`, `USER_VISIBLE`, `BEST_EFFORT`.
+- Shutdown policies: `CONTINUE_ON_SHUTDOWN`, `SKIP_ON_SHUTDOWN`, `BLOCK_SHUTDOWN`.
+- Delayed task execution and source-location tracing via `TaskTracer`.
+- Configurable compensation spawn delay for may-block workloads (Chromium-style delayed backfill).
+- Injectable scheduler time source and `TaskEnvironment` for deterministic virtual-time tests.
+
+### Testing and demos
+
+- Automated tests include deterministic task-environment coverage and scheduler stress/race regression.
+  - `TaskEnvironmentTest.*`
+  - `TaskSchedulerTest.*`
+- Demos remain available for exploratory runs:
+  - `task_thread_demo`, `task_location_delay_demo`, `task_priority_demo`, `task_shutdown_demo`, `task_may_block_demo`, `task_weak_ptr_demo`
 
 ## CMake options
 

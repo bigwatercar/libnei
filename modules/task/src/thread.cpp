@@ -13,22 +13,31 @@
 #include <vector>
 
 #include <nei/task/task_tracer.h>
+#include <nei/task/time_source.h>
 
 #include "single_thread_task_runner.h"
 
 namespace nei {
 
+namespace {
+
+std::shared_ptr<const TimeSource> SharedSystemTimeSource() {
+    static const std::shared_ptr<const TimeSource> source(
+        &SystemTimeSource::Instance(),
+        [](const TimeSource*) {});
+    return source;
+}
+
+} // namespace
+
 class Thread::Impl {
 public:
-    Impl()
-        : runner_(std::make_shared<SingleThreadTaskRunner>(
-              [this](
-                  const Location& from_here,
-                  const TaskTraits& traits,
-                  OnceClosure task,
-                  std::chrono::milliseconds delay) {
-                  Enqueue(from_here, traits, std::move(task), delay);
-              })),
+    explicit Impl(std::shared_ptr<const TimeSource> time_source)
+        : runner_(std::make_shared<SingleThreadTaskRunner>(SingleThreadTaskRunner::EnqueueDelegate{
+              this,
+              &Impl::EnqueueThunk,
+          })),
+          time_source_(std::move(time_source)),
           worker_([this]() { RunLoop(); }) {}
 
     ~Impl() {
@@ -109,6 +118,15 @@ private:
         return lhs->sequence < rhs->sequence;
     }
 
+    static void EnqueueThunk(
+        void* context,
+        const Location& from_here,
+        const TaskTraits& traits,
+        OnceClosure task,
+        std::chrono::milliseconds delay) {
+        static_cast<Impl*>(context)->Enqueue(from_here, traits, std::move(task), delay);
+    }
+
     void Enqueue(
         const Location& from_here,
         const TaskTraits& traits,
@@ -119,7 +137,7 @@ private:
             return;
         }
 
-        const auto run_at = std::chrono::steady_clock::now() + delay;
+        const auto run_at = time_source_->Now() + delay;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (shutting_down_.load(std::memory_order_relaxed) &&
@@ -178,7 +196,7 @@ private:
                         continue;
                     }
 
-                    const auto now = std::chrono::steady_clock::now();
+                    const auto now = time_source_->Now();
                     const auto next_run_at = tasks_.top()->run_at;
                     if (now >= next_run_at) {
                         std::vector<std::shared_ptr<ScheduledTask>> due_tasks;
@@ -212,6 +230,7 @@ private:
     }
 
     std::shared_ptr<SingleThreadTaskRunner> runner_;
+    std::shared_ptr<const TimeSource> time_source_;
     std::thread worker_;
     std::mutex mutex_;
     std::condition_variable cv_;
@@ -225,7 +244,12 @@ private:
     std::atomic<bool> shutting_down_{false};
 };
 
-Thread::Thread() : impl_(std::make_unique<Impl>()) {}
+Thread::Thread()
+    : Thread(SharedSystemTimeSource()) {}
+
+Thread::Thread(std::shared_ptr<const TimeSource> time_source)
+    : impl_(std::make_unique<Impl>(time_source ? std::move(time_source)
+                                              : SharedSystemTimeSource())) {}
 
 Thread::~Thread() = default;
 

@@ -9,16 +9,25 @@
 
 #include <nei/macros/nei_export.h>
 #include <nei/task/task_runner.h>
+#include <nei/task/time_source.h>
 
 namespace nei {
 
 class SequencedTaskRunner;
+class ScopedBlockingCall;  // Forward declaration for friend access
 
 class NEI_API ThreadPool final {
 public:
     class Impl;
+    friend class ScopedBlockingCall;  // Allow ScopedBlockingCall to access Impl
 
-    explicit ThreadPool(std::size_t worker_count = 0);
+    explicit ThreadPool(
+        std::size_t worker_count = 0,
+        std::chrono::milliseconds compensation_spawn_delay = std::chrono::milliseconds(8));
+    ThreadPool(
+        std::size_t worker_count,
+        std::shared_ptr<const TimeSource> time_source,
+        std::chrono::milliseconds compensation_spawn_delay = std::chrono::milliseconds(8));
     ~ThreadPool();
 
     ThreadPool(const ThreadPool&) = delete;
@@ -48,6 +57,18 @@ public:
     // Chromium-style preferred entry for sequence-bound task posting.
     std::shared_ptr<SequencedTaskRunner> CreateSequencedTaskRunner();
     std::size_t WorkerCount() const;
+    bool IsIdleForTesting() const;
+    void WakeForTesting();
+
+    // Observability: Query scheduler metrics (for testing/monitoring)
+    // Returns count of workers currently in blocking regions (ScopedBlockingCall)
+    std::size_t ActiveBlockingCallCountForTesting();
+    // Returns count of compensation workers spawned so far (cumulative)
+    std::size_t SpawnedCompensationWorkersForTesting();
+
+    // Internal: Called by ScopedBlockingCall to notify scheduler
+    static void NotifyBlockingRegionEntered();
+    static void NotifyBlockingRegionExited();
 
 private:
     std::unique_ptr<Impl> impl_;

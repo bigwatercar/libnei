@@ -6,16 +6,22 @@ namespace nei {
 
 class SingleThreadTaskRunner::Impl {
 public:
-    explicit Impl(
-        std::function<void(const Location&, const TaskTraits&, OnceClosure, std::chrono::milliseconds)>
-            enqueue)
-        : enqueue_(std::move(enqueue)) {}
+    explicit Impl(EnqueueDelegate enqueue_delegate)
+        : enqueue_delegate_(enqueue_delegate) {}
 
     void PostTaskWithTraits(
         const Location& from_here,
         const TaskTraits& traits,
         OnceClosure task) {
-        enqueue_(from_here, traits, std::move(task), std::chrono::milliseconds(0));
+        if (enqueue_delegate_.invoke == nullptr) {
+            return;
+        }
+        enqueue_delegate_.invoke(
+            enqueue_delegate_.context,
+            from_here,
+            traits,
+            std::move(task),
+            std::chrono::milliseconds(0));
     }
 
     void PostDelayedTaskWithTraits(
@@ -23,18 +29,18 @@ public:
         const TaskTraits& traits,
         OnceClosure task,
         std::chrono::milliseconds delay) {
-        enqueue_(from_here, traits, std::move(task), delay);
+        if (enqueue_delegate_.invoke == nullptr) {
+            return;
+        }
+        enqueue_delegate_.invoke(enqueue_delegate_.context, from_here, traits, std::move(task), delay);
     }
 
 private:
-    std::function<void(const Location&, const TaskTraits&, OnceClosure, std::chrono::milliseconds)>
-        enqueue_;
+    EnqueueDelegate enqueue_delegate_;
 };
 
-SingleThreadTaskRunner::SingleThreadTaskRunner(
-    std::function<void(const Location&, const TaskTraits&, OnceClosure, std::chrono::milliseconds)>
-        enqueue)
-    : impl_(std::make_unique<Impl>(std::move(enqueue))) {}
+SingleThreadTaskRunner::SingleThreadTaskRunner(EnqueueDelegate enqueue_delegate)
+    : impl_(std::make_unique<Impl>(enqueue_delegate)) {}
 
 SingleThreadTaskRunner::~SingleThreadTaskRunner() = default;
 

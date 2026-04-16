@@ -3,7 +3,6 @@
 #ifndef NEI_TASK_SINGLE_THREAD_TASK_RUNNER_H
 #define NEI_TASK_SINGLE_THREAD_TASK_RUNNER_H
 
-#include <functional>
 #include <memory>
 
 #include <nei/task/task_runner.h>
@@ -14,9 +13,19 @@ class SingleThreadTaskRunner final : public TaskRunner {
 public:
     class Impl;
 
-    explicit SingleThreadTaskRunner(
-        std::function<void(const Location&, const TaskTraits&, OnceClosure, std::chrono::milliseconds)>
-            enqueue);
+    struct EnqueueDelegate {
+        using InvokeFn = void (*)(
+            void* context,
+            const Location&,
+            const TaskTraits&,
+            OnceClosure,
+            std::chrono::milliseconds);
+
+        void* context = nullptr;
+        InvokeFn invoke = nullptr;
+    };
+
+    explicit SingleThreadTaskRunner(EnqueueDelegate enqueue_delegate);
     ~SingleThreadTaskRunner() override;
 
     SingleThreadTaskRunner(const SingleThreadTaskRunner&) = delete;

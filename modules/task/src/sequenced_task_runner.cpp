@@ -5,7 +5,7 @@
 #include <queue>
 #include <utility>
 
-#include <nei/task/once_callback.h>
+#include <nei/task/callback.h>
 #include <nei/task/thread_pool.h>
 
 namespace nei {

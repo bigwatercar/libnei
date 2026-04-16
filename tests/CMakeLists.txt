@@ -14,7 +14,12 @@ add_executable(
     nei_tests
     core_test.cpp
     log_test.cpp
-    xdr_test.cpp
+    task_callback_test.cpp
+    task_environment_test.cpp
+    task_scheduler_test.cpp
+    scoped_blocking_call_test.cpp
+    mixed_load_test.cpp
+    scoped_blocking_call_shutdown_test.cpp
 )
 
 target_link_libraries(
