@@ -89,3 +89,15 @@ TEST(TaskEnvironmentTest, SameDeadlineUsesPriorityOrder) {
     EXPECT_EQ(order[0], "blocking");
     EXPECT_EQ(order[1], "visible");
 }
+
+TEST(TaskEnvironmentTest, AcceptsThreadPoolOptions) {
+    nei::ThreadPoolOptions options;
+    options.worker_count = 2;
+    options.best_effort_worker_count = 2;
+    options.enable_compensation = false;
+    options.enable_best_effort_compensation = false;
+
+    nei::TaskEnvironment env(options);
+
+    EXPECT_EQ(env.thread_pool().WorkerCount(), 4u);
+}

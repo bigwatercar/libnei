@@ -32,24 +32,35 @@ std::shared_ptr<const TimeSource> SharedSystemTimeSource() {
 
 class ThreadPool::Impl {
 public:
-    static constexpr std::size_t kDefaultBestEffortWorkerCount = 1;
-    static constexpr std::chrono::milliseconds kCompensationIdleTimeout{300};
-    static constexpr std::chrono::milliseconds kDefaultCompensationSpawnDelay{8};
-
     // Thread-local current impl pointer for ScopedBlockingCall to notify scheduler
     thread_local static Impl* current_impl_;
 
+    struct ResolvedOptions {
+        std::size_t normal_worker_count = 0;
+        std::size_t best_effort_worker_count = 0;
+        bool enable_compensation = true;
+        bool enable_best_effort_compensation = false;
+        std::size_t max_compensation_workers = 0;
+        std::size_t best_effort_max_compensation_workers = 0;
+        std::chrono::milliseconds compensation_spawn_delay{0};
+        std::chrono::milliseconds compensation_idle_timeout{0};
+    };
+
     Impl(
-        std::size_t worker_count,
-        std::shared_ptr<const TimeSource> time_source,
-        std::chrono::milliseconds compensation_spawn_delay)
-        : compensation_spawn_delay_(
-              compensation_spawn_delay.count() < 0 ? std::chrono::milliseconds(0)
-                                                   : compensation_spawn_delay),
-          time_source_(std::move(time_source)) {
-        const std::size_t normal_count = NormalizeNormalWorkerCount(worker_count);
-        StartGroup(normal_group_, normal_count, true);
-        StartGroup(best_effort_group_, kDefaultBestEffortWorkerCount, false);
+        const ThreadPoolOptions& options,
+                std::shared_ptr<const TimeSource> time_source)
+                : options_(ResolveOptions(options)),
+                    time_source_(std::move(time_source)) {
+        StartGroup(
+            normal_group_,
+            options_.normal_worker_count,
+            options_.enable_compensation,
+            options_.max_compensation_workers);
+        StartGroup(
+            best_effort_group_,
+            options_.best_effort_worker_count,
+            options_.enable_best_effort_compensation,
+            options_.best_effort_max_compensation_workers);
     }
 
     ~Impl() {
@@ -214,6 +225,10 @@ public:
     }
 
 private:
+    static std::chrono::milliseconds ClampDuration(std::chrono::milliseconds duration) {
+        return duration.count() < 0 ? std::chrono::milliseconds(0) : duration;
+    }
+
     static std::size_t NormalizeNormalWorkerCount(std::size_t worker_count) {
         if (worker_count > 0) {
             return worker_count;
@@ -222,11 +237,47 @@ private:
         return std::max<std::size_t>(2, hw == 0 ? 1 : hw);
     }
 
-    void StartGroup(WorkerGroup& group, std::size_t worker_count, bool allow_compensation) {
+    static std::size_t ResolveMaxCompensationWorkers(
+        bool compensation_enabled,
+        std::size_t configured_max,
+        std::size_t base_worker_count) {
+        if (!compensation_enabled) {
+            return 0;
+        }
+        if (configured_max > 0) {
+            return configured_max;
+        }
+        return base_worker_count;
+    }
+
+    static ResolvedOptions ResolveOptions(const ThreadPoolOptions& options) {
+        ResolvedOptions resolved;
+        resolved.normal_worker_count = NormalizeNormalWorkerCount(options.worker_count);
+        resolved.best_effort_worker_count = options.best_effort_worker_count;
+        resolved.enable_compensation = options.enable_compensation;
+        resolved.enable_best_effort_compensation = options.enable_best_effort_compensation;
+        resolved.max_compensation_workers = ResolveMaxCompensationWorkers(
+            resolved.enable_compensation,
+            options.max_compensation_workers,
+            resolved.normal_worker_count);
+        resolved.best_effort_max_compensation_workers = ResolveMaxCompensationWorkers(
+            resolved.enable_best_effort_compensation,
+            options.best_effort_max_compensation_workers,
+            resolved.best_effort_worker_count);
+        resolved.compensation_spawn_delay = ClampDuration(options.compensation_spawn_delay);
+        resolved.compensation_idle_timeout = ClampDuration(options.compensation_idle_timeout);
+        return resolved;
+    }
+
+    void StartGroup(
+        WorkerGroup& group,
+        std::size_t worker_count,
+        bool allow_compensation,
+        std::size_t max_compensation_workers) {
         group.base_worker_count = worker_count;
         group.allow_compensation = allow_compensation;
-        group.max_compensation_workers = allow_compensation ? worker_count : 0;
-        group.workers.reserve(worker_count);
+        group.max_compensation_workers = allow_compensation ? max_compensation_workers : 0;
+        group.workers.reserve(worker_count + group.max_compensation_workers);
         for (std::size_t i = 0; i < worker_count; ++i) {
             group.workers.emplace_back([this, &group]() { RunLoop(&group, false); });
         }
@@ -273,7 +324,7 @@ private:
         }
 
         group.pending_compensation_spawn = true;
-        group.compensation_spawn_deadline = now + compensation_spawn_delay_;
+        group.compensation_spawn_deadline = now + options_.compensation_spawn_delay;
         StartCompensationSpawnTimer(&group);
     }
 
@@ -303,7 +354,7 @@ private:
     }
 
     void StartCompensationSpawnTimer(WorkerGroup* group) {
-        const auto delay = compensation_spawn_delay_;
+        const auto delay = options_.compensation_spawn_delay;
         std::lock_guard<std::mutex> lock(compensation_timer_mutex_);
         compensation_spawn_timers_.emplace_back([this, group, delay]() {
             std::this_thread::sleep_for(delay);
@@ -404,7 +455,7 @@ private:
                     if (group->tasks.empty()) {
                         CancelPendingCompensationSpawnLocked(*group);
                         if (is_compensation_worker) {
-                            const auto status = group->cv.wait_for(lock, kCompensationIdleTimeout);
+                            const auto status = group->cv.wait_for(lock, options_.compensation_idle_timeout);
                             if (status == std::cv_status::timeout && group->tasks.empty() && !group->stop) {
                                 if (group->spawned_compensation_workers > 0) {
                                     --group->spawned_compensation_workers;
@@ -550,23 +601,42 @@ public:
     }
 
     std::vector<std::thread> compensation_spawn_timers_;
-    std::chrono::milliseconds compensation_spawn_delay_ = kDefaultCompensationSpawnDelay;
+    ResolvedOptions options_;
     std::shared_ptr<const TimeSource> time_source_;
     std::atomic<bool> shutting_down_{false};
 };
 
+namespace {
+
+ThreadPoolOptions MakeLegacyOptions(
+    std::size_t worker_count,
+    std::chrono::milliseconds compensation_spawn_delay) {
+    ThreadPoolOptions options;
+    options.worker_count = worker_count;
+    options.compensation_spawn_delay = compensation_spawn_delay;
+    return options;
+}
+
+} // namespace
+
+ThreadPool::ThreadPool(const ThreadPoolOptions& options)
+    : ThreadPool(options, SharedSystemTimeSource()) {}
+
+ThreadPool::ThreadPool(
+    const ThreadPoolOptions& options,
+    std::shared_ptr<const TimeSource> time_source)
+    : impl_(std::make_unique<Impl>(
+          options,
+          time_source ? std::move(time_source) : SharedSystemTimeSource())) {}
+
 ThreadPool::ThreadPool(std::size_t worker_count, std::chrono::milliseconds compensation_spawn_delay)
-    : ThreadPool(worker_count, SharedSystemTimeSource(), compensation_spawn_delay) {}
+    : ThreadPool(MakeLegacyOptions(worker_count, compensation_spawn_delay), SharedSystemTimeSource()) {}
 
 ThreadPool::ThreadPool(
     std::size_t worker_count,
     std::shared_ptr<const TimeSource> time_source,
     std::chrono::milliseconds compensation_spawn_delay)
-    : impl_(std::make_unique<Impl>(
-          worker_count,
-          time_source ? std::move(time_source)
-                    : SharedSystemTimeSource(),
-          compensation_spawn_delay)) {}
+    : ThreadPool(MakeLegacyOptions(worker_count, compensation_spawn_delay), std::move(time_source)) {}
 
 ThreadPool::~ThreadPool() = default;
 

@@ -182,6 +182,206 @@ TEST(TaskSchedulerTest, PostingSkipTaskAfterShutdownIsIgnored) {
         std::future_status::timeout);
 }
 
+TEST(TaskSchedulerTest, ThreadPoolOptionsCustomizeWorkerCounts) {
+    nei::ThreadPoolOptions options;
+    options.worker_count = 2;
+    options.best_effort_worker_count = 3;
+    options.enable_compensation = false;
+    options.enable_best_effort_compensation = false;
+
+    nei::ThreadPool thread_pool(options);
+
+    EXPECT_EQ(thread_pool.WorkerCount(), 5u);
+}
+
+TEST(TaskSchedulerTest, BestEffortCompensationCanBeEnabledViaOptions) {
+    nei::ThreadPoolOptions options;
+    options.worker_count = 1;
+    options.best_effort_worker_count = 1;
+    options.enable_best_effort_compensation = true;
+    options.best_effort_max_compensation_workers = 1;
+    options.compensation_spawn_delay = std::chrono::milliseconds(0);
+    options.compensation_idle_timeout = std::chrono::milliseconds(200);
+
+    nei::ThreadPool thread_pool(options);
+
+    std::promise<void> blocker_started;
+    std::future<void> blocker_started_future = blocker_started.get_future();
+    std::promise<void> release_blocker;
+    std::shared_future<void> release_blocker_future = release_blocker.get_future().share();
+    std::promise<void> blocker_done;
+    std::future<void> blocker_done_future = blocker_done.get_future();
+    std::promise<void> quick_done;
+    std::future<void> quick_done_future = quick_done.get_future();
+
+    thread_pool.PostTaskWithTraits(
+        FROM_HERE,
+        nei::TaskTraits::BestEffort().MayBlock(),
+        nei::BindOnce(
+            [](std::promise<void>& started,
+               std::shared_future<void> release,
+               std::promise<void>& done) {
+                started.set_value();
+                release.wait();
+                done.set_value();
+            },
+            std::ref(blocker_started),
+            release_blocker_future,
+            std::ref(blocker_done)));
+
+    ASSERT_EQ(
+        blocker_started_future.wait_for(std::chrono::milliseconds(300)),
+        std::future_status::ready);
+
+    thread_pool.PostTaskWithTraits(
+        FROM_HERE,
+        nei::TaskTraits::BestEffort(),
+        nei::BindOnce(
+            [](std::promise<void>& done) {
+                done.set_value();
+            },
+            std::ref(quick_done)));
+
+    EXPECT_EQ(
+        quick_done_future.wait_for(std::chrono::milliseconds(300)),
+        std::future_status::ready);
+    EXPECT_GT(thread_pool.SpawnedCompensationWorkersForTesting(), 0u);
+
+    release_blocker.set_value();
+    EXPECT_EQ(blocker_done_future.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+}
+
+TEST(TaskSchedulerTest, BestEffortCompensationIsDisabledByDefault) {
+    nei::ThreadPoolOptions options;
+    options.worker_count = 1;
+    options.best_effort_worker_count = 1;
+
+    nei::ThreadPool thread_pool(options);
+
+    std::promise<void> blocker_started;
+    std::future<void> blocker_started_future = blocker_started.get_future();
+    std::promise<void> release_blocker;
+    std::shared_future<void> release_blocker_future = release_blocker.get_future().share();
+    std::promise<void> blocker_done;
+    std::future<void> blocker_done_future = blocker_done.get_future();
+    std::promise<void> quick_done;
+    std::future<void> quick_done_future = quick_done.get_future();
+
+    thread_pool.PostTaskWithTraits(
+        FROM_HERE,
+        nei::TaskTraits::BestEffort().MayBlock(),
+        nei::BindOnce(
+            [](std::promise<void>& started,
+               std::shared_future<void> release,
+               std::promise<void>& done) {
+                started.set_value();
+                release.wait();
+                done.set_value();
+            },
+            std::ref(blocker_started),
+            release_blocker_future,
+            std::ref(blocker_done)));
+
+    ASSERT_EQ(
+        blocker_started_future.wait_for(std::chrono::milliseconds(300)),
+        std::future_status::ready);
+
+    thread_pool.PostTaskWithTraits(
+        FROM_HERE,
+        nei::TaskTraits::BestEffort(),
+        nei::BindOnce(
+            [](std::promise<void>& done) {
+                done.set_value();
+            },
+            std::ref(quick_done)));
+
+    EXPECT_EQ(
+        quick_done_future.wait_for(std::chrono::milliseconds(120)),
+        std::future_status::timeout);
+    EXPECT_EQ(thread_pool.SpawnedCompensationWorkersForTesting(), 0u);
+
+    release_blocker.set_value();
+    EXPECT_EQ(blocker_done_future.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+    EXPECT_EQ(quick_done_future.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+}
+
+TEST(TaskSchedulerTest, CompensationWorkersReturnToZeroAfterIdle) {
+    nei::ThreadPoolOptions options;
+    options.worker_count = 1;
+    options.best_effort_worker_count = 1;
+    options.enable_compensation = true;
+    options.max_compensation_workers = 1;
+    options.compensation_spawn_delay = std::chrono::milliseconds(0);
+    options.compensation_idle_timeout = std::chrono::milliseconds(60);
+
+    nei::ThreadPool thread_pool(options);
+
+    std::promise<void> blocker_started;
+    std::future<void> blocker_started_future = blocker_started.get_future();
+    std::promise<void> release_blocker;
+    std::shared_future<void> release_blocker_future = release_blocker.get_future().share();
+    std::promise<void> blocker_done;
+    std::future<void> blocker_done_future = blocker_done.get_future();
+    std::promise<void> quick_done;
+    std::future<void> quick_done_future = quick_done.get_future();
+
+    thread_pool.PostTaskWithTraits(
+        FROM_HERE,
+        nei::TaskTraits::UserBlocking().MayBlock(),
+        nei::BindOnce(
+            [](std::promise<void>& started,
+               std::shared_future<void> release,
+               std::promise<void>& done) {
+                started.set_value();
+                release.wait();
+                done.set_value();
+            },
+            std::ref(blocker_started),
+            release_blocker_future,
+            std::ref(blocker_done)));
+
+    ASSERT_EQ(
+        blocker_started_future.wait_for(std::chrono::milliseconds(300)),
+        std::future_status::ready);
+
+    thread_pool.PostTaskWithTraits(
+        FROM_HERE,
+        nei::TaskTraits::UserVisible(),
+        nei::BindOnce(
+            [](std::promise<void>& done) {
+                done.set_value();
+            },
+            std::ref(quick_done)));
+
+    ASSERT_EQ(
+        quick_done_future.wait_for(std::chrono::milliseconds(400)),
+        std::future_status::ready);
+
+    const auto active_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    bool compensation_observed = false;
+    while (std::chrono::steady_clock::now() < active_deadline) {
+        if (thread_pool.SpawnedCompensationWorkersForTesting() > 0) {
+            compensation_observed = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    EXPECT_TRUE(compensation_observed);
+
+    release_blocker.set_value();
+    ASSERT_EQ(blocker_done_future.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+
+    const auto idle_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < idle_deadline) {
+        if (thread_pool.SpawnedCompensationWorkersForTesting() == 0) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    EXPECT_EQ(thread_pool.SpawnedCompensationWorkersForTesting(), 0u);
+}
+
 TEST(TaskSchedulerTest, BestEffortIsolationRemainsStableUnderRounds) {
     constexpr int kRounds = 12;
 

@@ -16,10 +16,26 @@ namespace nei {
 class SequencedTaskRunner;
 class ScopedBlockingCall;  // Forward declaration for friend access
 
+struct ThreadPoolOptions {
+    std::size_t worker_count = 0;
+    std::size_t best_effort_worker_count = 1;
+    bool enable_compensation = true;
+    bool enable_best_effort_compensation = false;
+    std::size_t max_compensation_workers = 0;
+    std::size_t best_effort_max_compensation_workers = 0;
+    std::chrono::milliseconds compensation_spawn_delay = std::chrono::milliseconds(8);
+    std::chrono::milliseconds compensation_idle_timeout = std::chrono::milliseconds(300);
+};
+
 class NEI_API ThreadPool final {
 public:
     class Impl;
     friend class ScopedBlockingCall;  // Allow ScopedBlockingCall to access Impl
+
+    explicit ThreadPool(const ThreadPoolOptions& options);
+    ThreadPool(
+        const ThreadPoolOptions& options,
+        std::shared_ptr<const TimeSource> time_source);
 
     explicit ThreadPool(
         std::size_t worker_count = 0,

@@ -42,12 +42,19 @@ public:
         : time_source_(std::make_shared<ManualTimeSource>(std::chrono::steady_clock::now())),
           thread_pool_(worker_count, time_source_) {}
 
+    explicit Impl(const ThreadPoolOptions& options)
+        : time_source_(std::make_shared<ManualTimeSource>(std::chrono::steady_clock::now())),
+          thread_pool_(options, time_source_) {}
+
     std::shared_ptr<ManualTimeSource> time_source_;
     ThreadPool thread_pool_;
 };
 
 TaskEnvironment::TaskEnvironment(std::size_t worker_count)
     : impl_(std::make_unique<Impl>(worker_count)) {}
+
+TaskEnvironment::TaskEnvironment(const ThreadPoolOptions& options)
+    : impl_(std::make_unique<Impl>(options)) {}
 
 TaskEnvironment::~TaskEnvironment() = default;
 

@@ -99,6 +99,8 @@ The `task` module has evolved into a production-oriented async execution layer i
 - Automated tests include deterministic task-environment coverage, scheduler stress/race regression, and blocking region (ScopedBlockingCall) correctness/robustness：
   - `TaskEnvironmentTest.*`
   - `TaskSchedulerTest.*`
+  - `TaskWeakPtrTest.*`
+  - `TaskStressTest.*`
   - `scoped_blocking_call_test.cpp`
   - `scoped_blocking_call_shutdown_test.cpp`
   - `mixed_load_test.cpp`

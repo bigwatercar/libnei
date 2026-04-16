@@ -12,6 +12,7 @@
 namespace nei {
 
 class ThreadPool;
+struct ThreadPoolOptions;
 class SequencedTaskRunner;
 
 class NEI_API TaskEnvironment final {
@@ -19,6 +20,7 @@ public:
     class Impl;
 
     explicit TaskEnvironment(std::size_t worker_count = 0);
+    explicit TaskEnvironment(const ThreadPoolOptions& options);
     ~TaskEnvironment();
 
     TaskEnvironment(const TaskEnvironment&) = delete;
