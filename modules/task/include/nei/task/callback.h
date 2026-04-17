@@ -9,6 +9,7 @@
 #include <utility>
 
 #include <nei/macros/nei_export.h>
+#include <nei/task/callback_base.h>
 #include <nei/task/callback_internal.h>
 
 namespace nei {
@@ -68,7 +69,7 @@ constexpr std::size_t REPEATING_SBO_ALIGN = ONCE_SBO_ALIGN;
 // All non-template lifecycle methods are defined in callback.cpp and exported
 // from the nei shared library, guaranteeing a single copy of each symbol.
 //
-class NEI_API OnceCallback {
+class NEI_API OnceCallback : public CallbackBase {
 public:
     OnceCallback() noexcept;
     ~OnceCallback();
@@ -94,6 +95,10 @@ public:
     }
 
 private:
+    bool IsNullImpl() const noexcept override {
+        return vtable_.invoke_and_destroy == nullptr;
+    }
+
     // Inline path: functor fits within SBO buffer — zero allocation.
     template <typename F>
     void InitFromCallable(F&& functor, std::true_type) {
@@ -151,7 +156,7 @@ private:
 // ABI-stable, copyable, multi-shot callable wrapper (void() signature).
 // Copies share ownership via an embedded reference count in the control block.
 //
-class NEI_API RepeatingCallback {
+class NEI_API RepeatingCallback : public CallbackBase {
 public:
     RepeatingCallback() noexcept;
     ~RepeatingCallback();
@@ -213,6 +218,10 @@ public:
     explicit RepeatingCallback(detail::RepeatingControlBlock* ctrl) noexcept;
 
 private:
+    bool IsNullImpl() const noexcept override {
+        return inline_vtable_.invoke == nullptr && ctrl_ == nullptr;
+    }
+
     // Inline path:  inline_vtable_.invoke != nullptr; ctrl_ == nullptr.
     // Heap path:    inline_vtable_ is zeroed;          ctrl_ != nullptr.
     detail::RepeatingInlineVTable inline_vtable_{nullptr, nullptr, nullptr}; // 24 bytes

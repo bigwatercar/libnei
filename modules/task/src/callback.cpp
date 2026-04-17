@@ -52,7 +52,7 @@ OnceCallback& OnceCallback::operator=(OnceCallback&& other) noexcept {
 }
 
 OnceCallback::operator bool() const noexcept {
-    return vtable_.invoke_and_destroy != nullptr;
+    return !IsNull();
 }
 
 void OnceCallback::Run() && {
@@ -154,7 +154,7 @@ RepeatingCallback::~RepeatingCallback() {
 }
 
 RepeatingCallback::operator bool() const noexcept {
-    return inline_vtable_.invoke != nullptr || ctrl_ != nullptr;
+    return !IsNull();
 }
 
 void RepeatingCallback::Run() const {
