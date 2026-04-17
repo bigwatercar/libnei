@@ -7,11 +7,11 @@
 #include <string>
 #include <vector>
 
-#include <nei/task/location.h>
-#include <nei/task/callback.h>
-#include <nei/task/task_environment.h>
-#include <nei/task/task_traits.h>
-#include <nei/task/thread_pool.h>
+#include <neixx/task/location.h>
+#include <neixx/task/callback.h>
+#include <neixx/task/task_environment.h>
+#include <neixx/task/task_traits.h>
+#include <neixx/task/thread_pool.h>
 
 TEST(TaskEnvironmentTest, DelayedTaskRunsOnlyAfterFastForward) {
     nei::TaskEnvironment env(2);

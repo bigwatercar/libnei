@@ -2,7 +2,7 @@
 
 #include <memory>
 
-#include <nei/task/callback.h>
+#include <neixx/task/callback.h>
 
 TEST(TaskCallbackTest, OnceCallbackRunsAtMostOnce) {
     int count = 0;

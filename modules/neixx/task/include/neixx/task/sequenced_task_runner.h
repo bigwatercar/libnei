@@ -7,11 +7,16 @@
 #include <memory>
 
 #include <nei/macros/nei_export.h>
-#include <nei/task/task_runner.h>
+#include <neixx/task/task_runner.h>
 
 namespace nei {
 
 class ThreadPool;
+
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4251)
+#endif
 
 class NEI_API SequencedTaskRunner final : public TaskRunner {
 public:
@@ -44,6 +49,10 @@ public:
 private:
     std::unique_ptr<Impl> impl_;
 };
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 } // namespace nei
 

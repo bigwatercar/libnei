@@ -6,10 +6,15 @@
 #include <memory>
 
 #include <nei/macros/nei_export.h>
-#include <nei/task/task_runner.h>
-#include <nei/task/time_source.h>
+#include <neixx/task/task_runner.h>
+#include <neixx/task/time_source.h>
 
 namespace nei {
+
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4251)
+#endif
 
 class NEI_API Thread final {
 public:
@@ -33,6 +38,10 @@ public:
 private:
     std::unique_ptr<Impl> impl_;
 };
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 } // namespace nei
 

@@ -4,7 +4,7 @@
 #define NEI_TASK_TASK_TRACER_H
 
 #include <nei/macros/nei_export.h>
-#include <nei/task/location.h>
+#include <neixx/task/location.h>
 
 namespace nei {
 

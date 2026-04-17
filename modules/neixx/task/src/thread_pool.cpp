@@ -1,5 +1,5 @@
-#include <nei/task/thread_pool.h>
-#include <nei/task/sequenced_task_runner.h>
+#include <neixx/task/thread_pool.h>
+#include <neixx/task/sequenced_task_runner.h>
 
 #include <algorithm>
 #include <atomic>
@@ -14,8 +14,8 @@
 #include <utility>
 #include <vector>
 
-#include <nei/task/task_tracer.h>
-#include <nei/task/time_source.h>
+#include <neixx/task/task_tracer.h>
+#include <neixx/task/time_source.h>
 
 namespace nei {
 

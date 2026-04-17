@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include <nei/task/task_environment.h>
-#include <nei/task/thread_pool.h>
-#include <nei/task/scoped_blocking_call.h>
+#include <neixx/task/task_environment.h>
+#include <neixx/task/thread_pool.h>
+#include <neixx/task/scoped_blocking_call.h>
 #include <thread>
 #include <chrono>
 #include <atomic>

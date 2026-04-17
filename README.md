@@ -32,7 +32,7 @@ libnei-src/
     utils/include/nei/utils/   src/strings.cpp
     xdr/include/nei/xdr/       src/xdr.c
     log/include/nei/log/       src/log.c
-    task/include/nei/task/     src/*.cpp
+    task/include/neixx/task/     src/*.cpp
   tests/
     CMakeLists.txt
     core_test.cpp

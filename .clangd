@@ -5,15 +5,15 @@
 CompileFlags:
   Add:
     - -I
-    - modules/core/include
+    - modules/nei/core/include
     - -I
-    - modules/log/include
+    - modules/nei/log/include
     - -I
-    - modules/macros/include
+    - modules/nei/macros/include
     - -I
-    - modules/utils/include
+    - modules/nei/utils/include
     - -I
-    - modules/xdr/include
+    - modules/nei/xdr/include
     - -I
     - tests
     - -I

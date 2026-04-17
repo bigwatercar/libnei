@@ -23,7 +23,7 @@ include(CMakePackageConfigHelpers)
 
 option(NEI_BUILD_TESTS "Build nei tests" ON)
 option(NEI_ENABLE_WARNINGS "Enable strict warnings" ON)
-option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
+option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 
 # Compatible with both single-config and multi-config generators.
 set(NEI_SUPPORTED_CONFIGS Debug Release RelWithDebInfo MinSizeRel)
@@ -44,38 +44,20 @@ if(NEI_ENABLE_WARNINGS)
     endif()
 endif()
 
-add_library(nei)
-add_library(nei::nei ALIAS nei)
+add_subdirectory(modules/nei)
+add_subdirectory(modules/neixx)
 
-target_compile_features(nei PUBLIC cxx_std_17)
-if(BUILD_SHARED_LIBS)
-    target_compile_definitions(nei PRIVATE NEI_EXPORTS)
-    if(NOT WIN32)
-        set_target_properties(
-            nei
-            PROPERTIES
-                C_VISIBILITY_PRESET hidden
-                CXX_VISIBILITY_PRESET hidden
-                VISIBILITY_INLINES_HIDDEN YES
-        )
-    endif()
-else()
-    target_compile_definitions(nei PUBLIC NEI_STATIC)
-endif()
-
-add_subdirectory(modules/macros)
-add_subdirectory(modules/nei/log)
-add_subdirectory(modules/nei/utils)
-add_subdirectory(modules/nei/xdr)
-add_subdirectory(modules/nei/core)
-add_subdirectory(modules/neixx/task)
+add_library(nei_all INTERFACE)
+add_library(nei::all ALIAS nei_all)
+set_target_properties(nei_all PROPERTIES EXPORT_NAME all)
+target_link_libraries(nei_all INTERFACE nei neixx)
 
 if(NEI_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
 install(
-    TARGETS nei
+    TARGETS nei neixx nei_all
     EXPORT neiTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

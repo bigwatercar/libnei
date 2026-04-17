@@ -9,8 +9,8 @@
 #include <utility>
 
 #include <nei/macros/nei_export.h>
-#include <nei/task/callback_base.h>
-#include <nei/task/callback_internal.h>
+#include <neixx/task/callback_base.h>
+#include <neixx/task/callback_internal.h>
 
 namespace nei {
 
@@ -55,13 +55,18 @@ struct RepeatingInlineVTable {
     void (*destroy)(char* storage);                       // in-place destructor
 };
 
-// SBO parameters for RepeatingCallback — mirror OnceCallback for consistency.
+// SBO parameters for RepeatingCallback - mirror OnceCallback for consistency.
 constexpr std::size_t REPEATING_SBO_SIZE  = ONCE_SBO_SIZE;
 constexpr std::size_t REPEATING_SBO_ALIGN = ONCE_SBO_ALIGN;
 
 }  // namespace detail
 
-// ─── OnceCallback ────────────────────────────────────────────────────────────
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4324)
+#endif
+
+// --- OnceCallback ------------------------------------------------------------
 //
 // ABI-stable, move-only, single-shot callable wrapper (void() signature).
 //
@@ -114,7 +119,7 @@ private:
     friend class RepeatingCallback;
 };
 
-// ─── RepeatingCallback ────────────────────────────────────────────────────────
+    // --- RepeatingCallback -------------------------------------------------------
 //
 // ABI-stable, copyable, multi-shot callable wrapper (void() signature).
 // Copies share ownership via an embedded reference count in the control block.
@@ -158,6 +163,10 @@ private:
     template <typename F>
     friend void detail::InitRepeatingCallbackFromFunctor(RepeatingCallback& cb, F&& functor);
 };
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 namespace detail {
 
@@ -239,7 +248,7 @@ void InitRepeatingCallbackFromFunctor(RepeatingCallback& cb, F&& functor) {
 
 }  // namespace detail
 
-// ─── BindOnce ────────────────────────────────────────────────────────────────
+// --- BindOnce ----------------------------------------------------------------
 //
 // Binds a callable and zero or more arguments into a move-only OnceCallback.
 //
@@ -253,7 +262,7 @@ OnceCallback BindOnce(F&& functor, Args&&... args) {
     auto bound_lambda = [fn = Fn(std::forward<F>(functor)),
                          args = BoundArgs(std::forward<Args>(args)...)]() mutable {
         // WeakPtr safety: if the first bound arg is a WeakPtr and has expired,
-        // silently skip invocation — no external null-check required.
+        // silently skip invocation - no external null-check required.
         if constexpr (sizeof...(Args) > 0) {
             if constexpr (detail::is_weak_ptr_v<
                               std::decay_t<std::tuple_element_t<0, BoundArgs>>>) {
@@ -267,7 +276,7 @@ OnceCallback BindOnce(F&& functor, Args&&... args) {
     return OnceCallback(std::move(bound_lambda));
 }
 
-// ─── BindRepeating ───────────────────────────────────────────────────────────
+// --- BindRepeating -----------------------------------------------------------
 //
 // Binds a callable and zero or more arguments into a copyable RepeatingCallback.
 // Copies share the same underlying allocation via reference counting.
@@ -289,7 +298,7 @@ RepeatingCallback BindRepeating(F&& functor, Args&&... args) {
     s->ctrl.invoke = [](detail::RepeatingControlBlock* self) {
         auto* st = reinterpret_cast<Storage*>(self);
         // WeakPtr safety: if the first bound arg is a WeakPtr and has expired,
-        // silently skip invocation — no external null-check required.
+        // silently skip invocation - no external null-check required.
         if constexpr (sizeof...(Args) > 0) {
             if constexpr (detail::is_weak_ptr_v<
                               std::decay_t<std::tuple_element_t<0, BoundArgs>>>) {
@@ -314,7 +323,7 @@ RepeatingCallback BindRepeating(F&& functor, Args&&... args) {
 
 }  // namespace nei
 
-// ─── Legacy aliases (kept for transition) ────────────────────────────────────
+// --- Legacy aliases (kept for transition) -----------------------------------
 // OnceClosure / RepeatingClosure are defined in task_runner.h as typedefs.
 
 #endif  // NEI_TASK_CALLBACK_H

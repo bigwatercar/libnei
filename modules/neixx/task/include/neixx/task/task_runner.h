@@ -6,9 +6,9 @@
 #include <chrono>
 
 #include <nei/macros/nei_export.h>
-#include <nei/task/location.h>
-#include <nei/task/callback.h>
-#include <nei/task/task_traits.h>
+#include <neixx/task/location.h>
+#include <neixx/task/callback.h>
+#include <neixx/task/task_traits.h>
 
 namespace nei {
 

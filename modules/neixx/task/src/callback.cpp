@@ -1,18 +1,18 @@
-// callback.cpp — out-of-line definitions for OnceCallback and RepeatingCallback.
+// callback.cpp - out-of-line definitions for OnceCallback and RepeatingCallback.
 //
 // All non-template lifecycle methods are compiled once into nei.dll.
 // Template factory helpers that materialize concrete functors are defined in
 // callback.h within nei::detail, keeping class bodies non-template oriented
 // while preserving per-TU template instantiation visibility.
 
-#include <nei/task/callback.h>
+#include <neixx/task/callback.h>
 
 #include <cstring>
 #include <utility>
 
 namespace nei {
 
-// ─── OnceCallback ────────────────────────────────────────────────────────────
+// --- OnceCallback ------------------------------------------------------------
 
 OnceCallback::OnceCallback() noexcept : vtable_{nullptr, nullptr}, heap_allocated_(false) {
     std::memset(storage_, 0, detail::ONCE_SBO_SIZE);
@@ -64,7 +64,7 @@ void OnceCallback::Run() && {
     }
 }
 
-// ─── RepeatingCallback ───────────────────────────────────────────────────────
+// --- RepeatingCallback -------------------------------------------------------
 
 RepeatingCallback::RepeatingCallback() noexcept
     : inline_vtable_{nullptr, nullptr, nullptr}, ctrl_(nullptr) {}

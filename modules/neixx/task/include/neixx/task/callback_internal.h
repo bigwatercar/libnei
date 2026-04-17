@@ -9,15 +9,15 @@
 
 namespace nei {
 
-// Forward declaration — avoids pulling in the full weak_ptr.h header here.
+// Forward declaration - avoids pulling in the full weak_ptr.h header here.
 // Callers that actually pass a WeakPtr to BindOnce/BindRepeating must include
-// <nei/task/weak_ptr.h> themselves so that operator bool() is visible at the
+// <neixx/task/weak_ptr.h> themselves so that operator bool() is visible at the
 // instantiation site.
 template <typename T> class WeakPtr;
 
 namespace detail {
 
-// ─── Allocation primitives ────────────────────────────────────────────────────
+// --- Allocation primitives ---------------------------------------------------
 //
 // All callback heap paths route through these two helpers.
 // Replace the bodies (at startup, before any callbacks are created) to plug in
@@ -32,7 +32,7 @@ inline void callback_free(void* ptr) noexcept {
     ::operator delete(ptr);
 }
 
-// ─── SBO eligibility ─────────────────────────────────────────────────────────
+// --- SBO eligibility ---------------------------------------------------------
 //
 // True when a type T can be stored inline in an SBO buffer of the given size
 // and alignment.
@@ -40,7 +40,7 @@ template <typename T, std::size_t SboSize, std::size_t SboAlign>
 constexpr bool is_sbo_eligible_v =
     sizeof(T) <= SboSize && alignof(T) <= SboAlign;
 
-// ─── WeakPtr detection ────────────────────────────────────────────────────────
+// --- WeakPtr detection -------------------------------------------------------
 //
 // Used by BindOnce / BindRepeating to detect when the first bound argument is
 // a WeakPtr<T> so that an automatic validity check can be injected.

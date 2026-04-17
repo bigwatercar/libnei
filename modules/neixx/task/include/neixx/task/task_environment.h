@@ -15,6 +15,11 @@ class ThreadPool;
 struct ThreadPoolOptions;
 class SequencedTaskRunner;
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4251)
+#endif
+
 class NEI_API TaskEnvironment final {
 public:
     class Impl;
@@ -40,6 +45,10 @@ public:
 private:
     std::unique_ptr<Impl> impl_;
 };
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 } // namespace nei
 

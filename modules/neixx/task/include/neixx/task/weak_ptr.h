@@ -5,7 +5,7 @@
 
 #include <memory>
 
-#include <nei/task/internal_flag.h>
+#include <neixx/task/internal_flag.h>
 
 namespace nei {
 

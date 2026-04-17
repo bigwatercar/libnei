@@ -1,5 +1,5 @@
 target_sources(
-    nei
+    neixx
     PRIVATE
         src/callback_base.cpp
         src/callback.cpp
@@ -16,7 +16,7 @@ target_sources(
 )
 
 target_include_directories(
-    nei
+    neixx
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>

@@ -1,4 +1,4 @@
-#include <nei/task/thread.h>
+#include <neixx/task/thread.h>
 
 #include <chrono>
 #include <condition_variable>
@@ -12,8 +12,8 @@
 #include <utility>
 #include <vector>
 
-#include <nei/task/task_tracer.h>
-#include <nei/task/time_source.h>
+#include <neixx/task/task_tracer.h>
+#include <neixx/task/time_source.h>
 
 #include "single_thread_task_runner.h"
 

@@ -27,12 +27,12 @@ add_executable(
 target_link_libraries(
     nei_tests
     PRIVATE
-        nei::nei
+  nei::all
         GTest::gtest_main
 )
 
 add_executable(log_bench log_bench.cpp)
-target_link_libraries(log_bench PRIVATE nei::nei)
+target_link_libraries(log_bench PRIVATE nei::all)
 
 option(NEI_BENCHMARK_SPDLOG "Build log_bench_compare (NEI vs spdlog, FetchContent spdlog)" ON)
 if(NEI_BENCHMARK_SPDLOG)
@@ -46,29 +46,32 @@ if(NEI_BENCHMARK_SPDLOG)
   FetchContent_MakeAvailable(spdlog)
 
   add_executable(log_bench_compare log_bench_compare.cpp)
-  target_link_libraries(log_bench_compare PRIVATE nei::nei spdlog::spdlog)
+  target_link_libraries(log_bench_compare PRIVATE nei::all spdlog::spdlog)
 endif()
 
 add_executable(log_demo log_demo.c)
-target_link_libraries(log_demo PRIVATE nei::nei)
+target_link_libraries(log_demo PRIVATE nei::all)
 
 add_executable(task_thread_demo task_thread_demo.cpp)
-target_link_libraries(task_thread_demo PRIVATE nei::nei)
+target_link_libraries(task_thread_demo PRIVATE nei::all)
+
+add_executable(task_threadpool_bench_demo task_threadpool_bench_demo.cpp)
+target_link_libraries(task_threadpool_bench_demo PRIVATE nei::all)
 
 add_executable(task_weak_ptr_demo task_weak_ptr_demo.cpp)
-target_link_libraries(task_weak_ptr_demo PRIVATE nei::nei)
+target_link_libraries(task_weak_ptr_demo PRIVATE nei::all)
 
 add_executable(task_location_delay_demo task_location_delay_demo.cpp)
-target_link_libraries(task_location_delay_demo PRIVATE nei::nei)
+target_link_libraries(task_location_delay_demo PRIVATE nei::all)
 
 add_executable(task_priority_demo task_priority_demo.cpp)
-target_link_libraries(task_priority_demo PRIVATE nei::nei)
+target_link_libraries(task_priority_demo PRIVATE nei::all)
 
 add_executable(task_shutdown_demo task_shutdown_demo.cpp)
-target_link_libraries(task_shutdown_demo PRIVATE nei::nei)
+target_link_libraries(task_shutdown_demo PRIVATE nei::all)
 
 add_executable(task_may_block_demo task_may_block_demo.cpp)
-target_link_libraries(task_may_block_demo PRIVATE nei::nei)
+target_link_libraries(task_may_block_demo PRIVATE nei::all)
 
 include(GoogleTest)
 #
@@ -103,6 +106,12 @@ if(WIN32 AND BUILD_SHARED_LIBS)
     TARGET task_thread_demo
     POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:task_thread_demo> $<TARGET_FILE_DIR:task_thread_demo>
+    COMMAND_EXPAND_LISTS
+  )
+  add_custom_command(
+    TARGET task_threadpool_bench_demo
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:task_threadpool_bench_demo> $<TARGET_FILE_DIR:task_threadpool_bench_demo>
     COMMAND_EXPAND_LISTS
   )
   add_custom_command(

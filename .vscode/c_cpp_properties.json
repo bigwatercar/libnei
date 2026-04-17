@@ -7,11 +7,11 @@
       "cStandard": "c99",
       "cppStandard": "c++17",
       "includePath": [
-        "${workspaceFolder}/modules/core/include",
-        "${workspaceFolder}/modules/log/include",
-        "${workspaceFolder}/modules/macros/include",
-        "${workspaceFolder}/modules/utils/include",
-        "${workspaceFolder}/modules/xdr/include",
+        "${workspaceFolder}/modules/nei/core/include",
+        "${workspaceFolder}/modules/nei/log/include",
+        "${workspaceFolder}/modules/nei/macros/include",
+        "${workspaceFolder}/modules/nei/utils/include",
+        "${workspaceFolder}/modules/nei/xdr/include",
         "${workspaceFolder}/tests",
         "${workspaceFolder}/build/_deps/googletest-src/googletest/include",
         "${workspaceFolder}/build/_deps/googletest-src/googlemock/include"
@@ -23,11 +23,11 @@
       ],
       "browse": {
         "path": [
-          "${workspaceFolder}/modules/core/include",
-          "${workspaceFolder}/modules/log/include",
-          "${workspaceFolder}/modules/macros/include",
-          "${workspaceFolder}/modules/utils/include",
-          "${workspaceFolder}/modules/xdr/include",
+          "${workspaceFolder}/modules/nei/core/include",
+          "${workspaceFolder}/modules/nei/log/include",
+          "${workspaceFolder}/modules/nei/macros/include",
+          "${workspaceFolder}/modules/nei/utils/include",
+          "${workspaceFolder}/modules/nei/xdr/include",
           "${workspaceFolder}/tests",
           "${workspaceFolder}/build/_deps/googletest-src/googletest/include",
           "${workspaceFolder}/build/_deps/googletest-src/googlemock/include"
