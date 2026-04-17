@@ -116,8 +116,10 @@ TEST(TaskWeakPtrTest, DestroyedOwnerInvalidatesPendingTask) {
 
     release_gate.set_value();
 
-    ASSERT_EQ(done_future.wait_for(std::chrono::seconds(1)), std::future_status::ready);
-    EXPECT_TRUE(done_future.get());
+    // BindOnce short-circuits when the first bound arg is an invalid WeakPtr,
+    // so the callback body is not executed and done is never fulfilled.
+    EXPECT_EQ(done_future.wait_for(std::chrono::milliseconds(200)),
+              std::future_status::timeout);
 }
 
 TEST(TaskWeakPtrTest, ConcurrentObserveAndInvalidateEventuallySeesInvalid) {
