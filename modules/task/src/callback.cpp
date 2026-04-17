@@ -1,9 +1,9 @@
 // callback.cpp — out-of-line definitions for OnceCallback and RepeatingCallback.
 //
 // All non-template lifecycle methods are compiled once into nei.dll.
-// Template members (InitFromCallable) are defined inline in callback.h so that
-// each instantiation is visible in the caller's translation unit — this is a
-// deliberate Stage-1 fix for the ODR/linkage-visibility issue.
+// Template factory helpers that materialize concrete functors are defined in
+// callback.h within nei::detail, keeping class bodies non-template oriented
+// while preserving per-TU template instantiation visibility.
 
 #include <nei/task/callback.h>
 

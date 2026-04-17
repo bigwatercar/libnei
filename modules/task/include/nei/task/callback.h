@@ -14,7 +14,16 @@
 
 namespace nei {
 
+class OnceCallback;
+class RepeatingCallback;
+
 namespace detail {
+
+template <typename F>
+void InitOnceCallbackFromFunctor(OnceCallback& cb, F&& functor);
+
+template <typename F>
+void InitRepeatingCallbackFromFunctor(RepeatingCallback& cb, F&& functor);
 
 // SBO buffer size for OnceCallback: 48 bytes allows most small lambdas and
 // small bind objects to be stored inline without heap allocation.
@@ -87,11 +96,7 @@ public:
     template <typename F,
               typename = std::enable_if_t<!std::is_same_v<std::decay_t<F>, OnceCallback>>>
     /*implicit*/ OnceCallback(F&& functor) {
-        // Delegate to out-of-line init method (template specialization in .cpp).
-        InitFromCallable(std::forward<F>(functor),
-                        std::integral_constant<bool,
-                            sizeof(std::decay_t<F>) <= detail::ONCE_SBO_SIZE &&
-                            alignof(std::decay_t<F>) <= detail::ONCE_SBO_ALIGN>{});
+        detail::InitOnceCallbackFromFunctor(*this, std::forward<F>(functor));
     }
 
 private:
@@ -99,54 +104,12 @@ private:
         return vtable_.invoke_and_destroy == nullptr;
     }
 
-    // Inline path: functor fits within SBO buffer — zero allocation.
-    template <typename F>
-    void InitFromCallable(F&& functor, std::true_type) {
-        using Fn = std::decay_t<F>;
-        vtable_.invoke_and_destroy = [](char* storage) {
-            auto* fn = reinterpret_cast<Fn*>(storage);
-            std::invoke(std::move(*fn));
-            fn->~Fn();
-        };
-        vtable_.destroy = [](char* storage) {
-            auto* fn = reinterpret_cast<Fn*>(storage);
-            fn->~Fn();
-        };
-        new (storage_) Fn(std::forward<F>(functor));
-        heap_allocated_ = false;
-    }
-
-    // Heap path: functor exceeds SBO buffer — raw alloc + placement-new.
-    // Deliberately avoids `new HeapLayout{}` to prevent requiring Fn to be
-    // default-constructible and to eliminate the double-construction UB.
-    template <typename F>
-    void InitFromCallable(F&& functor, std::false_type) {
-        using Fn = std::decay_t<F>;
-        struct HeapLayout {
-            detail::OnceCallbackVTable vt;
-            Fn fn;
-        };
-        auto* h = static_cast<HeapLayout*>(detail::callback_alloc(sizeof(HeapLayout)));
-        h->vt.invoke_and_destroy = [](char* storage) {
-            auto* h = *reinterpret_cast<HeapLayout**>(storage);
-            std::invoke(std::move(h->fn));
-            h->fn.~Fn();
-            detail::callback_free(h);
-        };
-        h->vt.destroy = [](char* storage) {
-            auto* h = *reinterpret_cast<HeapLayout**>(storage);
-            h->fn.~Fn();
-            detail::callback_free(h);
-        };
-        new (&h->fn) Fn(std::forward<F>(functor));
-        *reinterpret_cast<HeapLayout**>(storage_) = h;
-        vtable_ = h->vt;
-        heap_allocated_ = true;
-    }
-
     detail::OnceCallbackVTable vtable_;                                         // 16 bytes
     bool heap_allocated_;                                                       // 1 byte
     alignas(detail::ONCE_SBO_ALIGN) char storage_[detail::ONCE_SBO_SIZE];      // 48 bytes
+
+    template <typename F>
+    friend void detail::InitOnceCallbackFromFunctor(OnceCallback& cb, F&& functor);
 
     friend class RepeatingCallback;
 };
@@ -174,44 +137,7 @@ public:
                   !std::is_same_v<std::decay_t<F>, RepeatingCallback> &&
                   !std::is_same_v<std::decay_t<F>, OnceCallback>>>
     /*implicit*/ RepeatingCallback(F&& functor) {
-        using Fn = std::decay_t<F>;
-        if constexpr (detail::is_sbo_eligible_v<Fn,
-                          detail::REPEATING_SBO_SIZE,
-                          detail::REPEATING_SBO_ALIGN>) {
-            // Inline path: store functor directly — zero heap allocation.
-            // Each copy of this callback owns an independent copy of the functor.
-            inline_vtable_.invoke = [](char* storage) {
-                std::invoke(*reinterpret_cast<Fn*>(storage));
-            };
-            inline_vtable_.copy_construct = [](char* dst, const char* src) {
-                new (dst) Fn(*reinterpret_cast<const Fn*>(src));
-            };
-            inline_vtable_.destroy = [](char* storage) {
-                reinterpret_cast<Fn*>(storage)->~Fn();
-            };
-            new (inline_storage_) Fn(std::forward<F>(functor));
-            ctrl_ = nullptr;
-        } else {
-            // Heap path: allocate control block for ref-counted sharing.
-            struct Storage {
-                detail::RepeatingControlBlock ctrl;  // MUST be first member
-                Fn fn;
-            };
-            auto* s = static_cast<Storage*>(detail::callback_alloc(sizeof(Storage)));
-            s->ctrl.invoke = [](detail::RepeatingControlBlock* self) {
-                std::invoke(reinterpret_cast<Storage*>(self)->fn);
-            };
-            s->ctrl.destroy = [](detail::RepeatingControlBlock* self) {
-                if (self->ref_count.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                    reinterpret_cast<Storage*>(self)->fn.~Fn();
-                    detail::callback_free(self);
-                }
-            };
-            new (&s->ctrl.ref_count) std::atomic<int>(1);
-            new (&s->fn) Fn(std::forward<F>(functor));
-            inline_vtable_ = {nullptr, nullptr, nullptr};
-            ctrl_ = &s->ctrl;
-        }
+        detail::InitRepeatingCallbackFromFunctor(*this, std::forward<F>(functor));
     }
 
     // Internal: takes ownership of a pre-allocated control block (heap-only).
@@ -228,7 +154,90 @@ private:
     mutable alignas(detail::REPEATING_SBO_ALIGN)
         char inline_storage_[detail::REPEATING_SBO_SIZE];                   // 48 bytes
     detail::RepeatingControlBlock* ctrl_{nullptr};                          //  8 bytes
+
+    template <typename F>
+    friend void detail::InitRepeatingCallbackFromFunctor(RepeatingCallback& cb, F&& functor);
 };
+
+namespace detail {
+
+template <typename F>
+void InitOnceCallbackFromFunctor(OnceCallback& cb, F&& functor) {
+    using Fn = std::decay_t<F>;
+    if constexpr (is_sbo_eligible_v<Fn, ONCE_SBO_SIZE, ONCE_SBO_ALIGN>) {
+        cb.vtable_.invoke_and_destroy = [](char* storage) {
+            auto* fn = reinterpret_cast<Fn*>(storage);
+            std::invoke(std::move(*fn));
+            fn->~Fn();
+        };
+        cb.vtable_.destroy = [](char* storage) {
+            auto* fn = reinterpret_cast<Fn*>(storage);
+            fn->~Fn();
+        };
+        new (cb.storage_) Fn(std::forward<F>(functor));
+        cb.heap_allocated_ = false;
+    } else {
+        struct HeapLayout {
+            OnceCallbackVTable vt;
+            Fn fn;
+        };
+        auto* h = static_cast<HeapLayout*>(callback_alloc(sizeof(HeapLayout)));
+        h->vt.invoke_and_destroy = [](char* storage) {
+            auto* ptr = *reinterpret_cast<HeapLayout**>(storage);
+            std::invoke(std::move(ptr->fn));
+            ptr->fn.~Fn();
+            callback_free(ptr);
+        };
+        h->vt.destroy = [](char* storage) {
+            auto* ptr = *reinterpret_cast<HeapLayout**>(storage);
+            ptr->fn.~Fn();
+            callback_free(ptr);
+        };
+        new (&h->fn) Fn(std::forward<F>(functor));
+        *reinterpret_cast<HeapLayout**>(cb.storage_) = h;
+        cb.vtable_ = h->vt;
+        cb.heap_allocated_ = true;
+    }
+}
+
+template <typename F>
+void InitRepeatingCallbackFromFunctor(RepeatingCallback& cb, F&& functor) {
+    using Fn = std::decay_t<F>;
+    if constexpr (is_sbo_eligible_v<Fn, REPEATING_SBO_SIZE, REPEATING_SBO_ALIGN>) {
+        cb.inline_vtable_.invoke = [](char* storage) {
+            std::invoke(*reinterpret_cast<Fn*>(storage));
+        };
+        cb.inline_vtable_.copy_construct = [](char* dst, const char* src) {
+            new (dst) Fn(*reinterpret_cast<const Fn*>(src));
+        };
+        cb.inline_vtable_.destroy = [](char* storage) {
+            reinterpret_cast<Fn*>(storage)->~Fn();
+        };
+        new (cb.inline_storage_) Fn(std::forward<F>(functor));
+        cb.ctrl_ = nullptr;
+    } else {
+        struct Storage {
+            RepeatingControlBlock ctrl;
+            Fn fn;
+        };
+        auto* s = static_cast<Storage*>(callback_alloc(sizeof(Storage)));
+        s->ctrl.invoke = [](RepeatingControlBlock* self) {
+            std::invoke(reinterpret_cast<Storage*>(self)->fn);
+        };
+        s->ctrl.destroy = [](RepeatingControlBlock* self) {
+            if (self->ref_count.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                reinterpret_cast<Storage*>(self)->fn.~Fn();
+                callback_free(self);
+            }
+        };
+        new (&s->ctrl.ref_count) std::atomic<int>(1);
+        new (&s->fn) Fn(std::forward<F>(functor));
+        cb.inline_vtable_ = {nullptr, nullptr, nullptr};
+        cb.ctrl_ = &s->ctrl;
+    }
+}
+
+}  // namespace detail
 
 // ─── BindOnce ────────────────────────────────────────────────────────────────
 //
