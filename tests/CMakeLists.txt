@@ -49,8 +49,8 @@ if(NEI_BENCHMARK_SPDLOG)
   target_link_libraries(log_bench_compare PRIVATE nei::nei spdlog::spdlog)
 endif()
 
-add_executable(log_test2 log_test2.c)
-target_link_libraries(log_test2 PRIVATE nei::nei)
+add_executable(log_demo log_demo.c)
+target_link_libraries(log_demo PRIVATE nei::nei)
 
 add_executable(task_thread_demo task_thread_demo.cpp)
 target_link_libraries(task_thread_demo PRIVATE nei::nei)
@@ -94,9 +94,9 @@ if(WIN32 AND BUILD_SHARED_LIBS)
     COMMAND_EXPAND_LISTS
   )
   add_custom_command(
-    TARGET log_test2
+    TARGET log_demo
     POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:log_test2> $<TARGET_FILE_DIR:log_test2>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:log_demo> $<TARGET_FILE_DIR:log_demo>
     COMMAND_EXPAND_LISTS
   )
   add_custom_command(
