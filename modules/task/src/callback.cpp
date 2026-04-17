@@ -1,8 +1,9 @@
 // callback.cpp — out-of-line definitions for OnceCallback and RepeatingCallback.
 //
-// All methods here are compiled once into nei.dll, providing stable exported
-// symbols.  Template constructors and BindOnce/BindRepeating live in the header
-// but always call through these stable paths for lifecycle operations.
+// All non-template lifecycle methods are compiled once into nei.dll.
+// Template members (InitFromCallable) are defined inline in callback.h so that
+// each instantiation is visible in the caller's translation unit — this is a
+// deliberate Stage-1 fix for the ODR/linkage-visibility issue.
 
 #include <nei/task/callback.h>
 
@@ -63,71 +64,43 @@ void OnceCallback::Run() && {
     }
 }
 
-// Template specializations for InitFromCallable
-// (Inline version: small functor stored directly in buffer)
-template <typename F>
-inline void OnceCallback::InitFromCallable(F&& functor, std::true_type) {
-    using Fn = std::decay_t<F>;
-    // Inline storage: construct vtable lambda operations on the buffer
-    vtable_.invoke_and_destroy = [](char* storage) {
-        auto* fn = reinterpret_cast<Fn*>(storage);
-        std::invoke(std::move(*fn));
-        fn->~Fn();
-    };
-    vtable_.destroy = [](char* storage) {
-        auto* fn = reinterpret_cast<Fn*>(storage);
-        fn->~Fn();
-    };
-    new (storage_) Fn(std::forward<F>(functor));
-    heap_allocated_ = false;
-}
-
-// Template specializations for InitFromCallable
-// (Heap version: large functor allocated separately)
-template <typename F>
-void OnceCallback::InitFromCallable(F&& functor, std::false_type) {
-    using Fn = std::decay_t<F>;
-    struct HeapLayout {
-        detail::OnceCallbackVTable vt;
-        Fn fn;
-    };
-    auto* h = new HeapLayout{};
-    h->vt.invoke_and_destroy = [](char* storage) {
-        auto* h = *reinterpret_cast<HeapLayout**>(storage);
-        std::invoke(std::move(h->fn));
-        delete h;
-    };
-    h->vt.destroy = [](char* storage) {
-        auto* h = *reinterpret_cast<HeapLayout**>(storage);
-        delete h;
-    };
-    new (&h->fn) Fn(std::forward<F>(functor));
-    *reinterpret_cast<HeapLayout**>(storage_) = h;
-    vtable_ = h->vt;  // Copy vtable from heap
-    heap_allocated_ = true;
-}
-
 // ─── RepeatingCallback ───────────────────────────────────────────────────────
 
-RepeatingCallback::RepeatingCallback() noexcept : ctrl_(nullptr) {}
+RepeatingCallback::RepeatingCallback() noexcept
+    : inline_vtable_{nullptr, nullptr, nullptr}, ctrl_(nullptr) {}
 
 RepeatingCallback::RepeatingCallback(detail::RepeatingControlBlock* ctrl) noexcept
-    : ctrl_(ctrl) {}
+    : inline_vtable_{nullptr, nullptr, nullptr}, ctrl_(ctrl) {}
 
 RepeatingCallback::RepeatingCallback(const RepeatingCallback& other) noexcept
-    : ctrl_(other.ctrl_) {
-    if (ctrl_) {
+    : inline_vtable_(other.inline_vtable_), ctrl_(nullptr) {
+    if (inline_vtable_.invoke) {
+        // Inline path: copy-construct functor into own storage.
+        // noexcept is maintained under the assumption that inline functors
+        // (small lambdas that fit in SBO) have noexcept copy constructors.
+        inline_vtable_.copy_construct(inline_storage_, other.inline_storage_);
+    } else if (other.ctrl_) {
+        // Heap path: share the ref-counted control block.
+        ctrl_ = other.ctrl_;
         ctrl_->ref_count.fetch_add(1, std::memory_order_relaxed);
     }
 }
 
 RepeatingCallback& RepeatingCallback::operator=(const RepeatingCallback& other) noexcept {
     if (this != &other) {
-        if (ctrl_) {
+        // Destroy current state.
+        if (inline_vtable_.destroy) {
+            inline_vtable_.destroy(inline_storage_);
+        } else if (ctrl_) {
             ctrl_->destroy(ctrl_);
         }
-        ctrl_ = other.ctrl_;
-        if (ctrl_) {
+        // Copy from other.
+        inline_vtable_ = other.inline_vtable_;
+        ctrl_ = nullptr;
+        if (inline_vtable_.invoke) {
+            inline_vtable_.copy_construct(inline_storage_, other.inline_storage_);
+        } else if (other.ctrl_) {
+            ctrl_ = other.ctrl_;
             ctrl_->ref_count.fetch_add(1, std::memory_order_relaxed);
         }
     }
@@ -135,33 +108,59 @@ RepeatingCallback& RepeatingCallback::operator=(const RepeatingCallback& other) 
 }
 
 RepeatingCallback::RepeatingCallback(RepeatingCallback&& other) noexcept
-    : ctrl_(other.ctrl_) {
-    other.ctrl_ = nullptr;
+    : inline_vtable_(other.inline_vtable_), ctrl_(nullptr) {
+    if (inline_vtable_.invoke) {
+        // Inline path: copy-construct then destroy source.
+        // Since RepeatingCallback is copyable, copy+destroy is semantically a move.
+        inline_vtable_.copy_construct(inline_storage_, other.inline_storage_);
+        inline_vtable_.destroy(other.inline_storage_);
+        other.inline_vtable_ = {nullptr, nullptr, nullptr};
+    } else {
+        // Heap path: transfer the control block pointer.
+        ctrl_ = other.ctrl_;
+        other.ctrl_ = nullptr;
+    }
 }
 
 RepeatingCallback& RepeatingCallback::operator=(RepeatingCallback&& other) noexcept {
     if (this != &other) {
-        if (ctrl_) {
+        // Destroy current state.
+        if (inline_vtable_.destroy) {
+            inline_vtable_.destroy(inline_storage_);
+        } else if (ctrl_) {
             ctrl_->destroy(ctrl_);
         }
-        ctrl_ = other.ctrl_;
-        other.ctrl_ = nullptr;
+        // Move from other.
+        inline_vtable_ = other.inline_vtable_;
+        ctrl_ = nullptr;
+        if (inline_vtable_.invoke) {
+            inline_vtable_.copy_construct(inline_storage_, other.inline_storage_);
+            inline_vtable_.destroy(other.inline_storage_);
+            other.inline_vtable_ = {nullptr, nullptr, nullptr};
+        } else {
+            ctrl_ = other.ctrl_;
+            other.ctrl_ = nullptr;
+        }
     }
     return *this;
 }
 
 RepeatingCallback::~RepeatingCallback() {
-    if (ctrl_) {
+    if (inline_vtable_.destroy) {
+        inline_vtable_.destroy(inline_storage_);
+    } else if (ctrl_) {
         ctrl_->destroy(ctrl_);
     }
 }
 
 RepeatingCallback::operator bool() const noexcept {
-    return ctrl_ != nullptr;
+    return inline_vtable_.invoke != nullptr || ctrl_ != nullptr;
 }
 
 void RepeatingCallback::Run() const {
-    if (ctrl_) {
+    if (inline_vtable_.invoke) {
+        inline_vtable_.invoke(inline_storage_);
+    } else if (ctrl_) {
         ctrl_->invoke(ctrl_);
     }
 }
