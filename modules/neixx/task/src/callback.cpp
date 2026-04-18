@@ -14,7 +14,7 @@ namespace nei {
 
 // --- OnceCallback ------------------------------------------------------------
 
-OnceCallback::OnceCallback() noexcept : vtable_{nullptr, nullptr}, heap_allocated_(false) {
+OnceCallback::OnceCallback() noexcept : vtable_{nullptr, nullptr} {
     std::memset(storage_, 0, detail::ONCE_SBO_SIZE);
 }
 
@@ -25,11 +25,10 @@ OnceCallback::~OnceCallback() {
 }
 
 OnceCallback::OnceCallback(OnceCallback&& other) noexcept
-    : vtable_(other.vtable_), heap_allocated_(other.heap_allocated_) {
+    : vtable_(other.vtable_) {
     std::memcpy(storage_, other.storage_, detail::ONCE_SBO_SIZE);
     // Clear the source
     other.vtable_ = {nullptr, nullptr};
-    other.heap_allocated_ = false;
     std::memset(other.storage_, 0, detail::ONCE_SBO_SIZE);
 }
 
@@ -41,11 +40,9 @@ OnceCallback& OnceCallback::operator=(OnceCallback&& other) noexcept {
         }
         // Move from other
         vtable_ = other.vtable_;
-        heap_allocated_ = other.heap_allocated_;
         std::memcpy(storage_, other.storage_, detail::ONCE_SBO_SIZE);
         // Clear the source
         other.vtable_ = {nullptr, nullptr};
-        other.heap_allocated_ = false;
         std::memset(other.storage_, 0, detail::ONCE_SBO_SIZE);
     }
     return *this;

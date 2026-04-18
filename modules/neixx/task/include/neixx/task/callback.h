@@ -73,7 +73,6 @@ constexpr std::size_t REPEATING_SBO_ALIGN = ONCE_SBO_ALIGN;
 // Stable layout: fixed-size storage buffer with SBO (Small Buffer Optimization):
 //   - Storage: 48 bytes for inline functor + bound args (most small lambdas fit)
 //   - VTable:  2 function pointers (invoke_and_destroy, destroy) = 16 bytes
-//   - Flag:    1 byte (heap_allocated) to distinguish inline vs heap
 //   - Padding: alignment to natural boundary
 //
 // Total public size: 64-72 bytes (depending on alignment), part of ABI contract.
@@ -110,7 +109,6 @@ private:
     }
 
     detail::OnceCallbackVTable vtable_;                                         // 16 bytes
-    bool heap_allocated_;                                                       // 1 byte
     alignas(detail::ONCE_SBO_ALIGN) char storage_[detail::ONCE_SBO_SIZE];      // 48 bytes
 
     template <typename F>
@@ -184,7 +182,6 @@ void InitOnceCallbackFromFunctor(OnceCallback& cb, F&& functor) {
             fn->~Fn();
         };
         new (cb.storage_) Fn(std::forward<F>(functor));
-        cb.heap_allocated_ = false;
     } else {
         struct HeapLayout {
             OnceCallbackVTable vt;
@@ -205,7 +202,6 @@ void InitOnceCallbackFromFunctor(OnceCallback& cb, F&& functor) {
         new (&h->fn) Fn(std::forward<F>(functor));
         *reinterpret_cast<HeapLayout**>(cb.storage_) = h;
         cb.vtable_ = h->vt;
-        cb.heap_allocated_ = true;
     }
 }
 

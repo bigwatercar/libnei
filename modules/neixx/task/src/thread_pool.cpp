@@ -11,6 +11,7 @@
 #include <queue>
 #include <thread>
 #include <tuple>
+#include <iterator>
 #include <utility>
 #include <vector>
 
@@ -27,6 +28,12 @@ std::shared_ptr<const TimeSource> SharedSystemTimeSource() {
         [](const TimeSource*) {});
     return source;
 }
+
+// Batch size for flushing pending ready tasks to minimize heap operations
+constexpr std::size_t READY_TASK_BATCH_SIZE = 8;
+// Initial queue capacities to reduce reallocation cost under bursty enqueue load.
+constexpr std::size_t MIN_READY_TASK_CAPACITY = 256;
+constexpr std::size_t MIN_DELAYED_TASK_CAPACITY = 64;
 
 } // namespace
 
@@ -88,43 +95,43 @@ public:
             }
         }
 
-        bool operator()(const std::shared_ptr<ScheduledTask>& lhs,
-                        const std::shared_ptr<ScheduledTask>& rhs) const {
-            if (lhs->run_at != rhs->run_at) {
-                return lhs->run_at > rhs->run_at;
+        bool operator()(const ScheduledTask& lhs,
+                        const ScheduledTask& rhs) const {
+            if (lhs.run_at != rhs.run_at) {
+                return lhs.run_at > rhs.run_at;
             }
-            const int lhs_rank = PriorityRank(lhs->traits.priority());
-            const int rhs_rank = PriorityRank(rhs->traits.priority());
+            const int lhs_rank = PriorityRank(lhs.traits.priority());
+            const int rhs_rank = PriorityRank(rhs.traits.priority());
             if (lhs_rank != rhs_rank) {
                 return lhs_rank < rhs_rank;
             }
-            return lhs->sequence > rhs->sequence;
+            return lhs.sequence > rhs.sequence;
         }
     };
 
-    static bool IsHigherReadyPriority(
-        const std::shared_ptr<ScheduledTask>& lhs,
-        const std::shared_ptr<ScheduledTask>& rhs) {
-        const int lhs_rank = ScheduledTaskCompare::PriorityRank(lhs->traits.priority());
-        const int rhs_rank = ScheduledTaskCompare::PriorityRank(rhs->traits.priority());
-        if (lhs_rank != rhs_rank) {
-            return lhs_rank > rhs_rank;
+    struct ReadyTaskCompare {
+        static int PriorityRank(TaskPriority priority) {
+            return ScheduledTaskCompare::PriorityRank(priority);
         }
-        if (lhs->run_at != rhs->run_at) {
-            return lhs->run_at < rhs->run_at;
+
+        bool operator()(const ScheduledTask& lhs,
+                        const ScheduledTask& rhs) const {
+            const int lhs_rank = PriorityRank(lhs.traits.priority());
+            const int rhs_rank = PriorityRank(rhs.traits.priority());
+            if (lhs_rank != rhs_rank) {
+                return lhs_rank < rhs_rank;
+            }
+            return lhs.sequence > rhs.sequence;
         }
-        return lhs->sequence < rhs->sequence;
-    }
+    };
 
     struct WorkerGroup {
         std::vector<std::thread> workers;
         std::mutex mutex;
         std::condition_variable cv;
-        std::priority_queue<
-            std::shared_ptr<ScheduledTask>,
-            std::vector<std::shared_ptr<ScheduledTask>>,
-            ScheduledTaskCompare>
-            tasks;
+        std::vector<ScheduledTask> ready_tasks;
+        std::vector<ScheduledTask> delayed_tasks;
+        std::vector<ScheduledTask> pending_ready_tasks;  // Batch buffer for pending ready tasks
         std::size_t base_worker_count = 0;
         std::size_t max_compensation_workers = 0;
         std::size_t spawned_compensation_workers = 0;
@@ -160,13 +167,18 @@ public:
             if (group->stop) {
                 return;
             }
-            group->tasks.push(std::make_shared<ScheduledTask>(ScheduledTask{
+            ScheduledTask scheduled_task{
                 run_at,
                 group->next_sequence++,
                 from_here,
                 traits,
                 std::move(task),
-            }));
+            };
+            if (delay.count() <= 0) {
+                PushReadyTaskLocked(*group, std::move(scheduled_task));
+            } else {
+                PushDelayedTaskLocked(*group, std::move(scheduled_task));
+            }
             ArmCompensationSpawnLocked(*group, now);
         }
         group->cv.notify_one();
@@ -278,6 +290,13 @@ private:
         group.allow_compensation = allow_compensation;
         group.max_compensation_workers = allow_compensation ? max_compensation_workers : 0;
         group.workers.reserve(worker_count + group.max_compensation_workers);
+        const std::size_t ready_capacity =
+            std::max<std::size_t>(MIN_READY_TASK_CAPACITY, worker_count * READY_TASK_BATCH_SIZE * 8);
+        const std::size_t delayed_capacity =
+            std::max<std::size_t>(MIN_DELAYED_TASK_CAPACITY, worker_count * 8);
+        group.ready_tasks.reserve(ready_capacity);
+        group.delayed_tasks.reserve(delayed_capacity);
+        group.pending_ready_tasks.reserve(READY_TASK_BATCH_SIZE * 2);
         for (std::size_t i = 0; i < worker_count; ++i) {
             group.workers.emplace_back([this, &group]() { RunLoop(&group, false); });
         }
@@ -305,7 +324,7 @@ private:
             group.spawned_compensation_workers >= group.max_compensation_workers) {
             return false;
         }
-        if (group.active_may_block_workers == 0 || group.tasks.empty()) {
+        if (group.active_may_block_workers == 0 || !HasPendingTasksLocked(group)) {
             return false;
         }
 
@@ -391,14 +410,26 @@ private:
     }
 
     static void PruneTasksForShutdownLocked(WorkerGroup& group) {
-        std::vector<std::shared_ptr<ScheduledTask>> block_tasks;
-        block_tasks.reserve(group.tasks.size());
+        // Flush pending tasks first
+        FlushPendingReadyTasksLocked(group);
 
-        while (!group.tasks.empty()) {
-            std::shared_ptr<ScheduledTask> task = group.tasks.top();
-            group.tasks.pop();
+        std::vector<ScheduledTask> block_tasks;
+        block_tasks.reserve(group.ready_tasks.size() + group.delayed_tasks.size());
 
-            const ShutdownBehavior behavior = task->traits.shutdown_behavior();
+        while (!group.ready_tasks.empty()) {
+            ScheduledTask task = PopReadyTaskLocked(group);
+
+            const ShutdownBehavior behavior = task.traits.shutdown_behavior();
+            if (behavior == ShutdownBehavior::BLOCK_SHUTDOWN) {
+                block_tasks.push_back(std::move(task));
+            }
+            // CONTINUE_ON_SHUTDOWN / SKIP_ON_SHUTDOWN are dropped.
+        }
+
+        while (!group.delayed_tasks.empty()) {
+            ScheduledTask task = PopDelayedTaskLocked(group);
+
+            const ShutdownBehavior behavior = task.traits.shutdown_behavior();
             if (behavior == ShutdownBehavior::BLOCK_SHUTDOWN) {
                 block_tasks.push_back(std::move(task));
             }
@@ -406,7 +437,7 @@ private:
         }
 
         for (auto& task : block_tasks) {
-            group.tasks.push(std::move(task));
+            PushDelayedTaskLocked(group, std::move(task));
         }
     }
 
@@ -428,16 +459,19 @@ private:
         if (group.active_workers != 0) {
             return false;
         }
-        if (group.tasks.empty()) {
+        if (!group.ready_tasks.empty() || !group.pending_ready_tasks.empty()) {
+            return false;
+        }
+        if (group.delayed_tasks.empty()) {
             return true;
         }
-        return group.tasks.top()->run_at > now;
+        return group.delayed_tasks.front().run_at > now;
     }
 
     void RunLoop(WorkerGroup* group, bool is_compensation_worker) {
         current_impl_ = this;  // Set thread-local impl for ScopedBlockingCall
         for (;;) {
-            std::shared_ptr<ScheduledTask> scheduled;
+            ScheduledTask scheduled;
             bool scheduled_may_block = false;
             {
                 std::unique_lock<std::mutex> lock(group->mutex);
@@ -447,67 +481,60 @@ private:
                     }
 
                     const auto now = time_source_->Now();
+                    PromoteDueTasksLocked(*group, now);
+                    FlushPendingReadyTasksLocked(*group);  // Ensure pending tasks are in the heap
                     TrySpawnCompensationWorkerLocked(*group, now);
 
-                    if (group->stop && group->tasks.empty()) {
+                    if (group->stop && !HasPendingTasksLocked(*group)) {
                         return;
                     }
-                    if (group->tasks.empty()) {
+                    if (group->ready_tasks.empty()) {
                         CancelPendingCompensationSpawnLocked(*group);
-                        if (is_compensation_worker) {
-                            const auto status = group->cv.wait_for(lock, options_.compensation_idle_timeout);
-                            if (status == std::cv_status::timeout && group->tasks.empty() && !group->stop) {
-                                if (group->spawned_compensation_workers > 0) {
-                                    --group->spawned_compensation_workers;
+                        if (group->delayed_tasks.empty()) {
+                            if (is_compensation_worker) {
+                                const auto status = group->cv.wait_for(lock, options_.compensation_idle_timeout);
+                                if (status == std::cv_status::timeout &&
+                                    group->ready_tasks.empty() &&
+                                    group->delayed_tasks.empty() &&
+                                    !group->stop) {
+                                    if (group->spawned_compensation_workers > 0) {
+                                        --group->spawned_compensation_workers;
+                                    }
+                                    return;
                                 }
-                                return;
+                            } else {
+                                group->cv.wait(
+                                    lock,
+                                    [group]() {
+                                        return group->stop ||
+                                               !group->ready_tasks.empty() ||
+                                               !group->delayed_tasks.empty() ||
+                                               !group->pending_ready_tasks.empty();
+                                    });
                             }
                         } else {
-                            group->cv.wait(lock, [group]() { return group->stop || !group->tasks.empty(); });
+                            auto wake_deadline = group->delayed_tasks.front().run_at;
+                            if (group->pending_compensation_spawn &&
+                                group->compensation_spawn_deadline < wake_deadline) {
+                                wake_deadline = group->compensation_spawn_deadline;
+                            }
+                            group->cv.wait_until(lock, wake_deadline);
                         }
                         continue;
                     }
 
-                    const auto next_run_at = group->tasks.top()->run_at;
-                    if (now >= next_run_at) {
-                        std::vector<std::shared_ptr<ScheduledTask>> due_tasks;
-                        while (!group->tasks.empty() && group->tasks.top()->run_at <= now) {
-                            due_tasks.push_back(group->tasks.top());
-                            group->tasks.pop();
-                        }
-
-                        std::size_t best_index = 0;
-                        for (std::size_t i = 1; i < due_tasks.size(); ++i) {
-                            if (IsHigherReadyPriority(due_tasks[i], due_tasks[best_index])) {
-                                best_index = i;
-                            }
-                        }
-
-                        scheduled = due_tasks[best_index];
-                        for (std::size_t i = 0; i < due_tasks.size(); ++i) {
-                            if (i != best_index) {
-                                group->tasks.push(due_tasks[i]);
-                            }
-                        }
-                        scheduled_may_block = scheduled->traits.may_block();
-                        ++group->active_workers;
-                        if (scheduled_may_block) {
-                            ++group->active_may_block_workers;
-                            ArmCompensationSpawnLocked(*group, now);
-                        }
-                        break;
+                    scheduled = PopReadyTaskLocked(*group);
+                    scheduled_may_block = scheduled.traits.may_block();
+                    ++group->active_workers;
+                    if (scheduled_may_block) {
+                        ++group->active_may_block_workers;
+                        ArmCompensationSpawnLocked(*group, now);
                     }
-
-                    auto wake_deadline = next_run_at;
-                    if (group->pending_compensation_spawn &&
-                        group->compensation_spawn_deadline < wake_deadline) {
-                        wake_deadline = group->compensation_spawn_deadline;
-                    }
-                    group->cv.wait_until(lock, wake_deadline);
+                    break;
                 }
             }
-            ScopedTaskTrace trace_scope(scheduled->from_here);
-            std::move(scheduled->task).Run();
+            ScopedTaskTrace trace_scope(scheduled.from_here);
+            std::move(scheduled.task).Run();
             {
                 std::lock_guard<std::mutex> lock(group->mutex);
                 if (group->active_workers > 0) {
@@ -516,10 +543,75 @@ private:
                 if (scheduled_may_block && group->active_may_block_workers > 0) {
                     --group->active_may_block_workers;
                 }
-                if (group->active_may_block_workers == 0 || group->tasks.empty()) {
+                if (group->active_may_block_workers == 0 || !HasPendingTasksLocked(*group)) {
                     CancelPendingCompensationSpawnLocked(*group);
                 }
             }
+        }
+    }
+
+    static bool HasPendingTasksLocked(const WorkerGroup& group) {
+        return !group.ready_tasks.empty() || !group.delayed_tasks.empty() || !group.pending_ready_tasks.empty();
+    }
+
+    // Flush pending tasks to ready heap and rebuild heap structure
+    static void FlushPendingReadyTasksLocked(WorkerGroup& group) {
+        if (group.pending_ready_tasks.empty()) {
+            return;
+        }
+        // Grow once when needed to avoid multiple reallocations in bursty enqueue.
+        const std::size_t required_size = group.ready_tasks.size() + group.pending_ready_tasks.size();
+        if (required_size > group.ready_tasks.capacity()) {
+            std::size_t new_capacity = std::max<std::size_t>(group.ready_tasks.capacity(), MIN_READY_TASK_CAPACITY);
+            while (new_capacity < required_size) {
+                new_capacity *= 2;
+            }
+            group.ready_tasks.reserve(new_capacity);
+        }
+
+        // Move all pending tasks in one batch.
+        group.ready_tasks.insert(
+            group.ready_tasks.end(),
+            std::make_move_iterator(group.pending_ready_tasks.begin()),
+            std::make_move_iterator(group.pending_ready_tasks.end()));
+        group.pending_ready_tasks.clear();
+        // Rebuild heap once instead of incrementally
+        std::make_heap(group.ready_tasks.begin(), group.ready_tasks.end(), ReadyTaskCompare{});
+    }
+
+    static void PushReadyTaskLocked(WorkerGroup& group, ScheduledTask task) {
+        group.pending_ready_tasks.push_back(std::move(task));
+        // Flush when batch is full
+        if (group.pending_ready_tasks.size() >= READY_TASK_BATCH_SIZE) {
+            FlushPendingReadyTasksLocked(group);
+        }
+    }
+
+    static ScheduledTask PopReadyTaskLocked(WorkerGroup& group) {
+        FlushPendingReadyTasksLocked(group);
+        std::pop_heap(group.ready_tasks.begin(), group.ready_tasks.end(), ReadyTaskCompare{});
+        ScheduledTask task = std::move(group.ready_tasks.back());
+        group.ready_tasks.pop_back();
+        return task;
+    }
+
+    static void PushDelayedTaskLocked(WorkerGroup& group, ScheduledTask task) {
+        group.delayed_tasks.push_back(std::move(task));
+        std::push_heap(group.delayed_tasks.begin(), group.delayed_tasks.end(), ScheduledTaskCompare{});
+    }
+
+    static ScheduledTask PopDelayedTaskLocked(WorkerGroup& group) {
+        std::pop_heap(group.delayed_tasks.begin(), group.delayed_tasks.end(), ScheduledTaskCompare{});
+        ScheduledTask task = std::move(group.delayed_tasks.back());
+        group.delayed_tasks.pop_back();
+        return task;
+    }
+
+    static void PromoteDueTasksLocked(
+        WorkerGroup& group,
+        std::chrono::steady_clock::time_point now) {
+        while (!group.delayed_tasks.empty() && group.delayed_tasks.front().run_at <= now) {
+            PushReadyTaskLocked(group, PopDelayedTaskLocked(group));
         }
     }
 
@@ -574,7 +666,7 @@ public:
                 if (normal_group_.scoped_blocking_call_count == 0 &&
                     normal_group_.active_may_block_workers > 0) {
                     --normal_group_.active_may_block_workers;
-                    if (normal_group_.active_may_block_workers == 0 || normal_group_.tasks.empty()) {
+                    if (normal_group_.active_may_block_workers == 0 || !HasPendingTasksLocked(normal_group_)) {
                         CancelPendingCompensationSpawnLocked(normal_group_);
                     }
                 }
@@ -588,7 +680,7 @@ public:
                 if (best_effort_group_.scoped_blocking_call_count == 0 &&
                     best_effort_group_.active_may_block_workers > 0) {
                     --best_effort_group_.active_may_block_workers;
-                    if (best_effort_group_.active_may_block_workers == 0 || best_effort_group_.tasks.empty()) {
+                    if (best_effort_group_.active_may_block_workers == 0 || !HasPendingTasksLocked(best_effort_group_)) {
                         CancelPendingCompensationSpawnLocked(best_effort_group_);
                     }
                 }
