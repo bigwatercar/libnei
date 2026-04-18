@@ -1,14 +1,30 @@
+param(
+    [int]$Runs = 20
+)
+
 $ErrorActionPreference = 'Stop'
 
-$exe = '.\build\tests\Release\task_threadpool_bench_demo.exe'
-if (-not (Test-Path $exe)) {
-    throw "benchmark executable not found: $exe"
+$candidates = @(
+    '.\build\windows-vs2022-debug\tests\Release\task_threadpool_bench_demo.exe',
+    '.\build\tests\Release\task_threadpool_bench_demo.exe'
+)
+
+$exe = $null
+foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+        $exe = $candidate
+        break
+    }
+}
+
+if ($null -eq $exe) {
+    throw "benchmark executable not found in known paths"
 }
 
 $rows = @()
-for ($run = 1; $run -le 20; $run++) {
+for ($run = 1; $run -le $Runs; $run++) {
     & $exe | ForEach-Object {
-        if ($_ -match '^(1 thread|2 threads|4 threads|default|default_no_comp|1 thread_noop|2 threads_noop|4 threads_noop|default_noop|default_no_comp_noop) \| workers=(\d+) \| enqueue_only_ms=([0-9.]+) \| drain_wait_ms=([0-9.]+) \| total_ms=([0-9.]+) \| enqueue_only_ns_per_task=([0-9.]+) \| drain_wait_ns_per_task=([0-9.]+) \| total_ns_per_task=([0-9.]+) \| sum=(\d+) \| status=(PASS|FAIL)$') {
+        if ($_ -match '^(1 thread|2 threads|4 threads|default|default_no_comp|1 thread_noop|2 threads_noop|4 threads_noop|default_noop|default_no_comp_noop|default_delayed_mix|default_no_comp_delayed_mix) \| workers=(\d+) \| enqueue_only_ms=([0-9.]+) \| drain_wait_ms=([0-9.]+) \| total_ms=([0-9.]+) \| enqueue_only_ns_per_task=([0-9.]+) \| drain_wait_ns_per_task=([0-9.]+) \| total_ns_per_task=([0-9.]+) \| sum=(\d+) \| status=(PASS|FAIL)$') {
             $rows += [pscustomobject]@{
                 run = $run
                 label = $matches[1]
@@ -45,6 +61,8 @@ $rank = @{
     '4 threads_noop' = 8
     'default_noop' = 9
     'default_no_comp_noop' = 10
+    'default_delayed_mix' = 11
+    'default_no_comp_delayed_mix' = 12
 }
 
 $summary = $rows |

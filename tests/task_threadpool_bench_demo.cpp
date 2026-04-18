@@ -137,6 +137,59 @@ BenchmarkResult RunNoopBenchmark(
     return result;
 }
 
+BenchmarkResult RunDelayedNoopBenchmark(
+    const std::string& label,
+    std::size_t requested_worker_count,
+    std::uint32_t task_count,
+    bool disable_compensation = false) {
+    nei::ThreadPoolOptions options;
+    options.worker_count = requested_worker_count;
+    if (disable_compensation) {
+        options.enable_compensation = false;
+        options.enable_best_effort_compensation = false;
+        options.max_compensation_workers = 0;
+        options.best_effort_max_compensation_workers = 0;
+    }
+    nei::ThreadPool thread_pool(options);
+    const std::size_t worker_count = thread_pool.WorkerCount();
+
+    std::atomic<std::uint32_t> remaining{task_count};
+    std::promise<void> all_done;
+    auto all_done_future = all_done.get_future();
+
+    const auto total_started_at = std::chrono::steady_clock::now();
+    const auto post_started_at = std::chrono::steady_clock::now();
+    for (std::uint32_t i = 0; i < task_count; ++i) {
+        const std::chrono::milliseconds delay = std::chrono::milliseconds(1 + (i % 4));
+        thread_pool.PostDelayedTask(
+            FROM_HERE,
+            nei::BindOnce(
+                [](std::atomic<std::uint32_t>& shared_remaining,
+                   std::promise<void>& done) {
+                    if (shared_remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                        done.set_value();
+                    }
+                },
+                std::ref(remaining),
+                std::ref(all_done)),
+            delay);
+    }
+    const auto post_finished_at = std::chrono::steady_clock::now();
+
+    all_done_future.wait();
+    const auto total_finished_at = std::chrono::steady_clock::now();
+    thread_pool.Shutdown();
+
+    BenchmarkResult result;
+    result.label = label;
+    result.worker_count = worker_count;
+    result.post_elapsed = post_finished_at - post_started_at;
+    result.total_elapsed = total_finished_at - total_started_at;
+    result.sum = 0;
+    result.expected_sum = 0;
+    return result;
+}
+
 std::uint32_t ParseTaskCount(int argc, char* argv[]) {
     if (argc < 2) {
         return kDefaultTaskCount;
@@ -182,6 +235,10 @@ int main(int argc, char* argv[]) {
     const BenchmarkResult default_threads_noop = RunNoopBenchmark("default_noop", 0, task_count);
     const BenchmarkResult default_no_compensation_noop =
         RunNoopBenchmark("default_no_comp_noop", 0, task_count, true);
+    const BenchmarkResult default_delayed_mix =
+        RunDelayedNoopBenchmark("default_delayed_mix", 0, task_count);
+    const BenchmarkResult default_no_comp_delayed_mix =
+        RunDelayedNoopBenchmark("default_no_comp_delayed_mix", 0, task_count, true);
 
     const BenchmarkResult results[] = {
         one_thread,
@@ -193,7 +250,9 @@ int main(int argc, char* argv[]) {
         two_threads_noop,
         four_threads_noop,
         default_threads_noop,
-        default_no_compensation_noop};
+        default_no_compensation_noop,
+        default_delayed_mix,
+        default_no_comp_delayed_mix};
 
     std::cout << "ThreadPool PostTask benchmark: " << task_count
               << " tiny sum tasks (expected sum = " << expected_sum << ")\n";
