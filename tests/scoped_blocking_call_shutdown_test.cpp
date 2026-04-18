@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <future>
+#include <memory>
 #include <thread>
 
 namespace nei {
@@ -54,31 +55,31 @@ TEST_F(ScopedBlockingCallShutdownTest, BlockShutdownWithBlockingCalls) {
 }
 
 TEST_F(ScopedBlockingCallShutdownTest, NestedBlockingCallsShutdown) {
-    std::atomic<int> depth_tracker{0};
-    std::atomic<int> max_depth{0};
+    auto depth_tracker = std::make_shared<std::atomic<int>>(0);
+    auto max_depth = std::make_shared<std::atomic<int>>(0);
 
     for (int i = 0; i < 5; ++i) {
-        env_.thread_pool().PostTask(FROM_HERE, [&]() {
+        env_.thread_pool().PostTask(FROM_HERE, [depth_tracker, max_depth]() {
             ScopedBlockingCall outer;
-            int depth = depth_tracker.fetch_add(1) + 1;
-            max_depth.store((std::max)(max_depth.load(), depth));
+            int depth = depth_tracker->fetch_add(1) + 1;
+            max_depth->store((std::max)(max_depth->load(), depth));
 
             {
                 ScopedBlockingCall inner;
-                depth = depth_tracker.fetch_add(1) + 1;
-                max_depth.store((std::max)(max_depth.load(), depth));
+                depth = depth_tracker->fetch_add(1) + 1;
+                max_depth->store((std::max)(max_depth->load(), depth));
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
-                depth_tracker.fetch_sub(1);
+                depth_tracker->fetch_sub(1);
             }
 
-            depth_tracker.fetch_sub(1);
+            depth_tracker->fetch_sub(1);
         });
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
     env_.thread_pool().StartShutdown();
 
-    EXPECT_GE(max_depth.load(), 1);
+    EXPECT_GE(max_depth->load(), 1);
 }
 
 TEST_F(ScopedBlockingCallShutdownTest, BlockingCallCancellationOnShutdown) {
