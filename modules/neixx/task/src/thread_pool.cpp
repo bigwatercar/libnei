@@ -481,7 +481,11 @@ private:
                     }
 
                     const auto now = time_source_->Now();
-                    PromoteDueTasksLocked(*group, now);
+                    // Skip the promote check entirely when there are no delayed tasks to
+                    // avoid a redundant heap-empty test on the hot path for immediate tasks.
+                    if (!group->delayed_tasks.empty()) {
+                        PromoteDueTasksLocked(*group, now);
+                    }
                     FlushPendingReadyTasksLocked(*group);  // Ensure pending tasks are in the heap
                     TrySpawnCompensationWorkerLocked(*group, now);
 
