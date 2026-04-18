@@ -40,6 +40,13 @@ std::shared_ptr<const TimeSource> SharedSystemTimeSource() {
 
 // Batch size for flushing pending ready tasks to minimize heap operations
 constexpr std::size_t READY_TASK_BATCH_SIZE = 8;
+// Number of tasks a worker pops per lock acquisition on the hot path.
+// Reduces lock contention by amortising two mutex round-trips over N tasks.
+constexpr std::size_t WORKER_LOCAL_BATCH_SIZE = 8;
+// When the ready heap exceeds this size each pop_heap is O(log N) expensive.
+// Above this threshold batching is counter-productive: the extra lock hold time
+// outweighs the savings from fewer acquisitions, so we fall back to single pops.
+constexpr std::size_t WORKER_BATCH_HEAP_LIMIT = 512;
 // Initial queue capacities to reduce reallocation cost under bursty enqueue load.
 constexpr std::size_t MIN_READY_TASK_CAPACITY = 256;
 constexpr std::size_t MIN_DELAYED_TASK_CAPACITY = 64;
@@ -289,9 +296,8 @@ public:
       return;
     }
 
-    const auto run_at = time_source_->Now() + delay;
-    const auto now = time_source_->Now();
     WorkerGroup *group = SelectGroup(traits);
+    bool should_notify = false;
     {
       std::lock_guard<std::mutex> lock(group->mutex);
       if (shutting_down_.load(std::memory_order_relaxed)
@@ -300,6 +306,24 @@ public:
       }
       if (group->stop) {
         return;
+      }
+
+      const bool had_ready_before = !group->ready_tasks.empty();
+      const bool had_pending_before = !group->pending_ready_tasks.empty();
+
+      std::chrono::steady_clock::time_point now{};
+      bool has_now = false;
+      auto get_now = [this, &now, &has_now]() {
+        if (!has_now) {
+          now = time_source_->Now();
+          has_now = true;
+        }
+        return now;
+      };
+
+      std::chrono::steady_clock::time_point run_at{};
+      if (delay.count() > 0) {
+        run_at = get_now() + delay;
       }
       ScheduledTask scheduled_task{
           run_at,
@@ -310,12 +334,28 @@ public:
       };
       if (delay.count() <= 0) {
         PushReadyTaskLocked(*group, std::move(scheduled_task));
+        // Wake only when no immediate-ready work existed before this enqueue.
+        should_notify = !had_ready_before && !had_pending_before;
       } else {
+        const bool had_delayed_before = !group->delayed_tasks.empty();
+        const bool had_any_before = had_ready_before || had_pending_before || had_delayed_before;
+        const auto previous_next_delayed_run_at =
+            had_delayed_before ? group->delayed_tasks.front().run_at : std::chrono::steady_clock::time_point{};
+
         PushDelayedTaskLocked(*group, std::move(scheduled_task));
+        // Wake if queue was empty or if this delayed task advances the next wake-up deadline.
+        should_notify = !had_any_before || (had_delayed_before && run_at < previous_next_delayed_run_at);
       }
-      ArmCompensationSpawnLocked(*group, now);
+
+      // Compensation is only meaningful when may_block workers are active.
+      if (group->active_may_block_workers != 0 && !group->pending_compensation_spawn) {
+        (void)get_now();
+        ArmCompensationSpawnLocked(*group, now);
+      }
     }
-    group->cv.notify_one();
+    if (should_notify) {
+      group->cv.notify_one();
+    }
   }
 
   std::size_t WorkerCount() const {
@@ -614,9 +654,12 @@ private:
 
   void RunLoop(WorkerGroup *group, bool is_compensation_worker) {
     current_impl_ = this; // Set thread-local impl for ScopedBlockingCall
+    // Reuse allocation across outer-loop iterations; capacity is retained on clear().
+    std::vector<ScheduledTask> local_batch;
+    local_batch.reserve(WORKER_LOCAL_BATCH_SIZE);
     for (;;) {
-      ScheduledTask scheduled;
-      bool scheduled_may_block = false;
+      local_batch.clear();
+      bool batch_has_may_block = false;
       {
         std::unique_lock<std::mutex> lock(group->mutex);
         for (;;) {
@@ -664,24 +707,45 @@ private:
             continue;
           }
 
-          scheduled = PopReadyTaskLocked(*group);
-          scheduled_may_block = scheduled.traits.may_block();
+          // Pop first task; if it is may_block take only that one so that
+          // active_may_block_workers remains exact for compensation logic.
+          local_batch.push_back(PopReadyTaskLocked(*group));
+          batch_has_may_block = local_batch.back().traits.may_block();
+          if (!batch_has_may_block && group->ready_tasks.size() <= WORKER_BATCH_HEAP_LIMIT) {
+            // Extend the batch only when enough tasks remain to let other workers
+            // also fill a batch. When the queue is sparse (<= WORKER_LOCAL_BATCH_SIZE
+            // tasks left), take just one so that parallel tasks can start on idle
+            // workers without waiting for this worker's batch to complete.
+            while (local_batch.size() < WORKER_LOCAL_BATCH_SIZE
+                   && group->ready_tasks.size() > WORKER_LOCAL_BATCH_SIZE
+                   && group->ready_tasks.size() <= WORKER_BATCH_HEAP_LIMIT
+                   && !group->ready_tasks.front().traits.may_block()) {
+              local_batch.push_back(PopReadyTaskLocked(*group));
+            }
+          }
           ++group->active_workers;
-          if (scheduled_may_block) {
+          if (batch_has_may_block) {
             ++group->active_may_block_workers;
             ArmCompensationSpawnLocked(*group, now);
+          }
+          // If more work remains, cascade-wake another worker rather than
+          // relying solely on the enqueuer's notify.
+          if (!group->ready_tasks.empty() || !group->pending_ready_tasks.empty()) {
+            group->cv.notify_one();
           }
           break;
         }
       }
-      ScopedTaskTrace trace_scope(scheduled.from_here);
-      std::move(scheduled.task).Run();
+      for (ScheduledTask &scheduled : local_batch) {
+        ScopedTaskTrace trace_scope(scheduled.from_here);
+        std::move(scheduled.task).Run();
+      }
       {
         std::lock_guard<std::mutex> lock(group->mutex);
         if (group->active_workers > 0) {
           --group->active_workers;
         }
-        if (scheduled_may_block && group->active_may_block_workers > 0) {
+        if (batch_has_may_block && group->active_may_block_workers > 0) {
           --group->active_may_block_workers;
         }
         if (group->active_may_block_workers == 0 || !HasPendingTasksLocked(*group)) {
@@ -748,8 +812,24 @@ private:
   }
 
   static void PromoteDueTasksLocked(WorkerGroup &group, std::chrono::steady_clock::time_point now) {
+    if (group.delayed_tasks.empty() || group.delayed_tasks.front().run_at > now) {
+      return;
+    }
+
+    std::size_t promoted_count = 0;
     while (!group.delayed_tasks.empty() && group.delayed_tasks.front().run_at <= now) {
-      PushReadyTaskLocked(group, PopDelayedTaskLocked(group));
+      group.pending_ready_tasks.push_back(PopDelayedTaskLocked(group));
+      ++promoted_count;
+    }
+
+    if (promoted_count == 0) {
+      return;
+    }
+
+    // Flush at most once after due-task batch migration instead of checking
+    // batch threshold on every promoted task.
+    if (group.pending_ready_tasks.size() >= READY_TASK_BATCH_SIZE) {
+      FlushPendingReadyTasksLocked(group);
     }
   }
 

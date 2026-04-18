@@ -213,27 +213,45 @@ ManualTimeSource + RunUntilIdle 让延迟任务测试从“依赖真实时间”
 
 ## 9. 待改进点与建议路线
 
-按优先级建议如下：
+本轮按最终确认的执行优先级推进：
 
-### P0（短期）
+### P0（当前最高优先级，正在执行）
 
-- 明确并文档化 shutdown 语义边界，尤其 CONTINUE_ON_SHUTDOWN 的预期
-- 为关键并发测试引入统一状态托管模式（shared_state fixture helper）
-- 增加 ThreadPool 内部关键计数的 debug 断言（active/scoped 计数平衡）
+- 继续压缩 enqueue 热路径：缩短锁持有时间、提高批处理 flush 效率、减少无效唤醒。
+- 已落地一项：ThreadPool::PostTask 从无条件 notify 改为条件 notify，仅在“立即队列从空转非空”或“更早 delayed 截止时间出现/队列由空变非空”时唤醒。
 
-### P1（中期）
+### P1（下一优先级）
 
-- 提升补偿线程策略可解释性：增加统计埋点与决策日志开关
-- 评估 ready/delayed 数据结构在 delayed-heavy 场景下的替代方案
-- 为 SequencedTaskRunner 增加可选队列长度监控和背压策略
+- 单独优化 delayed_mix 路径：时间结构、批量晋升策略、唤醒策略协同优化。
+- 目标是降低 delayed-heavy 场景 enqueue 成本与尾部延迟波动。
 
-### P2（中长期）
+### P2（后续）
 
-- 设计可选任务取消令牌与截止时间语义
-- 引入分层调度统计（按优先级、行为、耗时分布）
-- 评估 NUMA/亲和性策略的自动化配置能力
+- 通过“4 threads 与 default 的性能差距”反推默认 worker 数与分组策略。
+- 输出可操作的默认参数建议，而非固定机器相关常量。
 
-### 9.1 如果未来继续做 Time-wheel 优化：建议启动方式
+### 9.1 固定回归基线字段（必须一致）
+
+每次基准对比必须固定输出以下字段，不允许缺项或改名：
+
+- enqueue_ns
+- drain_ns
+- total_ns
+- enqueue throughput（tasks/s，按 1e9 / enqueue_ns 反算）
+- total throughput（tasks/s，按 1e9 / total_ns 反算）
+- drain_share_pct（drain_ns / total_ns * 100）
+
+### 9.2 本轮 P0 变更后的快速基线（Release，10k，10 runs）
+
+关键标签统计如下（中位数）：
+
+- default：enqueue_ns=4593.54，drain_ns=97.24，total_ns=4739.62，enqueue throughput=217697.03，total throughput=210986.07，drain_share_pct=2.05
+- default_no_comp：enqueue_ns=4368.18，drain_ns=101.30，total_ns=4484.48，enqueue throughput=228928.30，total throughput=222991.56，drain_share_pct=2.26
+- default_delayed_mix：enqueue_ns=142.51，drain_ns=10681.93，total_ns=10819.92，enqueue throughput=7017051.43，total throughput=92422.84，drain_share_pct=98.72
+
+说明：100k 长跑统计在当前终端环境中仍会出现执行阻塞/无输出，需在稳定终端窗口补采后并入同口径字段。
+
+### 9.3 如果未来继续做 Time-wheel 优化：建议启动方式
 
 建议按“先并行验证，再灰度替换”的方式推进，而不是直接把 delayed heap 全量替换。
 
@@ -255,7 +273,7 @@ ManualTimeSource + RunUntilIdle 让延迟任务测试从“依赖真实时间”
 - 若 delayed-heavy enqueue 或 tail latency 回退超过 20% 且连续 3 轮复现，立即回退到 heap 路径排查。
 - 不满足止损线前，不进入主分支默认实现。
 
-### 9.2 Time-wheel 优化的注意事项
+### 9.4 Time-wheel 优化的注意事项
 
 - 槽宽（tick）与业务延迟分布要匹配：tick 过大导致精度损失，tick 过小导致推进成本上升。
 - rounds 计算必须无符号安全：注意大延迟换算、溢出和边界值（0、1 tick、超大 delay）。
@@ -264,7 +282,7 @@ ManualTimeSource + RunUntilIdle 让延迟任务测试从“依赖真实时间”
 - 与补偿线程策略协同：wheel 推进导致的突发 ready 任务会影响 may_block 与补偿触发阈值。
 - 可观测性先行：至少暴露 wheel occupancy、tick advance 次数、跨轮迁移量、回退次数。
 
-### 9.3 已踩过的坑（避免重复）
+### 9.5 已踩过的坑（避免重复）
 
 - 坑 1：只看 immediate-path 指标。
   - 现象：zero-delay 场景数据变好，但 delayed-heavy 场景出现数量级退化。
@@ -282,7 +300,7 @@ ManualTimeSource + RunUntilIdle 让延迟任务测试从“依赖真实时间”
   - 现象：CTest 全通过，但性能回归严重。
   - 规避：功能门禁与性能门禁分离；发布前必须同时满足两者。
 
-### 9.4 推荐验收门槛（可直接落地）
+### 9.6 推荐验收门槛（可直接落地）
 
 - 功能：全量 CTest 通过，且 shutdown/阻塞相关测试无新增 flaky。
 - 性能：
