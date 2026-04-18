@@ -197,6 +197,7 @@ public:
     std::uint64_t worker_cpu_affinity_mask = 0;
     std::uint64_t best_effort_cpu_affinity_mask = 0;
     bool apply_affinity_to_compensation_workers = true;
+    WakePolicy wake_policy = WakePolicy::kHybrid;
   };
 
   Impl(const ThreadPoolOptions &options, std::shared_ptr<const TimeSource> time_source)
@@ -334,8 +335,20 @@ public:
       };
       if (delay.count() <= 0) {
         PushReadyTaskLocked(*group, std::move(scheduled_task));
-        // Wake only when no immediate-ready work existed before this enqueue.
-        should_notify = !had_ready_before && !had_pending_before;
+        switch (options_.wake_policy) {
+        case WakePolicy::kAggressive:
+          should_notify = true;
+          break;
+        case WakePolicy::kConservative:
+          should_notify = !had_ready_before && !had_pending_before;
+          break;
+        case WakePolicy::kHybrid:
+        default:
+          // Aggressive when no delayed tasks are pending (immediate-heavy workloads);
+          // conservative otherwise to avoid wake storms in delayed-mix workloads.
+          should_notify = group->delayed_tasks.empty() || (!had_ready_before && !had_pending_before);
+          break;
+        }
       } else {
         const bool had_delayed_before = !group->delayed_tasks.empty();
         const bool had_any_before = had_ready_before || had_pending_before || had_delayed_before;
@@ -452,6 +465,7 @@ private:
     resolved.worker_cpu_affinity_mask = options.worker_cpu_affinity_mask;
     resolved.best_effort_cpu_affinity_mask = options.best_effort_cpu_affinity_mask;
     resolved.apply_affinity_to_compensation_workers = options.apply_affinity_to_compensation_workers;
+    resolved.wake_policy = options.wake_policy;
     return resolved;
   }
 

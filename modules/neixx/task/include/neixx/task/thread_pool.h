@@ -22,6 +22,53 @@ class ScopedBlockingCall; // Forward declaration for friend access
 #pragma warning(disable : 4251)
 #endif
 
+/// Controls how PostTask wakes sleeping workers when a non-delayed task is posted.
+///
+/// Choosing the right policy depends on the dominant workload pattern:
+///
+///  kConservative
+///    Wakes a worker only when the ready queue transitions from empty to
+///    non-empty (i.e. the first task of a new burst).  Subsequent posts within
+///    the same burst are batched silently; workers self-wake via cascade notify
+///    once they drain a task.
+///    Suitable for:
+///      • Workloads that mix immediate and delayed tasks heavily (e.g. timers,
+///        animations, periodic callbacks) where delayed-task wake precision
+///        matters most and spurious wakeups must be minimised.
+///      • Low-core-count machines where thundering-herd is expensive.
+///      • Background / best-effort pipelines that tolerate higher latency.
+///
+///  kAggressive
+///    Wakes a worker on every single non-delayed post regardless of queue state.
+///    Minimises first-task latency at the expense of more mutex round-trips and
+///    potential thundering-herd under burst enqueue.
+///    Suitable for:
+///      • Pure immediate-task workloads with no (or negligible) delayed tasks,
+///        where per-task latency is critical (e.g. real-time event dispatch,
+///        UI thread offloads).
+///      • Small thread pools (1–2 workers) where herd effect is negligible.
+///      • Benchmarks / stress tests that prioritise raw enqueue throughput over
+///        scheduling fairness.
+///
+///  kHybrid  (default)
+///    Applies kAggressive when no delayed tasks are currently pending, and falls
+///    back to kConservative when delayed tasks are queued.  This lets the pool
+///    run at full immediate-task throughput during pure-immediate bursts while
+///    avoiding wake storms when the delayed heap is active.
+///    Suitable for:
+///      • General-purpose thread pools that serve both immediate and delayed
+///        task sources simultaneously (most production use cases).
+///      • Workloads whose ratio of immediate-to-delayed traffic changes over
+///        time (e.g. startup burst then idle + timer callbacks).
+///      • The recommended starting point; switch to kConservative only if
+///        profiling shows delayed-task jitter, or to kAggressive only if
+///        per-task latency is measured as the bottleneck.
+enum class WakePolicy {
+  kConservative,
+  kAggressive,
+  kHybrid,
+};
+
 struct ThreadPoolOptions {
   std::size_t worker_count = 0;
   std::size_t best_effort_worker_count = 1;
@@ -39,6 +86,8 @@ struct ThreadPoolOptions {
   std::uint64_t best_effort_cpu_affinity_mask = 0;
   // Whether compensation workers should also be pinned.
   bool apply_affinity_to_compensation_workers = true;
+  // Worker wake-up strategy for non-delayed task posts.
+  WakePolicy wake_policy = WakePolicy::kHybrid;
 };
 
 class NEI_API ThreadPool final {
