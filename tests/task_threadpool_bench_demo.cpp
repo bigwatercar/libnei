@@ -165,7 +165,8 @@ BenchmarkResult RunDelayedNoopBenchmark(const std::string &label,
                                         std::size_t requested_worker_count,
                                         std::uint32_t task_count,
                                         bool disable_compensation = false,
-                                        bool use_affinity = false) {
+                                        bool use_affinity = false,
+                                        int fixed_delay_ms = 0) {
   nei::ThreadPoolOptions options;
   options.worker_count = requested_worker_count;
   ConfigureAffinityOptions(options, requested_worker_count, use_affinity);
@@ -185,7 +186,8 @@ BenchmarkResult RunDelayedNoopBenchmark(const std::string &label,
   const auto total_started_at = std::chrono::steady_clock::now();
   const auto post_started_at = std::chrono::steady_clock::now();
   for (std::uint32_t i = 0; i < task_count; ++i) {
-    const std::chrono::milliseconds delay = std::chrono::milliseconds(1 + (i % 4));
+    const std::chrono::milliseconds delay =
+        fixed_delay_ms > 0 ? std::chrono::milliseconds(fixed_delay_ms) : std::chrono::milliseconds(1 + (i % 4));
     thread_pool.PostDelayedTask(FROM_HERE,
                                 nei::BindOnce(
                                     [](std::atomic<std::uint32_t> &shared_remaining, std::promise<void> &done) {
@@ -270,6 +272,10 @@ int main(int argc, char *argv[]) {
       RunDelayedNoopBenchmark("default_delayed_mix", 0, task_count, false, use_affinity);
   const BenchmarkResult default_no_comp_delayed_mix =
       RunDelayedNoopBenchmark("default_no_comp_delayed_mix", 0, task_count, true, use_affinity);
+  const BenchmarkResult default_delayed_fixed =
+      RunDelayedNoopBenchmark("default_delayed_fixed", 0, task_count, false, use_affinity, 4);
+  const BenchmarkResult default_no_comp_delayed_fixed =
+      RunDelayedNoopBenchmark("default_no_comp_delayed_fixed", 0, task_count, true, use_affinity, 4);
 
   const BenchmarkResult results[] = {one_thread,
                                      two_threads,
@@ -282,7 +288,9 @@ int main(int argc, char *argv[]) {
                                      default_threads_noop,
                                      default_no_compensation_noop,
                                      default_delayed_mix,
-                                     default_no_comp_delayed_mix};
+                                     default_no_comp_delayed_mix,
+                                     default_delayed_fixed,
+                                     default_no_comp_delayed_fixed};
 
   std::cout << "ThreadPool PostTask benchmark: " << task_count << " tiny sum tasks (expected sum = " << expected_sum
             << ")\n";
