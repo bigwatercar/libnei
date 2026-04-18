@@ -302,27 +302,20 @@ int main() {
   std::cout << "NEI vs spdlog — aligned benchmark scaffold\n";
   std::cout << "==========================================\n";
   std::cout << "Memory:     " << kMemoryIters << " iters; sink = atomic++ only; time includes flush.\n";
-  std::cout << "File async: " << kFileIters
-            << " iters; async + file sink; both sides delete old files before run.\n";
-  std::cout << "Per-call:   " << kFileSyncIters
-            << " iters; async logger + flush after each log on both sides.\n";
+  std::cout << "File async: " << kFileIters << " iters; async + file sink; both sides delete old files before run.\n";
+  std::cout << "Per-call:   " << kFileSyncIters << " iters; async logger + flush after each log on both sides.\n";
   std::cout << "Fairness knobs: NEI log_thread_id forced OFF during benchmark.\n\n";
 
   std::cout << "--- Memory (async, minimal sink) ---\n\n";
 
-  print_stats("[NEI]  simple %s",
-              kMemoryIters,
-              time_nei_memory_ms(
-                  [] {
-                    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                             NEI_L_INFO,
-                             __FILE__,
-                             __LINE__,
-                             "bench",
-                             "test message %s",
-                             "test");
-                  },
-                  kMemoryIters));
+  print_stats(
+      "[NEI]  simple %s",
+      kMemoryIters,
+      time_nei_memory_ms(
+          [] {
+            nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", "test message %s", "test");
+          },
+          kMemoryIters));
 
   print_stats(
       "[spdlog] simple {}",
@@ -354,20 +347,16 @@ int main() {
                   },
                   kMemoryIters));
 
-  print_stats("[NEI]  llog_literal (opaque body)",
-              kMemoryIters,
-              time_nei_memory_ms(
-                  [] {
-                    static const char body[] = "info-only";
-                    nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                                     NEI_L_INFO,
-                                     __FILE__,
-                                     __LINE__,
-                                     "bench",
-                                     body,
-                                     sizeof(body) - 1U);
-                  },
-                  kMemoryIters));
+  print_stats(
+      "[NEI]  llog_literal (opaque body)",
+      kMemoryIters,
+      time_nei_memory_ms(
+          [] {
+            static const char body[] = "info-only";
+            nei_llog_literal(
+                NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", body, sizeof(body) - 1U);
+          },
+          kMemoryIters));
 
   print_stats(
       "[spdlog] literal only",
@@ -395,13 +384,7 @@ int main() {
   {
     const int64_t us = time_nei_file_ms(
         [] {
-          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                   NEI_L_INFO,
-                   __FILE__,
-                   __LINE__,
-                   "bench",
-                   "test message %s",
-                   "test");
+          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", "test message %s", "test");
         },
         kFileIters,
         nei_simple.c_str());
@@ -500,13 +483,7 @@ int main() {
   {
     const int64_t us = time_nei_file_sync_ms(
         [] {
-          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                   NEI_L_INFO,
-                   __FILE__,
-                   __LINE__,
-                   "bench",
-                   "test message %s",
-                   "test");
+          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", "test message %s", "test");
         },
         kFileSyncIters,
         nei_simple_sync.c_str());

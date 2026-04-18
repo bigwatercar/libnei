@@ -22,28 +22,28 @@ class SequencedTaskRunner;
 
 class NEI_API TaskEnvironment final {
 public:
-    class Impl;
+  class Impl;
 
-    explicit TaskEnvironment(std::size_t worker_count = 0);
-    explicit TaskEnvironment(const ThreadPoolOptions& options);
-    ~TaskEnvironment();
+  explicit TaskEnvironment(std::size_t worker_count = 0);
+  explicit TaskEnvironment(const ThreadPoolOptions &options);
+  ~TaskEnvironment();
 
-    TaskEnvironment(const TaskEnvironment&) = delete;
-    TaskEnvironment& operator=(const TaskEnvironment&) = delete;
+  TaskEnvironment(const TaskEnvironment &) = delete;
+  TaskEnvironment &operator=(const TaskEnvironment &) = delete;
 
-    TaskEnvironment(TaskEnvironment&&) noexcept;
-    TaskEnvironment& operator=(TaskEnvironment&&) noexcept;
+  TaskEnvironment(TaskEnvironment &&) noexcept;
+  TaskEnvironment &operator=(TaskEnvironment &&) noexcept;
 
-    ThreadPool& thread_pool();
-    std::shared_ptr<SequencedTaskRunner> CreateSequencedTaskRunner();
+  ThreadPool &thread_pool();
+  std::shared_ptr<SequencedTaskRunner> CreateSequencedTaskRunner();
 
-    std::chrono::steady_clock::time_point Now() const;
-    void AdvanceTimeBy(std::chrono::milliseconds delta);
-    void FastForwardBy(std::chrono::milliseconds delta);
-    void RunUntilIdle();
+  std::chrono::steady_clock::time_point Now() const;
+  void AdvanceTimeBy(std::chrono::milliseconds delta);
+  void FastForwardBy(std::chrono::milliseconds delta);
+  void RunUntilIdle();
 
 private:
-    std::unique_ptr<Impl> impl_;
+  std::unique_ptr<Impl> impl_;
 };
 
 #ifdef _MSC_VER

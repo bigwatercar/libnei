@@ -1695,11 +1695,8 @@ static const char *_nei_log_basename(const char *path) {
   return (slash > backslash) ? (slash + 1) : (backslash + 1);
 }
 
-static int _nei_log_append_location_block(const nei_log_event_header_st *header,
-                                          int short_path,
-                                          char *out,
-                                          size_t out_cap,
-                                          size_t *used) {
+static int _nei_log_append_location_block(
+    const nei_log_event_header_st *header, int short_path, char *out, size_t out_cap, size_t *used) {
   if (header == NULL || out == NULL || used == NULL) {
     return -1;
   }
@@ -1821,7 +1818,8 @@ static int _nei_log_format_event(const nei_log_event_header_st *header,
         return -1;
       }
     }
-    if (log_location != 0 && log_location_after_message != 0 && (header->file_ptr != NULL || header->func_ptr != NULL)) {
+    if (log_location != 0 && log_location_after_message != 0
+        && (header->file_ptr != NULL || header->func_ptr != NULL)) {
       if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
         return -1;
       if (_nei_log_append_location_block(header, short_path, out, out_cap, &used) != 0)

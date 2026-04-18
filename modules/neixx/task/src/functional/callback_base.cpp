@@ -4,5 +4,4 @@ namespace nei {
 
 CallbackBase::~CallbackBase() = default;
 
-}  // namespace nei
-
+} // namespace nei

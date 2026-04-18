@@ -16,19 +16,19 @@ namespace nei {
 
 class NEI_API InternalFlag final {
 public:
-    class Impl;
+  class Impl;
 
-    InternalFlag();
-    ~InternalFlag();
+  InternalFlag();
+  ~InternalFlag();
 
-    InternalFlag(const InternalFlag&) = delete;
-    InternalFlag& operator=(const InternalFlag&) = delete;
+  InternalFlag(const InternalFlag &) = delete;
+  InternalFlag &operator=(const InternalFlag &) = delete;
 
-    bool IsValid() const;
-    void Invalidate();
+  bool IsValid() const;
+  void Invalidate();
 
 private:
-    std::unique_ptr<Impl> impl_;
+  std::unique_ptr<Impl> impl_;
 };
 
 #ifdef _MSC_VER

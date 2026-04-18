@@ -12,24 +12,24 @@ namespace nei {
 // leaving invocation semantics in the concrete callback types.
 class NEI_API CallbackBase {
 public:
-    virtual ~CallbackBase();
+  virtual ~CallbackBase();
 
-    CallbackBase(const CallbackBase&) = default;
-    CallbackBase& operator=(const CallbackBase&) = default;
-    CallbackBase(CallbackBase&&) noexcept = default;
-    CallbackBase& operator=(CallbackBase&&) noexcept = default;
+  CallbackBase(const CallbackBase &) = default;
+  CallbackBase &operator=(const CallbackBase &) = default;
+  CallbackBase(CallbackBase &&) noexcept = default;
+  CallbackBase &operator=(CallbackBase &&) noexcept = default;
 
-    bool IsNull() const noexcept {
-        return IsNullImpl();
-    }
+  bool IsNull() const noexcept {
+    return IsNullImpl();
+  }
 
 protected:
-    CallbackBase() = default;
+  CallbackBase() = default;
 
 private:
-    virtual bool IsNullImpl() const noexcept = 0;
+  virtual bool IsNullImpl() const noexcept = 0;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEI_TASK_CALLBACK_BASE_H
+#endif // NEI_TASK_CALLBACK_BASE_H

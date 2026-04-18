@@ -3,15 +3,16 @@
 
 namespace nei {
 
-ScopedBlockingCall::ScopedBlockingCall() : notified_(false) {
-    ThreadPool::NotifyBlockingRegionEntered();
-    notified_ = true;
+ScopedBlockingCall::ScopedBlockingCall()
+    : notified_(false) {
+  ThreadPool::NotifyBlockingRegionEntered();
+  notified_ = true;
 }
 
 ScopedBlockingCall::~ScopedBlockingCall() {
-    if (notified_) {
-        ThreadPool::NotifyBlockingRegionExited();
-    }
+  if (notified_) {
+    ThreadPool::NotifyBlockingRegionExited();
+  }
 }
 
 } // namespace nei

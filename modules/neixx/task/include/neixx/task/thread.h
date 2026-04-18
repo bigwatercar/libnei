@@ -18,25 +18,25 @@ namespace nei {
 
 class NEI_API Thread final {
 public:
-    class Impl;
+  class Impl;
 
-    Thread();
-    explicit Thread(std::shared_ptr<const TimeSource> time_source);
-    ~Thread();
+  Thread();
+  explicit Thread(std::shared_ptr<const TimeSource> time_source);
+  ~Thread();
 
-    Thread(const Thread&) = delete;
-    Thread& operator=(const Thread&) = delete;
+  Thread(const Thread &) = delete;
+  Thread &operator=(const Thread &) = delete;
 
-    Thread(Thread&&) noexcept;
-    Thread& operator=(Thread&&) noexcept;
+  Thread(Thread &&) noexcept;
+  Thread &operator=(Thread &&) noexcept;
 
-    void StartShutdown();
-    void Shutdown();
+  void StartShutdown();
+  void Shutdown();
 
-    std::shared_ptr<TaskRunner> GetTaskRunner();
+  std::shared_ptr<TaskRunner> GetTaskRunner();
 
 private:
-    std::unique_ptr<Impl> impl_;
+  std::unique_ptr<Impl> impl_;
 };
 
 #ifdef _MSC_VER

@@ -17,26 +17,18 @@ using RepeatingClosure = RepeatingCallback;
 
 class NEI_API TaskRunner {
 public:
-    virtual ~TaskRunner();
+  virtual ~TaskRunner();
 
-    void PostTask(const Location& from_here, OnceClosure task);
-    void PostDelayedTask(
-        const Location& from_here,
-        OnceClosure task,
-        std::chrono::milliseconds delay);
+  void PostTask(const Location &from_here, OnceClosure task);
+  void PostDelayedTask(const Location &from_here, OnceClosure task, std::chrono::milliseconds delay);
 
-    virtual void PostTaskWithTraits(
-        const Location& from_here,
-        const TaskTraits& traits,
-        OnceClosure task) = 0;
-    virtual void PostDelayedTaskWithTraits(
-        const Location& from_here,
-        const TaskTraits& traits,
-        OnceClosure task,
-        std::chrono::milliseconds delay) = 0;
+  virtual void PostTaskWithTraits(const Location &from_here, const TaskTraits &traits, OnceClosure task) = 0;
+  virtual void PostDelayedTaskWithTraits(const Location &from_here,
+                                         const TaskTraits &traits,
+                                         OnceClosure task,
+                                         std::chrono::milliseconds delay) = 0;
 };
 
 } // namespace nei
 
 #endif // NEI_TASK_TASK_RUNNER_H
-

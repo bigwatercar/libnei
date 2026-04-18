@@ -11,41 +11,33 @@ namespace nei {
 
 class SingleThreadTaskRunner final : public TaskRunner {
 public:
-    class Impl;
+  class Impl;
 
-    struct EnqueueDelegate {
-        using InvokeFn = void (*)(
-            void* context,
-            const Location&,
-            const TaskTraits&,
-            OnceClosure,
-            std::chrono::milliseconds);
+  struct EnqueueDelegate {
+    using InvokeFn =
+        void (*)(void *context, const Location &, const TaskTraits &, OnceClosure, std::chrono::milliseconds);
 
-        void* context = nullptr;
-        InvokeFn invoke = nullptr;
-    };
+    void *context = nullptr;
+    InvokeFn invoke = nullptr;
+  };
 
-    explicit SingleThreadTaskRunner(EnqueueDelegate enqueue_delegate);
-    ~SingleThreadTaskRunner() override;
+  explicit SingleThreadTaskRunner(EnqueueDelegate enqueue_delegate);
+  ~SingleThreadTaskRunner() override;
 
-    SingleThreadTaskRunner(const SingleThreadTaskRunner&) = delete;
-    SingleThreadTaskRunner& operator=(const SingleThreadTaskRunner&) = delete;
+  SingleThreadTaskRunner(const SingleThreadTaskRunner &) = delete;
+  SingleThreadTaskRunner &operator=(const SingleThreadTaskRunner &) = delete;
 
-    SingleThreadTaskRunner(SingleThreadTaskRunner&&) noexcept;
-    SingleThreadTaskRunner& operator=(SingleThreadTaskRunner&&) noexcept;
+  SingleThreadTaskRunner(SingleThreadTaskRunner &&) noexcept;
+  SingleThreadTaskRunner &operator=(SingleThreadTaskRunner &&) noexcept;
 
-    void PostTaskWithTraits(
-        const Location& from_here,
-        const TaskTraits& traits,
-        OnceClosure task) override;
-    void PostDelayedTaskWithTraits(
-        const Location& from_here,
-        const TaskTraits& traits,
-        OnceClosure task,
-        std::chrono::milliseconds delay) override;
+  void PostTaskWithTraits(const Location &from_here, const TaskTraits &traits, OnceClosure task) override;
+  void PostDelayedTaskWithTraits(const Location &from_here,
+                                 const TaskTraits &traits,
+                                 OnceClosure task,
+                                 std::chrono::milliseconds delay) override;
 
 private:
-    std::unique_ptr<Impl> impl_;
+  std::unique_ptr<Impl> impl_;
 };
 
 } // namespace nei

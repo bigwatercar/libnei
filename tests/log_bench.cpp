@@ -185,18 +185,15 @@ int main(int argc, char **argv) {
 
   // Benchmark different log levels
   run_log_benchmark("Log Info", []() {
-    nei_llog(
-        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", "test message %s", "test");
+    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", "test message %s", "test");
   });
 
   run_log_benchmark("Log Warn", []() {
-    nei_llog(
-        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_WARN, __FILE__, __LINE__, "benchmark", "test message %s", "test");
+    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_WARN, __FILE__, __LINE__, "benchmark", "test message %s", "test");
   });
 
   run_log_benchmark("Log Error", []() {
-    nei_llog(
-        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_ERROR, __FILE__, __LINE__, "benchmark", "test message %s", "test");
+    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_ERROR, __FILE__, __LINE__, "benchmark", "test message %s", "test");
   });
 
   // Benchmark with formatting
@@ -256,39 +253,22 @@ int main(int argc, char **argv) {
   run_file_log_benchmark(
       "File Log Info",
       []() {
-        nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                 NEI_L_INFO,
-                 __FILE__,
-                 __LINE__,
-                 "benchmark",
-                 "test message %s",
-                 "test");
+        nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", "test message %s", "test");
       },
       "C:\\var\\log_bench_info.log");
 
   run_file_log_benchmark(
       "File Log Warn",
       []() {
-        nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                 NEI_L_WARN,
-                 __FILE__,
-                 __LINE__,
-                 "benchmark",
-                 "test message %s",
-                 "test");
+        nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_WARN, __FILE__, __LINE__, "benchmark", "test message %s", "test");
       },
       "C:\\var\\log_bench_warn.log");
 
   run_file_log_benchmark(
       "File Log Error",
       []() {
-        nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                 NEI_L_ERROR,
-                 __FILE__,
-                 __LINE__,
-                 "benchmark",
-                 "test message %s",
-                 "test");
+        nei_llog(
+            NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_ERROR, __FILE__, __LINE__, "benchmark", "test message %s", "test");
       },
       "C:\\var\\log_bench_error.log");
 
@@ -318,13 +298,8 @@ int main(int argc, char **argv) {
       "File Log Info (literal)",
       []() {
         static const char body[] = "literal line no printf";
-        nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                         NEI_L_INFO,
-                         __FILE__,
-                         __LINE__,
-                         "benchmark",
-                         body,
-                         sizeof(body) - 1U);
+        nei_llog_literal(
+            NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", body, sizeof(body) - 1U);
       },
       "C:\\var\\log_bench_info_literal.log");
 

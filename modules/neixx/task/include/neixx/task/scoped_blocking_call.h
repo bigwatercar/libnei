@@ -21,16 +21,16 @@ namespace nei {
 //   }  // Auto-destruct: notify scheduler: thread is available again
 class NEI_API ScopedBlockingCall {
 public:
-    ScopedBlockingCall();
-    ~ScopedBlockingCall();
+  ScopedBlockingCall();
+  ~ScopedBlockingCall();
 
-    ScopedBlockingCall(const ScopedBlockingCall&) = delete;
-    ScopedBlockingCall& operator=(const ScopedBlockingCall&) = delete;
-    ScopedBlockingCall(ScopedBlockingCall&&) = delete;
-    ScopedBlockingCall& operator=(ScopedBlockingCall&&) = delete;
+  ScopedBlockingCall(const ScopedBlockingCall &) = delete;
+  ScopedBlockingCall &operator=(const ScopedBlockingCall &) = delete;
+  ScopedBlockingCall(ScopedBlockingCall &&) = delete;
+  ScopedBlockingCall &operator=(ScopedBlockingCall &&) = delete;
 
 private:
-    bool notified_ = false;
+  bool notified_ = false;
 };
 
 } // namespace nei

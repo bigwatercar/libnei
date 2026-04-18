@@ -11,19 +11,19 @@ namespace nei {
 
 class NEI_API TimeSource {
 public:
-    virtual ~TimeSource();
+  virtual ~TimeSource();
 
-    virtual std::chrono::steady_clock::time_point Now() const = 0;
+  virtual std::chrono::steady_clock::time_point Now() const = 0;
 };
 
 class NEI_API SystemTimeSource final : public TimeSource {
 public:
-    static const SystemTimeSource& Instance();
+  static const SystemTimeSource &Instance();
 
-    std::chrono::steady_clock::time_point Now() const override;
+  std::chrono::steady_clock::time_point Now() const override;
 
 private:
-    SystemTimeSource() = default;
+  SystemTimeSource() = default;
 };
 
 } // namespace nei

@@ -10,21 +10,21 @@ namespace nei {
 
 class NEI_API TaskTracer final {
 public:
-    static const Location* GetCurrentTaskLocation();
+  static const Location *GetCurrentTaskLocation();
 
-    static void SetCurrentTaskLocation(const Location* location);
+  static void SetCurrentTaskLocation(const Location *location);
 };
 
 class NEI_API ScopedTaskTrace final {
 public:
-    explicit ScopedTaskTrace(const Location& location);
-    ~ScopedTaskTrace();
+  explicit ScopedTaskTrace(const Location &location);
+  ~ScopedTaskTrace();
 
-    ScopedTaskTrace(const ScopedTaskTrace&) = delete;
-    ScopedTaskTrace& operator=(const ScopedTaskTrace&) = delete;
+  ScopedTaskTrace(const ScopedTaskTrace &) = delete;
+  ScopedTaskTrace &operator=(const ScopedTaskTrace &) = delete;
 
 private:
-    const Location* previous_ = nullptr;
+  const Location *previous_ = nullptr;
 };
 
 } // namespace nei

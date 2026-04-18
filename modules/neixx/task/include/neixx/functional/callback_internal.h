@@ -13,7 +13,8 @@ namespace nei {
 // Callers that actually pass a WeakPtr to BindOnce/BindRepeating must include
 // <neixx/memory/weak_ptr.h> themselves so that operator bool() is visible at the
 // instantiation site.
-template <typename T> class WeakPtr;
+template <typename T>
+class WeakPtr;
 
 namespace detail {
 
@@ -24,12 +25,12 @@ namespace detail {
 // a custom memory pool.  Thread-safety during replacement is the caller's
 // responsibility.
 //
-inline void* callback_alloc(std::size_t bytes) {
-    return ::operator new(bytes);
+inline void *callback_alloc(std::size_t bytes) {
+  return ::operator new(bytes);
 }
 
-inline void callback_free(void* ptr) noexcept {
-    ::operator delete(ptr);
+inline void callback_free(void *ptr) noexcept {
+  ::operator delete(ptr);
 }
 
 // --- SBO eligibility ---------------------------------------------------------
@@ -37,19 +38,22 @@ inline void callback_free(void* ptr) noexcept {
 // True when a type T can be stored inline in an SBO buffer of the given size
 // and alignment.
 template <typename T, std::size_t SboSize, std::size_t SboAlign>
-constexpr bool is_sbo_eligible_v =
-    sizeof(T) <= SboSize && alignof(T) <= SboAlign;
+constexpr bool is_sbo_eligible_v = sizeof(T) <= SboSize && alignof(T) <= SboAlign;
 
 // --- WeakPtr detection -------------------------------------------------------
 //
 // Used by BindOnce / BindRepeating to detect when the first bound argument is
 // a WeakPtr<T> so that an automatic validity check can be injected.
-template <typename T> struct is_weak_ptr : std::false_type {};
-template <typename T> struct is_weak_ptr<nei::WeakPtr<T>> : std::true_type {};
-template <typename T> constexpr bool is_weak_ptr_v = is_weak_ptr<T>::value;
+template <typename T>
+struct is_weak_ptr : std::false_type {};
 
-}  // namespace detail
-}  // namespace nei
+template <typename T>
+struct is_weak_ptr<nei::WeakPtr<T>> : std::true_type {};
 
-#endif  // NEI_TASK_CALLBACK_INTERNAL_H
+template <typename T>
+constexpr bool is_weak_ptr_v = is_weak_ptr<T>::value;
 
+} // namespace detail
+} // namespace nei
+
+#endif // NEI_TASK_CALLBACK_INTERNAL_H

@@ -20,34 +20,30 @@ class ThreadPool;
 
 class NEI_API SequencedTaskRunner final : public TaskRunner {
 public:
-    class Impl;
+  class Impl;
 
-    explicit SequencedTaskRunner(ThreadPool& thread_pool);
-    ~SequencedTaskRunner() override;
+  explicit SequencedTaskRunner(ThreadPool &thread_pool);
+  ~SequencedTaskRunner() override;
 
-    SequencedTaskRunner(const SequencedTaskRunner&) = delete;
-    SequencedTaskRunner& operator=(const SequencedTaskRunner&) = delete;
+  SequencedTaskRunner(const SequencedTaskRunner &) = delete;
+  SequencedTaskRunner &operator=(const SequencedTaskRunner &) = delete;
 
-    SequencedTaskRunner(SequencedTaskRunner&&) noexcept;
-    SequencedTaskRunner& operator=(SequencedTaskRunner&&) noexcept;
+  SequencedTaskRunner(SequencedTaskRunner &&) noexcept;
+  SequencedTaskRunner &operator=(SequencedTaskRunner &&) noexcept;
 
-    // Low-level construction helpers kept for compatibility.
-    // Prefer ThreadPool::CreateSequencedTaskRunner() as the primary API.
-    static std::shared_ptr<SequencedTaskRunner> Create(ThreadPool& thread_pool);
-    static std::shared_ptr<SequencedTaskRunner> Create();
+  // Low-level construction helpers kept for compatibility.
+  // Prefer ThreadPool::CreateSequencedTaskRunner() as the primary API.
+  static std::shared_ptr<SequencedTaskRunner> Create(ThreadPool &thread_pool);
+  static std::shared_ptr<SequencedTaskRunner> Create();
 
-    void PostTaskWithTraits(
-        const Location& from_here,
-        const TaskTraits& traits,
-        OnceClosure task) override;
-    void PostDelayedTaskWithTraits(
-        const Location& from_here,
-        const TaskTraits& traits,
-        OnceClosure task,
-        std::chrono::milliseconds delay) override;
+  void PostTaskWithTraits(const Location &from_here, const TaskTraits &traits, OnceClosure task) override;
+  void PostDelayedTaskWithTraits(const Location &from_here,
+                                 const TaskTraits &traits,
+                                 OnceClosure task,
+                                 std::chrono::milliseconds delay) override;
 
 private:
-    std::unique_ptr<Impl> impl_;
+  std::unique_ptr<Impl> impl_;
 };
 
 #ifdef _MSC_VER

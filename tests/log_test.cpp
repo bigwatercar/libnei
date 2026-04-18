@@ -904,12 +904,11 @@ TEST(LogCTest, WsFormat_CjkHiraganaKatakanaHangulAndExtensionB) {
   nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
   ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
 
-  static const wchar_t kWide[] =
-      L"\u4E2D\u6587"
-      L"\u3042\u3044"
-      L"\u30A2\u30FC"
-      L"\uD55C\uAE00"
-      L"\U00020000";
+  static const wchar_t kWide[] = L"\u4E2D\u6587"
+                                 L"\u3042\u3044"
+                                 L"\u30A2\u30FC"
+                                 L"\uD55C\uAE00"
+                                 L"\U00020000";
 
   const std::string expected_body = ExpectedMbFromWideForLogCTest(kWide);
   nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "ws-cjk", "payload=%ws!", kWide);
