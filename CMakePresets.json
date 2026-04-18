@@ -15,7 +15,7 @@
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_CXX_EXTENSIONS": "OFF",
         "NEI_BUILD_TESTS": "ON",
-        "BUILD_SHARED_LIBS": "OFF"
+        "BUILD_SHARED_LIBS": "ON"
       }
     },
     {
@@ -34,18 +34,21 @@
       "binaryDir": "${sourceDir}/build/${presetName}"
     },
     {
-      "name": "windows-msvc-debug",
-      "displayName": "Windows MSVC Debug",
-      "description": "Debug build for Windows with MSVC",
-      "inherits": "base",
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
-      },
+      "name": "windows-msvc-release-shared",
+      "displayName": "Windows MSVC Release Shared",
+      "description": "Release shared build for Windows with MSVC",
+      "inherits": "windows-msvc-release",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "BUILD_SHARED_LIBS": "OFF"
+        "BUILD_SHARED_LIBS": "ON"
+      }
+    },
+    {
+      "name": "windows-msvc-debug-shared",
+      "displayName": "Windows MSVC Debug Shared",
+      "description": "Debug shared build for Windows with MSVC",
+      "inherits": "windows-msvc-debug",
+      "cacheVariables": {
+        "BUILD_SHARED_LIBS": "ON"
       }
     },
     {
@@ -64,35 +67,36 @@
       }
     },
     {
-      "name": "windows-msvc-debug-shared",
-      "displayName": "Windows MSVC Debug Shared",
-      "description": "Debug shared build for Windows with MSVC",
-      "inherits": "windows-msvc-debug",
-      "cacheVariables": {
-        "BUILD_SHARED_LIBS": "ON"
-      }
-    },
-    {
-      "name": "windows-msvc-release-shared",
-      "displayName": "Windows MSVC Release Shared",
-      "description": "Release shared build for Windows with MSVC",
-      "inherits": "windows-msvc-release",
-      "cacheVariables": {
-        "BUILD_SHARED_LIBS": "ON"
-      }
-    },
-    {
-      "name": "windows-vs2022-debug",
-      "displayName": "Windows VS2022 Debug",
-      "description": "Debug build for Windows with Visual Studio 2022",
-      "inherits": "base-vs",
+      "name": "windows-msvc-debug",
+      "displayName": "Windows MSVC Debug",
+      "description": "Debug build for Windows with MSVC",
+      "inherits": "base",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
         "rhs": "Windows"
       },
       "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
         "BUILD_SHARED_LIBS": "OFF"
+      }
+    },
+    {
+      "name": "windows-vs2022-release-shared",
+      "displayName": "Windows VS2022 Release Shared",
+      "description": "Release shared build for Windows with Visual Studio 2022",
+      "inherits": "windows-vs2022-release",
+      "cacheVariables": {
+        "BUILD_SHARED_LIBS": "ON"
+      }
+    },
+    {
+      "name": "windows-vs2022-debug-shared",
+      "displayName": "Windows VS2022 Debug Shared",
+      "description": "Debug shared build for Windows with Visual Studio 2022",
+      "inherits": "windows-vs2022-debug",
+      "cacheVariables": {
+        "BUILD_SHARED_LIBS": "ON"
       }
     },
     {
@@ -110,21 +114,17 @@
       }
     },
     {
-      "name": "windows-vs2022-debug-shared",
-      "displayName": "Windows VS2022 Debug Shared",
-      "description": "Debug shared build for Windows with Visual Studio 2022",
-      "inherits": "windows-vs2022-debug",
+      "name": "windows-vs2022-debug",
+      "displayName": "Windows VS2022 Debug",
+      "description": "Debug build for Windows with Visual Studio 2022",
+      "inherits": "base-vs",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
       "cacheVariables": {
-        "BUILD_SHARED_LIBS": "ON"
-      }
-    },
-    {
-      "name": "windows-vs2022-release-shared",
-      "displayName": "Windows VS2022 Release Shared",
-      "description": "Release shared build for Windows with Visual Studio 2022",
-      "inherits": "windows-vs2022-release",
-      "cacheVariables": {
-        "BUILD_SHARED_LIBS": "ON"
+        "BUILD_SHARED_LIBS": "OFF"
       }
     },
     {

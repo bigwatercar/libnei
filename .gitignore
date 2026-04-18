@@ -43,6 +43,8 @@
 # CMake build directories
 /build/
 build/
+build-*/
+build_*/
 
 # Local clangd/CMake generated artifacts
 build-clangd/
