@@ -2,6 +2,7 @@
 #include <neixx/task/location.h>
 #include <neixx/task/thread_pool.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -11,10 +12,39 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace {
 
 constexpr std::uint32_t kDefaultTaskCount = 10000;
+
+std::uint64_t BuildContiguousCpuMask(std::size_t cpu_count) {
+    if (cpu_count == 0) {
+        return 0;
+    }
+    const std::size_t bit_count = std::min<std::size_t>(cpu_count, 64);
+    if (bit_count >= 64) {
+        return std::numeric_limits<std::uint64_t>::max();
+    }
+    return (static_cast<std::uint64_t>(1) << bit_count) - 1;
+}
+
+void ConfigureAffinityOptions(
+    nei::ThreadPoolOptions& options,
+    std::size_t requested_worker_count,
+    bool use_affinity) {
+    if (!use_affinity) {
+        return;
+    }
+    const std::size_t hw = std::max<std::size_t>(1, std::thread::hardware_concurrency());
+    const std::size_t target_cpus = requested_worker_count > 0
+                                        ? std::min<std::size_t>(requested_worker_count, hw)
+                                        : hw;
+    options.enable_cpu_affinity = true;
+    options.worker_cpu_affinity_mask = BuildContiguousCpuMask(target_cpus);
+    options.best_effort_cpu_affinity_mask = 0;
+    options.apply_affinity_to_compensation_workers = true;
+}
 
 std::uint64_t ExpectedSum(std::uint32_t task_count) {
     return (static_cast<std::uint64_t>(task_count) * (task_count + 1)) / 2;
@@ -33,9 +63,11 @@ BenchmarkResult RunBenchmark(
     const std::string& label,
     std::size_t requested_worker_count,
     std::uint32_t task_count,
-    bool disable_compensation = false) {
+    bool disable_compensation = false,
+    bool use_affinity = false) {
     nei::ThreadPoolOptions options;
     options.worker_count = requested_worker_count;
+    ConfigureAffinityOptions(options, requested_worker_count, use_affinity);
     if (disable_compensation) {
         options.enable_compensation = false;
         options.enable_best_effort_compensation = false;
@@ -90,9 +122,11 @@ BenchmarkResult RunNoopBenchmark(
     const std::string& label,
     std::size_t requested_worker_count,
     std::uint32_t task_count,
-    bool disable_compensation = false) {
+    bool disable_compensation = false,
+    bool use_affinity = false) {
     nei::ThreadPoolOptions options;
     options.worker_count = requested_worker_count;
+    ConfigureAffinityOptions(options, requested_worker_count, use_affinity);
     if (disable_compensation) {
         options.enable_compensation = false;
         options.enable_best_effort_compensation = false;
@@ -141,9 +175,11 @@ BenchmarkResult RunDelayedNoopBenchmark(
     const std::string& label,
     std::size_t requested_worker_count,
     std::uint32_t task_count,
-    bool disable_compensation = false) {
+    bool disable_compensation = false,
+    bool use_affinity = false) {
     nei::ThreadPoolOptions options;
     options.worker_count = requested_worker_count;
+    ConfigureAffinityOptions(options, requested_worker_count, use_affinity);
     if (disable_compensation) {
         options.enable_compensation = false;
         options.enable_best_effort_compensation = false;
@@ -203,9 +239,17 @@ std::uint32_t ParseTaskCount(int argc, char* argv[]) {
         return static_cast<std::uint32_t>(parsed);
     } catch (const std::exception&) {
         std::cerr << "Invalid task_count: " << argv[1]
-                  << "\nUsage: task_threadpool_bench_demo.exe [task_count]\n";
+                  << "\nUsage: task_threadpool_bench_demo.exe [task_count] [affinity]\n";
         return 0;
     }
+}
+
+bool ParseUseAffinity(int argc, char* argv[]) {
+    if (argc < 3) {
+        return false;
+    }
+    const std::string value = argv[2];
+    return value == "affinity" || value == "on" || value == "1" || value == "true";
 }
 
 } // namespace
@@ -215,6 +259,7 @@ int main(int argc, char* argv[]) {
     if (task_count == 0) {
         return 2;
     }
+    const bool use_affinity = ParseUseAffinity(argc, argv);
 
     std::cout << "Callback layout: OnceCallback sizeof=" << sizeof(nei::OnceCallback)
               << ", alignof=" << alignof(nei::OnceCallback)
@@ -223,22 +268,22 @@ int main(int argc, char* argv[]) {
 
     const std::uint64_t expected_sum = ExpectedSum(task_count);
 
-    const BenchmarkResult one_thread = RunBenchmark("1 thread", 1, task_count);
-    const BenchmarkResult two_threads = RunBenchmark("2 threads", 2, task_count);
-    const BenchmarkResult four_threads = RunBenchmark("4 threads", 4, task_count);
-    const BenchmarkResult default_threads = RunBenchmark("default", 0, task_count);
+    const BenchmarkResult one_thread = RunBenchmark("1 thread", 1, task_count, false, use_affinity);
+    const BenchmarkResult two_threads = RunBenchmark("2 threads", 2, task_count, false, use_affinity);
+    const BenchmarkResult four_threads = RunBenchmark("4 threads", 4, task_count, false, use_affinity);
+    const BenchmarkResult default_threads = RunBenchmark("default", 0, task_count, false, use_affinity);
     const BenchmarkResult default_no_compensation =
-        RunBenchmark("default_no_comp", 0, task_count, true);
-    const BenchmarkResult one_thread_noop = RunNoopBenchmark("1 thread_noop", 1, task_count);
-    const BenchmarkResult two_threads_noop = RunNoopBenchmark("2 threads_noop", 2, task_count);
-    const BenchmarkResult four_threads_noop = RunNoopBenchmark("4 threads_noop", 4, task_count);
-    const BenchmarkResult default_threads_noop = RunNoopBenchmark("default_noop", 0, task_count);
+        RunBenchmark("default_no_comp", 0, task_count, true, use_affinity);
+    const BenchmarkResult one_thread_noop = RunNoopBenchmark("1 thread_noop", 1, task_count, false, use_affinity);
+    const BenchmarkResult two_threads_noop = RunNoopBenchmark("2 threads_noop", 2, task_count, false, use_affinity);
+    const BenchmarkResult four_threads_noop = RunNoopBenchmark("4 threads_noop", 4, task_count, false, use_affinity);
+    const BenchmarkResult default_threads_noop = RunNoopBenchmark("default_noop", 0, task_count, false, use_affinity);
     const BenchmarkResult default_no_compensation_noop =
-        RunNoopBenchmark("default_no_comp_noop", 0, task_count, true);
+        RunNoopBenchmark("default_no_comp_noop", 0, task_count, true, use_affinity);
     const BenchmarkResult default_delayed_mix =
-        RunDelayedNoopBenchmark("default_delayed_mix", 0, task_count);
+        RunDelayedNoopBenchmark("default_delayed_mix", 0, task_count, false, use_affinity);
     const BenchmarkResult default_no_comp_delayed_mix =
-        RunDelayedNoopBenchmark("default_no_comp_delayed_mix", 0, task_count, true);
+        RunDelayedNoopBenchmark("default_no_comp_delayed_mix", 0, task_count, true, use_affinity);
 
     const BenchmarkResult results[] = {
         one_thread,
@@ -256,6 +301,7 @@ int main(int argc, char* argv[]) {
 
     std::cout << "ThreadPool PostTask benchmark: " << task_count
               << " tiny sum tasks (expected sum = " << expected_sum << ")\n";
+    std::cout << "CPU affinity: " << (use_affinity ? "ON" : "OFF") << '\n';
     std::cout << std::fixed << std::setprecision(2);
 
     bool pass = true;

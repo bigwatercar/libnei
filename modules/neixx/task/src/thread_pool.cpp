@@ -15,6 +15,17 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#elif defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#elif defined(__APPLE__)
+#include <pthread.h>
+#include <mach/mach.h>
+#include <mach/thread_policy.h>
+#endif
+
 #include <neixx/task/task_tracer.h>
 #include <neixx/task/time_source.h>
 
@@ -35,6 +46,132 @@ constexpr std::size_t READY_TASK_BATCH_SIZE = 8;
 constexpr std::size_t MIN_READY_TASK_CAPACITY = 256;
 constexpr std::size_t MIN_DELAYED_TASK_CAPACITY = 64;
 
+#ifdef _WIN32
+bool TrySetCurrentThreadAffinity(std::uint64_t affinity_mask, std::size_t slot) {
+    if (affinity_mask == 0) {
+        return false;
+    }
+
+    constexpr std::size_t kMaxBits = sizeof(DWORD_PTR) * 8;
+    const DWORD_PTR platform_mask = static_cast<DWORD_PTR>(affinity_mask);
+    if (platform_mask == 0) {
+        return false;
+    }
+
+    std::size_t set_count = 0;
+    for (std::size_t bit = 0; bit < kMaxBits; ++bit) {
+        if ((platform_mask & (static_cast<DWORD_PTR>(1) << bit)) != 0) {
+            ++set_count;
+        }
+    }
+    if (set_count == 0) {
+        return false;
+    }
+
+    const std::size_t target_index = slot % set_count;
+    std::size_t current_index = 0;
+    std::size_t cpu_bit = 0;
+    for (; cpu_bit < kMaxBits; ++cpu_bit) {
+        if ((platform_mask & (static_cast<DWORD_PTR>(1) << cpu_bit)) == 0) {
+            continue;
+        }
+        if (current_index == target_index) {
+            break;
+        }
+        ++current_index;
+    }
+    if (cpu_bit >= kMaxBits) {
+        return false;
+    }
+
+    const DWORD_PTR selected_mask = static_cast<DWORD_PTR>(1) << cpu_bit;
+    return SetThreadAffinityMask(GetCurrentThread(), selected_mask) != 0;
+}
+#elif defined(__linux__)
+bool TrySetCurrentThreadAffinity(std::uint64_t affinity_mask, std::size_t slot) {
+    if (affinity_mask == 0) {
+        return false;
+    }
+
+    constexpr std::size_t kMaxBits = std::min<std::size_t>(64, CPU_SETSIZE);
+    std::size_t set_count = 0;
+    for (std::size_t bit = 0; bit < kMaxBits; ++bit) {
+        if ((affinity_mask & (static_cast<std::uint64_t>(1) << bit)) != 0) {
+            ++set_count;
+        }
+    }
+    if (set_count == 0) {
+        return false;
+    }
+
+    const std::size_t target_index = slot % set_count;
+    std::size_t current_index = 0;
+    std::size_t cpu_bit = 0;
+    for (; cpu_bit < kMaxBits; ++cpu_bit) {
+        if ((affinity_mask & (static_cast<std::uint64_t>(1) << cpu_bit)) == 0) {
+            continue;
+        }
+        if (current_index == target_index) {
+            break;
+        }
+        ++current_index;
+    }
+    if (cpu_bit >= kMaxBits) {
+        return false;
+    }
+
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(static_cast<int>(cpu_bit), &cpuset);
+    return pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0;
+}
+#elif defined(__APPLE__)
+bool TrySetCurrentThreadAffinity(std::uint64_t affinity_mask, std::size_t slot) {
+    if (affinity_mask == 0) {
+        return false;
+    }
+
+    constexpr std::size_t kMaxBits = 64;
+    std::size_t set_count = 0;
+    for (std::size_t bit = 0; bit < kMaxBits; ++bit) {
+        if ((affinity_mask & (static_cast<std::uint64_t>(1) << bit)) != 0) {
+            ++set_count;
+        }
+    }
+    if (set_count == 0) {
+        return false;
+    }
+
+    const std::size_t target_index = slot % set_count;
+    std::size_t current_index = 0;
+    std::size_t cpu_bit = 0;
+    for (; cpu_bit < kMaxBits; ++cpu_bit) {
+        if ((affinity_mask & (static_cast<std::uint64_t>(1) << cpu_bit)) == 0) {
+            continue;
+        }
+        if (current_index == target_index) {
+            break;
+        }
+        ++current_index;
+    }
+    if (cpu_bit >= kMaxBits) {
+        return false;
+    }
+
+    // macOS does not expose strict CPU-pin API; use affinity tags as best effort.
+    thread_affinity_policy_data_t policy{static_cast<integer_t>(cpu_bit + 1)};
+    return thread_policy_set(
+               pthread_mach_thread_np(pthread_self()),
+               THREAD_AFFINITY_POLICY,
+               reinterpret_cast<thread_policy_t>(&policy),
+               THREAD_AFFINITY_POLICY_COUNT) == KERN_SUCCESS;
+}
+#else
+bool TrySetCurrentThreadAffinity(std::uint64_t, std::size_t) {
+    return false;
+}
+#endif
+
 } // namespace
 
 class ThreadPool::Impl {
@@ -51,6 +188,10 @@ public:
         std::size_t best_effort_max_compensation_workers = 0;
         std::chrono::milliseconds compensation_spawn_delay{0};
         std::chrono::milliseconds compensation_idle_timeout{0};
+        bool enable_cpu_affinity = false;
+        std::uint64_t worker_cpu_affinity_mask = 0;
+        std::uint64_t best_effort_cpu_affinity_mask = 0;
+        bool apply_affinity_to_compensation_workers = true;
     };
 
     Impl(
@@ -62,12 +203,14 @@ public:
             normal_group_,
             options_.normal_worker_count,
             options_.enable_compensation,
-            options_.max_compensation_workers);
+            options_.max_compensation_workers,
+            false);
         StartGroup(
             best_effort_group_,
             options_.best_effort_worker_count,
             options_.enable_best_effort_compensation,
-            options_.best_effort_max_compensation_workers);
+            options_.best_effort_max_compensation_workers,
+            true);
     }
 
     ~Impl() {
@@ -138,7 +281,9 @@ public:
         std::size_t active_workers = 0;
         std::size_t active_may_block_workers = 0;
         std::size_t scoped_blocking_call_count = 0;  // Count of active ScopedBlockingCall in this group
+        std::size_t next_affinity_slot = 0;
         bool allow_compensation = false;
+        bool is_best_effort_group = false;
         bool pending_compensation_spawn = false;
         std::chrono::steady_clock::time_point compensation_spawn_deadline{};
         std::uint64_t next_sequence = 0;
@@ -278,16 +423,39 @@ private:
             resolved.best_effort_worker_count);
         resolved.compensation_spawn_delay = ClampDuration(options.compensation_spawn_delay);
         resolved.compensation_idle_timeout = ClampDuration(options.compensation_idle_timeout);
+        resolved.enable_cpu_affinity = options.enable_cpu_affinity;
+        resolved.worker_cpu_affinity_mask = options.worker_cpu_affinity_mask;
+        resolved.best_effort_cpu_affinity_mask = options.best_effort_cpu_affinity_mask;
+        resolved.apply_affinity_to_compensation_workers = options.apply_affinity_to_compensation_workers;
         return resolved;
+    }
+
+    void LaunchWorkerThread(WorkerGroup& group, bool is_compensation_worker) {
+        std::uint64_t affinity_mask = 0;
+        if (options_.enable_cpu_affinity &&
+            (!is_compensation_worker || options_.apply_affinity_to_compensation_workers)) {
+            affinity_mask = group.is_best_effort_group
+                                ? options_.best_effort_cpu_affinity_mask
+                                : options_.worker_cpu_affinity_mask;
+        }
+        const std::size_t affinity_slot = group.next_affinity_slot++;
+        group.workers.emplace_back([this, &group, is_compensation_worker, affinity_mask, affinity_slot]() {
+            if (affinity_mask != 0) {
+                (void)TrySetCurrentThreadAffinity(affinity_mask, affinity_slot);
+            }
+            RunLoop(&group, is_compensation_worker);
+        });
     }
 
     void StartGroup(
         WorkerGroup& group,
         std::size_t worker_count,
         bool allow_compensation,
-        std::size_t max_compensation_workers) {
+        std::size_t max_compensation_workers,
+        bool is_best_effort_group) {
         group.base_worker_count = worker_count;
         group.allow_compensation = allow_compensation;
+        group.is_best_effort_group = is_best_effort_group;
         group.max_compensation_workers = allow_compensation ? max_compensation_workers : 0;
         group.workers.reserve(worker_count + group.max_compensation_workers);
         const std::size_t ready_capacity =
@@ -298,7 +466,7 @@ private:
         group.delayed_tasks.reserve(delayed_capacity);
         group.pending_ready_tasks.reserve(READY_TASK_BATCH_SIZE * 2);
         for (std::size_t i = 0; i < worker_count; ++i) {
-            group.workers.emplace_back([this, &group]() { RunLoop(&group, false); });
+            LaunchWorkerThread(group, false);
         }
     }
 
@@ -368,7 +536,7 @@ private:
         group.pending_compensation_spawn = false;
 
         ++group.spawned_compensation_workers;
-        group.workers.emplace_back([this, &group]() { RunLoop(&group, true); });
+        LaunchWorkerThread(group, true);
         return true;
     }
 

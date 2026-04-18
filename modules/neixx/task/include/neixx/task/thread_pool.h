@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 
 #include <nei/macros/nei_export.h>
@@ -30,6 +31,14 @@ struct ThreadPoolOptions {
     std::size_t best_effort_max_compensation_workers = 0;
     std::chrono::milliseconds compensation_spawn_delay = std::chrono::milliseconds(8);
     std::chrono::milliseconds compensation_idle_timeout = std::chrono::milliseconds(300);
+    // Optional CPU affinity controls (effective on supported platforms, e.g. Windows).
+    bool enable_cpu_affinity = false;
+    // Affinity mask for normal-priority worker group. Bit i => CPU i.
+    std::uint64_t worker_cpu_affinity_mask = 0;
+    // Affinity mask for best-effort worker group. Bit i => CPU i.
+    std::uint64_t best_effort_cpu_affinity_mask = 0;
+    // Whether compensation workers should also be pinned.
+    bool apply_affinity_to_compensation_workers = true;
 };
 
 class NEI_API ThreadPool final {
