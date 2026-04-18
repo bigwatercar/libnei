@@ -1,7 +1,7 @@
-#include <neixx/task/callback.h>
+﻿#include <neixx/functional/callback.h>
 #include <neixx/task/sequenced_task_runner.h>
 #include <neixx/task/thread_pool.h>
-#include <neixx/task/weak_ptr.h>
+#include <neixx/memory/weak_ptr.h>
 
 #include <chrono>
 #include <functional>
@@ -84,3 +84,4 @@ int main() {
     std::cout << "weak ptr safety: " << (skipped_safely ? "PASS" : "FAIL") << '\n';
     return skipped_safely ? 0 : 1;
 }
+

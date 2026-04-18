@@ -1,5 +1,5 @@
-#include <neixx/task/location.h>
-#include <neixx/task/callback.h>
+﻿#include <neixx/task/location.h>
+#include <neixx/functional/callback.h>
 #include <neixx/task/thread_pool.h>
 
 #include <chrono>
@@ -51,3 +51,4 @@ int main() {
     std::cout << "may_block compensation: " << (pass ? "PASS" : "FAIL") << '\n';
     return pass ? 0 : 1;
 }
+

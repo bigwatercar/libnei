@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>
@@ -8,7 +8,7 @@
 #include <vector>
 
 #include <neixx/task/location.h>
-#include <neixx/task/callback.h>
+#include <neixx/functional/callback.h>
 #include <neixx/task/task_environment.h>
 #include <neixx/task/task_traits.h>
 #include <neixx/task/thread_pool.h>

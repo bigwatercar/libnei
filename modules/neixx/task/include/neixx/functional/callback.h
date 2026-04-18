@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #ifndef NEI_TASK_CALLBACK_H
 #define NEI_TASK_CALLBACK_H
@@ -10,8 +10,8 @@
 #include <utility>
 
 #include <nei/macros/nei_export.h>
-#include <neixx/task/callback_base.h>
-#include <neixx/task/callback_internal.h>
+#include <neixx/functional/callback_base.h>
+#include <neixx/functional/callback_internal.h>
 
 namespace nei {
 
@@ -324,3 +324,4 @@ RepeatingCallback BindRepeating(F&& functor, Args&&... args) {
 // OnceClosure / RepeatingClosure are defined in task_runner.h as typedefs.
 
 #endif  // NEI_TASK_CALLBACK_H
+

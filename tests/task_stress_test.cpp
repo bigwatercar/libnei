@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 
 #include <algorithm>
 #include <atomic>
@@ -8,7 +8,7 @@
 #include <thread>
 #include <vector>
 
-#include <neixx/task/callback.h>
+#include <neixx/functional/callback.h>
 #include <neixx/task/scoped_blocking_call.h>
 #include <neixx/task/sequenced_task_runner.h>
 #include <neixx/task/task_traits.h>
@@ -389,3 +389,4 @@ TEST(TaskStressTest, TenThousandMixedPriorityTasksEventuallyComplete) {
     EXPECT_GT(user_visible_executed.load(std::memory_order_acquire), 0);
     EXPECT_GT(best_effort_executed.load(std::memory_order_acquire), 0);
 }
+

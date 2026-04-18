@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #ifndef NEI_TASK_CALLBACK_INTERNAL_H
 #define NEI_TASK_CALLBACK_INTERNAL_H
@@ -11,7 +11,7 @@ namespace nei {
 
 // Forward declaration - avoids pulling in the full weak_ptr.h header here.
 // Callers that actually pass a WeakPtr to BindOnce/BindRepeating must include
-// <neixx/task/weak_ptr.h> themselves so that operator bool() is visible at the
+// <neixx/memory/weak_ptr.h> themselves so that operator bool() is visible at the
 // instantiation site.
 template <typename T> class WeakPtr;
 
@@ -52,3 +52,4 @@ template <typename T> constexpr bool is_weak_ptr_v = is_weak_ptr<T>::value;
 }  // namespace nei
 
 #endif  // NEI_TASK_CALLBACK_INTERNAL_H
+

@@ -1,5 +1,5 @@
-#include <neixx/task/location.h>
-#include <neixx/task/callback.h>
+﻿#include <neixx/task/location.h>
+#include <neixx/functional/callback.h>
 #include <neixx/task/sequenced_task_runner.h>
 #include <neixx/task/task_tracer.h>
 #include <neixx/task/thread_pool.h>
@@ -42,3 +42,4 @@ int main() {
     done_future.wait();
     return 0;
 }
+

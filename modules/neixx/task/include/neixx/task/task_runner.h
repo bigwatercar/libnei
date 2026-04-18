@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #ifndef NEI_TASK_TASK_RUNNER_H
 #define NEI_TASK_TASK_RUNNER_H
@@ -7,7 +7,7 @@
 
 #include <nei/macros/nei_export.h>
 #include <neixx/task/location.h>
-#include <neixx/task/callback.h>
+#include <neixx/functional/callback.h>
 #include <neixx/task/task_traits.h>
 
 namespace nei {
@@ -39,3 +39,4 @@ public:
 } // namespace nei
 
 #endif // NEI_TASK_TASK_RUNNER_H
+

@@ -1,4 +1,4 @@
-#include <neixx/task/callback.h>
+﻿#include <neixx/functional/callback.h>
 #include <neixx/task/sequenced_task_runner.h>
 #include <neixx/task/thread_pool.h>
 
@@ -131,3 +131,4 @@ int main() {
 
     return (same_sequence_is_serial && cross_sequence_is_parallel && order_ok) ? 0 : 1;
 }
+

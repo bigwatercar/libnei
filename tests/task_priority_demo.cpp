@@ -1,5 +1,5 @@
-#include <neixx/task/location.h>
-#include <neixx/task/callback.h>
+﻿#include <neixx/task/location.h>
+#include <neixx/functional/callback.h>
 #include <neixx/task/thread_pool.h>
 
 #include <chrono>
@@ -65,3 +65,4 @@ int main() {
     std::cout << "priority scheduling: " << (pass ? "PASS" : "FAIL") << '\n';
     return pass ? 0 : 1;
 }
+

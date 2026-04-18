@@ -1,8 +1,8 @@
-target_sources(
+﻿target_sources(
     neixx
     PRIVATE
-        src/callback_base.cpp
-        src/callback.cpp
+        src/functional/callback_base.cpp
+        src/functional/callback.cpp
         src/internal_flag.cpp
         src/task_tracer.cpp
         src/time_source.cpp
@@ -26,3 +26,4 @@ install(
     DIRECTORY include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
+

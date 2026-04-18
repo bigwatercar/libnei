@@ -1,8 +1,8 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 
 #include <memory>
 
-#include <neixx/task/callback.h>
+#include <neixx/functional/callback.h>
 
 TEST(TaskCallbackTest, OnceCallbackRunsAtMostOnce) {
     int count = 0;
@@ -92,3 +92,4 @@ TEST(TaskCallbackTest, RepeatingCallbackCanHoldMoveOnlyState) {
 
     EXPECT_EQ(sum, 14);
 }
+

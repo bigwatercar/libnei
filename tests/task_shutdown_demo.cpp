@@ -1,5 +1,5 @@
-#include <neixx/task/location.h>
-#include <neixx/task/callback.h>
+﻿#include <neixx/task/location.h>
+#include <neixx/functional/callback.h>
 #include <neixx/task/thread_pool.h>
 
 #include <atomic>
@@ -55,3 +55,4 @@ int main() {
 
     return (block_finished && skip_was_skipped && elapsed_is_expected) ? 0 : 1;
 }
+
