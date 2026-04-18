@@ -34,6 +34,9 @@ constexpr std::size_t READY_TASK_BATCH_SIZE = 8;
 // Initial queue capacities to reduce reallocation cost under bursty enqueue load.
 constexpr std::size_t MIN_READY_TASK_CAPACITY = 256;
 constexpr std::size_t MIN_DELAYED_TASK_CAPACITY = 64;
+constexpr std::size_t NEAR_WHEEL_SLOT_COUNT = 256;
+constexpr std::size_t FAR_WHEEL_SLOT_COUNT = 256;
+constexpr std::chrono::milliseconds WHEEL_TICK{1};
 
 } // namespace
 
@@ -130,8 +133,15 @@ public:
         std::mutex mutex;
         std::condition_variable cv;
         std::vector<ScheduledTask> ready_tasks;
-        std::vector<ScheduledTask> delayed_tasks;
+        std::vector<std::vector<ScheduledTask>> near_wheel;
+        std::vector<std::vector<ScheduledTask>> far_wheel;
         std::vector<ScheduledTask> pending_ready_tasks;  // Batch buffer for pending ready tasks
+        std::size_t near_cursor = 0;
+        std::size_t far_cursor = 0;
+        std::uint64_t near_tick = 0;
+        bool delayed_wheel_initialized = false;
+        std::size_t delayed_task_count = 0;
+        std::chrono::steady_clock::time_point next_delayed_run_at = std::chrono::steady_clock::time_point::max();
         std::size_t base_worker_count = 0;
         std::size_t max_compensation_workers = 0;
         std::size_t spawned_compensation_workers = 0;
@@ -158,6 +168,7 @@ public:
         const auto run_at = time_source_->Now() + delay;
         const auto now = time_source_->Now();
         WorkerGroup* group = SelectGroup(traits);
+        bool should_notify = false;
         {
             std::lock_guard<std::mutex> lock(group->mutex);
             if (shutting_down_.load(std::memory_order_relaxed) &&
@@ -176,12 +187,19 @@ public:
             };
             if (delay.count() <= 0) {
                 PushReadyTaskLocked(*group, std::move(scheduled_task));
+                should_notify = true;
             } else {
-                PushDelayedTaskLocked(*group, std::move(scheduled_task));
+                const auto previous_next_delayed = group->next_delayed_run_at;
+                PushDelayedTaskLocked(*group, std::move(scheduled_task), now);
+                should_notify =
+                    (previous_next_delayed == std::chrono::steady_clock::time_point::max() ||
+                     run_at < previous_next_delayed);
             }
             ArmCompensationSpawnLocked(*group, now);
         }
-        group->cv.notify_one();
+        if (should_notify) {
+            group->cv.notify_one();
+        }
     }
 
     std::size_t WorkerCount() const {
@@ -295,7 +313,18 @@ private:
         const std::size_t delayed_capacity =
             std::max<std::size_t>(MIN_DELAYED_TASK_CAPACITY, worker_count * 8);
         group.ready_tasks.reserve(ready_capacity);
-        group.delayed_tasks.reserve(delayed_capacity);
+        group.near_wheel.resize(NEAR_WHEEL_SLOT_COUNT);
+        group.far_wheel.resize(FAR_WHEEL_SLOT_COUNT);
+        const std::size_t near_bucket_capacity =
+            std::max<std::size_t>(1, delayed_capacity / NEAR_WHEEL_SLOT_COUNT);
+        for (auto& bucket : group.near_wheel) {
+            bucket.reserve(near_bucket_capacity);
+        }
+        const std::size_t far_bucket_capacity =
+            std::max<std::size_t>(1, delayed_capacity / FAR_WHEEL_SLOT_COUNT);
+        for (auto& bucket : group.far_wheel) {
+            bucket.reserve(far_bucket_capacity);
+        }
         group.pending_ready_tasks.reserve(READY_TASK_BATCH_SIZE * 2);
         for (std::size_t i = 0; i < worker_count; ++i) {
             group.workers.emplace_back([this, &group]() { RunLoop(&group, false); });
@@ -401,20 +430,24 @@ private:
     }
 
     void StartGroupShutdown(WorkerGroup& group) {
+        const auto now = time_source_->Now();
         {
             std::lock_guard<std::mutex> lock(group.mutex);
             group.stop = true;
-            PruneTasksForShutdownLocked(group);
+            PruneTasksForShutdownLocked(group, now);
         }
         group.cv.notify_all();
     }
 
-    static void PruneTasksForShutdownLocked(WorkerGroup& group) {
+    static void PruneTasksForShutdownLocked(
+        WorkerGroup& group,
+        std::chrono::steady_clock::time_point now) {
         // Flush pending tasks first
         FlushPendingReadyTasksLocked(group);
+        PromoteDueTasksLocked(group, now);
 
         std::vector<ScheduledTask> block_tasks;
-        block_tasks.reserve(group.ready_tasks.size() + group.delayed_tasks.size());
+        block_tasks.reserve(group.ready_tasks.size() + group.delayed_task_count);
 
         while (!group.ready_tasks.empty()) {
             ScheduledTask task = PopReadyTaskLocked(group);
@@ -426,8 +459,8 @@ private:
             // CONTINUE_ON_SHUTDOWN / SKIP_ON_SHUTDOWN are dropped.
         }
 
-        while (!group.delayed_tasks.empty()) {
-            ScheduledTask task = PopDelayedTaskLocked(group);
+        while (group.delayed_task_count != 0) {
+            ScheduledTask task = PopAnyDelayedTaskLocked(group);
 
             const ShutdownBehavior behavior = task.traits.shutdown_behavior();
             if (behavior == ShutdownBehavior::BLOCK_SHUTDOWN) {
@@ -437,7 +470,7 @@ private:
         }
 
         for (auto& task : block_tasks) {
-            PushDelayedTaskLocked(group, std::move(task));
+            PushDelayedTaskLocked(group, std::move(task), now);
         }
     }
 
@@ -462,10 +495,10 @@ private:
         if (!group.ready_tasks.empty() || !group.pending_ready_tasks.empty()) {
             return false;
         }
-        if (group.delayed_tasks.empty()) {
+        if (group.delayed_task_count == 0) {
             return true;
         }
-        return group.delayed_tasks.front().run_at > now;
+        return group.next_delayed_run_at > now;
     }
 
     void RunLoop(WorkerGroup* group, bool is_compensation_worker) {
@@ -476,12 +509,14 @@ private:
             {
                 std::unique_lock<std::mutex> lock(group->mutex);
                 for (;;) {
+                    const auto now = time_source_->Now();
                     if (shutting_down_.load(std::memory_order_relaxed)) {
-                        PruneTasksForShutdownLocked(*group);
+                        PruneTasksForShutdownLocked(*group, now);
                     }
 
-                    const auto now = time_source_->Now();
-                    PromoteDueTasksLocked(*group, now);
+                    if (group->delayed_task_count != 0 && group->next_delayed_run_at <= now) {
+                        PromoteDueTasksLocked(*group, now);
+                    }
                     FlushPendingReadyTasksLocked(*group);  // Ensure pending tasks are in the heap
                     TrySpawnCompensationWorkerLocked(*group, now);
 
@@ -490,12 +525,12 @@ private:
                     }
                     if (group->ready_tasks.empty()) {
                         CancelPendingCompensationSpawnLocked(*group);
-                        if (group->delayed_tasks.empty()) {
+                        if (group->delayed_task_count == 0) {
                             if (is_compensation_worker) {
                                 const auto status = group->cv.wait_for(lock, options_.compensation_idle_timeout);
                                 if (status == std::cv_status::timeout &&
                                     group->ready_tasks.empty() &&
-                                    group->delayed_tasks.empty() &&
+                                    group->delayed_task_count == 0 &&
                                     !group->stop) {
                                     if (group->spawned_compensation_workers > 0) {
                                         --group->spawned_compensation_workers;
@@ -508,12 +543,12 @@ private:
                                     [group]() {
                                         return group->stop ||
                                                !group->ready_tasks.empty() ||
-                                               !group->delayed_tasks.empty() ||
+                                               group->delayed_task_count != 0 ||
                                                !group->pending_ready_tasks.empty();
                                     });
                             }
                         } else {
-                            auto wake_deadline = group->delayed_tasks.front().run_at;
+                            auto wake_deadline = group->next_delayed_run_at;
                             if (group->pending_compensation_spawn &&
                                 group->compensation_spawn_deadline < wake_deadline) {
                                 wake_deadline = group->compensation_spawn_deadline;
@@ -551,7 +586,7 @@ private:
     }
 
     static bool HasPendingTasksLocked(const WorkerGroup& group) {
-        return !group.ready_tasks.empty() || !group.delayed_tasks.empty() || !group.pending_ready_tasks.empty();
+        return !group.ready_tasks.empty() || group.delayed_task_count != 0 || !group.pending_ready_tasks.empty();
     }
 
     // Flush pending tasks to ready heap and rebuild heap structure
@@ -595,23 +630,168 @@ private:
         return task;
     }
 
-    static void PushDelayedTaskLocked(WorkerGroup& group, ScheduledTask task) {
-        group.delayed_tasks.push_back(std::move(task));
-        std::push_heap(group.delayed_tasks.begin(), group.delayed_tasks.end(), ScheduledTaskCompare{});
+    static std::uint64_t ToWheelTickFloor(std::chrono::steady_clock::time_point when) {
+        const auto elapsed_ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(when.time_since_epoch()).count();
+        const auto tick_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(WHEEL_TICK).count();
+        return static_cast<std::uint64_t>(elapsed_ns / tick_ns);
     }
 
-    static ScheduledTask PopDelayedTaskLocked(WorkerGroup& group) {
-        std::pop_heap(group.delayed_tasks.begin(), group.delayed_tasks.end(), ScheduledTaskCompare{});
-        ScheduledTask task = std::move(group.delayed_tasks.back());
-        group.delayed_tasks.pop_back();
-        return task;
+    static std::uint64_t ToWheelTickCeil(std::chrono::steady_clock::time_point when) {
+        const auto elapsed_ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(when.time_since_epoch()).count();
+        const auto tick_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(WHEEL_TICK).count();
+        return static_cast<std::uint64_t>((elapsed_ns + tick_ns - 1) / tick_ns);
+    }
+
+    static std::chrono::steady_clock::time_point TickToTimePoint(std::uint64_t tick) {
+        return std::chrono::steady_clock::time_point(std::chrono::milliseconds(tick * WHEEL_TICK.count()));
+    }
+
+    static void EnsureDelayedWheelInitializedLocked(
+        WorkerGroup& group,
+        std::chrono::steady_clock::time_point now) {
+        if (group.delayed_wheel_initialized) {
+            return;
+        }
+        group.near_tick = ToWheelTickFloor(now);
+        group.near_cursor = static_cast<std::size_t>(group.near_tick % NEAR_WHEEL_SLOT_COUNT);
+        group.far_cursor = static_cast<std::size_t>((group.near_tick / NEAR_WHEEL_SLOT_COUNT) % FAR_WHEEL_SLOT_COUNT);
+        group.delayed_wheel_initialized = true;
+    }
+
+    static void PushDelayedTaskLocked(
+        WorkerGroup& group,
+        ScheduledTask task,
+        std::chrono::steady_clock::time_point now,
+        bool count_new_task = true) {
+        EnsureDelayedWheelInitializedLocked(group, now);
+        const auto run_at = task.run_at;
+
+        const std::uint64_t now_tick = group.near_tick;
+        const std::uint64_t run_tick = ToWheelTickCeil(run_at);
+        const std::uint64_t delta_tick = run_tick > now_tick ? (run_tick - now_tick) : 0;
+
+        if (delta_tick < NEAR_WHEEL_SLOT_COUNT) {
+            const std::size_t slot =
+                (group.near_cursor + static_cast<std::size_t>(delta_tick)) % NEAR_WHEEL_SLOT_COUNT;
+            group.near_wheel[slot].push_back(std::move(task));
+        } else {
+            std::uint64_t far_delta = delta_tick / NEAR_WHEEL_SLOT_COUNT;
+            if (far_delta >= FAR_WHEEL_SLOT_COUNT) {
+                far_delta = FAR_WHEEL_SLOT_COUNT - 1;
+            }
+            const std::size_t slot =
+                (group.far_cursor + static_cast<std::size_t>(far_delta)) % FAR_WHEEL_SLOT_COUNT;
+            group.far_wheel[slot].push_back(std::move(task));
+        }
+
+        if (count_new_task) {
+            ++group.delayed_task_count;
+        }
+        if (group.next_delayed_run_at == std::chrono::steady_clock::time_point::max() ||
+            run_at < group.next_delayed_run_at) {
+            group.next_delayed_run_at = run_at;
+        }
+    }
+
+    static ScheduledTask PopAnyDelayedTaskLocked(WorkerGroup& group) {
+        for (auto& bucket : group.near_wheel) {
+            if (!bucket.empty()) {
+                ScheduledTask task = std::move(bucket.back());
+                bucket.pop_back();
+                --group.delayed_task_count;
+                if (group.delayed_task_count == 0) {
+                    group.next_delayed_run_at = std::chrono::steady_clock::time_point::max();
+                }
+                return task;
+            }
+        }
+        for (auto& bucket : group.far_wheel) {
+            if (!bucket.empty()) {
+                ScheduledTask task = std::move(bucket.back());
+                bucket.pop_back();
+                --group.delayed_task_count;
+                if (group.delayed_task_count == 0) {
+                    group.next_delayed_run_at = std::chrono::steady_clock::time_point::max();
+                }
+                return task;
+            }
+        }
+        return ScheduledTask{};
+    }
+
+    static void PromoteFarBucketLocked(
+        WorkerGroup& group,
+        std::chrono::steady_clock::time_point now) {
+        auto& far_bucket = group.far_wheel[group.far_cursor];
+        if (far_bucket.empty()) {
+            return;
+        }
+        std::vector<ScheduledTask> tasks;
+        tasks.swap(far_bucket);
+        for (auto& task : tasks) {
+            PushDelayedTaskLocked(group, std::move(task), now, false);
+        }
+    }
+
+    static void PromoteNearSlotDueLocked(
+        WorkerGroup& group,
+        std::size_t slot,
+        std::chrono::steady_clock::time_point now) {
+        auto& near_bucket = group.near_wheel[slot];
+        if (near_bucket.empty()) {
+            return;
+        }
+
+        std::vector<ScheduledTask> tasks;
+        tasks.swap(near_bucket);
+        for (auto& task : tasks) {
+            if (task.run_at <= now) {
+                PushReadyTaskLocked(group, std::move(task));
+                --group.delayed_task_count;
+                continue;
+            }
+            PushDelayedTaskLocked(group, std::move(task), now, false);
+        }
+
+        if (group.delayed_task_count == 0) {
+            group.next_delayed_run_at = std::chrono::steady_clock::time_point::max();
+        }
     }
 
     static void PromoteDueTasksLocked(
         WorkerGroup& group,
         std::chrono::steady_clock::time_point now) {
-        while (!group.delayed_tasks.empty() && group.delayed_tasks.front().run_at <= now) {
-            PushReadyTaskLocked(group, PopDelayedTaskLocked(group));
+        if (group.delayed_task_count == 0) {
+            return;
+        }
+
+        EnsureDelayedWheelInitializedLocked(group, now);
+
+        const std::uint64_t target_tick = ToWheelTickFloor(now);
+        bool advanced_tick = false;
+        while (group.near_tick < target_tick) {
+            advanced_tick = true;
+            ++group.near_tick;
+            group.near_cursor = (group.near_cursor + 1) % NEAR_WHEEL_SLOT_COUNT;
+
+            if (group.near_cursor == 0) {
+                group.far_cursor = (group.far_cursor + 1) % FAR_WHEEL_SLOT_COUNT;
+                PromoteFarBucketLocked(group, TickToTimePoint(group.near_tick));
+            }
+
+            PromoteNearSlotDueLocked(group, group.near_cursor, TickToTimePoint(group.near_tick));
+        }
+
+        // Lazy advancement: only inspect the current slot when we've advanced ticks,
+        // or when we have reached the earliest delayed deadline.
+        if (advanced_tick || group.next_delayed_run_at <= now) {
+            PromoteNearSlotDueLocked(group, group.near_cursor, now);
+        }
+
+        if (group.delayed_task_count == 0) {
+            group.next_delayed_run_at = std::chrono::steady_clock::time_point::max();
         }
     }
 
