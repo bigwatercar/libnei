@@ -55,6 +55,9 @@ target_link_libraries(log_demo PRIVATE nei::all)
 add_executable(task_thread_demo task_thread_demo.cpp)
 target_link_libraries(task_thread_demo PRIVATE nei::all)
 
+add_executable(task_thread_single_runner_bench_demo task_thread_single_runner_bench_demo.cpp)
+target_link_libraries(task_thread_single_runner_bench_demo PRIVATE nei::all)
+
 add_executable(task_threadpool_bench_demo task_threadpool_bench_demo.cpp)
 target_link_libraries(task_threadpool_bench_demo PRIVATE nei::all)
 
@@ -106,6 +109,12 @@ if(WIN32 AND BUILD_SHARED_LIBS)
     TARGET task_thread_demo
     POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:task_thread_demo> $<TARGET_FILE_DIR:task_thread_demo>
+    COMMAND_EXPAND_LISTS
+  )
+  add_custom_command(
+    TARGET task_thread_single_runner_bench_demo
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:task_thread_single_runner_bench_demo> $<TARGET_FILE_DIR:task_thread_single_runner_bench_demo>
     COMMAND_EXPAND_LISTS
   )
   add_custom_command(

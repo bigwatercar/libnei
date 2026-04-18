@@ -1,5 +1,6 @@
-#include <neixx/task/thread.h>
+﻿#include <neixx/task/thread.h>
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -21,6 +22,10 @@ namespace nei {
 
 namespace {
 
+// Initial capacities to reduce reallocations under bursty enqueue load.
+constexpr std::size_t MIN_READY_TASK_CAPACITY = 256;
+constexpr std::size_t MIN_DELAYED_TASK_CAPACITY = 64;
+
 std::shared_ptr<const TimeSource> SharedSystemTimeSource() {
     static const std::shared_ptr<const TimeSource> source(
         &SystemTimeSource::Instance(),
@@ -37,8 +42,11 @@ public:
               this,
               &Impl::EnqueueThunk,
           })),
-          time_source_(std::move(time_source)),
-          worker_([this]() { RunLoop(); }) {}
+          time_source_(std::move(time_source)) {
+        ready_tasks_.reserve(MIN_READY_TASK_CAPACITY);
+        delayed_tasks_.reserve(MIN_DELAYED_TASK_CAPACITY);
+        worker_ = std::thread([this]() { RunLoop(); });
+    }
 
     ~Impl() {
         Stop();
@@ -90,33 +98,35 @@ private:
             }
         }
 
-        bool operator()(const std::shared_ptr<ScheduledTask>& lhs,
-                        const std::shared_ptr<ScheduledTask>& rhs) const {
-            if (lhs->run_at != rhs->run_at) {
-                return lhs->run_at > rhs->run_at;
+        bool operator()(const ScheduledTask& lhs,
+                        const ScheduledTask& rhs) const {
+            if (lhs.run_at != rhs.run_at) {
+                return lhs.run_at > rhs.run_at;
             }
-            const int lhs_rank = PriorityRank(lhs->traits.priority());
-            const int rhs_rank = PriorityRank(rhs->traits.priority());
+            const int lhs_rank = PriorityRank(lhs.traits.priority());
+            const int rhs_rank = PriorityRank(rhs.traits.priority());
             if (lhs_rank != rhs_rank) {
                 return lhs_rank < rhs_rank;
             }
-            return lhs->sequence > rhs->sequence;
+            return lhs.sequence > rhs.sequence;
         }
     };
 
-    static bool IsHigherReadyPriority(
-        const std::shared_ptr<ScheduledTask>& lhs,
-        const std::shared_ptr<ScheduledTask>& rhs) {
-        const int lhs_rank = ScheduledTaskCompare::PriorityRank(lhs->traits.priority());
-        const int rhs_rank = ScheduledTaskCompare::PriorityRank(rhs->traits.priority());
-        if (lhs_rank != rhs_rank) {
-            return lhs_rank > rhs_rank;
+    struct ReadyTaskCompare {
+        static int PriorityRank(TaskPriority priority) {
+            return ScheduledTaskCompare::PriorityRank(priority);
         }
-        if (lhs->run_at != rhs->run_at) {
-            return lhs->run_at < rhs->run_at;
+
+        bool operator()(const ScheduledTask& lhs,
+                        const ScheduledTask& rhs) const {
+            const int lhs_rank = PriorityRank(lhs.traits.priority());
+            const int rhs_rank = PriorityRank(rhs.traits.priority());
+            if (lhs_rank != rhs_rank) {
+                return lhs_rank < rhs_rank;
+            }
+            return lhs.sequence > rhs.sequence;
         }
-        return lhs->sequence < rhs->sequence;
-    }
+    };
 
     static void EnqueueThunk(
         void* context,
@@ -138,6 +148,7 @@ private:
         }
 
         const auto run_at = time_source_->Now() + delay;
+        bool should_notify = false;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (shutting_down_.load(std::memory_order_relaxed) &&
@@ -147,40 +158,120 @@ private:
             if (stop_) {
                 return;
             }
-            tasks_.push(std::make_shared<ScheduledTask>(ScheduledTask{
+
+            const bool had_tasks_before = HasTasksLocked();
+            const bool had_ready_before = !ready_tasks_.empty();
+            const bool had_delayed_before = !delayed_tasks_.empty();
+            const auto previous_next_delayed_run_at =
+                had_delayed_before ? delayed_tasks_.front().run_at : std::chrono::steady_clock::time_point{};
+
+            ScheduledTask scheduled_task{
                 run_at,
                 next_sequence_++,
                 from_here,
                 traits,
                 std::move(task),
-            }));
+            };
+            if (delay.count() <= 0) {
+                PushReadyTaskLocked(std::move(scheduled_task));
+                should_notify = !had_ready_before;
+            } else {
+                PushDelayedTaskLocked(std::move(scheduled_task));
+                should_notify = !had_tasks_before ||
+                                (had_delayed_before && run_at < previous_next_delayed_run_at);
+            }
         }
-        cv_.notify_one();
+        if (should_notify) {
+            cv_.notify_one();
+        }
     }
 
     void PruneTasksForShutdownLocked() {
-        std::vector<std::shared_ptr<ScheduledTask>> block_tasks;
-        block_tasks.reserve(tasks_.size());
-
-        while (!tasks_.empty()) {
-            std::shared_ptr<ScheduledTask> task = tasks_.top();
-            tasks_.pop();
-
-            const ShutdownBehavior behavior = task->traits.shutdown_behavior();
-            if (behavior == ShutdownBehavior::BLOCK_SHUTDOWN) {
-                block_tasks.push_back(std::move(task));
+        const auto prune = [](std::vector<ScheduledTask>& tasks,
+                              auto compare) {
+            std::size_t write_index = 0;
+            for (std::size_t i = 0; i < tasks.size(); ++i) {
+                const ShutdownBehavior behavior = tasks[i].traits.shutdown_behavior();
+                if (behavior != ShutdownBehavior::BLOCK_SHUTDOWN) {
+                    continue;
+                }
+                if (write_index != i) {
+                    tasks[write_index] = std::move(tasks[i]);
+                }
+                ++write_index;
             }
-            // CONTINUE_ON_SHUTDOWN / SKIP_ON_SHUTDOWN are dropped.
+            tasks.resize(write_index);
+            std::make_heap(tasks.begin(), tasks.end(), compare);
+        };
+
+        prune(ready_tasks_, ReadyTaskCompare{});
+        prune(delayed_tasks_, ScheduledTaskCompare{});
+    }
+
+    void PushReadyTaskLocked(ScheduledTask task) {
+        ready_tasks_.push_back(std::move(task));
+        std::push_heap(ready_tasks_.begin(), ready_tasks_.end(), ReadyTaskCompare{});
+    }
+
+    void PushDelayedTaskLocked(ScheduledTask task) {
+        delayed_tasks_.push_back(std::move(task));
+        std::push_heap(delayed_tasks_.begin(), delayed_tasks_.end(), ScheduledTaskCompare{});
+    }
+
+    ScheduledTask PopReadyTaskLocked() {
+        std::pop_heap(ready_tasks_.begin(), ready_tasks_.end(), ReadyTaskCompare{});
+        ScheduledTask task = std::move(ready_tasks_.back());
+        ready_tasks_.pop_back();
+        return task;
+    }
+
+    ScheduledTask PopDelayedTaskLocked() {
+        std::pop_heap(delayed_tasks_.begin(), delayed_tasks_.end(), ScheduledTaskCompare{});
+        ScheduledTask task = std::move(delayed_tasks_.back());
+        delayed_tasks_.pop_back();
+        return task;
+    }
+
+    void MoveReadyTasksFromDelayedLocked(const std::chrono::steady_clock::time_point now) {
+        const std::size_t ready_size_before = ready_tasks_.size();
+        std::size_t moved_count = 0;
+
+        while (!delayed_tasks_.empty() && delayed_tasks_.front().run_at <= now) {
+            ready_tasks_.push_back(PopDelayedTaskLocked());
+            ++moved_count;
         }
 
-        for (auto& task : block_tasks) {
-            tasks_.push(std::move(task));
+        if (moved_count == 0) {
+            return;
         }
+
+        if (ready_size_before == 0 && moved_count == 1) {
+            return;
+        }
+
+        if (moved_count == 1) {
+            std::push_heap(ready_tasks_.begin(), ready_tasks_.end(), ReadyTaskCompare{});
+            return;
+        }
+
+        std::make_heap(ready_tasks_.begin(), ready_tasks_.end(), ReadyTaskCompare{});
+    }
+
+    bool HasTasksLocked() const {
+        return !ready_tasks_.empty() || !delayed_tasks_.empty();
+    }
+
+    bool ShouldStopLocked() const {
+        return stop_ && !HasTasksLocked();
+    }
+
+    std::chrono::steady_clock::time_point NextDelayedRunAtLocked() const {
+        return delayed_tasks_.front().run_at;
     }
 
     void RunLoop() {
         for (;;) {
-            std::shared_ptr<ScheduledTask> scheduled;
+            ScheduledTask scheduled;
             {
                 std::unique_lock<std::mutex> lock(mutex_);
                 for (;;) {
@@ -188,60 +279,43 @@ private:
                         PruneTasksForShutdownLocked();
                     }
 
-                    if (stop_ && tasks_.empty()) {
+                    if (ShouldStopLocked()) {
                         return;
-                    }
-                    if (tasks_.empty()) {
-                        cv_.wait(lock, [this]() { return stop_ || !tasks_.empty(); });
-                        continue;
                     }
 
                     const auto now = time_source_->Now();
-                    const auto next_run_at = tasks_.top()->run_at;
-                    if (now >= next_run_at) {
-                        std::vector<std::shared_ptr<ScheduledTask>> due_tasks;
-                        while (!tasks_.empty() && tasks_.top()->run_at <= now) {
-                            due_tasks.push_back(tasks_.top());
-                            tasks_.pop();
-                        }
+                    MoveReadyTasksFromDelayedLocked(now);
 
-                        std::size_t best_index = 0;
-                        for (std::size_t i = 1; i < due_tasks.size(); ++i) {
-                            if (IsHigherReadyPriority(due_tasks[i], due_tasks[best_index])) {
-                                best_index = i;
-                            }
-                        }
-
-                        scheduled = due_tasks[best_index];
-                        for (std::size_t i = 0; i < due_tasks.size(); ++i) {
-                            if (i != best_index) {
-                                tasks_.push(due_tasks[i]);
-                            }
-                        }
+                    if (!ready_tasks_.empty()) {
+                        scheduled = PopReadyTaskLocked();
                         break;
                     }
 
-                    cv_.wait_until(lock, next_run_at);
+                    if (delayed_tasks_.empty()) {
+                        cv_.wait(lock, [this]() {
+                            return stop_ || HasTasksLocked();
+                        });
+                        continue;
+                    }
+
+                    cv_.wait_until(lock, NextDelayedRunAtLocked());
                 }
             }
-            ScopedTaskTrace trace_scope(scheduled->from_here);
-            std::move(scheduled->task).Run();
+            ScopedTaskTrace trace_scope(scheduled.from_here);
+            std::move(scheduled.task).Run();
         }
     }
 
     std::shared_ptr<SingleThreadTaskRunner> runner_;
     std::shared_ptr<const TimeSource> time_source_;
-    std::thread worker_;
     std::mutex mutex_;
     std::condition_variable cv_;
-    std::priority_queue<
-        std::shared_ptr<ScheduledTask>,
-        std::vector<std::shared_ptr<ScheduledTask>>,
-        ScheduledTaskCompare>
-        tasks_;
+    std::vector<ScheduledTask> ready_tasks_;
+    std::vector<ScheduledTask> delayed_tasks_;
     std::uint64_t next_sequence_ = 0;
     bool stop_ = false;
     std::atomic<bool> shutting_down_{false};
+    std::thread worker_;
 };
 
 Thread::Thread()
