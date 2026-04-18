@@ -67,3 +67,47 @@ TEST(TaskCallbackTest, RepeatingCallbackCanHoldMoveOnlyState) {
 
   EXPECT_EQ(sum, 14);
 }
+
+TEST(TaskCallbackTest, BindOnceCanBindMemberFunction) {
+  struct Counter {
+    void Add(int delta) {
+      value += delta;
+    }
+
+    int value = 0;
+  };
+
+  Counter counter;
+  nei::OnceCallback cb = nei::BindOnce(&Counter::Add, &counter, 5);
+
+  std::move(cb).Run();
+
+  EXPECT_EQ(counter.value, 5);
+}
+
+TEST(TaskCallbackTest, BindOnceCanBindThisPointer) {
+  class ThisBoundCounter {
+  public:
+    nei::OnceCallback MakeAddCallback(int delta) {
+      return nei::BindOnce(&ThisBoundCounter::Add, this, delta);
+    }
+
+    int value() const {
+      return value_;
+    }
+
+  private:
+    void Add(int delta) {
+      value_ += delta;
+    }
+
+    int value_ = 0;
+  };
+
+  ThisBoundCounter counter;
+  nei::OnceCallback cb = counter.MakeAddCallback(7);
+
+  std::move(cb).Run();
+
+  EXPECT_EQ(counter.value(), 7);
+}
