@@ -11,7 +11,17 @@
 #ifndef NEI_LOG_LOG_H
 #define NEI_LOG_LOG_H
 
+#if !defined(_WIN32)
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
+#endif
+
 #include <nei/macros/nei_export.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdarg.h>
 
@@ -192,14 +202,14 @@ typedef struct nei_log_config_st {
  * you can route logs to different destinations (e.g., stdout, files, syslog,
  * network, etc.).
  */
-typedef struct nei_log_sink_st {
+struct nei_log_sink_st {
   /** @brief Callback for level-based logs (can be NULL). */
   void (*llog)(const struct nei_log_sink_st *sink, nei_log_level_e level, const char *message, size_t length);
   /** @brief Callback for verbose logs (can be NULL). */
   void (*vlog)(const struct nei_log_sink_st *sink, int verbose, const char *message, size_t length);
   /** @brief User data pointer; lifetime is managed by the caller. */
   void *opaque;
-} nei_log_sink_st;
+};
 
 /**
  * @brief Log sink callback type for level-based logs

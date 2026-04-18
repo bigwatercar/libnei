@@ -2,6 +2,12 @@ add_library(nei)
 add_library(nei::nei ALIAS nei)
 
 target_compile_features(nei PUBLIC c_std_99)
+
+if(NOT WIN32)
+    find_package(Threads REQUIRED)
+    target_link_libraries(nei PUBLIC Threads::Threads)
+endif()
+
 if(BUILD_SHARED_LIBS)
     target_compile_definitions(nei PRIVATE NEI_EXPORTS)
     if(NOT WIN32)

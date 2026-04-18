@@ -4,6 +4,7 @@
 #define NEI_TASK_CALLBACK_H
 
 #include <atomic>
+#include <functional>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -154,7 +155,7 @@ private:
     // Inline path:  inline_vtable_.invoke != nullptr; ctrl_ == nullptr.
     // Heap path:    inline_vtable_ is zeroed;          ctrl_ != nullptr.
     detail::RepeatingInlineVTable inline_vtable_{nullptr, nullptr, nullptr}; // 24 bytes
-    mutable alignas(detail::REPEATING_SBO_ALIGN)
+    alignas(detail::REPEATING_SBO_ALIGN) mutable
         char inline_storage_[detail::REPEATING_SBO_SIZE];                   // 48 bytes
     detail::RepeatingControlBlock* ctrl_{nullptr};                          //  8 bytes
 

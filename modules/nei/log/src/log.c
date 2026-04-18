@@ -1,4 +1,8 @@
-﻿#include <nei/log/log.h>
+﻿#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
+#include <nei/log/log.h>
 
 #include <assert.h>
 #include <stddef.h>
