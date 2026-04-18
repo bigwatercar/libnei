@@ -19,4 +19,6 @@ else()
     target_compile_definitions(neixx PUBLIC NEI_STATIC)
 endif()
 
+add_subdirectory(functional)
+add_subdirectory(memory)
 add_subdirectory(task)
