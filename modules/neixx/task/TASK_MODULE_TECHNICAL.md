@@ -1,387 +1,511 @@
-# Task 模块技术说明
+# Task 模块技术设计说明
 
-## 1. 模块定位与设计目标
+## 1. 文档目标与范围
 
-Task 模块是 neixx 的异步执行基础设施，目标是提供一套可工程化落地的任务调度能力，覆盖以下场景：
+本文档面向 Task 模块的使用方与维护方，提供当前版本的技术设计说明，覆盖：
 
-- 一次性任务和可重复任务的统一封装
-- 线程池并发执行与序列化执行（sequenced）
-- 延迟任务调度
-- 任务优先级与关停行为控制
-- 可测试时间源与可测试执行环境
-- 阻塞区间感知与补偿线程（compensation worker）
+- 模块能力边界与设计目标
+- 核心抽象与调度模型
+- 关键技术点（调度、延迟任务、阻塞补偿、可测性）
+- 用户可直接复用的示例
+- 性能评估方法与最新实测数据
+- 不同业务场景的推荐配置
+- TimeWheel 方案尝试现状与后续开发注意事项
 
-设计取向是：
+本文仅描述当前可用方案，不展开历史迭代细节。
 
-- 语义清晰优先于过度抽象
-- 热路径尽量低开销
-- 对测试友好（可控时间、可观测状态）
-- 在多平台下保持行为一致（含可选 CPU 亲和性）
+## 2. 模块定位
 
-## 2. 核心能力概览
+Task 模块是 `neixx` 的异步执行基础设施，提供统一的任务语义与执行载体：
 
-### 2.1 任务语义
+- `TaskRunner`：通用任务投递抽象
+- `ThreadPool`：并发执行载体（normal + best-effort 组）
+- `Thread`：单线程执行载体
+- `SequencedTaskRunner`：基于线程池的同序列串行执行
+- `TaskEnvironment`：测试环境（可控时间 + 可控驱动）
 
-- 优先级：BEST_EFFORT / USER_VISIBLE / USER_BLOCKING
-- 关停行为：CONTINUE_ON_SHUTDOWN / SKIP_ON_SHUTDOWN / BLOCK_SHUTDOWN
-- 阻塞属性：may_block
+目标是：
 
-上述语义由 TaskTraits 描述，作为任务元数据参与调度决策。
+- 在可控复杂度下提供高吞吐、低抖动调度
+- 保持语义一致（优先级、shutdown 行为、阻塞属性）
+- 提供工程化可测能力与可观测性
 
-### 2.2 执行模型
+## 3. 核心语义与抽象
 
-- ThreadPool：多工作线程并发执行，含 normal 与 best-effort 两个工作组
-- Thread：单工作线程执行，适合轻量串行后台任务
-- SequencedTaskRunner：在 ThreadPool 上构建“同序列串行”语义
-- SingleThreadTaskRunner：把队列入队委托给 Thread::Impl，复用单线程调度循环
+### 3.1 任务语义（TaskTraits）
 
-### 2.3 可观测与调试辅助
+- 优先级：`BEST_EFFORT` / `USER_VISIBLE` / `USER_BLOCKING`
+- 关停行为：`CONTINUE_ON_SHUTDOWN` / `SKIP_ON_SHUTDOWN` / `BLOCK_SHUTDOWN`
+- 阻塞属性：`may_block`
 
-- Location + FROM_HERE：记录任务来源
-- TaskTracer / ScopedTaskTrace：线程局部保存当前任务位置信息
-- ThreadPool 提供测试观测接口：
-  - ActiveBlockingCallCountForTesting
-  - SpawnedCompensationWorkersForTesting
+### 3.2 任务排序规则
 
-### 2.4 可测试环境
+- `delayed_tasks`：先比较 `run_at`，再比较优先级，再比较 `sequence`
+- `ready_tasks`：先比较优先级，再比较 `sequence`
 
-TaskEnvironment 内置 ManualTimeSource，可通过 AdvanceTimeBy/FastForwardBy 控制时间推进，并结合 RunUntilIdle 做确定性测试。
+该规则保证：
 
-## 3. 架构与分层
+- 到期优先
+- 同到期高优先级优先
+- 同优先级 FIFO
 
-## 3.1 分层结构
+### 3.3 可观测性
 
-- API 层：TaskRunner、ThreadPool、Thread、SequencedTaskRunner、TaskEnvironment
-- 语义层：TaskTraits、Location、ScopedBlockingCall
-- 执行层：ThreadPool::Impl 与 Thread::Impl 的调度循环
-- 支撑层：callback（Once/Repeating + BindOnce/BindRepeating）、WeakPtr
+- `Location` + `FROM_HERE`：记录任务提交来源
+- `TaskTracer` / `ScopedTaskTrace`：运行中任务位置追踪
+- ThreadPool 测试观测接口：
+  - `ActiveBlockingCallCountForTesting`
+  - `SpawnedCompensationWorkersForTesting`
 
-### 3.2 ThreadPool 内部关键结构
+## 4. 架构设计
 
-每个 WorkerGroup 包含：
+### 4.1 分层结构
 
-- workers：工作线程集合
-- ready_tasks：就绪任务堆（按优先级 + sequence）
-- delayed_tasks：延迟任务堆（按 run_at + priority + sequence）
-- pending_ready_tasks：批量入队缓冲
-- active_workers / active_may_block_workers
-- scoped_blocking_call_count
-- 补偿线程状态：spawned_compensation_workers、pending_compensation_spawn 等
+- API 层：`TaskRunner`、`ThreadPool`、`Thread`、`SequencedTaskRunner`、`TaskEnvironment`
+- 语义层：`TaskTraits`、`Location`、`ScopedBlockingCall`
+- 执行层：`ThreadPool::Impl`、`Thread::Impl`
+- 支撑层：callback、weak_ptr、time_source
 
-调度循环核心流程：
+### 4.2 ThreadPool 执行模型
 
-1. 若处于 shutdown，先按策略裁剪任务（仅保留 BLOCK_SHUTDOWN）。
-2. 提升到期 delayed 任务到 ready。
-3. 从 ready 弹出一个任务执行。
-4. 基于 may_block / ScopedBlockingCall 统计，按条件触发补偿线程策略。
+每个 `WorkerGroup` 维护：
 
-### 3.3 Thread 单线程调度
+- `ready_tasks`（就绪堆）
+- `delayed_tasks`（延迟堆）
+- `pending_ready_tasks`（批量入队缓冲）
+- 活跃计数与补偿线程状态
 
-Thread::Impl 使用 ready_tasks + delayed_tasks 双堆模型，执行循环与 ThreadPool 类似但只运行一个 worker。
+调度循环：
 
-已实现两项热点优化：
+1. shutdown 收敛裁剪
+2. 提升到期 delayed 任务
+3. 弹出 ready 任务执行
+4. 根据 `may_block`/`ScopedBlockingCall` 触发补偿策略
 
-- 条件通知（减少无效 cv notify）
-- 延迟任务批量迁移（减少堆维护次数）
+### 4.3 Thread 执行模型
 
-### 3.4 SequencedTaskRunner 串行语义
+`Thread::Impl` 使用单 worker + 双堆（ready/delayed）模型。
 
-- 内部维护 FIFO 队列
-- 通过 scheduled 标记保证同一序列同一时刻仅一个在执行
-- 每次执行完一个任务后再调度下一个
+当前版本关键优化：
 
-该实现提供“顺序一致性”，但不同序列之间仍可并行。
+- Enqueue 侧惰性时钟读取（immediate 不调用 `Now()`）
+- RunLoop 侧惰性时钟读取（仅 delayed 非空时取时钟）
+- delayed->ready 迁移使用增量堆维护（逐项 `push_heap`）
 
-## 4. 关键设计思路
+### 4.4 SequencedTaskRunner 模型
 
-### 4.1 任务排序策略
+- 内部 FIFO
+- `scheduled` 标记保证同一序列同一时刻仅有一个执行体
+- 任务完成后再挂下一个
 
-- delayed_tasks 先比较 run_at，再比较优先级，再比较 sequence
-- ready_tasks 先比较优先级，再比较 sequence
+用于提供“序列内串行、序列间并行”的执行语义。
 
-这保证：
+## 5. 关键技术点
 
-- 到期时间优先
-- 同到期下高优先级优先
-- 同优先级下先入先出
+### 5.1 唤醒策略（ThreadPool）
 
-### 4.2 shutdown 语义清晰化
+`WakePolicy`：
 
-StartShutdown 后会按 ShutdownBehavior 裁剪任务：
+- `kConservative`：队列从空转非空时唤醒
+- `kAggressive`：每次 immediate post 都唤醒
+- `kHybrid`（默认）：无 delayed 时偏激进，有 delayed 时偏保守
 
-- BLOCK_SHUTDOWN：保留执行
-- SKIP_ON_SHUTDOWN：丢弃
-- CONTINUE_ON_SHUTDOWN：当前实现按 shutdown 收敛策略会被裁剪掉（对外建议明确使用 BLOCK_SHUTDOWN 来表达必须执行）
+目标是在 immediate-heavy 与 delayed-heavy 之间平衡吞吐和抖动。
 
-这种设计更偏“快速收敛 + 可控完成”。
+### 5.2 延迟任务迁移
 
-### 4.3 阻塞感知与补偿线程
+延迟任务通过堆顶到期判断迁移到 ready。
 
-- may_block trait 和 ScopedBlockingCall 都会影响 active_may_block_workers
-- 当活跃阻塞存在且仍有待执行任务时，按 delay 触发补偿线程
-- 空闲后补偿线程可超时回收
+优化原则：
 
-该机制的目标是降低 I/O 或锁等待对吞吐的拖累。
+- 迁移链路尽量批量化
+- 堆维护尽量增量化，减少锁内全量重建
 
-### 4.4 测试可控性
+### 5.3 阻塞感知与补偿线程
 
-ManualTimeSource + RunUntilIdle 让延迟任务测试从“依赖真实时间”转向“逻辑时间驱动”，可显著降低 CI 抖动与超时不稳定。
+- `may_block` 和 `ScopedBlockingCall` 都会影响阻塞活跃计数
+- 当阻塞活跃且仍有待执行任务时，按策略触发补偿 worker
+- 补偿 worker 空闲可回收
 
-## 5. 优点与不足
+### 5.4 shutdown 收敛策略
 
-## 5.1 优点
+shutdown 后保留 `BLOCK_SHUTDOWN` 任务，其他策略按收敛路径裁剪。
 
-- 语义完整：优先级、关停行为、阻塞属性、序列化执行一体化
-- 可测试性高：时间可控、状态可观测
-- 热路径有针对性优化：条件通知、批量迁移、预留容量、批量 flush
-- 扩展面明确：CPU 亲和性、best-effort 隔离、补偿策略都可配置
-- ABI 意识较强：TaskTraits/Location/Callback 等关键结构保持稳定布局
+设计重点：
 
-### 5.2 不足
+- 快速收敛
+- 行为可预测
+- 避免“半关停”状态下语义模糊
 
-- WorkerGroup 逻辑较复杂，维护门槛偏高
-- shutdown 期间语义对业务不够直观（尤其 CONTINUE_ON_SHUTDOWN 的期望差异）
-- ScopedBlockingCall 与 worker 归属推断目前偏“启发式”，在复杂拓扑下可读性一般
-- 全局公平性策略较朴素，尚未引入 aging 等机制
-- 在极端 delayed-heavy 工作负载下仍需更细化优化策略验证
+### 5.5 可测试时间源
 
-## 6. 适用性分析
+`TaskEnvironment` + `ManualTimeSource` 提供：
 
-### 6.1 适合场景
+- 逻辑时间推进
+- 延迟任务确定性触发
+- 降低真实时间依赖导致的 CI 抖动
 
-- 高并发后台任务分发
-- 需要根据业务重要性做优先级调度
-- 存在阻塞任务，需要补偿线程缓解吞吐塌陷
-- 需要高可测性的基础库和中间件
+## 6. 用户示例（Example）
 
-### 6.2 不适合场景
+### 6.1 示例 A：ThreadPool 常规投递
 
-- 强实时（硬实时）场景
-- 需要严格 EDF 或复杂抢占式调度策略
-- 对任务取消/超时传播有完整结构化语义要求（当前能力偏基础）
+```cpp
+#include <neixx/task/thread_pool.h>
+#include <neixx/task/location.h>
 
-## 7. 性能评估摘要
+nei::ThreadPoolOptions options;
+options.worker_count = 0; // 自动按硬件并发
+options.enable_compensation = true;
+options.wake_policy = nei::WakePolicy::kHybrid;
 
-以下来自 tools 目录的 10k/100k、5 轮中位数数据（Windows, VS2022 工程）：
+nei::ThreadPool pool(options);
+pool.PostTask(FROM_HERE, [] {
+  // immediate task
+});
 
-### 7.1 Release 吞吐（tasks/s）
+pool.PostDelayedTask(FROM_HERE, [] {
+  // delayed task
+}, std::chrono::milliseconds(50));
 
-- single_thread_task_runner_noop：
-  - 10k: 5,138,746
-  - 100k: 4,130,013
-- single_thread_task_runner_sum：
-  - 10k: 4,545,661
-  - 100k: 3,445,662
-- thread_noop：
-  - 10k: 4,091,151
-  - 100k: 3,907,166
-- thread_sum：
-  - 10k: 3,399,510
-  - 100k: 3,820,147
+pool.StartShutdown();
+pool.Shutdown();
+```
 
-### 7.2 Debug vs Release（enqueue 中位延迟）
+### 6.2 示例 B：Thread 单线程执行
 
-- thread_sum：
-  - 10k: 1492.42ns -> 294.16ns（-80.29%）
-  - 100k: 1470.46ns -> 261.77ns（-82.20%）
-- thread_noop：
-  - 10k: 1454.23ns -> 244.43ns（-83.19%）
-  - 100k: 1577.14ns -> 255.94ns（-83.77%）
+```cpp
+#include <neixx/task/thread.h>
+#include <neixx/task/location.h>
 
-### 7.3 吞吐提升（由 1e9 / enqueue_ns 统一口径反算）
+nei::Thread thread;
+auto runner = thread.GetTaskRunner();
 
-- thread_sum：
-  - 10k: +407.35%
-  - 100k: +461.74%
-- thread_noop：
-  - 10k: +494.95%
-  - 100k: +516.21%
+runner->PostTask(FROM_HERE, [] {
+  // run on dedicated single worker
+});
 
-结论：
+runner->PostDelayedTask(FROM_HERE, [] {
+  // delayed single-thread task
+}, std::chrono::milliseconds(20));
 
-- Release 相比 Debug 有显著吞吐优势（约 4x 到 6x）。
-- 近期 Thread 路径优化已带来明显 enqueue 热路径收益。
+thread.Shutdown();
+```
 
-## 8. 稳定性与工程经验
+### 6.3 示例 C：业务序列串行执行
 
-此前测试中的历史崩溃问题已修复并完成回归验证，当前文档不再保留该历史问题细节。
+```cpp
+#include <neixx/task/thread_pool.h>
+#include <neixx/task/sequenced_task_runner.h>
 
-启示：
+nei::ThreadPool pool(nei::ThreadPoolOptions{});
+auto seq = pool.CreateSequencedTaskRunner();
 
-- 异步测试中必须显式设计被捕获状态生命周期。
-- fixture 析构与后台任务收尾叠加时，最容易暴露悬空引用问题。
+seq->PostTask(FROM_HERE, [] { /* step 1 */ });
+seq->PostTask(FROM_HERE, [] { /* step 2, always after step 1 */ });
+```
 
-## 9. 本轮优化同步与后续路线
+## 7. 性能评估
 
-本轮已将 ThreadPool 调度热路径优化从“实验态”收敛为“可配置 + 已验证”状态，核心变更如下。
+### 7.1 Bench 方案（必须遵循）
 
-### P0（本轮已完成）
+测试目标：
 
-- 唤醒策略开关化：新增 `WakePolicy`（`kConservative` / `kAggressive` / `kHybrid`），默认保持 `kHybrid`，即 v4 行为可配置化。
-- RunLoop 时钟读取惰性化：仅在 delayed 队列非空或补偿线程定时触发待处理时才调用 `Now()`，去除 immediate-only 热路径中的冗余时钟开销。
-- ready flush 堆维护优化：`FlushPendingReadyTasksLocked` 由全量 `make_heap` 重建改为增量 `push_heap`，将锁内复杂度从 `O(N+k)` 收敛到 `O(k*logN)`（k 为本次 flush 任务数）。
-- 级联唤醒锁外化：在锁内只记录是否需要级联唤醒，`notify_one()` 在解锁后执行，减少“唤醒后立即再次阻塞同一把锁”的额外竞争。
+- ThreadPool：并发调度吞吐 + delayed 场景开销
+- Thread：单线程路径吞吐与排队开销
 
-### P1（下一优先级）
+测试程序：
 
-- 继续拆分 delayed-heavy 场景：针对 delayed_mix 的到期迁移与唤醒协同做细化调参（批大小、迁移阈值、唤醒门槛）。
-- 目标是进一步收敛 delayed 路径波动，并压低高分位尾延迟。
+- `tests/task_threadpool_bench_demo.cpp`
+- `tests/task_thread_single_runner_bench_demo.cpp`
 
-### P2（后续）
+测试口径：
 
-- 基于 `4 threads` 与 `default` 的长期差异，回推默认 worker 策略（包括 normal/best-effort 分组与补偿上限）。
-- 输出机器无关的默认参数建议，而不是固定机型经验值。
+- 任务规模：`10k * 10 runs`，`100k * 3 runs`
+- 固定输出字段：
+  - `enqueue_only_ms`
+  - `drain_wait_ms`
+  - `total_ms`
+  - `enqueue throughput`（tasks/s）
+  - `total throughput`（tasks/s）
+  - `drain_share_pct`
 
-### 9.1 固定回归基线字段（必须一致）
+建议执行环境：
 
-每次基准对比必须固定输出以下字段，不允许缺项或改名：
+- Windows / VS2022 Release
+- 关闭高噪声后台任务
+- 同机型上重复执行并保留原始文件
 
-- enqueue_ns
-- drain_ns
-- total_ns
-- enqueue throughput（tasks/s，按 1e9 / enqueue_ns 反算）
-- total throughput（tasks/s，按 1e9 / total_ns 反算）
-- drain_share_pct（drain_ns / total_ns * 100）
+### 7.1.1 Bench 测试环境（本机）
 
-### 9.2 本轮 P0 变更后的快速基线（Release）
+以下数据来自本次文档更新时的实际测试主机（2026-04-19）：
 
-以下为本轮 lock 优化后的统计（bench demo，10k*10 与 100k*3，均值口径）：
+- OS：Microsoft Windows 11 专业工作站版
+- OS Version / Build：10.0.26200 / 26200
+- CPU：Intel(R) Core(TM) Ultra 9 185H
+- 物理核心 / 逻辑处理器：16 / 22
+- CPU Max Clock：2300 MHz（系统报告值）
+- 内存：31.61 GB（采样空闲约 15.49 GB）
+- 机型：LENOVO 21LD
+- BIOS：NJCN65WW
+- CMake：4.2.3
+- MSBuild（由 CMake 构建输出识别）：17.14.40+3e7442088
+- 电源策略：性能模式
 
-- 10k（default）：enqueue_only_ms=21.418，drain_wait_ms=0.002，total_ms=21.42，enqueue throughput=466832，total throughput=466832，drain_share_pct=0.01
-- 10k（default_no_comp）：enqueue_only_ms=23.223，drain_wait_ms=0.003，total_ms=23.23，enqueue throughput=430608，total throughput=430552，drain_share_pct=0.01
-- 10k（default_delayed_mix）：enqueue_only_ms=7.267，drain_wait_ms=19.144，total_ms=26.41，enqueue throughput=1376084，total throughput=378587，drain_share_pct=72.49
-- 10k（default_no_comp_delayed_mix）：enqueue_only_ms=3.017，drain_wait_ms=21.764，total_ms=24.78，enqueue throughput=3314551，total throughput=403535，drain_share_pct=87.83
+说明：
 
-- 100k（default）：enqueue_only_ms=274.400，drain_wait_ms=0.000，total_ms=274.40，enqueue throughput=364431，total throughput=364427，drain_share_pct=0.00
-- 100k（default_no_comp）：enqueue_only_ms=279.053，drain_wait_ms=0.000，total_ms=279.05，enqueue throughput=358355，total throughput=358354，drain_share_pct=0.00
-- 100k（default_delayed_mix）：enqueue_only_ms=149.923，drain_wait_ms=140.523，total_ms=290.45，enqueue throughput=667009，total throughput=344297，drain_share_pct=48.38
-- 100k（default_no_comp_delayed_mix）：enqueue_only_ms=212.440，drain_wait_ms=89.973，total_ms=302.41，enqueue throughput=470721，total throughput=330673，drain_share_pct=29.75
+- 吞吐结果对 CPU 频率策略、系统后台负载、温度与电源模式敏感。
+- 若跨机器对比，建议固定“电源模式 + 构建配置 + 任务规模 + 轮次”，并记录同口径环境字段。
 
-对比优化前（同口径历史基线）本轮结论：
+### 7.2 最新实测数据（当前版本）
 
-- immediate-heavy 默认路径小幅增益（default 约 +1.2%，default_no_comp 约 +13.3%）。
-- delayed_mix 路径显著增益（约 +58% 到 +74%）。
-- 波动收敛明显：多数组合 `total_std_ms` 下降，长尾抖动减少。
+#### 7.2.1 ThreadPool（10k*10）
 
-注：历史文档中的 `enqueue_ns/drain_ns/total_ns` 字段定义继续保留作为回归规范；本轮 bench demo 的原始输出单位为 ms，按原始字段名对齐时需要先做单位换算。
+| 场景 | enq_avg_ms | drain_avg_ms | total_avg_ms | total_std_ms | total_tps | drain_share_pct |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 thread | 1.770 | 0.389 | 2.161 | 0.063 | 4627487 | 18.00 |
+| 2 threads | 2.257 | 0.118 | 2.373 | 0.115 | 4214075 | 4.97 |
+| 4 threads | 3.358 | 0.040 | 3.401 | 0.419 | 2940312 | 1.18 |
+| default | 27.120 | 0.005 | 27.124 | 1.439 | 368677 | 0.02 |
+| default_no_comp | 26.532 | 0.008 | 26.540 | 1.162 | 376790 | 0.03 |
+| 1 thread_noop | 1.797 | 0.311 | 2.109 | 0.125 | 4741584 | 14.75 |
+| 2 threads_noop | 2.379 | 0.038 | 2.416 | 0.274 | 4139073 | 1.57 |
+| 4 threads_noop | 3.292 | 0.046 | 3.338 | 0.295 | 2995806 | 1.38 |
+| default_noop | 27.103 | 0.009 | 27.114 | 0.524 | 368813 | 0.03 |
+| default_no_comp_noop | 27.196 | 0.000 | 27.197 | 1.063 | 367688 | 0.00 |
+| default_delayed_mix | 8.732 | 20.244 | 28.978 | 2.573 | 345089 | 69.86 |
+| default_no_comp_delayed_mix | 6.025 | 23.767 | 29.790 | 4.730 | 335683 | 79.78 |
+| default_delayed_fixed | 1.475 | 29.789 | 31.264 | 3.704 | 319857 | 95.28 |
+| default_no_comp_delayed_fixed | 1.527 | 28.521 | 30.048 | 3.398 | 332801 | 94.92 |
 
-### 9.3 高负载稳定性验证（本轮新增）
+#### 7.2.2 ThreadPool（100k*3）
 
-- 全量 CTest 连续 5 轮：全部通过（result code=0，无非零失败条目）。
-- 压测冲击：执行 15 次 `task_threadpool_bench_demo 100000`（3 轮*每轮 5 次），过程无崩溃、无卡死。
-- 压测后全量 CTest 连续 3 轮：全部通过（result code=0，无非零失败条目）。
+| 场景 | enq_avg_ms | drain_avg_ms | total_avg_ms | total_std_ms | total_tps | drain_share_pct |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 thread | 18.037 | 0.670 | 18.707 | 0.242 | 5345688 | 3.58 |
+| 2 threads | 21.283 | 0.140 | 21.423 | 1.086 | 4667808 | 0.65 |
+| 4 threads | 32.447 | 0.007 | 32.453 | 1.176 | 3081348 | 0.02 |
+| default | 274.010 | 0.000 | 274.013 | 4.949 | 364946 | 0.00 |
+| default_no_comp | 273.717 | 0.007 | 273.723 | 10.947 | 365332 | 0.00 |
+| 1 thread_noop | 18.567 | 0.300 | 18.863 | 0.252 | 5301290 | 1.59 |
+| 2 threads_noop | 21.253 | 0.147 | 21.400 | 0.361 | 4672897 | 0.69 |
+| 4 threads_noop | 31.730 | 0.007 | 31.737 | 0.647 | 3150930 | 0.02 |
+| default_noop | 269.640 | 0.000 | 269.640 | 0.997 | 370865 | 0.00 |
+| default_no_comp_noop | 277.657 | 0.003 | 277.657 | 3.316 | 360157 | 0.00 |
+| default_delayed_mix | 127.480 | 158.127 | 285.607 | 5.495 | 350132 | 55.37 |
+| default_no_comp_delayed_mix | 77.893 | 205.663 | 283.553 | 17.086 | 352667 | 72.53 |
+| default_delayed_fixed | 169.000 | 109.110 | 278.110 | 19.016 | 359570 | 39.23 |
+| default_no_comp_delayed_fixed | 130.510 | 160.840 | 291.347 | 11.734 | 343234 | 55.21 |
 
-结论：在“高负载冲击 + 多轮全量回归”组合下，本轮调度优化未引入可观测稳定性回归。
+#### 7.2.3 Thread::GetTaskRunner（10k*10）
 
-### 9.4 Thread 单线程路径优化同步（本轮新增）
+| 场景 | enq_avg_ms | drain_avg_ms | total_avg_ms | total_std_ms | total_tps | drain_share_pct |
+|---|---:|---:|---:|---:|---:|---:|
+| thread_sum | 2.254 | 0.098 | 2.355 | 0.120 | 4246285 | 4.16 |
+| thread_noop | 1.918 | 0.097 | 2.018 | 0.169 | 4955401 | 4.81 |
 
-针对 `Thread::Impl` 已落地三项热路径优化：
+#### 7.2.4 Thread::GetTaskRunner（100k*3）
 
-- Enqueue 惰性时钟读取：仅 delayed 任务计算 `run_at` 时调用 `Now()`，immediate 任务不再无条件取时钟。
-- RunLoop 惰性时钟读取：仅在 delayed 队列非空时调用 `Now()` 并执行到期迁移。
-- delayed->ready 迁移改为增量堆维护：迁移时逐个 `push_heap`，去掉迁移后的全量 `make_heap` 重建。
+| 场景 | enq_avg_ms | drain_avg_ms | total_avg_ms | total_std_ms | total_tps | drain_share_pct |
+|---|---:|---:|---:|---:|---:|---:|
+| thread_sum | 19.103 | 0.027 | 19.130 | 0.790 | 5227392 | 0.14 |
+| thread_noop | 19.620 | 0.087 | 19.707 | 1.036 | 5074425 | 0.44 |
 
-在当前机器上的 bench 结果（`task_thread_single_runner_bench_demo`）：
+### 7.3 数据解读
 
-- 10k*10：
-  - `thread_sum`：`2.976ms -> 2.475ms`（约 +16.8%）
-  - `thread_noop`：`2.629ms -> 1.972ms`（约 +25.0%）
-- 100k*3：
-  - `thread_sum`：`28.793ms -> 19.883ms`（约 +30.9%）
-  - `thread_noop`：`28.700ms -> 19.967ms`（约 +30.4%）
+- ThreadPool 默认路径在当前环境稳定维持约 `0.36M ~ 0.38M tasks/s`（7.2.1/7.2.2 的 default 系列）。
+- delayed 场景中 `drain_share_pct` 明显上升（10k 约 `69.86% ~ 95.28%`，100k 约 `39.23% ~ 72.53%`），说明瓶颈从 enqueue 转向到期等待与迁移执行。
+- Thread 单线程路径达到 `4.25M ~ 4.96M tasks/s`（10k）和 `5.07M ~ 5.23M tasks/s`（100k），适合高频轻任务串行化场景。
 
-回归验证：`task_environment_test` 与 `task_scheduler_test` 共 14/14 通过。
+### 7.4 线程数差异与 TPS 下降原因
 
-### 9.5 Thread bench 口径修正（本轮新增）
+在 `1/2/4 threads` 与对应 noop 场景中，随着线程数增加，TPS 呈下降趋势，这是当前 work-sharing 模型在“超轻任务”下的典型特征，并非功能异常。
 
-`task_thread_single_runner_bench_demo` 已调整为仅测试 `Thread::GetTaskRunner()` 外部接口路径：
+主要原因：
 
-- 不再包含对内部 `single_thread_task_runner.h` 的直接依赖。
-- 不再包含自建 `BenchSingleThreadQueue` 对照实现。
-- 当前输出仅保留 `thread_sum` / `thread_noop` 两组指标，避免“接口路径”和“内部实现路径”混测导致口径不一致。
+1. 任务执行成本过低，调度开销成为主导。
+- 当 task body 很轻（如 noop）时，总耗时主要由队列操作、锁竞争和唤醒路径构成。
 
-### 9.6 如果未来继续做 Time-wheel 优化：建议启动方式
+2. 共享结构竞争随线程数上升。
+- 多 worker 竞争同一组 `ready_tasks` / `delayed_tasks` / 状态计数，锁竞争和 cache coherence 开销上升。
 
-建议按“先并行验证，再灰度替换”的方式推进，而不是直接把 delayed heap 全量替换。
+3. 唤醒与上下文切换成本不可忽略。
+- 线程增多后，通知、调度与上下文切换开销增加，吞噬并行收益。
 
-推荐起步步骤：
+4. 并行收益被“调度固定成本”抵消。
+- 当任务计算量不足以覆盖同步成本时，增加线程只会放大同步开销，因此表现为 TPS 下降。
 
-1. 建立双实现开关
-- 在 ThreadPool delayed 路径保留 heap 与 wheel 两套实现，通过编译开关或运行时选项切换。
-- 先保证相同输入下两者语义一致（到期顺序、同到期优先级、shutdown 行为）。
+工程结论：
 
-2. 先补基准，再改算法
-- 基准必须区分 immediate-heavy 与 delayed-heavy，两类都要覆盖。
-- 除 enqueue_ns 外，至少记录：到期偏差（deadline overshoot）、尾延迟（p95/p99）、单位时间处理量。
+- 对“超轻任务吞吐极限”场景，单线程或少线程常优于多线程。
+- 对真实业务任务（含实际计算/I/O）应以端到端延迟与稳定性为主，不只看 noop 吞吐。
+- 配置上优先按业务负载选择线程数，而不是默认“线程越多越好”。
 
-3. 固定实验矩阵
-- 至少包含：10k/100k 任务规模、5~20 轮重复、noop 与有计算负载两类任务。
-- 需要单独增加 delayed_mix 场景（例如 10ms/50ms/200ms 多桶分布），避免“只在 zero-delay 下看起来更快”。
+## 8. 业务场景推荐配置
 
-4. 设置止损线（Fail-fast）
-- 若 delayed-heavy enqueue 或 tail latency 回退超过 20% 且连续 3 轮复现，立即回退到 heap 路径排查。
-- 不满足止损线前，不进入主分支默认实现。
+### 8.1 场景 A：通用后端并发任务（混合 immediate + delayed）
 
-### 9.7 Time-wheel 优化的注意事项
+推荐：
 
-- 槽宽（tick）与业务延迟分布要匹配：tick 过大导致精度损失，tick 过小导致推进成本上升。
-- rounds 计算必须无符号安全：注意大延迟换算、溢出和边界值（0、1 tick、超大 delay）。
-- 推进时机要明确：在 worker 唤醒、post delayed、shutdown 入口三处保持一致性。
-- 不能破坏现有优先级语义：同一 bucket 内仍要按 TaskPriority + sequence 维持稳定顺序。
-- 与补偿线程策略协同：wheel 推进导致的突发 ready 任务会影响 may_block 与补偿触发阈值。
-- 可观测性先行：至少暴露 wheel occupancy、tick advance 次数、跨轮迁移量、回退次数。
+- `ThreadPool`
+- `wake_policy = kHybrid`
+- `enable_compensation = true`
+- `worker_count = 0`（自动）
 
-### 9.8 已踩过的坑（避免重复）
+适用原因：
 
-- 坑 1：只看 immediate-path 指标。
-  - 现象：zero-delay 场景数据变好，但 delayed-heavy 场景出现数量级退化。
-  - 规避：评估结论必须以 delayed-heavy 结果为准，不允许用单一场景做发布决策。
+- 在 mixed 负载下兼顾吞吐和延迟抖动
 
-- 坑 2：过早“全量替换 delayed heap”。
-  - 现象：问题出现后无法快速回退，定位成本高。
-  - 规避：长期保留 heap 兜底开关，直到 wheel 在完整矩阵中稳定优于 heap。
+### 8.2 场景 B：低优先级后台批处理
 
-- 坑 3：缺少统一口径的对比统计。
-  - 现象：不同轮次、不同脚本输出口径不一致，结论不可比。
-  - 规避：统一使用中位 enqueue_ns 与反算吞吐（tasks/s = 1e9 / enqueue_ns），并固定输出字段。
+推荐：
 
-- 坑 4：把“功能通过”当成“性能可发布”。
-  - 现象：CTest 全通过，但性能回归严重。
-  - 规避：功能门禁与性能门禁分离；发布前必须同时满足两者。
+- `ThreadPool`
+- 提高 `best_effort_worker_count`
+- `enable_best_effort_compensation = false`（优先稳态资源）
+- `wake_policy = kConservative`
 
-### 9.9 推荐验收门槛（可直接落地）
+适用原因：
 
-- 功能：全量 CTest 通过，且 shutdown/阻塞相关测试无新增 flaky。
-- 性能：
-  - immediate-heavy 不低于 heap 基线；
-  - delayed-heavy 的 enqueue_ns、p99 延迟均不劣于 heap（允许 5% 以内波动）；
-  - 至少 3 次独立批次复现同结论。
-- 可运维性：保留快速回退开关与关键观测指标。
+- 控制资源抢占，降低无效唤醒
 
-## 10. 与 Chromium 风格能力映射（简述）
+### 8.3 场景 C：延迟任务密集（定时器/轮询）
 
-已有能力：
+推荐：
 
-- TaskRunner / SequencedTaskRunner 基础抽象
-- TaskTraits（priority/shutdown/may_block）
-- ScopedBlockingCall
-- FROM_HERE 与 TaskTracer
+- `ThreadPool`
+- `wake_policy = kConservative` 或 `kHybrid`
+- 保持补偿线程开启，但控制补偿上限
+- 重点监控 `drain_share_pct` 与 p99 延迟
 
-差距方向：
+适用原因：
 
-- 任务取消体系
-- 更完整的 delayed policy 与调度可视化
-- 更丰富的运行时诊断接口
+- delayed-heavy 下应优先抑制抖动与唤醒风暴
 
-## 11. 参考文件
+### 8.4 场景 D：强串行语义业务（状态机/顺序日志处理）
 
-- modules/neixx/task/include/neixx/task/thread_pool.h
-- modules/neixx/task/src/thread_pool.cpp
-- modules/neixx/task/include/neixx/task/thread.h
-- modules/neixx/task/src/thread.cpp
-- modules/neixx/task/include/neixx/task/sequenced_task_runner.h
-- modules/neixx/task/src/sequenced_task_runner.cpp
-- modules/neixx/task/include/neixx/task/task_environment.h
-- modules/neixx/task/src/task_environment.cpp
-- modules/neixx/functional/include/neixx/functional/callback.h
-- modules/neixx/memory/include/neixx/memory/weak_ptr.h
+推荐：
+
+- `Thread` + `GetTaskRunner()`
+- 或 `ThreadPool + SequencedTaskRunner`
+
+选型建议：
+
+- 追求极致顺序确定性：优先 `Thread`
+- 需要多序列并行：优先 `SequencedTaskRunner`
+
+### 8.5 场景 E：任务可能长时间阻塞（I/O、外部 RPC）
+
+推荐：
+
+- `ThreadPool`
+- `enable_compensation = true`
+- 业务中显式使用 `ScopedBlockingCall`
+
+适用原因：
+
+- 降低阻塞任务对吞吐塌陷影响
+
+## 9. 稳定性与验收门槛
+
+### 9.1 功能稳定性门槛
+
+- 全量 CTest 通过
+- shutdown、阻塞、延迟相关测试无新增 flaky
+
+### 9.2 性能门槛
+
+- immediate-heavy 不低于当前 heap 基线
+- delayed-heavy 的 enqueue/尾延迟不劣于基线（允许小幅波动）
+- 至少 3 批次独立复现同结论
+
+### 9.3 运维门槛
+
+- 可快速回退开关
+- 关键指标可观测
+- 失败路径可追踪（日志/trace）
+
+## 10. 当前方案持续优化方向
+
+基于当前实现，后续优化建议按投入/风险分层推进：
+
+### 10.1 低风险高收益（建议优先）
+
+- 自适应批处理参数：按队列深度与负载动态调整 batch size，减少固定阈值对不同场景的不适配。
+- 进一步降低锁内工作量：持续把可延后逻辑从锁内迁到锁外，收敛 lock hold time。
+- 指标体系完善：增加 p95/p99 与 wake 相关计数，提升性能诊断分辨率。
+
+### 10.2 中风险中收益（可灰度）
+
+- 分组策略优化：按业务画像动态配置 normal/best-effort worker 占比与补偿上限。
+- delayed 迁移策略细化：按 delayed 分布自适应迁移阈值与唤醒门槛。
+- 线程亲和性策略模板化：在稳定机型下启用可复用的 affinity 模板配置。
+
+### 10.3 高风险高收益（需双实现开关）
+
+- 工作窃取（work-stealing）模型：缓解单共享队列竞争，但实现复杂度和调试成本较高。
+- 分层/分片队列：降低全局锁竞争，需谨慎处理全局公平性与优先级语义。
+- TimeWheel 深化替换 delayed heap：仅在完整实验矩阵与止损机制下推进。
+
+## 11. 用户侧性能发挥建议
+
+以下建议用于帮助业务侧在不改动框架内部实现的前提下，稳定发挥当前方案性能：
+
+1. 让任务足够粗粒度。
+- 避免海量极轻任务（例如纯 noop）；可在业务层先做小批合并，摊薄调度固定成本。
+
+2. 正确区分 immediate 与 delayed。
+- 非必要不要把即时任务改造成短延迟任务；delayed-heavy 场景应重点监控 `drain_share_pct`。
+
+3. 显式标注阻塞任务。
+- 对可能阻塞的任务使用 `may_block`/`ScopedBlockingCall`，让补偿策略准确生效。
+
+4. 线程数按实测定，不盲目增大。
+- 超轻任务场景常出现“线程越多 TPS 越低”；建议固定 1/2/4/default 逐档测后再选。
+
+5. 基准测试先预热再采样。
+- 固定任务规模、轮次、构建模式（Release）与电源策略，减少非业务噪声。
+
+6. 控制运行环境噪声。
+- 关闭高负载后台进程，保持散热与电源模式一致，避免跨轮次环境漂移。
+
+7. 用对执行模型。
+- 强串行状态机优先 `Thread::GetTaskRunner()`；多序列并行优先 `ThreadPool + SequencedTaskRunner`。
+
+## 12. TimeWheel 方案尝试与后续建议
+
+### 12.1 现状
+
+Task 模块已对 TimeWheel 方向进行过可行性尝试，但当前默认实现仍以 heap 路径为主。
+
+原因：
+
+- 在部分 delayed-heavy 组合上，TimeWheel 的收益对参数较敏感
+- 若缺少严格实验矩阵与回退策略，容易出现局部变快、全局退化
+
+### 12.2 若继续开发 TimeWheel，必须关注的坑点
+
+- tick 粒度与业务延迟分布不匹配：过大损失精度，过小增加推进开销
+- rounds/slot 计算边界：大 delay、溢出、0/1 tick 等边界处理
+- 推进时机不一致：post、wake、shutdown 三入口语义必须统一
+- bucket 内排序语义丢失：必须维持 priority + sequence 稳定顺序
+- 与补偿线程协同：突发 ready 迁移会放大补偿触发频率
+- 可观测性不足：缺少 occupancy/advance/migration 指标将导致排障困难
+
+### 12.3 推荐推进策略
+
+- 双实现并行（heap/wheel）+ 开关切换
+- 先补完整基准矩阵，再灰度替换
+- 明确止损线：若 delayed-heavy 指标持续退化则自动回退
+
+## 13. 参考文件
+
+- `modules/neixx/task/include/neixx/task/thread_pool.h`
+- `modules/neixx/task/src/thread_pool.cpp`
+- `modules/neixx/task/include/neixx/task/thread.h`
+- `modules/neixx/task/src/thread.cpp`
+- `modules/neixx/task/include/neixx/task/sequenced_task_runner.h`
+- `modules/neixx/task/src/sequenced_task_runner.cpp`
+- `modules/neixx/task/include/neixx/task/task_environment.h`
+- `modules/neixx/task/src/task_environment.cpp`
+- `tests/task_threadpool_bench_demo.cpp`
+- `tests/task_thread_single_runner_bench_demo.cpp`
