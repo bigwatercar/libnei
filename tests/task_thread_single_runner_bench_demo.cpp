@@ -10,15 +10,9 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
-#include <memory>
-#include <mutex>
-#include <queue>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <utility>
-
-#include "../modules/neixx/task/src/single_thread_task_runner.h"
 
 namespace {
 
@@ -125,116 +119,6 @@ BenchmarkResult RunNoopBenchmark(const std::string &label, nei::TaskRunner &runn
   return result;
 }
 
-class BenchSingleThreadQueue {
-public:
-  BenchSingleThreadQueue()
-      : worker_([this]() { RunLoop(); }) {
-  }
-
-  ~BenchSingleThreadQueue() {
-    Shutdown();
-  }
-
-  BenchSingleThreadQueue(const BenchSingleThreadQueue &) = delete;
-  BenchSingleThreadQueue &operator=(const BenchSingleThreadQueue &) = delete;
-
-  static void EnqueueThunk(void *context,
-                           const nei::Location &from_here,
-                           const nei::TaskTraits &traits,
-                           nei::OnceClosure task,
-                           std::chrono::milliseconds delay) {
-    static_cast<BenchSingleThreadQueue *>(context)->Enqueue(from_here, traits, std::move(task), delay);
-  }
-
-  void Shutdown() {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      if (stop_) {
-        return;
-      }
-      stop_ = true;
-    }
-    cv_.notify_all();
-    if (worker_.joinable()) {
-      worker_.join();
-    }
-  }
-
-private:
-  struct QueuedTask {
-    std::chrono::steady_clock::time_point run_at;
-    std::uint64_t sequence = 0;
-    nei::Location from_here;
-    nei::TaskTraits traits;
-    nei::OnceClosure task;
-  };
-
-  struct QueuedTaskCompare {
-    bool operator()(const std::shared_ptr<QueuedTask> &lhs, const std::shared_ptr<QueuedTask> &rhs) const {
-      if (lhs->run_at != rhs->run_at) {
-        return lhs->run_at > rhs->run_at;
-      }
-      return lhs->sequence > rhs->sequence;
-    }
-  };
-
-  void Enqueue(const nei::Location &from_here,
-               const nei::TaskTraits &traits,
-               nei::OnceClosure task,
-               std::chrono::milliseconds delay) {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      if (stop_) {
-        return;
-      }
-      queue_.push(std::make_shared<QueuedTask>(QueuedTask{
-          std::chrono::steady_clock::now() + delay,
-          next_sequence_++,
-          from_here,
-          traits,
-          std::move(task),
-      }));
-    }
-    cv_.notify_one();
-  }
-
-  void RunLoop() {
-    for (;;) {
-      std::shared_ptr<QueuedTask> scheduled;
-      {
-        std::unique_lock<std::mutex> lock(mutex_);
-        for (;;) {
-          if (stop_ && queue_.empty()) {
-            return;
-          }
-          if (queue_.empty()) {
-            cv_.wait(lock, [this]() { return stop_ || !queue_.empty(); });
-            continue;
-          }
-
-          const auto now = std::chrono::steady_clock::now();
-          const auto run_at = queue_.top()->run_at;
-          if (now >= run_at) {
-            scheduled = queue_.top();
-            queue_.pop();
-            break;
-          }
-
-          cv_.wait_until(lock, run_at);
-        }
-      }
-      std::move(scheduled->task).Run();
-    }
-  }
-
-  std::thread worker_;
-  std::mutex mutex_;
-  std::condition_variable cv_;
-  std::priority_queue<std::shared_ptr<QueuedTask>, std::vector<std::shared_ptr<QueuedTask>>, QueuedTaskCompare> queue_;
-  std::uint64_t next_sequence_ = 0;
-  bool stop_ = false;
-};
-
 void PrintResult(const BenchmarkResult &result, std::uint32_t task_count, bool &pass) {
   const bool sum_ok = result.sum == result.expected_sum;
   pass = pass && sum_ok;
@@ -271,24 +155,11 @@ int main(int argc, char *argv[]) {
   const BenchmarkResult thread_sum = RunSumBenchmark("thread_sum", *thread_runner, task_count);
   const BenchmarkResult thread_noop = RunNoopBenchmark("thread_noop", *thread_runner, task_count);
 
-  thread_runner_owner.Shutdown();
-
-  BenchSingleThreadQueue queue;
-  auto single_runner = std::make_shared<nei::SingleThreadTaskRunner>(nei::SingleThreadTaskRunner::EnqueueDelegate{
-      &queue,
-      &BenchSingleThreadQueue::EnqueueThunk,
-  });
-
-  const BenchmarkResult single_sum = RunSumBenchmark("single_thread_task_runner_sum", *single_runner, task_count);
-  const BenchmarkResult single_noop = RunNoopBenchmark("single_thread_task_runner_noop", *single_runner, task_count);
-
-  queue.Shutdown();
-
   bool pass = true;
   PrintResult(thread_sum, task_count, pass);
   PrintResult(thread_noop, task_count, pass);
-  PrintResult(single_sum, task_count, pass);
-  PrintResult(single_noop, task_count, pass);
+
+  thread_runner_owner.Shutdown();
 
   return pass ? 0 : 1;
 }

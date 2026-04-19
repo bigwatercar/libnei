@@ -138,7 +138,10 @@ private:
       return;
     }
 
-    const auto run_at = time_source_->Now() + delay;
+    std::chrono::steady_clock::time_point run_at{};
+    if (delay.count() > 0) {
+      run_at = time_source_->Now() + delay;
+    }
     bool should_notify = false;
     {
       std::lock_guard<std::mutex> lock(mutex_);
@@ -222,28 +225,16 @@ private:
   }
 
   void MoveReadyTasksFromDelayedLocked(const std::chrono::steady_clock::time_point now) {
-    const std::size_t ready_size_before = ready_tasks_.size();
     std::size_t moved_count = 0;
 
     while (!delayed_tasks_.empty() && delayed_tasks_.front().run_at <= now) {
-      ready_tasks_.push_back(PopDelayedTaskLocked());
+      PushReadyTaskLocked(PopDelayedTaskLocked());
       ++moved_count;
     }
 
     if (moved_count == 0) {
       return;
     }
-
-    if (ready_size_before == 0 && moved_count == 1) {
-      return;
-    }
-
-    if (moved_count == 1) {
-      std::push_heap(ready_tasks_.begin(), ready_tasks_.end(), ReadyTaskCompare{});
-      return;
-    }
-
-    std::make_heap(ready_tasks_.begin(), ready_tasks_.end(), ReadyTaskCompare{});
   }
 
   bool HasTasksLocked() const {
@@ -272,8 +263,10 @@ private:
             return;
           }
 
-          const auto now = time_source_->Now();
-          MoveReadyTasksFromDelayedLocked(now);
+          if (!delayed_tasks_.empty()) {
+            const auto now = time_source_->Now();
+            MoveReadyTasksFromDelayedLocked(now);
+          }
 
           if (!ready_tasks_.empty()) {
             scheduled = PopReadyTaskLocked();

@@ -273,7 +273,34 @@ ManualTimeSource + RunUntilIdle 让延迟任务测试从“依赖真实时间”
 
 结论：在“高负载冲击 + 多轮全量回归”组合下，本轮调度优化未引入可观测稳定性回归。
 
-### 9.4 如果未来继续做 Time-wheel 优化：建议启动方式
+### 9.4 Thread 单线程路径优化同步（本轮新增）
+
+针对 `Thread::Impl` 已落地三项热路径优化：
+
+- Enqueue 惰性时钟读取：仅 delayed 任务计算 `run_at` 时调用 `Now()`，immediate 任务不再无条件取时钟。
+- RunLoop 惰性时钟读取：仅在 delayed 队列非空时调用 `Now()` 并执行到期迁移。
+- delayed->ready 迁移改为增量堆维护：迁移时逐个 `push_heap`，去掉迁移后的全量 `make_heap` 重建。
+
+在当前机器上的 bench 结果（`task_thread_single_runner_bench_demo`）：
+
+- 10k*10：
+  - `thread_sum`：`2.976ms -> 2.475ms`（约 +16.8%）
+  - `thread_noop`：`2.629ms -> 1.972ms`（约 +25.0%）
+- 100k*3：
+  - `thread_sum`：`28.793ms -> 19.883ms`（约 +30.9%）
+  - `thread_noop`：`28.700ms -> 19.967ms`（约 +30.4%）
+
+回归验证：`task_environment_test` 与 `task_scheduler_test` 共 14/14 通过。
+
+### 9.5 Thread bench 口径修正（本轮新增）
+
+`task_thread_single_runner_bench_demo` 已调整为仅测试 `Thread::GetTaskRunner()` 外部接口路径：
+
+- 不再包含对内部 `single_thread_task_runner.h` 的直接依赖。
+- 不再包含自建 `BenchSingleThreadQueue` 对照实现。
+- 当前输出仅保留 `thread_sum` / `thread_noop` 两组指标，避免“接口路径”和“内部实现路径”混测导致口径不一致。
+
+### 9.6 如果未来继续做 Time-wheel 优化：建议启动方式
 
 建议按“先并行验证，再灰度替换”的方式推进，而不是直接把 delayed heap 全量替换。
 
@@ -295,7 +322,7 @@ ManualTimeSource + RunUntilIdle 让延迟任务测试从“依赖真实时间”
 - 若 delayed-heavy enqueue 或 tail latency 回退超过 20% 且连续 3 轮复现，立即回退到 heap 路径排查。
 - 不满足止损线前，不进入主分支默认实现。
 
-### 9.5 Time-wheel 优化的注意事项
+### 9.7 Time-wheel 优化的注意事项
 
 - 槽宽（tick）与业务延迟分布要匹配：tick 过大导致精度损失，tick 过小导致推进成本上升。
 - rounds 计算必须无符号安全：注意大延迟换算、溢出和边界值（0、1 tick、超大 delay）。
@@ -304,7 +331,7 @@ ManualTimeSource + RunUntilIdle 让延迟任务测试从“依赖真实时间”
 - 与补偿线程策略协同：wheel 推进导致的突发 ready 任务会影响 may_block 与补偿触发阈值。
 - 可观测性先行：至少暴露 wheel occupancy、tick advance 次数、跨轮迁移量、回退次数。
 
-### 9.6 已踩过的坑（避免重复）
+### 9.8 已踩过的坑（避免重复）
 
 - 坑 1：只看 immediate-path 指标。
   - 现象：zero-delay 场景数据变好，但 delayed-heavy 场景出现数量级退化。
@@ -322,7 +349,7 @@ ManualTimeSource + RunUntilIdle 让延迟任务测试从“依赖真实时间”
   - 现象：CTest 全通过，但性能回归严重。
   - 规避：功能门禁与性能门禁分离；发布前必须同时满足两者。
 
-### 9.6 推荐验收门槛（可直接落地）
+### 9.9 推荐验收门槛（可直接落地）
 
 - 功能：全量 CTest 通过，且 shutdown/阻塞相关测试无新增 flaky。
 - 性能：
