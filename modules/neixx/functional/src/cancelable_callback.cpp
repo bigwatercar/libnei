@@ -1,8 +1,8 @@
 #include <neixx/functional/cancelable_callback.h>
 #include <neixx/functional/callback.h>
+#include <neixx/memory/weak_ptr.h>
 
 #include <atomic>
-#include <memory>
 #include <mutex>
 #include <utility>
 
@@ -11,30 +11,34 @@ namespace nei {
 class CancelableOnceClosure::Impl {
 public:
   explicit Impl(OnceCallback closure)
-      : state_(std::make_shared<State>(std::move(closure))) {
+      : state_(std::move(closure)) {
   }
 
   OnceCallback callback() {
-    std::shared_ptr<State> state = state_;
-    return BindOnce([state = std::move(state)]() mutable {
-      if (state->is_cancelled.load(std::memory_order_acquire)) {
+    WeakPtr<State> weak_state = state_.GetWeakPtr();
+    return BindOnce([weak_state]() mutable {
+      if (!weak_state) {
+        return;
+      }
+
+      if (weak_state->is_cancelled.load(std::memory_order_acquire)) {
         return;
       }
 
       OnceCallback task;
       {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        if (state->is_cancelled.load(std::memory_order_relaxed)) {
+        std::lock_guard<std::mutex> lock(weak_state->mutex);
+        if (weak_state->is_cancelled.load(std::memory_order_relaxed)) {
           return;
         }
-        task = std::move(state->task);
+        task = std::move(weak_state->task);
       }
 
       if (!task) {
         return;
       }
 
-      if (state->is_cancelled.load(std::memory_order_acquire)) {
+      if (weak_state->is_cancelled.load(std::memory_order_acquire)) {
         return;
       }
 
@@ -43,23 +47,34 @@ public:
   }
 
   void Cancel() {
-    state_->is_cancelled.store(true, std::memory_order_release);
-    std::lock_guard<std::mutex> lock(state_->mutex);
-    state_->task = OnceCallback();
+    state_.Cancel();
   }
 
 private:
   struct State {
     explicit State(OnceCallback closure_in)
-        : task(std::move(closure_in)) {
+        : task(std::move(closure_in))
+        , weak_factory(this) {
+    }
+
+    WeakPtr<State> GetWeakPtr() {
+      return weak_factory.GetWeakPtr();
+    }
+
+    void Cancel() {
+      is_cancelled.store(true, std::memory_order_release);
+      std::lock_guard<std::mutex> lock(mutex);
+      task = OnceCallback();
+      weak_factory.InvalidateWeakPtrs();
     }
 
     std::atomic<bool> is_cancelled{false};
     std::mutex mutex;
     OnceCallback task;
+    WeakPtrFactory<State> weak_factory;
   };
 
-  std::shared_ptr<State> state_;
+  State state_;
 };
 
 CancelableOnceClosure::CancelableOnceClosure(OnceCallback closure)
