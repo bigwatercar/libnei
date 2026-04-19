@@ -674,6 +674,7 @@ private:
     for (;;) {
       local_batch.clear();
       bool batch_has_may_block = false;
+      bool cascade_wake = false;
       {
         std::unique_lock<std::mutex> lock(group->mutex);
         for (;;) {
@@ -681,14 +682,18 @@ private:
             PruneTasksForShutdownLocked(*group);
           }
 
-          const auto now = time_source_->Now();
-          // Skip the promote check entirely when there are no delayed tasks to
-          // avoid a redundant heap-empty test on the hot path for immediate tasks.
+          // Lazy Now(): only query the clock when delayed tasks exist or compensation
+          // is pending.  On the pure-immediate hot path this avoids a syscall while
+          // holding the mutex.
+          const bool need_now = !group->delayed_tasks.empty() || group->pending_compensation_spawn;
+          const auto now = need_now ? time_source_->Now() : std::chrono::steady_clock::time_point{};
           if (!group->delayed_tasks.empty()) {
             PromoteDueTasksLocked(*group, now);
           }
           FlushPendingReadyTasksLocked(*group); // Ensure pending tasks are in the heap
-          TrySpawnCompensationWorkerLocked(*group, now);
+          if (need_now) {
+            TrySpawnCompensationWorkerLocked(*group, now);
+          }
 
           if (group->stop && !HasPendingTasksLocked(*group)) {
             return;
@@ -742,13 +747,18 @@ private:
             ++group->active_may_block_workers;
             ArmCompensationSpawnLocked(*group, now);
           }
-          // If more work remains, cascade-wake another worker rather than
-          // relying solely on the enqueuer's notify.
-          if (!group->ready_tasks.empty() || !group->pending_ready_tasks.empty()) {
-            group->cv.notify_one();
-          }
+          // Record whether a cascade-wake is needed; the actual notify_one() is
+          // deferred to after the lock is released (see below) to avoid waking a
+          // thread that would immediately block on the same mutex.
+          cascade_wake = !group->ready_tasks.empty() || !group->pending_ready_tasks.empty();
           break;
         }
+      }
+      // Cascade-wake: if there is still work queued after we picked our batch,
+      // wake one more worker now that the lock is released.  Doing this outside
+      // the lock avoids a spurious mutex round-trip in the woken thread.
+      if (cascade_wake) {
+        group->cv.notify_one();
       }
       for (ScheduledTask &scheduled : local_batch) {
         ScopedTaskTrace trace_scope(scheduled.from_here);
@@ -773,7 +783,14 @@ private:
     return !group.ready_tasks.empty() || !group.delayed_tasks.empty() || !group.pending_ready_tasks.empty();
   }
 
-  // Flush pending tasks to ready heap and rebuild heap structure
+  // Flush pending tasks to ready heap using incremental push_heap.
+  //
+  // Complexity comparison (k = pending count, N = existing heap size):
+  //   make_heap(N+k)   : O(N+k)  — must re-examine every existing element
+  //   push_heap × k    : O(k·log(N+k)) — only sifts k new elements upward
+  //
+  // For our typical k = READY_TASK_BATCH_SIZE (8) and N > 3 the incremental
+  // approach wins.  N > 3 is practically always true after warm-up.
   static void FlushPendingReadyTasksLocked(WorkerGroup &group) {
     if (group.pending_ready_tasks.empty()) {
       return;
@@ -788,13 +805,14 @@ private:
       group.ready_tasks.reserve(new_capacity);
     }
 
-    // Move all pending tasks in one batch.
-    group.ready_tasks.insert(group.ready_tasks.end(),
-                             std::make_move_iterator(group.pending_ready_tasks.begin()),
-                             std::make_move_iterator(group.pending_ready_tasks.end()));
+    // Incrementally push each pending task into the existing heap.
+    // push_heap maintains the heap invariant one element at a time (sift-up),
+    // which is O(log N) per task vs O(N+k) for a full make_heap rebuild.
+    for (ScheduledTask &task : group.pending_ready_tasks) {
+      group.ready_tasks.push_back(std::move(task));
+      std::push_heap(group.ready_tasks.begin(), group.ready_tasks.end(), ReadyTaskCompare{});
+    }
     group.pending_ready_tasks.clear();
-    // Rebuild heap once instead of incrementally
-    std::make_heap(group.ready_tasks.begin(), group.ready_tasks.end(), ReadyTaskCompare{});
   }
 
   static void PushReadyTaskLocked(WorkerGroup &group, ScheduledTask task) {

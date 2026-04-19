@@ -211,24 +211,26 @@ ManualTimeSource + RunUntilIdle 让延迟任务测试从“依赖真实时间”
 - 异步测试中必须显式设计被捕获状态生命周期。
 - fixture 析构与后台任务收尾叠加时，最容易暴露悬空引用问题。
 
-## 9. 待改进点与建议路线
+## 9. 本轮优化同步与后续路线
 
-本轮按最终确认的执行优先级推进：
+本轮已将 ThreadPool 调度热路径优化从“实验态”收敛为“可配置 + 已验证”状态，核心变更如下。
 
-### P0（当前最高优先级，正在执行）
+### P0（本轮已完成）
 
-- 继续压缩 enqueue 热路径：缩短锁持有时间、提高批处理 flush 效率、减少无效唤醒。
-- 已落地一项：ThreadPool::PostTask 从无条件 notify 改为条件 notify，仅在“立即队列从空转非空”或“更早 delayed 截止时间出现/队列由空变非空”时唤醒。
+- 唤醒策略开关化：新增 `WakePolicy`（`kConservative` / `kAggressive` / `kHybrid`），默认保持 `kHybrid`，即 v4 行为可配置化。
+- RunLoop 时钟读取惰性化：仅在 delayed 队列非空或补偿线程定时触发待处理时才调用 `Now()`，去除 immediate-only 热路径中的冗余时钟开销。
+- ready flush 堆维护优化：`FlushPendingReadyTasksLocked` 由全量 `make_heap` 重建改为增量 `push_heap`，将锁内复杂度从 `O(N+k)` 收敛到 `O(k*logN)`（k 为本次 flush 任务数）。
+- 级联唤醒锁外化：在锁内只记录是否需要级联唤醒，`notify_one()` 在解锁后执行，减少“唤醒后立即再次阻塞同一把锁”的额外竞争。
 
 ### P1（下一优先级）
 
-- 单独优化 delayed_mix 路径：时间结构、批量晋升策略、唤醒策略协同优化。
-- 目标是降低 delayed-heavy 场景 enqueue 成本与尾部延迟波动。
+- 继续拆分 delayed-heavy 场景：针对 delayed_mix 的到期迁移与唤醒协同做细化调参（批大小、迁移阈值、唤醒门槛）。
+- 目标是进一步收敛 delayed 路径波动，并压低高分位尾延迟。
 
 ### P2（后续）
 
-- 通过“4 threads 与 default 的性能差距”反推默认 worker 数与分组策略。
-- 输出可操作的默认参数建议，而非固定机器相关常量。
+- 基于 `4 threads` 与 `default` 的长期差异，回推默认 worker 策略（包括 normal/best-effort 分组与补偿上限）。
+- 输出机器无关的默认参数建议，而不是固定机型经验值。
 
 ### 9.1 固定回归基线字段（必须一致）
 
@@ -241,17 +243,37 @@ ManualTimeSource + RunUntilIdle 让延迟任务测试从“依赖真实时间”
 - total throughput（tasks/s，按 1e9 / total_ns 反算）
 - drain_share_pct（drain_ns / total_ns * 100）
 
-### 9.2 本轮 P0 变更后的快速基线（Release，10k，10 runs）
+### 9.2 本轮 P0 变更后的快速基线（Release）
 
-关键标签统计如下（中位数）：
+以下为本轮 lock 优化后的统计（bench demo，10k*10 与 100k*3，均值口径）：
 
-- default：enqueue_ns=4593.54，drain_ns=97.24，total_ns=4739.62，enqueue throughput=217697.03，total throughput=210986.07，drain_share_pct=2.05
-- default_no_comp：enqueue_ns=4368.18，drain_ns=101.30，total_ns=4484.48，enqueue throughput=228928.30，total throughput=222991.56，drain_share_pct=2.26
-- default_delayed_mix：enqueue_ns=142.51，drain_ns=10681.93，total_ns=10819.92，enqueue throughput=7017051.43，total throughput=92422.84，drain_share_pct=98.72
+- 10k（default）：enqueue_only_ms=21.418，drain_wait_ms=0.002，total_ms=21.42，enqueue throughput=466832，total throughput=466832，drain_share_pct=0.01
+- 10k（default_no_comp）：enqueue_only_ms=23.223，drain_wait_ms=0.003，total_ms=23.23，enqueue throughput=430608，total throughput=430552，drain_share_pct=0.01
+- 10k（default_delayed_mix）：enqueue_only_ms=7.267，drain_wait_ms=19.144，total_ms=26.41，enqueue throughput=1376084，total throughput=378587，drain_share_pct=72.49
+- 10k（default_no_comp_delayed_mix）：enqueue_only_ms=3.017，drain_wait_ms=21.764，total_ms=24.78，enqueue throughput=3314551，total throughput=403535，drain_share_pct=87.83
 
-说明：100k 长跑统计在当前终端环境中仍会出现执行阻塞/无输出，需在稳定终端窗口补采后并入同口径字段。
+- 100k（default）：enqueue_only_ms=274.400，drain_wait_ms=0.000，total_ms=274.40，enqueue throughput=364431，total throughput=364427，drain_share_pct=0.00
+- 100k（default_no_comp）：enqueue_only_ms=279.053，drain_wait_ms=0.000，total_ms=279.05，enqueue throughput=358355，total throughput=358354，drain_share_pct=0.00
+- 100k（default_delayed_mix）：enqueue_only_ms=149.923，drain_wait_ms=140.523，total_ms=290.45，enqueue throughput=667009，total throughput=344297，drain_share_pct=48.38
+- 100k（default_no_comp_delayed_mix）：enqueue_only_ms=212.440，drain_wait_ms=89.973，total_ms=302.41，enqueue throughput=470721，total throughput=330673，drain_share_pct=29.75
 
-### 9.3 如果未来继续做 Time-wheel 优化：建议启动方式
+对比优化前（同口径历史基线）本轮结论：
+
+- immediate-heavy 默认路径小幅增益（default 约 +1.2%，default_no_comp 约 +13.3%）。
+- delayed_mix 路径显著增益（约 +58% 到 +74%）。
+- 波动收敛明显：多数组合 `total_std_ms` 下降，长尾抖动减少。
+
+注：历史文档中的 `enqueue_ns/drain_ns/total_ns` 字段定义继续保留作为回归规范；本轮 bench demo 的原始输出单位为 ms，按原始字段名对齐时需要先做单位换算。
+
+### 9.3 高负载稳定性验证（本轮新增）
+
+- 全量 CTest 连续 5 轮：全部通过（result code=0，无非零失败条目）。
+- 压测冲击：执行 15 次 `task_threadpool_bench_demo 100000`（3 轮*每轮 5 次），过程无崩溃、无卡死。
+- 压测后全量 CTest 连续 3 轮：全部通过（result code=0，无非零失败条目）。
+
+结论：在“高负载冲击 + 多轮全量回归”组合下，本轮调度优化未引入可观测稳定性回归。
+
+### 9.4 如果未来继续做 Time-wheel 优化：建议启动方式
 
 建议按“先并行验证，再灰度替换”的方式推进，而不是直接把 delayed heap 全量替换。
 
@@ -273,7 +295,7 @@ ManualTimeSource + RunUntilIdle 让延迟任务测试从“依赖真实时间”
 - 若 delayed-heavy enqueue 或 tail latency 回退超过 20% 且连续 3 轮复现，立即回退到 heap 路径排查。
 - 不满足止损线前，不进入主分支默认实现。
 
-### 9.4 Time-wheel 优化的注意事项
+### 9.5 Time-wheel 优化的注意事项
 
 - 槽宽（tick）与业务延迟分布要匹配：tick 过大导致精度损失，tick 过小导致推进成本上升。
 - rounds 计算必须无符号安全：注意大延迟换算、溢出和边界值（0、1 tick、超大 delay）。
@@ -282,7 +304,7 @@ ManualTimeSource + RunUntilIdle 让延迟任务测试从“依赖真实时间”
 - 与补偿线程策略协同：wheel 推进导致的突发 ready 任务会影响 may_block 与补偿触发阈值。
 - 可观测性先行：至少暴露 wheel occupancy、tick advance 次数、跨轮迁移量、回退次数。
 
-### 9.5 已踩过的坑（避免重复）
+### 9.6 已踩过的坑（避免重复）
 
 - 坑 1：只看 immediate-path 指标。
   - 现象：zero-delay 场景数据变好，但 delayed-heavy 场景出现数量级退化。
