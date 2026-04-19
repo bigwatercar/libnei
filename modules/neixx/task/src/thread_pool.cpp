@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <thread>
 #include <tuple>
@@ -50,6 +51,11 @@ constexpr std::size_t WORKER_BATCH_HEAP_LIMIT = 512;
 // Initial queue capacities to reduce reallocation cost under bursty enqueue load.
 constexpr std::size_t MIN_READY_TASK_CAPACITY = 256;
 constexpr std::size_t MIN_DELAYED_TASK_CAPACITY = 64;
+// Delayed tasks are first buffered and then merged to heap in batches.
+constexpr std::size_t DELAYED_TASK_FLUSH_BATCH_SIZE = 256;
+constexpr std::size_t DELAYED_TASK_MAKE_HEAP_THRESHOLD = 64;
+constexpr std::size_t DELAYED_TASK_FLUSH_CHUNK_SIZE = 192;
+constexpr std::chrono::milliseconds DELAYED_TASK_DUE_MERGE_WINDOW{1};
 
 #ifdef _WIN32
 bool TrySetCurrentThreadAffinity(std::uint64_t affinity_mask, std::size_t slot) {
@@ -268,6 +274,78 @@ public:
     }
   };
 
+  struct MPSCQueue {
+    struct Node {
+      std::optional<ScheduledTask> task;
+      Node *next = nullptr;
+    };
+
+    std::atomic<Node *> head{nullptr};
+    std::atomic<Node *> free_head{nullptr};
+
+    MPSCQueue() = default;
+    MPSCQueue(const MPSCQueue &) = delete;
+    MPSCQueue &operator=(const MPSCQueue &) = delete;
+
+    ~MPSCQueue() {
+      DestroyChain(PopAll());
+      DestroyChain(free_head.exchange(nullptr, std::memory_order_acquire));
+    }
+
+    bool Push(ScheduledTask task) {
+      Node *new_node = AcquireNode();
+      new_node->task.emplace(std::move(task));
+      Node *expected = head.load(std::memory_order_relaxed);
+      do {
+        new_node->next = expected;
+      } while (!head.compare_exchange_weak(
+          expected, new_node, std::memory_order_release, std::memory_order_relaxed));
+      return expected == nullptr;
+    }
+
+    Node *PopAll() {
+      return head.exchange(nullptr, std::memory_order_acquire);
+    }
+
+    bool Empty() const {
+      return head.load(std::memory_order_acquire) == nullptr;
+    }
+
+    void RecycleChain(Node *chain_head, Node *chain_tail) {
+      if (chain_head == nullptr || chain_tail == nullptr) {
+        return;
+      }
+
+      Node *expected = free_head.load(std::memory_order_relaxed);
+      do {
+        chain_tail->next = expected;
+      } while (!free_head.compare_exchange_weak(
+          expected, chain_head, std::memory_order_release, std::memory_order_relaxed));
+    }
+
+  private:
+    Node *AcquireNode() {
+      Node *node = free_head.load(std::memory_order_acquire);
+      while (node != nullptr) {
+        Node *next = node->next;
+        if (free_head.compare_exchange_weak(node, next, std::memory_order_acq_rel, std::memory_order_acquire)) {
+          node->next = nullptr;
+          return node;
+        }
+      }
+      return new Node{};
+    }
+
+    static void DestroyChain(Node *node) {
+      while (node != nullptr) {
+        Node *next = node->next;
+        node->task.reset();
+        delete node;
+        node = next;
+      }
+    }
+  };
+
   struct WorkerGroup {
     std::vector<std::thread> workers;
     std::mutex mutex;
@@ -275,6 +353,9 @@ public:
     std::vector<ScheduledTask> ready_tasks;
     std::vector<ScheduledTask> delayed_tasks;
     std::vector<ScheduledTask> pending_ready_tasks; // Batch buffer for pending ready tasks
+    std::vector<ScheduledTask> pending_delayed_tasks; // Buffered delayed tasks to reduce producer-side heap churn
+    std::chrono::steady_clock::time_point pending_delayed_earliest{};
+    MPSCQueue incoming_queue;
     std::size_t base_worker_count = 0;
     std::size_t max_compensation_workers = 0;
     std::size_t spawned_compensation_workers = 0;
@@ -286,8 +367,11 @@ public:
     bool is_best_effort_group = false;
     bool pending_compensation_spawn = false;
     std::chrono::steady_clock::time_point compensation_spawn_deadline{};
-    std::uint64_t next_sequence = 0;
-    bool stop = false;
+    std::atomic<std::uint64_t> next_sequence{0};
+    std::atomic<bool> stop{false};
+    std::atomic<std::uint32_t> incoming_task_count{0};
+    std::atomic<bool> incoming_notify_armed{false};
+    std::atomic<bool> has_delayed_tasks{false};
   };
 
   void
@@ -298,6 +382,63 @@ public:
     }
 
     WorkerGroup *group = SelectGroup(traits);
+    if (delay.count() <= 0) {
+      if (group->stop.load(std::memory_order_acquire)) {
+        return;
+      }
+
+      ScheduledTask scheduled_task{
+          std::chrono::steady_clock::time_point{},
+          group->next_sequence.fetch_add(1, std::memory_order_relaxed),
+          from_here,
+          traits,
+          std::move(task),
+      };
+
+      const bool queue_was_empty = group->incoming_queue.Push(std::move(scheduled_task));
+      group->incoming_task_count.fetch_add(1, std::memory_order_release);
+
+      const bool delayed_pending = group->has_delayed_tasks.load(std::memory_order_acquire);
+      bool should_notify = false;
+      auto arm_notify_once = [&group]() {
+        return !group->incoming_notify_armed.exchange(true, std::memory_order_acq_rel);
+      };
+
+      switch (options_.wake_policy) {
+      case WakePolicy::kAggressive:
+        // Aggressive mode wakes on every immediate post.
+        should_notify = true;
+        break;
+      case WakePolicy::kConservative:
+        should_notify = queue_was_empty ? arm_notify_once() : false;
+        break;
+      case WakePolicy::kHybrid:
+      default:
+        if (!delayed_pending) {
+          // Hybrid behaves aggressively when no delayed work is pending.
+          should_notify = true;
+        } else {
+          // Delayed-heavy mode falls back to conservative burst-start wake.
+          should_notify = queue_was_empty ? arm_notify_once() : false;
+        }
+        break;
+      }
+
+      if (!queue_was_empty && !group->incoming_notify_armed.load(std::memory_order_acquire)) {
+        // Repair latch if producer races with consumer disarm while queue stays non-empty.
+        should_notify = should_notify || arm_notify_once();
+      }
+
+      if (should_notify) {
+        group->cv.notify_one();
+      }
+      return;
+    }
+
+    // Capture enqueue time before taking the group mutex to shorten lock hold time.
+    const auto enqueue_now = time_source_->Now();
+    const auto run_at = enqueue_now + delay;
+
     bool should_notify = false;
     {
       std::lock_guard<std::mutex> lock(group->mutex);
@@ -305,65 +446,33 @@ public:
           && traits.shutdown_behavior() != ShutdownBehavior::BLOCK_SHUTDOWN) {
         return;
       }
-      if (group->stop) {
+      if (group->stop.load(std::memory_order_relaxed)) {
         return;
       }
 
-      const bool had_ready_before = !group->ready_tasks.empty();
-      const bool had_pending_before = !group->pending_ready_tasks.empty();
+      const bool had_delayed_before = !group->delayed_tasks.empty();
+      const bool had_pending_delayed_before = !group->pending_delayed_tasks.empty();
 
-      std::chrono::steady_clock::time_point now{};
-      bool has_now = false;
-      auto get_now = [this, &now, &has_now]() {
-        if (!has_now) {
-          now = time_source_->Now();
-          has_now = true;
-        }
-        return now;
-      };
-
-      std::chrono::steady_clock::time_point run_at{};
-      if (delay.count() > 0) {
-        run_at = get_now() + delay;
-      }
       ScheduledTask scheduled_task{
           run_at,
-          group->next_sequence++,
+          group->next_sequence.fetch_add(1, std::memory_order_relaxed),
           from_here,
           traits,
           std::move(task),
       };
-      if (delay.count() <= 0) {
-        PushReadyTaskLocked(*group, std::move(scheduled_task));
-        switch (options_.wake_policy) {
-        case WakePolicy::kAggressive:
-          should_notify = true;
-          break;
-        case WakePolicy::kConservative:
-          should_notify = !had_ready_before && !had_pending_before;
-          break;
-        case WakePolicy::kHybrid:
-        default:
-          // Aggressive when no delayed tasks are pending (immediate-heavy workloads);
-          // conservative otherwise to avoid wake storms in delayed-mix workloads.
-          should_notify = group->delayed_tasks.empty() || (!had_ready_before && !had_pending_before);
-          break;
-        }
-      } else {
-        const bool had_delayed_before = !group->delayed_tasks.empty();
-        const bool had_any_before = had_ready_before || had_pending_before || had_delayed_before;
-        const auto previous_next_delayed_run_at =
-            had_delayed_before ? group->delayed_tasks.front().run_at : std::chrono::steady_clock::time_point{};
+      const bool had_any_before = !group->delayed_tasks.empty() || !group->ready_tasks.empty()
+              || !group->pending_ready_tasks.empty() || !group->pending_delayed_tasks.empty();
+        const auto previous_next_delayed_run_at = NextDelayedDeadlineLocked(*group);
 
-        PushDelayedTaskLocked(*group, std::move(scheduled_task));
-        // Wake if queue was empty or if this delayed task advances the next wake-up deadline.
-        should_notify = !had_any_before || (had_delayed_before && run_at < previous_next_delayed_run_at);
-      }
+      PushDelayedTaskLocked(*group, std::move(scheduled_task));
+      // Wake if queue was empty or if this delayed task advances the next wake-up deadline.
+        should_notify = !had_any_before
+                || ((had_delayed_before || had_pending_delayed_before)
+                  && run_at < previous_next_delayed_run_at);
 
       // Compensation is only meaningful when may_block workers are active.
       if (group->active_may_block_workers != 0 && !group->pending_compensation_spawn) {
-        (void)get_now();
-        ArmCompensationSpawnLocked(*group, now);
+        ArmCompensationSpawnLocked(*group, enqueue_now);
       }
     }
     if (should_notify) {
@@ -500,6 +609,7 @@ private:
     group.ready_tasks.reserve(ready_capacity);
     group.delayed_tasks.reserve(delayed_capacity);
     group.pending_ready_tasks.reserve(READY_TASK_BATCH_SIZE * 2);
+    group.pending_delayed_tasks.reserve(DELAYED_TASK_FLUSH_BATCH_SIZE);
     for (std::size_t i = 0; i < worker_count; ++i) {
       LaunchWorkerThread(group, false);
     }
@@ -520,7 +630,8 @@ private:
   }
 
   bool CanSpawnCompensationWorkerLocked(const WorkerGroup &group) const {
-    if (!group.allow_compensation || shutting_down_.load(std::memory_order_relaxed) || group.stop) {
+    if (!group.allow_compensation || shutting_down_.load(std::memory_order_relaxed)
+        || group.stop.load(std::memory_order_relaxed)) {
       return false;
     }
     if (group.max_compensation_workers == 0 || group.spawned_compensation_workers >= group.max_compensation_workers) {
@@ -601,15 +712,17 @@ private:
   void StartGroupShutdown(WorkerGroup &group) {
     {
       std::lock_guard<std::mutex> lock(group.mutex);
-      group.stop = true;
+      group.stop.store(true, std::memory_order_release);
       PruneTasksForShutdownLocked(group);
     }
     group.cv.notify_all();
   }
 
   static void PruneTasksForShutdownLocked(WorkerGroup &group) {
+    DrainIncomingTasksLocked(group);
     // Flush pending tasks first
     FlushPendingReadyTasksLocked(group);
+    FlushPendingDelayedTasksLocked(group);
 
     std::vector<ScheduledTask> block_tasks;
     block_tasks.reserve(group.ready_tasks.size() + group.delayed_tasks.size());
@@ -642,7 +755,7 @@ private:
   static void StopGroup(WorkerGroup &group) {
     {
       std::lock_guard<std::mutex> lock(group.mutex);
-      group.stop = true;
+      group.stop.store(true, std::memory_order_release);
     }
     group.cv.notify_all();
     for (std::thread &worker : group.workers) {
@@ -657,7 +770,8 @@ private:
     if (group.active_workers != 0) {
       return false;
     }
-    if (!group.ready_tasks.empty() || !group.pending_ready_tasks.empty()) {
+    if (!group.ready_tasks.empty() || !group.pending_ready_tasks.empty()
+        || !group.pending_delayed_tasks.empty() || group.incoming_task_count.load(std::memory_order_acquire) != 0) {
       return false;
     }
     if (group.delayed_tasks.empty()) {
@@ -682,12 +796,15 @@ private:
             PruneTasksForShutdownLocked(*group);
           }
 
+          DrainIncomingTasksLocked(*group);
+
           // Lazy Now(): only query the clock when delayed tasks exist or compensation
           // is pending.  On the pure-immediate hot path this avoids a syscall while
           // holding the mutex.
-          const bool need_now = !group->delayed_tasks.empty() || group->pending_compensation_spawn;
+          const bool need_now = !group->delayed_tasks.empty() || !group->pending_delayed_tasks.empty()
+                                || group->pending_compensation_spawn;
           const auto now = need_now ? time_source_->Now() : std::chrono::steady_clock::time_point{};
-          if (!group->delayed_tasks.empty()) {
+          if (!group->delayed_tasks.empty() || !group->pending_delayed_tasks.empty()) {
             PromoteDueTasksLocked(*group, now);
           }
           FlushPendingReadyTasksLocked(*group); // Ensure pending tasks are in the heap
@@ -695,16 +812,18 @@ private:
             TrySpawnCompensationWorkerLocked(*group, now);
           }
 
-          if (group->stop && !HasPendingTasksLocked(*group)) {
+          if (group->stop.load(std::memory_order_relaxed) && !HasPendingTasksLocked(*group)) {
             return;
           }
           if (group->ready_tasks.empty()) {
             CancelPendingCompensationSpawnLocked(*group);
-            if (group->delayed_tasks.empty()) {
+            if (group->delayed_tasks.empty() && group->pending_delayed_tasks.empty()) {
               if (is_compensation_worker) {
                 const auto status = group->cv.wait_for(lock, options_.compensation_idle_timeout);
                 if (status == std::cv_status::timeout && group->ready_tasks.empty() && group->delayed_tasks.empty()
-                    && !group->stop) {
+                  && group->pending_delayed_tasks.empty()
+                  && group->incoming_task_count.load(std::memory_order_acquire) == 0
+                  && !group->stop.load(std::memory_order_relaxed)) {
                   if (group->spawned_compensation_workers > 0) {
                     --group->spawned_compensation_workers;
                   }
@@ -712,12 +831,14 @@ private:
                 }
               } else {
                 group->cv.wait(lock, [group]() {
-                  return group->stop || !group->ready_tasks.empty() || !group->delayed_tasks.empty()
-                         || !group->pending_ready_tasks.empty();
+                  return group->stop.load(std::memory_order_relaxed) || !group->ready_tasks.empty()
+                         || !group->delayed_tasks.empty() || !group->pending_ready_tasks.empty()
+                         || !group->pending_delayed_tasks.empty()
+                        || group->incoming_task_count.load(std::memory_order_acquire) != 0;
                 });
               }
             } else {
-              auto wake_deadline = group->delayed_tasks.front().run_at;
+              auto wake_deadline = NextDelayedDeadlineLocked(*group);
               if (group->pending_compensation_spawn && group->compensation_spawn_deadline < wake_deadline) {
                 wake_deadline = group->compensation_spawn_deadline;
               }
@@ -750,7 +871,8 @@ private:
           // Record whether a cascade-wake is needed; the actual notify_one() is
           // deferred to after the lock is released (see below) to avoid waking a
           // thread that would immediately block on the same mutex.
-          cascade_wake = !group->ready_tasks.empty() || !group->pending_ready_tasks.empty();
+          cascade_wake = !group->ready_tasks.empty() || !group->pending_ready_tasks.empty()
+                         || group->incoming_task_count.load(std::memory_order_acquire) != 0;
           break;
         }
       }
@@ -780,7 +902,70 @@ private:
   }
 
   static bool HasPendingTasksLocked(const WorkerGroup &group) {
-    return !group.ready_tasks.empty() || !group.delayed_tasks.empty() || !group.pending_ready_tasks.empty();
+    return !group.ready_tasks.empty() || !group.delayed_tasks.empty() || !group.pending_ready_tasks.empty()
+           || !group.pending_delayed_tasks.empty()
+           || group.incoming_task_count.load(std::memory_order_acquire) != 0;
+  }
+
+  static std::chrono::steady_clock::time_point NextDelayedDeadlineLocked(const WorkerGroup &group) {
+    if (group.delayed_tasks.empty()) {
+      return group.pending_delayed_earliest;
+    }
+    if (group.pending_delayed_tasks.empty()) {
+      return group.delayed_tasks.front().run_at;
+    }
+    return group.delayed_tasks.front().run_at < group.pending_delayed_earliest ? group.delayed_tasks.front().run_at
+                                                                                : group.pending_delayed_earliest;
+  }
+
+  static void DrainIncomingTasksLocked(WorkerGroup &group) {
+    if (group.incoming_task_count.load(std::memory_order_acquire) == 0) {
+      return;
+    }
+
+    MPSCQueue::Node *node = group.incoming_queue.PopAll();
+    if (node == nullptr) {
+      return;
+    }
+
+    // PopAll returns LIFO-ordered chain (last-pushed node is at head).
+    // Reverse it to restore FIFO order for task execution.
+    MPSCQueue::Node *reversed_head = nullptr;
+    while (node != nullptr) {
+      MPSCQueue::Node *next = node->next;
+      node->next = reversed_head;
+      reversed_head = node;
+      node = next;
+    }
+
+    MPSCQueue::Node *recycle_head = nullptr;
+    MPSCQueue::Node *recycle_tail = nullptr;
+    std::uint32_t drained_count = 0;
+    node = reversed_head;
+    while (node != nullptr) {
+      MPSCQueue::Node *next = node->next;
+      group.pending_ready_tasks.push_back(std::move(*node->task));
+      node->task.reset();
+      node->next = recycle_head;
+      recycle_head = node;
+      if (recycle_tail == nullptr) {
+        recycle_tail = node;
+      }
+      ++drained_count;
+      node = next;
+    }
+
+    const std::uint32_t previous = group.incoming_task_count.fetch_sub(drained_count, std::memory_order_acq_rel);
+    const std::uint32_t remaining = previous >= drained_count ? previous - drained_count : 0;
+    if (remaining == 0) {
+      group.incoming_notify_armed.store(false, std::memory_order_release);
+    }
+
+    group.incoming_queue.RecycleChain(recycle_head, recycle_tail);
+
+    if (group.pending_ready_tasks.size() >= READY_TASK_BATCH_SIZE) {
+      FlushPendingReadyTasksLocked(group);
+    }
   }
 
   // Flush pending tasks to ready heap using incremental push_heap.
@@ -831,19 +1016,167 @@ private:
     return task;
   }
 
+  static void RecomputePendingDelayedEarliestLocked(WorkerGroup &group) {
+    if (group.pending_delayed_tasks.empty()) {
+      group.pending_delayed_earliest = std::chrono::steady_clock::time_point{};
+      return;
+    }
+
+    auto earliest = group.pending_delayed_tasks.front().run_at;
+    for (std::size_t i = 1; i < group.pending_delayed_tasks.size(); ++i) {
+      if (group.pending_delayed_tasks[i].run_at < earliest) {
+        earliest = group.pending_delayed_tasks[i].run_at;
+      }
+    }
+    group.pending_delayed_earliest = earliest;
+  }
+
+  static std::size_t AdaptiveDelayedFlushChunkSizeLocked(const WorkerGroup &group,
+                                                         std::chrono::steady_clock::time_point now) {
+    const std::size_t pending = group.pending_delayed_tasks.size();
+    if (pending == 0) {
+      return DELAYED_TASK_MAKE_HEAP_THRESHOLD;
+    }
+
+    // Keep normal merges conservative to reduce lock hold time on the common path.
+    std::size_t chunk = DELAYED_TASK_MAKE_HEAP_THRESHOLD;
+    if (pending >= DELAYED_TASK_FLUSH_BATCH_SIZE) {
+      return DELAYED_TASK_FLUSH_CHUNK_SIZE;
+    }
+
+    // Only expand chunk size when pending earliest task is already overdue.
+    if (group.pending_delayed_earliest <= now) {
+      const auto overdue = now - group.pending_delayed_earliest;
+      if (overdue >= std::chrono::milliseconds(4) && pending >= DELAYED_TASK_FLUSH_CHUNK_SIZE * 2) {
+        chunk = DELAYED_TASK_FLUSH_CHUNK_SIZE * 2;
+      } else if (overdue >= std::chrono::milliseconds(1) && pending >= DELAYED_TASK_FLUSH_CHUNK_SIZE) {
+        chunk = DELAYED_TASK_FLUSH_CHUNK_SIZE;
+      }
+    }
+
+    return chunk;
+  }
+
+  static bool MergePendingDelayedUntilLocked(WorkerGroup &group,
+                                             std::chrono::steady_clock::time_point merge_deadline,
+                                             std::size_t max_items) {
+    if (group.pending_delayed_tasks.empty() || max_items == 0 || group.pending_delayed_earliest > merge_deadline) {
+      return false;
+    }
+
+    std::vector<ScheduledTask> selected;
+    selected.reserve(max_items);
+    std::size_t i = 0;
+    while (i < group.pending_delayed_tasks.size() && selected.size() < max_items) {
+      if (group.pending_delayed_tasks[i].run_at > merge_deadline) {
+        ++i;
+        continue;
+      }
+
+      selected.push_back(std::move(group.pending_delayed_tasks[i]));
+      group.pending_delayed_tasks[i] = std::move(group.pending_delayed_tasks.back());
+      group.pending_delayed_tasks.pop_back();
+    }
+
+    if (selected.empty()) {
+      RecomputePendingDelayedEarliestLocked(group);
+      return false;
+    }
+
+    const std::size_t required_size = group.delayed_tasks.size() + selected.size();
+    if (required_size > group.delayed_tasks.capacity()) {
+      std::size_t new_capacity = std::max<std::size_t>(group.delayed_tasks.capacity(), MIN_DELAYED_TASK_CAPACITY);
+      while (new_capacity < required_size) {
+        new_capacity += new_capacity / 2;
+      }
+      group.delayed_tasks.reserve(new_capacity);
+    }
+
+    const bool rebuild_heap = group.delayed_tasks.empty() || selected.size() >= DELAYED_TASK_MAKE_HEAP_THRESHOLD;
+    if (rebuild_heap) {
+      for (ScheduledTask &task : selected) {
+        group.delayed_tasks.push_back(std::move(task));
+      }
+      if (group.delayed_tasks.size() > 1) {
+        std::make_heap(group.delayed_tasks.begin(), group.delayed_tasks.end(), ScheduledTaskCompare{});
+      }
+    } else {
+      for (ScheduledTask &task : selected) {
+        group.delayed_tasks.push_back(std::move(task));
+        std::push_heap(group.delayed_tasks.begin(), group.delayed_tasks.end(), ScheduledTaskCompare{});
+      }
+    }
+
+    RecomputePendingDelayedEarliestLocked(group);
+    group.has_delayed_tasks.store(!group.delayed_tasks.empty() || !group.pending_delayed_tasks.empty(),
+                                  std::memory_order_release);
+    return true;
+  }
+
+  static void FlushPendingDelayedTasksLocked(WorkerGroup &group, std::size_t max_items = DELAYED_TASK_FLUSH_CHUNK_SIZE) {
+    if (group.pending_delayed_tasks.empty() || max_items == 0) {
+      return;
+    }
+
+    const std::size_t merge_count = std::min<std::size_t>(max_items, group.pending_delayed_tasks.size());
+    const std::size_t required_size = group.delayed_tasks.size() + merge_count;
+    if (required_size > group.delayed_tasks.capacity()) {
+      std::size_t new_capacity = std::max<std::size_t>(group.delayed_tasks.capacity(), MIN_DELAYED_TASK_CAPACITY);
+      while (new_capacity < required_size) {
+        new_capacity += new_capacity / 2;
+      }
+      group.delayed_tasks.reserve(new_capacity);
+    }
+
+    const bool rebuild_heap = group.delayed_tasks.empty() || merge_count >= DELAYED_TASK_MAKE_HEAP_THRESHOLD;
+    const std::size_t pending_start = group.pending_delayed_tasks.size() - merge_count;
+
+    if (rebuild_heap) {
+      for (std::size_t i = pending_start; i < group.pending_delayed_tasks.size(); ++i) {
+        group.delayed_tasks.push_back(std::move(group.pending_delayed_tasks[i]));
+      }
+      if (group.delayed_tasks.size() > 1) {
+        std::make_heap(group.delayed_tasks.begin(), group.delayed_tasks.end(), ScheduledTaskCompare{});
+      }
+    } else {
+      for (std::size_t i = pending_start; i < group.pending_delayed_tasks.size(); ++i) {
+        group.delayed_tasks.push_back(std::move(group.pending_delayed_tasks[i]));
+        std::push_heap(group.delayed_tasks.begin(), group.delayed_tasks.end(), ScheduledTaskCompare{});
+      }
+    }
+
+    group.pending_delayed_tasks.resize(pending_start);
+    RecomputePendingDelayedEarliestLocked(group);
+    group.has_delayed_tasks.store(!group.delayed_tasks.empty() || !group.pending_delayed_tasks.empty(),
+                                  std::memory_order_release);
+  }
+
   static void PushDelayedTaskLocked(WorkerGroup &group, ScheduledTask task) {
-    group.delayed_tasks.push_back(std::move(task));
-    std::push_heap(group.delayed_tasks.begin(), group.delayed_tasks.end(), ScheduledTaskCompare{});
+    const auto run_at = task.run_at;
+    if (group.pending_delayed_tasks.empty() || run_at < group.pending_delayed_earliest) {
+      group.pending_delayed_earliest = run_at;
+    }
+    group.pending_delayed_tasks.push_back(std::move(task));
+    group.has_delayed_tasks.store(true, std::memory_order_release);
   }
 
   static ScheduledTask PopDelayedTaskLocked(WorkerGroup &group) {
     std::pop_heap(group.delayed_tasks.begin(), group.delayed_tasks.end(), ScheduledTaskCompare{});
     ScheduledTask task = std::move(group.delayed_tasks.back());
     group.delayed_tasks.pop_back();
+    if (group.delayed_tasks.empty() && group.pending_delayed_tasks.empty()) {
+      group.has_delayed_tasks.store(false, std::memory_order_release);
+    }
     return task;
   }
 
   static void PromoteDueTasksLocked(WorkerGroup &group, std::chrono::steady_clock::time_point now) {
+    const auto merge_deadline = now + DELAYED_TASK_DUE_MERGE_WINDOW;
+    if (!group.pending_delayed_tasks.empty() && group.pending_delayed_earliest <= merge_deadline) {
+      const std::size_t chunk = AdaptiveDelayedFlushChunkSizeLocked(group, now);
+      (void)MergePendingDelayedUntilLocked(group, merge_deadline, chunk);
+    }
+
     if (group.delayed_tasks.empty() || group.delayed_tasks.front().run_at > now) {
       return;
     }

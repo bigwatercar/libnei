@@ -19,6 +19,10 @@ else()
     target_compile_definitions(neixx PUBLIC NEI_STATIC)
 endif()
 
+if (WIN32)
+    target_compile_definitions(neixx PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 add_subdirectory(functional)
 add_subdirectory(memory)
 add_subdirectory(task)
