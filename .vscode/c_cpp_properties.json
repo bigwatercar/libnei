@@ -6,15 +6,13 @@
       "intelliSenseMode": "windows-msvc-x64",
       "cStandard": "c99",
       "cppStandard": "c++17",
+      "configurationProvider": "ms-vscode.cmake-tools",
+      "compileCommands": "${workspaceFolder}/compile_commands.json",
       "includePath": [
-        "${workspaceFolder}/modules/nei/core/include",
-        "${workspaceFolder}/modules/nei/log/include",
-        "${workspaceFolder}/modules/nei/macros/include",
-        "${workspaceFolder}/modules/nei/utils/include",
-        "${workspaceFolder}/modules/nei/xdr/include",
-        "${workspaceFolder}/tests",
-        "${workspaceFolder}/build/_deps/googletest-src/googletest/include",
-        "${workspaceFolder}/build/_deps/googletest-src/googlemock/include"
+        "${workspaceFolder}/modules/**",
+        "${workspaceFolder}/tests/**",
+        "${workspaceFolder}/build/**",
+        "${workspaceFolder}/build-linux/**"
       ],
       "defines": [
         "_DEBUG",
@@ -23,14 +21,10 @@
       ],
       "browse": {
         "path": [
-          "${workspaceFolder}/modules/nei/core/include",
-          "${workspaceFolder}/modules/nei/log/include",
-          "${workspaceFolder}/modules/nei/macros/include",
-          "${workspaceFolder}/modules/nei/utils/include",
-          "${workspaceFolder}/modules/nei/xdr/include",
+          "${workspaceFolder}/modules",
           "${workspaceFolder}/tests",
-          "${workspaceFolder}/build/_deps/googletest-src/googletest/include",
-          "${workspaceFolder}/build/_deps/googletest-src/googlemock/include"
+          "${workspaceFolder}/build",
+          "${workspaceFolder}/build-linux"
         ],
         "limitSymbolsToIncludedHeaders": true
       }
