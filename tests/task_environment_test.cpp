@@ -42,7 +42,9 @@ TEST(TaskEnvironmentTest, DelayedTaskRunsOnlyAfterFastForward) {
 }
 
 TEST(TaskEnvironmentTest, SameDeadlineUsesPriorityOrder) {
-  nei::TaskEnvironment env(2);
+  // Use a single worker so this test validates scheduler ordering semantics,
+  // not cross-thread completion races.
+  nei::TaskEnvironment env(1);
 
   std::mutex order_mutex;
   std::vector<std::string> order;

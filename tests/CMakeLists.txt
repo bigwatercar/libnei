@@ -1,8 +1,13 @@
 include(FetchContent)
 
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
+
 FetchContent_Declare(
     googletest
     URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -40,6 +45,7 @@ if(NEI_BENCHMARK_SPDLOG)
   FetchContent_Declare(
     spdlog
     URL https://github.com/gabime/spdlog/archive/refs/tags/v1.15.0.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   )
   set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
   set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)

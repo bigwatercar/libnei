@@ -687,6 +687,12 @@ private:
       {
         std::unique_lock<std::mutex> lock(group->mutex);
         for (;;) {
+          // Re-evaluate time-sensitive scheduling with a fresh clock sample on
+          // every wait/wake cycle.  Caching across loop iterations can leave
+          // delayed tasks permanently undispatched after spurious or deadline
+          // wakeups when no task was executed in between.
+          has_now = false;
+
           if (shutting_down_.load(std::memory_order_relaxed)) {
             PruneTasksForShutdownLocked(*group);
           }
