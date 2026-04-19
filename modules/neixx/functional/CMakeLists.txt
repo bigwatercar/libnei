@@ -1,6 +1,7 @@
 target_sources(
     neixx
     PRIVATE
+    src/cancelable_callback.cpp
         src/callback_base.cpp
         src/callback.cpp
 )

@@ -14,6 +14,7 @@ add_executable(
     nei_tests
     core_test.cpp
     log_test.cpp
+    cancelable_callback_test.cpp
     task_callback_test.cpp
     task_environment_test.cpp
     task_scheduler_test.cpp
