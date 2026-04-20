@@ -10,6 +10,7 @@ namespace nei {
 
 enum class CompareCase {
   kSensitive,
+  // ASCII-only case folding. Non-ASCII code points are compared byte/unit-wise.
   kInsensitiveASCII,
 };
 
@@ -45,9 +46,13 @@ NEI_API bool EndsWith(std::u16string_view input,
 NEI_API std::string TrimWhitespace(std::string_view input, TrimPositions positions = TrimPositions::kAll);
 NEI_API std::u16string TrimWhitespace(std::u16string_view input, TrimPositions positions = TrimPositions::kAll);
 
+// Chromium-style printf helper that returns UTF-8 std::string only.
+// If UTF-16 output is needed, format as UTF-8 first and then convert.
 NEI_API std::string StringPrintf(const char *format, ...);
 NEI_API void StringAppendF(std::string *dest, const char *format, ...);
 
+// ASCII-only transforms for protocol, identifier, and path style use cases.
+// They intentionally do not apply locale-specific casing rules.
 NEI_API std::string ToLowerASCII(std::string_view input);
 NEI_API std::u16string ToLowerASCII(std::u16string_view input);
 NEI_API std::string ToUpperASCII(std::string_view input);
