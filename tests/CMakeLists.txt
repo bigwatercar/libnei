@@ -22,6 +22,9 @@ add_executable(
     string_util_test.cpp
     split_string_test.cpp
     string_number_conversions_test.cpp
+  text_normalization_test.cpp
+  cjk_width_test.cpp
+  chinese_search_key_test.cpp
     utf_string_conversions_test.cpp
     cancelable_callback_test.cpp
     task_callback_test.cpp
