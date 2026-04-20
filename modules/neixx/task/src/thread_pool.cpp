@@ -804,8 +804,8 @@ private:
   // Flush pending tasks to ready heap using incremental push_heap.
   //
   // Complexity comparison (k = pending count, N = existing heap size):
-  //   make_heap(N+k)   : O(N+k)  — must re-examine every existing element
-  //   push_heap × k    : O(k·log(N+k)) — only sifts k new elements upward
+  //   make_heap(N+k)   : O(N+k)  - must re-examine every existing element
+  //   push_heap * k    : O(k*log(N+k)) - only sifts k new elements upward
   //
   // For our typical k = READY_TASK_BATCH_SIZE (8) and N > 3 the incremental
   // approach wins.  N > 3 is practically always true after warm-up.

@@ -30,20 +30,20 @@
 #define _NEI_LOG_TLS __thread
 #endif
 
-/// @brief 非 verbose 日志的占位值。
+/// @brief Sentinel value used for non-verbose logs.
 #define _NEI_LOG_NOT_VERBOSE -1
 
-/// @brief 单条日志序列化缓冲区上限（字节）。
+/// @brief Per-record serialization buffer limit in bytes.
 #define _NEI_LOG_EVENT_BUFFER_SIZE 8192U
 
-/// @brief 字符串参数深拷贝上限（字节）。
+/// @brief Maximum deep-copy size for string arguments in bytes.
 #define _NEI_LOG_MAX_STRING_COPY 4096U
 
-/// @brief 全局双缓冲中单个缓冲区容量（字节）。
+/// @brief Capacity of each buffer in the global double-buffer, in bytes.
 #define _NEI_LOG_GLOBAL_BUFFER_CAPACITY (1024U * 1024U)
 #define _NEI_LOG_DEFAULT_FILE_SINK_MAGIC 0x4B4E5346U
 
-/// @brief 紧凑序列化参数类型标签。
+/// @brief Compact serialized payload type tags.
 enum _nei_log_payload_type_e {
   _NEI_LOG_PAYLOAD_I32 = 1,
   _NEI_LOG_PAYLOAD_U32 = 2,
@@ -61,8 +61,8 @@ enum _nei_log_payload_type_e {
 #define _NEI_LOG_LONGDOUBLE_STORAGE 16U
 
 /**
- * @brief 紧凑序列化记录头部。
- * @details 头部后紧跟 payload，可按 total_size 快速跳过整条记录。
+ * @brief Header for a compact serialized log record.
+ * @details The payload follows immediately after the header; total_size allows fast skipping.
  */
 typedef struct _nei_log_event_header_st {
   uint32_t total_size;
@@ -144,22 +144,22 @@ static pthread_rwlock_t s_config_lock = PTHREAD_RWLOCK_INITIALIZER;
   _NEI_LOG_LVL_STR_PAIRS("FATAL",   "F")
 // clang-format on
 #define _NEI_LOG_LVL_STR_PAIRS(_longstr, _shortstr) _longstr
-/** @brief 完整日志级别标签表。 */
+/** @brief Full log level tag table. */
 static const char *s_level_strings[] = {_NEI_LOG_LVL_TAGS};
 #undef _NEI_LOG_LVL_STR_PAIRS
 #define _NEI_LOG_LVL_STR_PAIRS(_longstr, _shortstr) _shortstr
-/** @brief 简短日志级别标签表。 */
+/** @brief Short log level tag table. */
 static const char *s_level_short_strings[] = {_NEI_LOG_LVL_TAGS};
 #undef _NEI_LOG_LVL_STR_PAIRS
 #undef _NEI_LOG_LVL_TAGS
 
-/** @brief 获取完整日志级别标签。 */
+/** @brief Get the full log level tag. */
 static inline const char *_get_level_string(nei_log_level_e level) {
   assert(level >= NEI_L_VERBOSE && level <= NEI_L_FATAL);
   return s_level_strings[level];
 }
 
-/** @brief 获取简短日志级别标签。 */
+/** @brief Get the short log level tag. */
 static inline const char *_get_level_short_string(nei_log_level_e level) {
   assert(level >= NEI_L_VERBOSE && level <= NEI_L_FATAL);
   return s_level_short_strings[level];

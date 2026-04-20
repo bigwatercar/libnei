@@ -1,5 +1,5 @@
 /**
- * NEI vs spdlog — aligned micro-benchmark scaffold.
+ * NEI vs spdlog - aligned micro-benchmark scaffold.
  *
  * Methodology (read before interpreting numbers):
  * - Memory: both libraries enqueue asynchronously; sink does only an atomic increment (no I/O, no
@@ -9,7 +9,7 @@
  * - File (per-call delivery): both sides use async logger + flush after each log call, so each iteration
  *   includes per-call delivery pressure on the async pipeline.
  * - Single-threaded producer; not a multi-writer contention test.
- * - spdlog uses fmt-style "{}" formatting; NEI uses printf-style "%" formatting — work split
+ * - spdlog uses fmt-style "{}" formatting; NEI uses printf-style "%" formatting - work split
  *   between caller formatting vs binary serialization differs by design.
  */
 
@@ -299,7 +299,7 @@ int64_t time_spdlog_file_sync_ms(F &&f, int iters, const std::string &path) {
 } // namespace
 
 int main() {
-  std::cout << "NEI vs spdlog — aligned benchmark scaffold\n";
+  std::cout << "NEI vs spdlog - aligned benchmark scaffold\n";
   std::cout << "==========================================\n";
   std::cout << "Memory:     " << kMemoryIters << " iters; sink = atomic++ only; time includes flush.\n";
   std::cout << "File async: " << kFileIters << " iters; async + file sink; both sides delete old files before run.\n";
