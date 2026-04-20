@@ -228,7 +228,7 @@ std::uint32_t ParseTaskCount(int argc, char *argv[]) {
     return static_cast<std::uint32_t>(parsed);
   } catch (const std::exception &) {
     std::cerr << "Invalid task_count: " << argv[1]
-              << "\nUsage: task_threadpool_bench_demo.exe [task_count] [affinity]\n";
+              << "\nUsage: task_threadpool_bench.exe [task_count] [affinity]\n";
     return 0;
   }
 }

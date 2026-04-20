@@ -1,5 +1,3 @@
-option(NEIXX_BUILD_STRINGS_DEMO "Build neixx strings demo" OFF)
-
 target_sources(
     neixx
     PRIVATE

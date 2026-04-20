@@ -1,5 +1,5 @@
 # ThreadPool benchmark — rebuild + run + summarize
-# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\rebuild_and_bench_threadpool.ps1
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File .\bench\rebuild_and_bench_threadpool.ps1
 # Parameters:
 #   -Runs10k  N   (default 3)  — repeat count for 10 000-task suite
 #   -Runs100k N   (default 2)  — repeat count for 100 000-task suite
@@ -16,8 +16,8 @@ $ErrorActionPreference = 'Stop'
 # ── paths ────────────────────────────────────────────────────────────────────
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildDir = if ($BuildDir) { $BuildDir } else { "$repoRoot\build\windows-vs2022-release-shared" }
-$exePath = "$buildDir\tests\Release\task_threadpool_bench_demo.exe"
-$runtimeDir = "$buildDir\tests\Release"
+$exePath = "$buildDir\bench\Release\task_threadpool_bench.exe"
+$runtimeDir = "$buildDir\bench\Release"
 $outMd = "$repoRoot\threadpool_bench_latest.md"
 
 # ── scenario whitelist (order determines display order) ──────────────────────
@@ -32,12 +32,12 @@ $scenarios = @(
 
 # ── build ────────────────────────────────────────────────────────────────────
 Get-Process -ErrorAction SilentlyContinue |
-Where-Object { $_.ProcessName -in @('task_threadpool_bench_demo', 'nei_tests') } |
+Where-Object { $_.ProcessName -in @('task_threadpool_bench', 'nei_tests') } |
 Stop-Process -Force
 
 if (-not $SkipBuild) {
     Write-Host '==> Building...'
-    & cmake --build $buildDir --config Release --target neixx task_threadpool_bench_demo
+    & cmake --build $buildDir --config Release --target neixx task_threadpool_bench
     Write-Host ''
 }
 

@@ -22,6 +22,8 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 option(NEI_BUILD_TESTS "Build nei tests" ON)
+option(NEI_BUILD_BENCHMARKS "Build nei benchmarks" ON)
+option(NEI_BUILD_DEMOS "Build nei demos" ON)
 option(NEI_ENABLE_WARNINGS "Enable strict warnings" ON)
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 
@@ -54,6 +56,14 @@ target_link_libraries(nei_all INTERFACE nei neixx)
 
 if(NEI_BUILD_TESTS)
     add_subdirectory(tests)
+endif()
+
+if(NEI_BUILD_BENCHMARKS)
+    add_subdirectory(bench)
+endif()
+
+if(NEI_BUILD_DEMOS)
+    add_subdirectory(demo)
 endif()
 
 install(

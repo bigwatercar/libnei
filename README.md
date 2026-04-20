@@ -41,12 +41,16 @@ libnei-src/
     task_environment_test.cpp
     task_scheduler_test.cpp
     xdr_test.cpp
+  demo/
+    CMakeLists.txt
     task_thread_demo.cpp
     task_location_delay_demo.cpp
     task_priority_demo.cpp
     task_shutdown_demo.cpp
     task_may_block_demo.cpp
     task_weak_ptr_demo.cpp
+  bench/
+    CMakeLists.txt
     log_bench.cpp
     log_bench_compare.cpp   # optional, see below
 ```
@@ -113,8 +117,10 @@ The `task` module has evolved into a production-oriented async execution layer i
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
 | `NEI_BUILD_TESTS` | `ON` | Build `tests/` (GoogleTest via FetchContent). |
+| `NEI_BUILD_BENCHMARKS` | `ON` | Build `bench/` benchmark targets. |
+| `NEI_BUILD_DEMOS` | `ON` | Build `demo/` demo targets. |
 | `NEI_ENABLE_WARNINGS` | `ON` | `/W4` (MSVC) or `-Wall -Wextra -Wpedantic` (others). |
-| `BUILD_SHARED_LIBS` | `OFF` | Static `nei` by default; set `ON` for a shared library. |
+| `BUILD_SHARED_LIBS` | `ON` | Build shared libraries by default; set `OFF` for static-only. |
 | `NEI_BENCHMARK_SPDLOG` | `ON` | Build `log_bench_compare` (fetches **spdlog** via FetchContent). Set `OFF` to skip spdlog and that target. |
 
 The project sets `CMAKE_EXPORT_COMPILE_COMMANDS` so a `compile_commands.json` is generated for **clangd** / IDE use (path depends on your build directory).

@@ -4,8 +4,8 @@ set -euo pipefail
 
 # ThreadPool benchmark (Linux/WSL) - rebuild + run + summarize
 # Usage:
-#   ./tools/rebuild_and_bench_threadpool.sh
-#   ./tools/rebuild_and_bench_threadpool.sh --skip-build --runs-10k 5 --runs-100k 3
+#   ./bench/rebuild_and_bench_threadpool.sh
+#   ./bench/rebuild_and_bench_threadpool.sh --skip-build --runs-10k 5 --runs-100k 3
 
 RUNS_10K=3
 RUNS_100K=2
@@ -86,7 +86,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-EXE_PATH="$BUILD_DIR/tests/task_threadpool_bench_demo"
+EXE_PATH="$BUILD_DIR/bench/task_threadpool_bench"
 
 if [[ ! -d "$BUILD_DIR" ]]; then
   echo "Build directory not found: $BUILD_DIR" >&2
@@ -96,7 +96,7 @@ fi
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
   echo "==> Building..."
-  cmake --build "$BUILD_DIR" --target neixx task_threadpool_bench_demo
+  cmake --build "$BUILD_DIR" --target neixx task_threadpool_bench
   echo
 fi
 
@@ -105,7 +105,7 @@ if [[ ! -x "$EXE_PATH" ]]; then
   exit 1
 fi
 
-pkill -f task_threadpool_bench_demo >/dev/null 2>&1 || true
+pkill -f task_threadpool_bench >/dev/null 2>&1 || true
 
 raw_tsv="$(mktemp)"
 summary_tmp="$(mktemp)"
