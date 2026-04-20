@@ -2,7 +2,9 @@ target_sources(
     neixx
     PRIVATE
         src/utf_string_conversions.cpp
-    src/string_util.cpp
+        src/string_util.cpp
+        src/split_string.cpp
+        src/string_number_conversions.cpp
 )
 
 if(WIN32)

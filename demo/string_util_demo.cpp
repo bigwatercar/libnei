@@ -1,9 +1,12 @@
 #include <neixx/strings/string_util.h>
+#include <neixx/strings/split_string.h>
+#include <neixx/strings/string_number_conversions.h>
 #include <neixx/strings/utf_string_conversions.h>
 
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <vector>
 
 int main() {
   const std::string utf8 = "  Chromium style: \xe4\xb8\xad\xe6\x96\x87\xe5\xad\x97\xe7\xac\xa6\xe8\xbd\xac\xe6\x8d\xa2  ";
@@ -22,6 +25,9 @@ int main() {
                                                   utf8_trimmed.size(),
                                                   starts_with ? 1 : 0,
                                                   starts_with_u16 ? 1 : 0);
+  const std::string csv = " 42, , 7, -3 , word, 100 ";
+  const std::vector<std::string> csv_parts =
+      nei::SplitString(csv, ',', nei::TRIM_WHITESPACE, nei::SPLIT_WANT_ALL);
 
   std::cout << "UTF-8 input     : " << utf8 << "\n";
   std::cout << "UTF-8 trimmed   : " << utf8_trimmed << "\n";
@@ -31,6 +37,20 @@ int main() {
   std::cout << "Roundtrip UTF-8 : " << roundtrip << "\n";
   std::cout << "ASCII->UTF16 len: " << ascii16.size() << "\n";
   std::cout << "StringPrintf    : " << formatted << "\n";
+  std::cout << "CSV split       :";
+  for (const std::string &part : csv_parts) {
+    std::cout << " [" << part << "]";
+  }
+  std::cout << "\n";
+
+  std::cout << "CSV integers    :";
+  for (const std::string &part : csv_parts) {
+    std::int64_t parsed = 0;
+    if (nei::StringToInt64(part, &parsed)) {
+      std::cout << ' ' << parsed;
+    }
+  }
+  std::cout << "\n";
 
   std::cout << "UTF-16 hex      : ";
   for (char16_t cu : utf16) {

@@ -20,7 +20,9 @@ add_executable(
     core_test.cpp
     log_test.cpp
     string_util_test.cpp
-  utf_string_conversions_test.cpp
+    split_string_test.cpp
+    string_number_conversions_test.cpp
+    utf_string_conversions_test.cpp
     cancelable_callback_test.cpp
     task_callback_test.cpp
     task_environment_test.cpp
