@@ -5,19 +5,20 @@
 #   -Runs100k N   (default 2)  — repeat count for 100 000-task suite
 #   -SkipBuild    — skip cmake --build (use existing binaries)
 param(
-    [int]$Runs10k  = 3,
+    [int]$Runs10k = 3,
     [int]$Runs100k = 2,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [string]$BuildDir
 )
 
 $ErrorActionPreference = 'Stop'
 
 # ── paths ────────────────────────────────────────────────────────────────────
-$repoRoot   = 'c:\Personal\Projects\LibNei\libnei-src'
-$buildDir   = "$repoRoot\build\windows-vs2022-release-shared"
-$exePath    = "$buildDir\tests\Release\task_threadpool_bench_demo.exe"
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$buildDir = if ($BuildDir) { $BuildDir } else { "$repoRoot\build\windows-vs2022-release-shared" }
+$exePath = "$buildDir\tests\Release\task_threadpool_bench_demo.exe"
 $runtimeDir = "$buildDir\tests\Release"
-$outMd      = "$repoRoot\threadpool_bench_latest.md"
+$outMd = "$repoRoot\threadpool_bench_latest.md"
 
 # ── scenario whitelist (order determines display order) ──────────────────────
 $scenarios = @(
@@ -31,8 +32,8 @@ $scenarios = @(
 
 # ── build ────────────────────────────────────────────────────────────────────
 Get-Process -ErrorAction SilentlyContinue |
-    Where-Object { $_.ProcessName -in @('task_threadpool_bench_demo', 'nei_tests') } |
-    Stop-Process -Force
+Where-Object { $_.ProcessName -in @('task_threadpool_bench_demo', 'nei_tests') } |
+Stop-Process -Force
 
 if (-not $SkipBuild) {
     Write-Host '==> Building...'
@@ -82,12 +83,13 @@ foreach ($n in @(10000, 100000)) {
         $g = @($raw | Where-Object { $_.n -eq $n -and $_.scenario -eq $sc })
         if ($g.Count -eq 0) { continue }
 
-        $tots  = $g.tot_ms
-        $tpss  = $g.tps
+        $tots = $g.tot_ms
+        $tpss = $g.tps
         $mean_tot = ($tots | Measure-Object -Average).Average
         $stddev_tot = if ($g.Count -gt 1) {
-            [math]::Round([math]::Sqrt(($tots | ForEach-Object { ($_ - $mean_tot)*($_ - $mean_tot) } | Measure-Object -Average).Average), 2)
-        } else { 0.0 }
+            [math]::Round([math]::Sqrt(($tots | ForEach-Object { ($_ - $mean_tot) * ($_ - $mean_tot) } | Measure-Object -Average).Average), 2)
+        }
+        else { 0.0 }
         $summary += [pscustomobject]@{
             n          = $n
             scenario   = $sc
@@ -106,7 +108,7 @@ foreach ($n in @(10000, 100000)) {
 
 # ── print to console ──────────────────────────────────────────────────────────
 # layout: scenario(32) W(4) Enq(7) Drn(7) Tot(7) Stddev(7) ns/t(9) TPS(10) PASS(5)
-$hdr  = '{0,-32}  {1,4}  {2,7}  {3,7}  {4,7}  {5,7}  {6,9}  {7,10}  {8}'
+$hdr = '{0,-32}  {1,4}  {2,7}  {3,7}  {4,7}  {5,7}  {6,9}  {7,10}  {8}'
 $data = '{0,-32}  {1,4}  {2,7:0.00}  {3,7:0.00}  {4,7:0.00}  {5,7:0.00}  {6,9:0.0}  {7,10:N0}  {8}'
 
 Write-Host ''
@@ -116,8 +118,8 @@ Write-Host ''
 foreach ($n in @(10000, 100000)) {
     $label = if ($n -eq 10000) { '10 000' } else { '100 000' }
     Write-Host ("-- {0} tasks {1}" -f $label, ('-' * 70))
-    Write-Host ($hdr  -f 'Scenario','W','Enq ms','Drn ms','Tot ms','Stddev','ns/task','Avg TPS','PASS')
-    Write-Host ($hdr  -f ('-'*32),('-'*4),('-'*7),('-'*7),('-'*7),('-'*7),('-'*9),('-'*10),('-'*5))
+    Write-Host ($hdr -f 'Scenario', 'W', 'Enq ms', 'Drn ms', 'Tot ms', 'Stddev', 'ns/task', 'Avg TPS', 'PASS')
+    Write-Host ($hdr -f ('-' * 32), ('-' * 4), ('-' * 7), ('-' * 7), ('-' * 7), ('-' * 7), ('-' * 9), ('-' * 10), ('-' * 5))
 
     foreach ($row in ($summary | Where-Object { $_.n -eq $n })) {
         $passStr = ('{0}/{1}' -f $row.pass_count, $row.runs)
@@ -142,7 +144,7 @@ foreach ($n in @(10000, 100000)) {
     foreach ($row in ($summary | Where-Object { $_.n -eq $n })) {
         $passStr = '{0}/{1}' -f $row.pass_count, $row.runs
         $null = $md.AppendLine(('| {0} | {1} | {2:0.00} | {3:0.00} | {4:0.00} | {5:0.00} | {6:0.0} | {7:N0} | {8} |' -f `
-            $row.scenario, $row.workers, $row.avg_enq, $row.avg_drn, $row.avg_tot, $row.stddev_tot, $row.avg_tot_ns, $row.avg_tps, $passStr))
+                    $row.scenario, $row.workers, $row.avg_enq, $row.avg_drn, $row.avg_tot, $row.stddev_tot, $row.avg_tot_ns, $row.avg_tps, $passStr))
     }
     $null = $md.AppendLine('')
 }
