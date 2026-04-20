@@ -32,9 +32,3 @@ install(
     DIRECTORY include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
-
-if(NEIXX_BUILD_STRINGS_DEMO)
-    add_executable(neixx_strings_demo main.cpp)
-    target_link_libraries(neixx_strings_demo PRIVATE neixx)
-    target_compile_features(neixx_strings_demo PRIVATE cxx_std_17)
-endif()

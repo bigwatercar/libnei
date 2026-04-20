@@ -88,6 +88,11 @@ target_link_libraries(task_shutdown_demo PRIVATE nei::all)
 add_executable(task_may_block_demo task_may_block_demo.cpp)
 target_link_libraries(task_may_block_demo PRIVATE nei::all)
 
+if(NEIXX_BUILD_STRINGS_DEMO)
+  add_executable(string_util_demo string_util_demo.cpp)
+  target_link_libraries(string_util_demo PRIVATE nei::all)
+endif()
+
 include(GoogleTest)
 #
 # Avoid running the test executable during build time on Windows shared builds
@@ -171,6 +176,14 @@ if(WIN32 AND BUILD_SHARED_LIBS)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:string_append_bench> $<TARGET_FILE_DIR:string_append_bench>
     COMMAND_EXPAND_LISTS
   )
+  if(NEIXX_BUILD_STRINGS_DEMO AND TARGET string_util_demo)
+    add_custom_command(
+      TARGET string_util_demo
+      POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:string_util_demo> $<TARGET_FILE_DIR:string_util_demo>
+      COMMAND_EXPAND_LISTS
+    )
+  endif()
   if(NEI_BENCHMARK_SPDLOG AND TARGET log_bench_compare)
     add_custom_command(
       TARGET log_bench_compare

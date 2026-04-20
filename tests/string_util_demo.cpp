@@ -1,5 +1,5 @@
-#include <neixx/strings/utf_string_conversions.h>
 #include <neixx/strings/string_util.h>
+#include <neixx/strings/utf_string_conversions.h>
 
 #include <iomanip>
 #include <iostream>
@@ -12,10 +12,9 @@ int main() {
   const bool starts_with = nei::StartsWith(utf8_trimmed, "chromium", nei::CompareCase::kInsensitiveASCII);
   const std::u16string utf16 = nei::UTF8ToUTF16(utf8);
   const std::u16string utf16_trimmed = nei::TrimWhitespace(std::u16string_view(utf16), nei::TrimPositions::kAll);
-  const bool starts_with_u16 = nei::StartsWith(
-      std::u16string_view(utf16_trimmed),
-      nei::UTF8ToUTF16("chromium"),
-      nei::CompareCase::kInsensitiveASCII);
+  const bool starts_with_u16 = nei::StartsWith(std::u16string_view(utf16_trimmed),
+                                               nei::UTF8ToUTF16("chromium"),
+                                               nei::CompareCase::kInsensitiveASCII);
 
   const std::string roundtrip = nei::UTF16ToUTF8(utf16);
   const std::u16string ascii16 = nei::ASCIIToUTF16("ASCII demo");
