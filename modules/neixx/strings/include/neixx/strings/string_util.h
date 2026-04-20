@@ -46,6 +46,7 @@ NEI_API std::string TrimWhitespace(std::string_view input, TrimPositions positio
 NEI_API std::u16string TrimWhitespace(std::u16string_view input, TrimPositions positions = TrimPositions::kAll);
 
 NEI_API std::string StringPrintf(const char *format, ...);
+NEI_API void StringAppendF(std::string *dest, const char *format, ...);
 
 NEI_API std::string ToLowerASCII(std::string_view input);
 NEI_API std::u16string ToLowerASCII(std::u16string_view input);

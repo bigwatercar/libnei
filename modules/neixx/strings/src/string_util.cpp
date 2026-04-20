@@ -3,7 +3,6 @@
 
 #include <cstdarg>
 #include <cstdio>
-#include <vector>
 
 namespace nei {
 namespace {
@@ -109,6 +108,75 @@ std::basic_string<CharT> ToUpperASCIIT(std::basic_string_view<CharT> input) {
   return out;
 }
 
+bool StringAppendV(std::string *dest, const char *format, va_list args) {
+  if (dest == nullptr || format == nullptr) {
+    return false;
+  }
+
+  constexpr std::size_t kStackBufferSize = 256;
+  char stack_buffer[kStackBufferSize] = {};
+
+  va_list stack_args;
+  va_copy(stack_args, args);
+  const int stack_result = std::vsnprintf(stack_buffer, kStackBufferSize, format, stack_args);
+  va_end(stack_args);
+
+  if (stack_result >= 0 && static_cast<std::size_t>(stack_result) < kStackBufferSize) {
+    dest->append(stack_buffer, static_cast<std::size_t>(stack_result));
+    return true;
+  }
+
+  int required = stack_result;
+  if (required < 0) {
+    va_list measure_args;
+    va_copy(measure_args, args);
+    required = std::vsnprintf(nullptr, 0, format, measure_args);
+    va_end(measure_args);
+  }
+
+  if (required < 0) {
+    return false;
+  }
+
+  const std::size_t original_size = dest->size();
+  dest->resize(original_size + static_cast<std::size_t>(required));
+
+  va_list fill_args;
+  va_copy(fill_args, args);
+  const int written = std::vsnprintf(dest->data() + original_size,
+                                     static_cast<std::size_t>(required) + 1,
+                                     format,
+                                     fill_args);
+  va_end(fill_args);
+
+  if (written < 0) {
+    dest->resize(original_size);
+    return false;
+  }
+
+  if (static_cast<std::size_t>(written) > static_cast<std::size_t>(required)) {
+    dest->resize(original_size + static_cast<std::size_t>(written));
+    va_list retry_args;
+    va_copy(retry_args, args);
+    const int retried_written = std::vsnprintf(dest->data() + original_size,
+                                               static_cast<std::size_t>(written) + 1,
+                                               format,
+                                               retry_args);
+    va_end(retry_args);
+
+    if (retried_written < 0) {
+      dest->resize(original_size);
+      return false;
+    }
+
+    dest->resize(original_size + static_cast<std::size_t>(retried_written));
+  } else {
+    dest->resize(original_size + static_cast<std::size_t>(written));
+  }
+
+  return true;
+}
+
 } // namespace
 
 bool StartsWith(std::string_view input, std::string_view prefix, CompareCase compare_case) {
@@ -136,32 +204,22 @@ std::u16string TrimWhitespace(std::u16string_view input, TrimPositions positions
 }
 
 std::string StringPrintf(const char *format, ...) {
-  if (format == nullptr) {
-    return {};
-  }
-
   va_list args;
   va_start(args, format);
 
-  va_list args_copy;
-  va_copy(args_copy, args);
-  const int required = std::vsnprintf(nullptr, 0, format, args_copy);
-  va_end(args_copy);
+  std::string out;
+  (void)StringAppendV(&out, format, args);
 
-  if (required < 0) {
-    va_end(args);
-    return {};
-  }
-
-  std::vector<char> buffer(static_cast<std::size_t>(required) + 1, '\0');
-  const int written = std::vsnprintf(buffer.data(), buffer.size(), format, args);
   va_end(args);
 
-  if (written < 0) {
-    return {};
-  }
+  return out;
+}
 
-  return std::string(buffer.data(), static_cast<std::size_t>(written));
+void StringAppendF(std::string *dest, const char *format, ...) {
+  va_list args;
+  va_start(args, format);
+  (void)StringAppendV(dest, format, args);
+  va_end(args);
 }
 
 std::string ToLowerASCII(std::string_view input) {

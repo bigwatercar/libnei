@@ -19,6 +19,7 @@ add_executable(
     nei_tests
     core_test.cpp
     log_test.cpp
+    string_util_test.cpp
   utf_string_conversions_test.cpp
     cancelable_callback_test.cpp
     task_callback_test.cpp
@@ -40,6 +41,9 @@ target_link_libraries(
 
 add_executable(log_bench log_bench.cpp)
 target_link_libraries(log_bench PRIVATE nei::all)
+
+add_executable(string_append_bench string_append_bench.cpp)
+target_link_libraries(string_append_bench PRIVATE nei::all)
 
 option(NEI_BENCHMARK_SPDLOG "Build log_bench_compare (NEI vs spdlog, FetchContent spdlog)" ON)
 if(NEI_BENCHMARK_SPDLOG)
@@ -159,6 +163,12 @@ if(WIN32 AND BUILD_SHARED_LIBS)
     TARGET task_may_block_demo
     POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:task_may_block_demo> $<TARGET_FILE_DIR:task_may_block_demo>
+    COMMAND_EXPAND_LISTS
+  )
+  add_custom_command(
+    TARGET string_append_bench
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:string_append_bench> $<TARGET_FILE_DIR:string_append_bench>
     COMMAND_EXPAND_LISTS
   )
   if(NEI_BENCHMARK_SPDLOG AND TARGET log_bench_compare)
