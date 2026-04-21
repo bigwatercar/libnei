@@ -28,10 +28,15 @@ TEST(TextNormalizationTest, Utf8ValidationAndRepair) {
   EXPECT_EQ(nei::FixInvalidUTF8(bad), std::string("\xEF\xBF\xBD(\xEF\xBF\xBD("));
 }
 
-TEST(TextNormalizationTest, NormalizeUnicodeReturnsFalseWithoutBackend) {
+TEST(TextNormalizationTest, NormalizeUnicodeProvidesLightweightFallback) {
   std::string out;
-  EXPECT_FALSE(nei::NormalizeUnicode("abc", nei::UnicodeNormalizationForm::kNFC, &out));
+  EXPECT_TRUE(nei::NormalizeUnicode("abc", nei::UnicodeNormalizationForm::kNFC, &out));
+  EXPECT_EQ(out, "abc");
+
+  EXPECT_TRUE(nei::NormalizeUnicode(u8"\uFF21\uFF22\uFF23", nei::UnicodeNormalizationForm::kNFKC, &out));
+  EXPECT_EQ(out, "ABC");
 
   std::u16string out16;
-  EXPECT_FALSE(nei::NormalizeUnicode(u"abc", nei::UnicodeNormalizationForm::kNFKC, &out16));
+  EXPECT_TRUE(nei::NormalizeUnicode(u"\uFF21\uFF22\uFF23", nei::UnicodeNormalizationForm::kNFKC, &out16));
+  EXPECT_EQ(out16, u"ABC");
 }

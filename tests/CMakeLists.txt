@@ -33,17 +33,9 @@ add_executable(
     scoped_blocking_call_test.cpp
     mixed_load_test.cpp
     scoped_blocking_call_shutdown_test.cpp
+    text_normalization_test.cpp
+    cjk_width_test.cpp
 )
-
-if(NEI_ENABLE_CHINESE_LOCALE)
-  target_sources(
-    nei_tests
-    PRIVATE
-      text_normalization_test.cpp
-      cjk_width_test.cpp
-      chinese_search_key_test.cpp
-  )
-endif()
 
 target_link_libraries(
     nei_tests

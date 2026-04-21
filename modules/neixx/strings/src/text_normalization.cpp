@@ -232,18 +232,37 @@ static std::u16string CollapseSpaceRunsUTF16(std::u16string result) {
 
 // ---- Public API -------------------------------------------------------------
 
-bool NormalizeUnicode(std::string_view /*input*/,
-                      UnicodeNormalizationForm /*form*/,
-                      std::string * /*output*/) {
-  // Full Unicode normalization (NFC/NFKC) requires an external library such as
-  // ICU.  This build does not include one.
-  return false;
+bool NormalizeUnicode(std::string_view input,
+                      UnicodeNormalizationForm form,
+                      std::string *output) {
+  if (output == nullptr) {
+    return false;
+  }
+
+  // Lightweight stateless fallback:
+  // - NFC: validate/repair UTF-8 only.
+  // - NFKC: additionally fold fullwidth compatibility forms to halfwidth.
+  std::string normalized = IsValidUTF8(input) ? std::string(input) : FixInvalidUTF8(input);
+  if (form == UnicodeNormalizationForm::kNFKC) {
+    normalized = ToHalfWidth(normalized);
+  }
+  *output = std::move(normalized);
+  return true;
 }
 
-bool NormalizeUnicode(std::u16string_view /*input*/,
-                      UnicodeNormalizationForm /*form*/,
-                      std::u16string * /*output*/) {
-  return false;
+bool NormalizeUnicode(std::u16string_view input,
+                      UnicodeNormalizationForm form,
+                      std::u16string *output) {
+  if (output == nullptr) {
+    return false;
+  }
+
+  std::u16string normalized(input);
+  if (form == UnicodeNormalizationForm::kNFKC) {
+    normalized = ToHalfWidth(normalized);
+  }
+  *output = std::move(normalized);
+  return true;
 }
 
 std::string ToHalfWidth(std::string_view input) {

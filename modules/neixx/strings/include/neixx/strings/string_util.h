@@ -58,6 +58,9 @@ NEI_API std::u16string ToLowerASCII(std::u16string_view input);
 NEI_API std::string ToUpperASCII(std::string_view input);
 NEI_API std::u16string ToUpperASCII(std::u16string_view input);
 
+// Truncates UTF-8 by bytes without splitting a multi-byte code point.
+NEI_API std::string TruncateUTF8(std::string_view input, std::size_t byte_limit);
+
 } // namespace nei
 
 #endif // NEIXX_STRINGS_STRING_UTIL_H_

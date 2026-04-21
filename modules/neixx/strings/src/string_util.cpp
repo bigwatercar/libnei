@@ -1,6 +1,8 @@
 #include <neixx/strings/string_util.h>
 #include <neixx/strings/utf_string_conversions.h>
 
+#include "utf_string_conversions_fallback.h"
+
 #include <cstdarg>
 #include <cstdio>
 
@@ -236,6 +238,42 @@ std::string ToUpperASCII(std::string_view input) {
 
 std::u16string ToUpperASCII(std::u16string_view input) {
   return ToUpperASCIIT<char16_t>(input);
+}
+
+std::string TruncateUTF8(std::string_view input, std::size_t byte_limit) {
+  if (byte_limit >= input.size()) {
+    return std::string(input);
+  }
+
+  std::size_t i = 0;
+  std::size_t last_boundary = 0;
+  while (i < input.size() && i < byte_limit) {
+    const unsigned char lead = static_cast<unsigned char>(input[i]);
+    const int seq_len = internal::UTF8SequenceLength(lead);
+
+    bool valid = true;
+    if (seq_len > 1) {
+      if (i + static_cast<std::size_t>(seq_len) > input.size()) {
+        valid = false;
+      } else {
+        for (int j = 1; j < seq_len; ++j) {
+          if (!internal::IsContinuation(static_cast<unsigned char>(input[i + j]))) {
+            valid = false;
+            break;
+          }
+        }
+      }
+    }
+
+    const std::size_t step = valid ? static_cast<std::size_t>(seq_len) : 1u;
+    if (i + step > byte_limit) {
+      break;
+    }
+    i += step;
+    last_boundary = i;
+  }
+
+  return std::string(input.substr(0, last_boundary));
 }
 
 } // namespace nei
