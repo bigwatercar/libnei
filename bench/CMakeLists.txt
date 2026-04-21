@@ -6,6 +6,9 @@ target_link_libraries(log_bench PRIVATE nei::all)
 add_executable(string_append_bench string_append_bench.cpp)
 target_link_libraries(string_append_bench PRIVATE nei::all)
 
+add_executable(flake_id_bench flake_id_bench.c)
+target_link_libraries(flake_id_bench PRIVATE nei::all)
+
 add_executable(task_thread_bench task_thread_bench.cpp)
 target_link_libraries(task_thread_bench PRIVATE nei::all)
 
@@ -40,6 +43,7 @@ if(WIN32 AND BUILD_SHARED_LIBS)
 
   nei_copy_runtime_dlls(log_bench)
   nei_copy_runtime_dlls(string_append_bench)
+  nei_copy_runtime_dlls(flake_id_bench)
   nei_copy_runtime_dlls(task_thread_bench)
   nei_copy_runtime_dlls(task_threadpool_bench)
 

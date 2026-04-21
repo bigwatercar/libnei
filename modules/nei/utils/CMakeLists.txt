@@ -1,6 +1,7 @@
 target_sources(
     nei
     PRIVATE
+    src/flake_id.c
         src/strings.cpp
 )
 

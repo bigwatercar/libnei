@@ -18,6 +18,7 @@ enable_testing()
 add_executable(
     nei_tests
     core_test.cpp
+  flake_id_test.cpp
     log_test.cpp
     string_util_test.cpp
     split_string_test.cpp
