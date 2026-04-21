@@ -23,9 +23,6 @@ add_executable(
     string_util_test.cpp
     split_string_test.cpp
     string_number_conversions_test.cpp
-  text_normalization_test.cpp
-  cjk_width_test.cpp
-  chinese_search_key_test.cpp
     utf_string_conversions_test.cpp
     cancelable_callback_test.cpp
     task_callback_test.cpp
@@ -37,6 +34,16 @@ add_executable(
     mixed_load_test.cpp
     scoped_blocking_call_shutdown_test.cpp
 )
+
+if(NEI_ENABLE_CHINESE_LOCALE)
+  target_sources(
+    nei_tests
+    PRIVATE
+      text_normalization_test.cpp
+      cjk_width_test.cpp
+      chinese_search_key_test.cpp
+  )
+endif()
 
 target_link_libraries(
     nei_tests

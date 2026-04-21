@@ -25,6 +25,7 @@ option(NEI_BUILD_TESTS "Build nei tests" ON)
 option(NEI_BUILD_BENCHMARKS "Build nei benchmarks" ON)
 option(NEI_BUILD_DEMOS "Build nei demos" ON)
 option(NEI_ENABLE_WARNINGS "Enable strict warnings" ON)
+option(NEI_ENABLE_CHINESE_LOCALE "Enable Chinese locale/string utilities in neixx::strings" ON)
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 
 # Compatible with both single-config and multi-config generators.

@@ -5,10 +5,23 @@ target_sources(
         src/string_util.cpp
         src/split_string.cpp
         src/string_number_conversions.cpp
-    src/text_normalization.cpp
-    src/cjk_width.cpp
-    src/chinese_search_key.cpp
 )
+
+if(NEI_ENABLE_CHINESE_LOCALE)
+    target_sources(
+        neixx
+        PRIVATE
+            src/text_normalization.cpp
+            src/cjk_width.cpp
+            src/chinese_search_key.cpp
+    )
+endif()
+
+if(NEI_ENABLE_CHINESE_LOCALE)
+    target_compile_definitions(neixx PUBLIC NEI_ENABLE_CHINESE_LOCALE=1)
+else()
+    target_compile_definitions(neixx PUBLIC NEI_ENABLE_CHINESE_LOCALE=0)
+endif()
 
 if(WIN32)
     target_sources(
