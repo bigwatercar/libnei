@@ -20,6 +20,7 @@ add_executable(
     core_test.cpp
   flake_id_test.cpp
     log_test.cpp
+    utils_crypto_uuid_test.cpp
     string_util_test.cpp
     split_string_test.cpp
     string_number_conversions_test.cpp
