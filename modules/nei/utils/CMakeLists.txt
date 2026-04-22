@@ -1,6 +1,7 @@
 target_sources(
     nei
     PRIVATE
+    src/base64.c
         src/flake_id.c
         src/md5.c
         src/sha1.c
