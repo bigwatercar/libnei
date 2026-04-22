@@ -1,8 +1,7 @@
 target_sources(
     nei
     PRIVATE
-    src/flake_id.c
-        src/strings.cpp
+        src/flake_id.c
 )
 
 target_include_directories(
