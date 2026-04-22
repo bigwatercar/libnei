@@ -1054,9 +1054,6 @@ static size_t _nei_log_serialize_event(uint8_t *out,
     } else if (*p == 'L') {
       ++p;
       conv_lm = 8;
-    } else if (*p == 'w') {
-      ++p;
-      conv_lm = 9;
     }
     if (*p == '\0') {
       break;
@@ -1191,7 +1188,7 @@ static size_t _nei_log_serialize_event(uint8_t *out,
         char ws_buf[_NEI_LOG_MAX_STRING_COPY + 1U];
         uint16_t len16;
         size_t len;
-        if (conv_lm == 9) {
+        if (conv_lm == 3) {
           const wchar_t *ws = va_arg(args, const wchar_t *);
           s = _nei_log_wstr_to_mbs_or_placeholder(ws, ws_buf, sizeof(ws_buf));
         } else {
@@ -1642,17 +1639,20 @@ static int _nei_log_build_runtime_conversion_spec(const char *scan,
       }
     }
   }
-  if (*p == 'w') {
-    ++p;
-  } else if (*p == 'h' || *p == 'l') {
+  if (*p == 'h' || *p == 'l') {
     char first = *p;
-    if (n + 2U >= spec_cap)
-      return -1;
-    spec[n++] = *p++;
+    ++p;
     if (*p == first) {
+      if (n + 3U >= spec_cap)
+        return -1;
+      spec[n++] = first;
+      spec[n++] = *p++;
+    } else if (first == 'l' && *p == 's') {
+      /* Runtime formatting always replays narrow bytes, so keep %ls as %s in replay spec. */
+    } else {
       if (n + 2U >= spec_cap)
         return -1;
-      spec[n++] = *p++;
+      spec[n++] = first;
     }
   } else if (*p == 'j' || *p == 'z' || *p == 't') {
     if (n + 2U >= spec_cap)

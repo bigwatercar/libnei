@@ -863,7 +863,7 @@ TEST(LogCTest, WsFormat_NullUsesPlaceholder) {
   nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
   ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
 
-  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "ws-null", "wide=%ws!", static_cast<const wchar_t *>(nullptr));
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "ws-null", "wide=%ls!", static_cast<const wchar_t *>(nullptr));
   nei_log_flush();
   std::lock_guard<std::mutex> lock(collector.mu);
   ASSERT_EQ(collector.messages.size(), 1U);
@@ -884,7 +884,7 @@ TEST(LogCTest, WsFormat_EmptyWideString) {
   ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
 
   static const wchar_t kEmpty[] = {L'\0'};
-  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "ws-empty", "wide=%ws|end", kEmpty);
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "ws-empty", "wide=%ls|end", kEmpty);
   nei_log_flush();
   std::lock_guard<std::mutex> lock(collector.mu);
   ASSERT_EQ(collector.messages.size(), 1U);
@@ -911,7 +911,7 @@ TEST(LogCTest, WsFormat_CjkHiraganaKatakanaHangulAndExtensionB) {
                                  L"\U00020000";
 
   const std::string expected_body = ExpectedMbFromWideForLogCTest(kWide);
-  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "ws-cjk", "payload=%ws!", kWide);
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "ws-cjk", "payload=%ls!", kWide);
   nei_log_flush();
   std::lock_guard<std::mutex> lock(collector.mu);
   ASSERT_EQ(collector.messages.size(), 1U);
@@ -934,7 +934,7 @@ TEST(LogCTest, WsFormat_VlogSameCjkPayload) {
 
   static const wchar_t kWide[] = L"\u97F3\u8AAD\u307F\U00024B62";
   const std::string expected_body = ExpectedMbFromWideForLogCTest(kWide);
-  nei_vlog(cfg_handle, 1, __FILE__, __LINE__, "ws-v", "v=%ws.", kWide);
+  nei_vlog(cfg_handle, 1, __FILE__, __LINE__, "ws-v", "v=%ls.", kWide);
   nei_log_flush();
   std::lock_guard<std::mutex> lock(collector.mu);
   ASSERT_EQ(collector.messages.size(), 1U);
@@ -962,7 +962,7 @@ TEST(LogCTest, WsFormat_ConvertedPayloadNotAffectedByLaterWideBufferMutation) {
   mutable_wide[2] = L'\0';
 
   const std::string expected_before = ExpectedMbFromWideForLogCTest(mutable_wide);
-  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "ws-mut", "w=%ws", mutable_wide);
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "ws-mut", "w=%ls", mutable_wide);
   mutable_wide[0] = L'X';
   mutable_wide[1] = L'Y';
   nei_log_flush();
