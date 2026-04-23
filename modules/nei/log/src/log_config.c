@@ -8,6 +8,11 @@ nei_log_config_st s_custom_configs[_NEI_LOG_MAX_CONFIGS];
 uint8_t s_config_used[_NEI_LOG_MAX_CONFIGS];
 int s_config_table_initialized = 0;
 #if defined(_WIN32)
+volatile LONGLONG s_config_snapshot = 1;
+#else
+uint64_t s_config_snapshot = 1;
+#endif
+#if defined(_WIN32)
 SRWLOCK s_config_lock = SRWLOCK_INIT;
 #else
 pthread_rwlock_t s_config_lock = PTHREAD_RWLOCK_INITIALIZER;
@@ -107,6 +112,22 @@ int _nei_log_slot_from_handle(nei_log_config_handle_t handle, size_t *out_slot) 
   return 0;
 }
 
+uint64_t _nei_log_config_snapshot_load(void) {
+#if defined(_WIN32)
+  return (uint64_t)InterlockedCompareExchange64(&s_config_snapshot, 0, 0);
+#else
+  return __atomic_load_n(&s_config_snapshot, __ATOMIC_ACQUIRE);
+#endif
+}
+
+void _nei_log_config_snapshot_bump(void) {
+#if defined(_WIN32)
+  (void)InterlockedIncrement64(&s_config_snapshot);
+#else
+  (void)__atomic_add_fetch(&s_config_snapshot, 1U, __ATOMIC_RELEASE);
+#endif
+}
+
 #pragma endregion
 
 #pragma region public API
@@ -135,6 +156,7 @@ int nei_log_add_config(const nei_log_config_st *config, nei_log_config_handle_t 
   s_config_used[free_slot] = 1U;
   memcpy(&s_custom_configs[free_slot], config, sizeof(*config));
   s_config_ptrs[free_slot] = &s_custom_configs[free_slot];
+  _nei_log_config_snapshot_bump();
   if (out_handle != NULL) {
     *out_handle = _nei_log_make_handle_from_slot(free_slot);
   }
@@ -153,11 +175,13 @@ void nei_log_remove_config(nei_log_config_handle_t handle) {
   }
   if (slot == 0U) {
     _nei_log_reset_default_config();
+    _nei_log_config_snapshot_bump();
     _nei_log_config_unlock_write();
     return;
   }
   s_config_used[slot] = 0U;
   s_config_ptrs[slot] = NULL;
+  _nei_log_config_snapshot_bump();
   _nei_log_config_unlock_write();
 }
 
@@ -185,6 +209,7 @@ nei_log_config_st *nei_log_default_config(void) {
     s_config_ptrs[0] = &s_custom_configs[0];
     cfg = s_config_ptrs[0];
     _nei_log_fill_default_config(cfg);
+    _nei_log_config_snapshot_bump();
   }
   _nei_log_config_unlock_write();
   return cfg;

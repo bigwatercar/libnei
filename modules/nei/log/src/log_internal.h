@@ -105,10 +105,10 @@ typedef struct _nei_log_runtime_st {
 typedef struct _nei_log_default_file_sink_ctx_st {
   uint32_t magic;
   FILE *fp;
+  uint32_t flush_counter;  /* Batch flush: count logs since last fflush. */
+  uint32_t flush_interval; /* Flush after this many logs (0=disable batching, always fflush). */
 } nei_log_default_file_sink_ctx_st;
 
-// NOTE: This config table is intended to be managed during initialization and
-// is not designed for concurrent add/remove while logging is active.
 #define _NEI_LOG_MAX_CONFIGS 16U // includes default config
 
 /* Global variables - defined in log_config.c */
@@ -116,6 +116,11 @@ extern nei_log_config_st *s_config_ptrs[_NEI_LOG_MAX_CONFIGS];
 extern nei_log_config_st s_custom_configs[_NEI_LOG_MAX_CONFIGS];
 extern uint8_t s_config_used[_NEI_LOG_MAX_CONFIGS];
 extern int s_config_table_initialized;
+#if defined(_WIN32)
+extern volatile LONGLONG s_config_snapshot;
+#else
+extern uint64_t s_config_snapshot;
+#endif
 #if defined(_WIN32)
 extern SRWLOCK s_config_lock;
 #else
@@ -141,6 +146,8 @@ void _nei_log_config_unlock_read(void);
 void _nei_log_config_unlock_write(void);
 nei_log_config_handle_t _nei_log_make_handle_from_slot(size_t slot);
 int _nei_log_slot_from_handle(nei_log_config_handle_t handle, size_t *out_slot);
+uint64_t _nei_log_config_snapshot_load(void);
+void _nei_log_config_snapshot_bump(void);
 
 /* From log_runtime.c */
 int _nei_log_ensure_runtime_initialized(void);

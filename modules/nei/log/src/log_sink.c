@@ -14,7 +14,16 @@ void _nei_log_default_file_llog(const nei_log_sink_st *sink, nei_log_level_e lev
   }
   (void)fwrite(message, 1U, length, ctx->fp);
   (void)fputc('\n', ctx->fp);
-  (void)fflush(ctx->fp);
+  /* Batch flush: only fflush after every N logs (default 100). */
+  if (ctx->flush_interval > 0U) {
+    ctx->flush_counter++;
+    if (ctx->flush_counter >= ctx->flush_interval) {
+      ctx->flush_counter = 0U;
+      (void)fflush(ctx->fp);
+    }
+  } else {
+    (void)fflush(ctx->fp);
+  }
 }
 
 void _nei_log_default_file_vlog(const nei_log_sink_st *sink, int verbose, const char *message, size_t length) {
@@ -29,7 +38,16 @@ void _nei_log_default_file_vlog(const nei_log_sink_st *sink, int verbose, const 
   (void)verbose;
   (void)fwrite(message, 1U, length, ctx->fp);
   (void)fputc('\n', ctx->fp);
-  (void)fflush(ctx->fp);
+  /* Batch flush: only fflush after every N logs (default 100). */
+  if (ctx->flush_interval > 0U) {
+    ctx->flush_counter++;
+    if (ctx->flush_counter >= ctx->flush_interval) {
+      ctx->flush_counter = 0U;
+      (void)fflush(ctx->fp);
+    }
+  } else {
+    (void)fflush(ctx->fp);
+  }
 }
 
 void _nei_log_emit_message(const nei_log_config_st *config, int32_t level, int32_t verbose, const char *message, size_t length) {
@@ -107,6 +125,8 @@ nei_log_sink_st *nei_log_create_default_file_sink(const char *filename) {
 
   ctx->magic = _NEI_LOG_DEFAULT_FILE_SINK_MAGIC;
   ctx->fp = fp;
+  ctx->flush_counter = 0U;
+  ctx->flush_interval = 100U; /* Flush every 100 logs by default. */
 
   sink->llog = _nei_log_default_file_llog;
   sink->vlog = _nei_log_default_file_vlog;

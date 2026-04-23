@@ -23,8 +23,20 @@ void nei_llog(nei_log_config_handle_t config_handle,
   va_list args;
   va_list scan_args;
   uint8_t event[_NEI_LOG_EVENT_BUFFER_SIZE];
+  nei_log_config_st *config;
 
   (void)_nei_log_ensure_runtime_initialized();
+
+  /* Early filter: check if this level is enabled before serialization. */
+  config = nei_log_get_config(config_handle);
+  if (config != NULL) {
+    const uint32_t mask = (uint32_t)(1U << (uint32_t)level);
+    if (level < (int32_t)NEI_L_VERBOSE || level > (int32_t)NEI_L_FATAL ||
+        (config->level_flags.all & mask) == 0U) {
+      return; /* Level not enabled, skip serialization. */
+    }
+  }
+
   va_start(args, fmt);
   va_copy(scan_args, args);
   {
@@ -48,8 +60,16 @@ void nei_vlog(nei_log_config_handle_t config_handle,
   va_list args;
   va_list scan_args;
   uint8_t event[_NEI_LOG_EVENT_BUFFER_SIZE];
+  nei_log_config_st *config;
 
   (void)_nei_log_ensure_runtime_initialized();
+
+  /* Early filter: check if this verbose level passes threshold before serialization. */
+  config = nei_log_get_config(config_handle);
+  if (config != NULL && config->verbose_threshold >= 0 && verbose > config->verbose_threshold) {
+    return; /* Verbose level exceeds threshold, skip serialization. */
+  }
+
   va_start(args, fmt);
   va_copy(scan_args, args);
   {

@@ -386,6 +386,50 @@ TEST(LogCTest, LogThreadIdPrefixWhenConfigEnabled) {
   nei_log_remove_config(cfg_handle);
 }
 
+TEST(LogCTest, LogThreadIdCacheInvalidatesOnConfigSlotReuse) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.log_thread_id = 1;
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+
+  nei_log_config_handle_t first_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &first_handle), 0);
+  nei_llog(first_handle, NEI_L_INFO, __FILE__, __LINE__, "tid-cache", "phase=%d", 1);
+  nei_log_flush();
+  {
+    std::lock_guard<std::mutex> lock(collector.mu);
+    ASSERT_EQ(collector.messages.size(), 1U);
+    EXPECT_NE(collector.messages[0].find("tid="), std::string::npos);
+  }
+  nei_log_remove_config(first_handle);
+
+  collector.messages.clear();
+  config = *nei_log_default_config();
+  config.log_thread_id = 0;
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+
+  nei_log_config_handle_t second_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &second_handle), 0);
+  ASSERT_EQ(first_handle, second_handle);
+
+  nei_llog(second_handle, NEI_L_INFO, __FILE__, __LINE__, "tid-cache", "phase=%d", 2);
+  nei_log_flush();
+  {
+    std::lock_guard<std::mutex> lock(collector.mu);
+    ASSERT_EQ(collector.messages.size(), 1U);
+    EXPECT_EQ(collector.messages[0].find("tid="), std::string::npos);
+    EXPECT_NE(collector.messages[0].find("phase=2"), std::string::npos);
+  }
+
+  nei_log_remove_config(second_handle);
+}
+
 TEST(LogCTest, AsyncPipelineFormatsTimestampAndFileLineAfterMessageByDefault) {
   LogCollector collector;
   nei_log_sink_st sink = {};

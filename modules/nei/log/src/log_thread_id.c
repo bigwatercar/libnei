@@ -6,10 +6,16 @@
 static _NEI_LOG_TLS char s_tls_tid_buf[32];
 static _NEI_LOG_TLS DWORD s_tls_tid_dw;
 static _NEI_LOG_TLS unsigned char s_tls_tid_ready;
+static _NEI_LOG_TLS nei_log_config_handle_t s_tls_tid_config_cached;
+static _NEI_LOG_TLS uint64_t s_tls_tid_config_snapshot;
+static _NEI_LOG_TLS int s_tls_tid_config_want;
 #else
 static _NEI_LOG_TLS char s_tls_tid_buf[32];
 static _NEI_LOG_TLS pthread_t s_tls_tid_pt;
 static _NEI_LOG_TLS unsigned char s_tls_tid_ready;
+static _NEI_LOG_TLS nei_log_config_handle_t s_tls_tid_config_cached;
+static _NEI_LOG_TLS uint64_t s_tls_tid_config_snapshot;
+static _NEI_LOG_TLS int s_tls_tid_config_want;
 #endif
 
 void _nei_log_tls_thread_id_cstr(const char **out_str, size_t *out_len) {
@@ -39,6 +45,13 @@ void _nei_log_tls_thread_id_cstr(const char **out_str, size_t *out_len) {
 int _nei_log_config_wants_thread_id(nei_log_config_handle_t config_handle) {
   size_t slot = 0U;
   int want = 0;
+  const uint64_t snapshot = _nei_log_config_snapshot_load();
+
+  /* Cache is valid only when both config handle and snapshot match. */
+  if (s_tls_tid_config_cached == config_handle && s_tls_tid_config_snapshot == snapshot) {
+    return s_tls_tid_config_want;
+  }
+
   _nei_log_config_lock_read();
   _nei_log_ensure_config_table_initialized();
   if (_nei_log_slot_from_handle(config_handle, &slot) == 0 && s_config_used[slot] != 0U) {
@@ -48,6 +61,11 @@ int _nei_log_config_wants_thread_id(nei_log_config_handle_t config_handle) {
     }
   }
   _nei_log_config_unlock_read();
+
+  /* Cache the result against the observed config snapshot. */
+  s_tls_tid_config_cached = config_handle;
+  s_tls_tid_config_snapshot = snapshot;
+  s_tls_tid_config_want = want;
   return want;
 }
 
