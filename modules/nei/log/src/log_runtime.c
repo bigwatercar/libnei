@@ -56,24 +56,24 @@ void _nei_log_shutdown_runtime(void) {
     return;
   }
 
-#if defined(_WIN32)
-  EnterCriticalSection(&s_runtime.mutex);
-  s_runtime.stop_requested = 1;
-  WakeAllConditionVariable(&s_runtime.cond);
-  LeaveCriticalSection(&s_runtime.mutex);
-  WaitForSingleObject(s_runtime.thread, INFINITE);
-  CloseHandle(s_runtime.thread);
-  s_runtime.consumer_thread_id = 0U;
-  DeleteCriticalSection(&s_runtime.mutex);
-#else
-  pthread_mutex_lock(&s_runtime.mutex);
-  s_runtime.stop_requested = 1;
-  pthread_cond_broadcast(&s_runtime.cond);
-  pthread_mutex_unlock(&s_runtime.mutex);
-  pthread_join(s_runtime.thread, NULL);
-  pthread_cond_destroy(&s_runtime.cond);
-  pthread_mutex_destroy(&s_runtime.mutex);
-#endif
+  #if defined(_WIN32)
+    EnterCriticalSection(&s_runtime.mutex);
+    s_runtime.stop_requested = 1;
+    _NEI_LOG_BROADCAST_COND(&s_runtime.cond);
+    LeaveCriticalSection(&s_runtime.mutex);
+    WaitForSingleObject(s_runtime.thread, INFINITE);
+    CloseHandle(s_runtime.thread);
+    s_runtime.consumer_thread_id = 0U;
+    DeleteCriticalSection(&s_runtime.mutex);
+  #else
+    pthread_mutex_lock(&s_runtime.mutex);
+    s_runtime.stop_requested = 1;
+    _NEI_LOG_BROADCAST_COND(&s_runtime.cond);
+    pthread_mutex_unlock(&s_runtime.mutex);
+    pthread_join(s_runtime.thread, NULL);
+    pthread_cond_destroy(&s_runtime.cond);
+    pthread_mutex_destroy(&s_runtime.mutex);
+  #endif
   s_runtime.initialized = 0;
 }
 
@@ -109,11 +109,7 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
         s_runtime.pending_index = active;
         s_runtime.active_index = 1 - active;
         _nei_log_ensure_active_not_consuming(&s_runtime);
-#if defined(_WIN32)
-        WakeAllConditionVariable(&s_runtime.cond);
-#else
-        pthread_cond_broadcast(&s_runtime.cond);
-#endif
+  _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
       }
       break;
     }
@@ -122,11 +118,7 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
       s_runtime.pending_index = active;
       s_runtime.active_index = 1 - active;
       _nei_log_ensure_active_not_consuming(&s_runtime);
-#if defined(_WIN32)
-      WakeAllConditionVariable(&s_runtime.cond);
-#else
-      pthread_cond_broadcast(&s_runtime.cond);
-#endif
+  _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
       continue;
     }
 
@@ -239,19 +231,19 @@ static void *_nei_log_consumer_thread(void *arg) {
       _nei_log_process_events(consume_buf, consume_size);
     }
 
-#if defined(_WIN32)
-    EnterCriticalSection(&rt->mutex);
-    rt->used[consume_index] = 0U;
-    rt->consuming_index = -1;
-    WakeAllConditionVariable(&rt->cond);
-    LeaveCriticalSection(&rt->mutex);
-#else
-    pthread_mutex_lock(&rt->mutex);
-    rt->used[consume_index] = 0U;
-    rt->consuming_index = -1;
-    pthread_cond_broadcast(&rt->cond);
-    pthread_mutex_unlock(&rt->mutex);
-#endif
+    #if defined(_WIN32)
+      EnterCriticalSection(&rt->mutex);
+      rt->used[consume_index] = 0U;
+      rt->consuming_index = -1;
+      _NEI_LOG_SIGNAL_COND(&rt->cond);
+      LeaveCriticalSection(&rt->mutex);
+    #else
+      pthread_mutex_lock(&rt->mutex);
+      rt->used[consume_index] = 0U;
+      rt->consuming_index = -1;
+      _NEI_LOG_SIGNAL_COND(&rt->cond);
+      pthread_mutex_unlock(&rt->mutex);
+    #endif
   }
 
 #if defined(_WIN32)

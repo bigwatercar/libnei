@@ -123,8 +123,12 @@ extern uint64_t s_config_snapshot;
 #endif
 #if defined(_WIN32)
 extern SRWLOCK s_config_lock;
+#define _NEI_LOG_SIGNAL_COND(cv) WakeConditionVariable(cv)
+#define _NEI_LOG_BROADCAST_COND(cv) WakeAllConditionVariable(cv)
 #else
 extern pthread_rwlock_t s_config_lock;
+#define _NEI_LOG_SIGNAL_COND(cv) pthread_cond_signal(cv)
+#define _NEI_LOG_BROADCAST_COND(cv) pthread_cond_broadcast(cv)
 #endif
 
 /* Global variables - defined in log_runtime.c */
