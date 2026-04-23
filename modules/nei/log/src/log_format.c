@@ -218,6 +218,35 @@ void _nei_log_format_timestamp(uint64_t timestamp_ns, nei_log_timestamp_style_e 
 
 #pragma region event formatting
 
+typedef struct _nei_log_fmt_cache_st {
+  const char *fmt;
+  size_t fmt_len;
+  int has_percent;
+} nei_log_fmt_cache_st;
+
+static _NEI_LOG_TLS nei_log_fmt_cache_st s_tls_fmt_cache;
+
+static void _nei_log_get_fmt_meta_cached(const char *fmt, int *out_has_percent, size_t *out_len) {
+  if (out_has_percent == NULL || out_len == NULL) {
+    return;
+  }
+  if (fmt == NULL) {
+    *out_has_percent = 0;
+    *out_len = 0U;
+    return;
+  }
+  if (s_tls_fmt_cache.fmt == fmt) {
+    *out_has_percent = s_tls_fmt_cache.has_percent;
+    *out_len = s_tls_fmt_cache.fmt_len;
+    return;
+  }
+  s_tls_fmt_cache.fmt = fmt;
+  s_tls_fmt_cache.fmt_len = strlen(fmt);
+  s_tls_fmt_cache.has_percent = (strchr(fmt, '%') != NULL) ? 1 : 0;
+  *out_has_percent = s_tls_fmt_cache.has_percent;
+  *out_len = s_tls_fmt_cache.fmt_len;
+}
+
 static int _nei_log_append_char(char *out, size_t cap, size_t *used, char c) {
   if (out == NULL || used == NULL || *used + 1U >= cap) {
     return -1;
@@ -587,6 +616,23 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
   }
 
   fmt = header->fmt_ptr;
+  {
+    int has_percent = 0;
+    size_t fmt_len = 0U;
+    _nei_log_get_fmt_meta_cached(fmt, &has_percent, &fmt_len);
+    if (has_percent == 0) {
+      if (fmt_len > 0U && _nei_log_append_nstr(out, out_cap, &used, fmt, fmt_len) != 0) {
+        return -1;
+      }
+      if (log_location != 0 && log_location_after_message != 0 && (header->file_ptr != NULL || header->func_ptr != NULL)) {
+        if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
+          return -1;
+        if (_nei_log_append_location_block(header, short_path, out, out_cap, &used) != 0)
+          return -1;
+      }
+      return 0;
+    }
+  }
   scan = fmt;
   while (*scan) {
     if (*scan != '%') {
