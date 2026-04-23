@@ -141,6 +141,36 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
 
 #pragma region consumer
 
+typedef struct _nei_log_consumer_cfg_cache_st {
+  nei_log_config_handle_t handle;
+  uint64_t snapshot;
+  const nei_log_config_st *cfg;
+} nei_log_consumer_cfg_cache_st;
+
+static _NEI_LOG_TLS nei_log_consumer_cfg_cache_st s_tls_consumer_cfg_cache;
+
+static const nei_log_config_st *_nei_log_resolve_config_cached(nei_log_config_handle_t handle) {
+  size_t slot = 0U;
+  const nei_log_config_st *cfg = NULL;
+  const uint64_t snapshot = _nei_log_config_snapshot_load();
+
+  if (s_tls_consumer_cfg_cache.handle == handle && s_tls_consumer_cfg_cache.snapshot == snapshot) {
+    return s_tls_consumer_cfg_cache.cfg;
+  }
+
+  _nei_log_config_lock_read();
+  _nei_log_ensure_config_table_initialized();
+  if (_nei_log_slot_from_handle(handle, &slot) == 0 && s_config_used[slot] != 0U) {
+    cfg = s_config_ptrs[slot];
+  }
+  _nei_log_config_unlock_read();
+
+  s_tls_consumer_cfg_cache.handle = handle;
+  s_tls_consumer_cfg_cache.snapshot = snapshot;
+  s_tls_consumer_cfg_cache.cfg = cfg;
+  return cfg;
+}
+
 static void _nei_log_process_events(const uint8_t *buf, size_t size) {
   size_t offset = 0U;
   char message[2048];
@@ -152,7 +182,7 @@ static void _nei_log_process_events(const uint8_t *buf, size_t size) {
     if (header->total_size == 0U || offset + header->total_size > size) {
       break;
     }
-    config = nei_log_get_config(header->config_handle);
+    config = _nei_log_resolve_config_cached(header->config_handle);
     if (config != NULL && _nei_log_format_event(header, config, payload, payload_size, message, sizeof(message)) == 0) {
       _nei_log_emit_message(config, header->level, header->verbose, message, strlen(message));
     }
