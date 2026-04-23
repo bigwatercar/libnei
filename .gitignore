@@ -49,3 +49,6 @@ build_*/
 # Local clangd/CMake generated artifacts
 build-clangd/
 compile_commands.json
+
+log_bench_latest.md
+threadpool_bench_latest.md
