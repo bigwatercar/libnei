@@ -150,6 +150,23 @@ typedef union nei_log_level_flags_u {
 typedef struct nei_log_sink_st nei_log_sink_st;
 
 /**
+ * @brief Runtime performance counters for diagnostics and benchmarking.
+ *
+ * @details These counters are process-wide and monotonic until reset.
+ * They are intended for benchmark instrumentation and tests.
+ */
+typedef struct nei_log_perf_stats_st {
+  /** Producer-side spin iterations while waiting for a reserved ring slot to become free. */
+  uint64_t producer_spin_loops;
+  /** Number of wait-loop iterations in @ref nei_log_flush while waiting for target drain. */
+  uint64_t flush_wait_loops;
+  /** Number of consumer thread wakeups from condition-variable waits. */
+  uint64_t consumer_wakeups;
+  /** Maximum observed in-flight ring depth (write_pos - consumer_pos). */
+  uint64_t ring_high_watermark;
+} nei_log_perf_stats_st;
+
+/**
  * @brief Log configuration
  *
  * @details
@@ -432,6 +449,22 @@ NEI_API void nei_log_flush(void);
  * @return Process-wide runtime initialization execution count.
  */
 NEI_API uint32_t nei_log_get_runtime_init_count_for_test(void);
+
+/**
+ * @brief Snapshot current runtime performance counters.
+ *
+ * @param[out] out_stats Output pointer that receives the snapshot.
+ * @return 0 on success, -1 if @p out_stats is NULL.
+ */
+NEI_API int nei_log_get_perf_stats_for_test(nei_log_perf_stats_st *out_stats);
+
+/**
+ * @brief Reset runtime performance counters to zero.
+ *
+ * @details Intended for controlled benchmark phases where each case wants an
+ * isolated counter window.
+ */
+NEI_API void nei_log_reset_perf_stats_for_test(void);
 
 /** @} */ /* end of nei_log_functions */
 

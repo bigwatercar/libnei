@@ -30,6 +30,12 @@
 #define _NEI_LOG_TLS __thread
 #endif
 
+#if defined(_WIN32)
+#  define _NEI_LOG_THREAD_YIELD() SwitchToThread()
+#else
+#  define _NEI_LOG_THREAD_YIELD() sched_yield()
+#endif
+
 /* ── Atomic primitive helpers (C99 / platform-specific) ──────────────────── *
  * These wrap the minimal operations needed by the lock-free MPSC ring buffer.
  * Windows: Interlocked* intrinsics.  POSIX: GCC/Clang __atomic builtins.    */
@@ -79,9 +85,13 @@ typedef volatile uint64_t _nei_log_atomic64_t;
  *  memory: 256 * (4+4+8192) = ~2 MB, similar to the old double-buffer. */
 #define _NEI_LOG_RING_SLOTS 256U
 
-/** Maximum spin iterations a producer will wait for a ring slot to become free
- *  before dropping the event.  At ~1 ns/iteration this is ~10 µs of patience. */
-#define _NEI_LOG_RING_FULL_SPINS 10000
+/** Producer wait strategy thresholds while reserved slot is still occupied.
+ *  1) [1, RELAX_ITERS]      : cpu-relax (very short wait)
+ *  2) (RELAX_ITERS, YIELD]  : OS thread yield
+ *  3) > YIELD_ITERS         : block on condition variable until consumer drains
+ */
+#define _NEI_LOG_RING_WAIT_RELAX_ITERS 64U
+#define _NEI_LOG_RING_WAIT_YIELD_ITERS 2048U
 #define _NEI_LOG_DEFAULT_FILE_SINK_MAGIC 0x4B4E5346U
 
 /// @brief Compact serialized payload type tags.
@@ -147,6 +157,10 @@ typedef struct {
 
 typedef struct _nei_log_runtime_st {
   nei_log_ring_st ring;
+  _nei_log_atomic64_t stat_producer_spin_loops;
+  _nei_log_atomic64_t stat_flush_wait_loops;
+  _nei_log_atomic64_t stat_consumer_wakeups;
+  _nei_log_atomic64_t stat_ring_high_watermark;
   int stop_requested;
   int initialized;
 #if defined(_WIN32)
@@ -218,6 +232,8 @@ int _nei_log_ensure_runtime_initialized(void);
 void _nei_log_shutdown_runtime(void);
 int _nei_log_enqueue_event(const uint8_t *event, size_t len);
 uint32_t _nei_log_get_runtime_init_count_for_test(void);
+int _nei_log_get_perf_stats_for_test(nei_log_perf_stats_st *out_stats);
+void _nei_log_reset_perf_stats_for_test(void);
 
 /* From log_thread_id.c */
 void _nei_log_tls_thread_id_cstr(const char **out_str, size_t *out_len);

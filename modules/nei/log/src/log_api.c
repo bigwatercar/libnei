@@ -184,21 +184,35 @@ void nei_log_flush(void) {
     return;
   }
 
-  /* Wake the consumer (handles the case where it is asleep on the condvar). */
+#if defined(_WIN32)
+  EnterCriticalSection(&s_runtime.mutex);
   _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
-
-  /* Spin-yield until the consumer has processed all slots up to flush_target.
-   * Each iteration re-signals in case the previous signal was lost, then
-   * yields the CPU.  Worst-case latency is bounded by the consumer's 10 ms
-   * timeout.  flush() is not a hot path so spin-yield is acceptable. */
   while (_NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos) < flush_target) {
-    _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
-    _NEI_LOG_CPU_YIELD();
+    (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&s_runtime.stat_flush_wait_loops, 1U);
+    SleepConditionVariableCS(&s_runtime.cond, &s_runtime.mutex, INFINITE);
   }
+  LeaveCriticalSection(&s_runtime.mutex);
+#else
+  pthread_mutex_lock(&s_runtime.mutex);
+  _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
+  while (_NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos) < flush_target) {
+    (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&s_runtime.stat_flush_wait_loops, 1U);
+    pthread_cond_wait(&s_runtime.cond, &s_runtime.mutex);
+  }
+  pthread_mutex_unlock(&s_runtime.mutex);
+#endif
 }
 
 uint32_t nei_log_get_runtime_init_count_for_test(void) {
   return _nei_log_get_runtime_init_count_for_test();
+}
+
+int nei_log_get_perf_stats_for_test(nei_log_perf_stats_st *out_stats) {
+  return _nei_log_get_perf_stats_for_test(out_stats);
+}
+
+void nei_log_reset_perf_stats_for_test(void) {
+  _nei_log_reset_perf_stats_for_test();
 }
 
 #pragma endregion

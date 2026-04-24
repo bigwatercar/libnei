@@ -41,7 +41,10 @@ namespace {
 
 constexpr int kMemoryIters = 1'000'000;
 constexpr int kFileIters = 100'000;
-/** Sync file mode: NEI flush-per-log is costly; keep count lower than kFileIters. */
+/**
+ * Sync file mode: flush-after-each-log is intentionally expensive.
+ * Keep this high to stress per-call delivery behavior consistently.
+ */
 constexpr int kFileSyncIters = 10'000;
 
 void ensure_out_dir() {

@@ -2,6 +2,38 @@
 
 #pragma region sink implementation
 
+static uint32_t _nei_log_parse_env_u32(const char *name, uint32_t fallback) {
+  const char *s = getenv(name);
+  char *end = NULL;
+  unsigned long v = 0UL;
+  if (s == NULL || s[0] == '\0') {
+    return fallback;
+  }
+  v = strtoul(s, &end, 10);
+  if (end == s || (end != NULL && *end != '\0') || v > 0xFFFFFFFFUL) {
+    return fallback;
+  }
+  return (uint32_t)v;
+}
+
+static void _nei_log_file_write_line(FILE *fp, const char *message, size_t length) {
+  if (fp == NULL || message == NULL) {
+    return;
+  }
+
+  /* Fast path for short lines: one fwrite call avoids extra libc overhead. */
+  if (length <= 1023U) {
+    char line[1024 + 1];
+    memcpy(line, message, length);
+    line[length] = '\n';
+    (void)fwrite(line, 1U, length + 1U, fp);
+    return;
+  }
+
+  (void)fwrite(message, 1U, length, fp);
+  (void)fputc('\n', fp);
+}
+
 void _nei_log_default_file_llog(const nei_log_sink_st *sink, nei_log_level_e level, const char *message, size_t length) {
   nei_log_default_file_sink_ctx_st *ctx = NULL;
   (void)level;
@@ -12,9 +44,8 @@ void _nei_log_default_file_llog(const nei_log_sink_st *sink, nei_log_level_e lev
   if (ctx == NULL || ctx->magic != _NEI_LOG_DEFAULT_FILE_SINK_MAGIC || ctx->fp == NULL) {
     return;
   }
-  (void)fwrite(message, 1U, length, ctx->fp);
-  (void)fputc('\n', ctx->fp);
-  /* Batch flush: only fflush after every N logs (default 100). */
+  _nei_log_file_write_line(ctx->fp, message, length);
+  /* Batch flush: only fflush after every N logs (default 256). */
   if (ctx->flush_interval > 0U) {
     ctx->flush_counter++;
     if (ctx->flush_counter >= ctx->flush_interval) {
@@ -36,9 +67,8 @@ void _nei_log_default_file_vlog(const nei_log_sink_st *sink, int verbose, const 
     return;
   }
   (void)verbose;
-  (void)fwrite(message, 1U, length, ctx->fp);
-  (void)fputc('\n', ctx->fp);
-  /* Batch flush: only fflush after every N logs (default 100). */
+  _nei_log_file_write_line(ctx->fp, message, length);
+  /* Batch flush: only fflush after every N logs (default 256). */
   if (ctx->flush_interval > 0U) {
     ctx->flush_counter++;
     if (ctx->flush_counter >= ctx->flush_interval) {
@@ -96,6 +126,8 @@ nei_log_sink_st *nei_log_create_default_file_sink(const char *filename) {
   nei_log_sink_st *sink = NULL;
   nei_log_default_file_sink_ctx_st *ctx = NULL;
   FILE *fp = NULL;
+  uint32_t flush_interval = 0U;
+  uint32_t file_buffer_bytes = 0U;
 
   if (filename == NULL || filename[0] == '\0') {
     return NULL;
@@ -112,6 +144,12 @@ nei_log_sink_st *nei_log_create_default_file_sink(const char *filename) {
     return NULL;
   }
 
+  flush_interval = _nei_log_parse_env_u32("NEI_LOG_FILE_FLUSH_INTERVAL", 256U);
+  file_buffer_bytes = _nei_log_parse_env_u32("NEI_LOG_FILE_BUFFER_BYTES", 1024U * 1024U);
+  if (file_buffer_bytes > 0U) {
+    (void)setvbuf(fp, NULL, _IOFBF, (size_t)file_buffer_bytes);
+  }
+
   sink = (nei_log_sink_st *)calloc(1U, sizeof(*sink));
   ctx = (nei_log_default_file_sink_ctx_st *)calloc(1U, sizeof(*ctx));
   if (sink == NULL || ctx == NULL) {
@@ -126,7 +164,7 @@ nei_log_sink_st *nei_log_create_default_file_sink(const char *filename) {
   ctx->magic = _NEI_LOG_DEFAULT_FILE_SINK_MAGIC;
   ctx->fp = fp;
   ctx->flush_counter = 0U;
-  ctx->flush_interval = 100U; /* Flush every 100 logs by default. */
+  ctx->flush_interval = flush_interval; /* default 256; 0 means always fflush. */
 
   sink->llog = _nei_log_default_file_llog;
   sink->vlog = _nei_log_default_file_vlog;

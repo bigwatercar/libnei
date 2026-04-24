@@ -77,6 +77,7 @@ struct BenchmarkConfigGuard {
 
 void run_log_benchmark(const std::string &name, std::function<void()> log_func, int iterations = 1000000) {
   LogCollector collector;
+  nei_log_perf_stats_st stats = {};
   nei_log_sink_st sink = {};
   sink.llog = CollectLevelLog;
   sink.opaque = &collector;
@@ -84,25 +85,44 @@ void run_log_benchmark(const std::string &name, std::function<void()> log_func, 
   BenchmarkConfigGuard guard;
   guard.set_primary_sink(&sink);
 
-  auto start = std::chrono::high_resolution_clock::now();
+  nei_log_reset_perf_stats_for_test();
+
+  auto start_enqueue = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iterations; ++i) {
     log_func();
   }
-  nei_log_flush();
-  auto end = std::chrono::high_resolution_clock::now();
+  auto end_enqueue = std::chrono::high_resolution_clock::now();
 
-  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-  double avg_time = static_cast<double>(duration.count()) / iterations;
+  auto start_flush = std::chrono::high_resolution_clock::now();
+  nei_log_flush();
+  auto end_flush = std::chrono::high_resolution_clock::now();
+
+  (void)nei_log_get_perf_stats_for_test(&stats);
+
+  auto enqueue_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_enqueue - start_enqueue);
+  auto flush_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_flush - start_flush);
+  auto e2e_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_flush - start_enqueue);
+  double enqueue_avg = static_cast<double>(enqueue_duration.count()) / iterations;
+  double e2e_avg = static_cast<double>(e2e_duration.count()) / iterations;
 
   std::cout << name << ":\n";
   std::cout << "  Iterations: " << iterations << "\n";
-  std::cout << "  Total time: " << duration.count() << " microseconds\n";
-  std::cout << "  Average time per log: " << avg_time << " microseconds\n";
-  std::cout << "  Logs per second: " << (1000000.0 / avg_time) << "\n\n";
+  std::cout << "  Enqueue total: " << enqueue_duration.count() << " microseconds\n";
+  std::cout << "  Enqueue avg per log: " << enqueue_avg << " microseconds\n";
+  std::cout << "  Flush total: " << flush_duration.count() << " microseconds\n";
+  std::cout << "  E2E total: " << e2e_duration.count() << " microseconds\n";
+  std::cout << "  E2E avg per log: " << e2e_avg << " microseconds\n";
+  std::cout << "  Enqueue logs/sec: " << (1000000.0 / enqueue_avg) << "\n";
+  std::cout << "  E2E logs/sec: " << (1000000.0 / e2e_avg) << "\n";
+  std::cout << "  Runtime stats: producer_spins=" << stats.producer_spin_loops
+            << ", flush_wait_loops=" << stats.flush_wait_loops
+            << ", consumer_wakeups=" << stats.consumer_wakeups
+            << ", ring_hwm=" << stats.ring_high_watermark << "\n\n";
 }
 
 void run_vlog_benchmark(const std::string &name, std::function<void()> log_func, int iterations = 1000000) {
   LogCollector collector;
+  nei_log_perf_stats_st stats = {};
   nei_log_sink_st sink = {};
   sink.vlog = CollectVerboseLog;
   sink.opaque = &collector;
@@ -110,27 +130,46 @@ void run_vlog_benchmark(const std::string &name, std::function<void()> log_func,
   BenchmarkConfigGuard guard;
   guard.set_primary_sink(&sink);
 
-  auto start = std::chrono::high_resolution_clock::now();
+  nei_log_reset_perf_stats_for_test();
+
+  auto start_enqueue = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iterations; ++i) {
     log_func();
   }
-  nei_log_flush();
-  auto end = std::chrono::high_resolution_clock::now();
+  auto end_enqueue = std::chrono::high_resolution_clock::now();
 
-  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-  double avg_time = static_cast<double>(duration.count()) / iterations;
+  auto start_flush = std::chrono::high_resolution_clock::now();
+  nei_log_flush();
+  auto end_flush = std::chrono::high_resolution_clock::now();
+
+  (void)nei_log_get_perf_stats_for_test(&stats);
+
+  auto enqueue_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_enqueue - start_enqueue);
+  auto flush_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_flush - start_flush);
+  auto e2e_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_flush - start_enqueue);
+  double enqueue_avg = static_cast<double>(enqueue_duration.count()) / iterations;
+  double e2e_avg = static_cast<double>(e2e_duration.count()) / iterations;
 
   std::cout << name << ":\n";
   std::cout << "  Iterations: " << iterations << "\n";
-  std::cout << "  Total time: " << duration.count() << " microseconds\n";
-  std::cout << "  Average time per log: " << avg_time << " microseconds\n";
-  std::cout << "  Logs per second: " << (1000000.0 / avg_time) << "\n\n";
+  std::cout << "  Enqueue total: " << enqueue_duration.count() << " microseconds\n";
+  std::cout << "  Enqueue avg per log: " << enqueue_avg << " microseconds\n";
+  std::cout << "  Flush total: " << flush_duration.count() << " microseconds\n";
+  std::cout << "  E2E total: " << e2e_duration.count() << " microseconds\n";
+  std::cout << "  E2E avg per log: " << e2e_avg << " microseconds\n";
+  std::cout << "  Enqueue logs/sec: " << (1000000.0 / enqueue_avg) << "\n";
+  std::cout << "  E2E logs/sec: " << (1000000.0 / e2e_avg) << "\n";
+  std::cout << "  Runtime stats: producer_spins=" << stats.producer_spin_loops
+            << ", flush_wait_loops=" << stats.flush_wait_loops
+            << ", consumer_wakeups=" << stats.consumer_wakeups
+            << ", ring_hwm=" << stats.ring_high_watermark << "\n\n";
 }
 
 void run_file_log_benchmark(const std::string &name,
                             std::function<void()> log_func,
                             const std::string &filename,
                             int iterations = 100000) {
+  nei_log_perf_stats_st stats = {};
   // Create directory if it doesn't exist
 #ifdef _WIN32
   _mkdir("C:\\var");
@@ -148,21 +187,39 @@ void run_file_log_benchmark(const std::string &name,
     BenchmarkConfigGuard guard;
     guard.set_primary_sink(file_sink);
 
-    auto start = std::chrono::high_resolution_clock::now();
+    nei_log_reset_perf_stats_for_test();
+
+    auto start_enqueue = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < iterations; ++i) {
       log_func();
     }
-    nei_log_flush();
-    auto end = std::chrono::high_resolution_clock::now();
+    auto end_enqueue = std::chrono::high_resolution_clock::now();
 
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    double avg_time = static_cast<double>(duration.count()) / iterations;
+    auto start_flush = std::chrono::high_resolution_clock::now();
+    nei_log_flush();
+    auto end_flush = std::chrono::high_resolution_clock::now();
+
+    (void)nei_log_get_perf_stats_for_test(&stats);
+
+    auto enqueue_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_enqueue - start_enqueue);
+    auto flush_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_flush - start_flush);
+    auto e2e_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_flush - start_enqueue);
+    double enqueue_avg = static_cast<double>(enqueue_duration.count()) / iterations;
+    double e2e_avg = static_cast<double>(e2e_duration.count()) / iterations;
 
     std::cout << name << " (File: " << filename << "):\n";
     std::cout << "  Iterations: " << iterations << "\n";
-    std::cout << "  Total time: " << duration.count() << " microseconds\n";
-    std::cout << "  Average time per log: " << avg_time << " microseconds\n";
-    std::cout << "  Logs per second: " << (1000000.0 / avg_time) << "\n";
+    std::cout << "  Enqueue total: " << enqueue_duration.count() << " microseconds\n";
+    std::cout << "  Enqueue avg per log: " << enqueue_avg << " microseconds\n";
+    std::cout << "  Flush total: " << flush_duration.count() << " microseconds\n";
+    std::cout << "  E2E total: " << e2e_duration.count() << " microseconds\n";
+    std::cout << "  E2E avg per log: " << e2e_avg << " microseconds\n";
+    std::cout << "  Enqueue logs/sec: " << (1000000.0 / enqueue_avg) << "\n";
+    std::cout << "  E2E logs/sec: " << (1000000.0 / e2e_avg) << "\n";
+    std::cout << "  Runtime stats: producer_spins=" << stats.producer_spin_loops
+              << ", flush_wait_loops=" << stats.flush_wait_loops
+              << ", consumer_wakeups=" << stats.consumer_wakeups
+              << ", ring_hwm=" << stats.ring_high_watermark << "\n";
   }
 
   // Destroy sink first
@@ -226,20 +283,38 @@ int main(int argc, char **argv) {
 
   auto start = std::chrono::high_resolution_clock::now();
   const int iterations = 1000000;
+  nei_log_perf_stats_st verbose_stats = {};
+  nei_log_reset_perf_stats_for_test();
   for (int i = 0; i < iterations; ++i) {
     nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", "verbose message %s", "verbose");
   }
+  auto enqueue_end = std::chrono::high_resolution_clock::now();
+
+  auto flush_start = std::chrono::high_resolution_clock::now();
   nei_log_flush();
   auto end = std::chrono::high_resolution_clock::now();
 
-  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-  double avg_time = static_cast<double>(duration.count()) / iterations;
+  (void)nei_log_get_perf_stats_for_test(&verbose_stats);
+
+  auto enqueue_duration = std::chrono::duration_cast<std::chrono::microseconds>(enqueue_end - start);
+  auto flush_duration = std::chrono::duration_cast<std::chrono::microseconds>(end - flush_start);
+  auto e2e_duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  double enqueue_avg = static_cast<double>(enqueue_duration.count()) / iterations;
+  double e2e_avg = static_cast<double>(e2e_duration.count()) / iterations;
 
   std::cout << "Log Verbose:\n";
   std::cout << "  Iterations: " << iterations << "\n";
-  std::cout << "  Total time: " << duration.count() << " microseconds\n";
-  std::cout << "  Average time per log: " << avg_time << " microseconds\n";
-  std::cout << "  Logs per second: " << (1000000.0 / avg_time) << "\n\n";
+  std::cout << "  Enqueue total: " << enqueue_duration.count() << " microseconds\n";
+  std::cout << "  Enqueue avg per log: " << enqueue_avg << " microseconds\n";
+  std::cout << "  Flush total: " << flush_duration.count() << " microseconds\n";
+  std::cout << "  E2E total: " << e2e_duration.count() << " microseconds\n";
+  std::cout << "  E2E avg per log: " << e2e_avg << " microseconds\n";
+  std::cout << "  Enqueue logs/sec: " << (1000000.0 / enqueue_avg) << "\n";
+  std::cout << "  E2E logs/sec: " << (1000000.0 / e2e_avg) << "\n";
+  std::cout << "  Runtime stats: producer_spins=" << verbose_stats.producer_spin_loops
+            << ", flush_wait_loops=" << verbose_stats.flush_wait_loops
+            << ", consumer_wakeups=" << verbose_stats.consumer_wakeups
+            << ", ring_hwm=" << verbose_stats.ring_high_watermark << "\n\n";
 
   run_vlog_benchmark("Log Verbose (literal)", []() {
     static const char body[] = "verbose literal body";

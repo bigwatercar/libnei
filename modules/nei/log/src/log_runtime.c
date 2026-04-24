@@ -9,12 +9,46 @@ static DWORD WINAPI _nei_log_consumer_thread(LPVOID arg);
 static void *_nei_log_consumer_thread(void *arg);
 #endif
 
+/* Forward declaration */
+static void _nei_log_process_events(const uint8_t *buf, size_t size);
+
 nei_log_runtime_st s_runtime = {
   .stop_requested = 0,
   .initialized = 0,
 };
 
 static uint32_t s_runtime_init_count = 0U;
+
+static void _nei_log_update_ring_hwm(uint64_t depth) {
+#if defined(_WIN32)
+  for (;;) {
+    uint64_t old = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_ring_high_watermark);
+    if (depth <= old) {
+      return;
+    }
+    if ((uint64_t)InterlockedCompareExchange64((volatile LONGLONG *)&s_runtime.stat_ring_high_watermark,
+                                               (LONGLONG)depth,
+                                               (LONGLONG)old) == old) {
+      return;
+    }
+  }
+#else
+  for (;;) {
+    uint64_t old = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_ring_high_watermark);
+    if (depth <= old) {
+      return;
+    }
+    if (__atomic_compare_exchange_n(&s_runtime.stat_ring_high_watermark,
+                                    &old,
+                                    depth,
+                                    0,
+                                    __ATOMIC_ACQ_REL,
+                                    __ATOMIC_ACQUIRE)) {
+      return;
+    }
+  }
+#endif
+}
 
 #if defined(_WIN32)
 static INIT_ONCE s_runtime_init_once = INIT_ONCE_STATIC_INIT;
@@ -100,6 +134,24 @@ uint32_t _nei_log_get_runtime_init_count_for_test(void) {
   return s_runtime_init_count;
 }
 
+int _nei_log_get_perf_stats_for_test(nei_log_perf_stats_st *out_stats) {
+  if (out_stats == NULL) {
+    return -1;
+  }
+  out_stats->producer_spin_loops = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_producer_spin_loops);
+  out_stats->flush_wait_loops = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_flush_wait_loops);
+  out_stats->consumer_wakeups = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_consumer_wakeups);
+  out_stats->ring_high_watermark = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_ring_high_watermark);
+  return 0;
+}
+
+void _nei_log_reset_perf_stats_for_test(void) {
+  _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_producer_spin_loops, 0U);
+  _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_flush_wait_loops, 0U);
+  _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_consumer_wakeups, 0U);
+  _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_ring_high_watermark, 0U);
+}
+
 void _nei_log_shutdown_runtime(void) {
   if (!s_runtime.initialized) {
     return;
@@ -140,9 +192,6 @@ void _nei_log_publish_pending_buffer(nei_log_runtime_st *rt, int pending_index) 
 
 /* ── Ring-buffer helpers (consumer-side) ──────────────────────────────────── */
 
-/* Forward declaration — defined in the consumer region below. */
-static void _nei_log_process_events(const uint8_t *buf, size_t size);
-
 /** Returns non-zero if the next slot the consumer should read is committed. */
 static int _nei_log_ring_has_ready_slot(nei_log_ring_st *ring) {
   uint64_t cpos = _NEI_LOG_ATOMIC_LOAD64(&ring->consumer_pos);
@@ -154,7 +203,8 @@ static int _nei_log_ring_has_ready_slot(nei_log_ring_st *ring) {
 }
 
 /** Consume all committed slots in order; stops at the first uncommitted one. */
-static void _nei_log_drain_ring(nei_log_ring_st *ring) {
+static uint64_t _nei_log_drain_ring(nei_log_ring_st *ring) {
+  uint64_t drained = 0U;
   for (;;) {
     uint64_t cpos = _NEI_LOG_ATOMIC_LOAD64(&ring->consumer_pos);
     uint32_t idx = (uint32_t)(cpos % (uint64_t)_NEI_LOG_RING_SLOTS);
@@ -166,14 +216,16 @@ static void _nei_log_drain_ring(nei_log_ring_st *ring) {
     /* Release slot so producers may reuse it. */
     _NEI_LOG_ATOMIC_STORE32(&slot->state, 0U);
     _NEI_LOG_ATOMIC_STORE64(&ring->consumer_pos, cpos + 1U);
+    drained += 1U;
   }
+  return drained;
 }
 
 int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
   uint64_t pos;
+  uint64_t spins = 0U;
   uint32_t idx;
   nei_log_ring_slot_st *slot;
-  int spins;
 
   if (event == NULL || len == 0U || len > _NEI_LOG_EVENT_BUFFER_SIZE || !s_runtime.initialized) {
     return -1;
@@ -183,16 +235,40 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
   pos = _NEI_LOG_ATOMIC_FETCH_ADD64(&s_runtime.ring.write_pos, 1U);
   idx = (uint32_t)(pos % (uint64_t)_NEI_LOG_RING_SLOTS);
   slot = &s_runtime.ring.slots[idx];
+  _nei_log_update_ring_hwm((pos + 1U) - _NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos));
 
-  /* Spin-wait for the slot to be empty (ring-full back-pressure).
-   * With 256 slots the ring is far deeper than typical burst depth.
-   * After _NEI_LOG_RING_FULL_SPINS iterations, drop rather than block. */
-  spins = 0;
+  /* Spin-wait for the reserved slot to be released by the consumer.
+   * IMPORTANT: once write_pos is incremented we must eventually publish this
+   * exact sequence number. Dropping here would leave a "hole" and stall flush
+   * forever because consumer_pos can only advance in order. */
   while (_NEI_LOG_ATOMIC_LOAD32(&slot->state) != 0U) {
-    if (++spins > _NEI_LOG_RING_FULL_SPINS) {
-      return -1; /* ring full — drop this event */
+    spins += 1U;
+    if (spins <= _NEI_LOG_RING_WAIT_RELAX_ITERS) {
+      _NEI_LOG_CPU_YIELD();
+      continue;
     }
-    _NEI_LOG_CPU_YIELD();
+    if (spins <= _NEI_LOG_RING_WAIT_YIELD_ITERS) {
+      _NEI_LOG_THREAD_YIELD();
+      continue;
+    }
+
+#if defined(_WIN32)
+    EnterCriticalSection(&s_runtime.mutex);
+    while (_NEI_LOG_ATOMIC_LOAD32(&slot->state) != 0U && !s_runtime.stop_requested) {
+      SleepConditionVariableCS(&s_runtime.cond, &s_runtime.mutex, INFINITE);
+    }
+    LeaveCriticalSection(&s_runtime.mutex);
+#else
+    pthread_mutex_lock(&s_runtime.mutex);
+    while (_NEI_LOG_ATOMIC_LOAD32(&slot->state) != 0U && !s_runtime.stop_requested) {
+      pthread_cond_wait(&s_runtime.cond, &s_runtime.mutex);
+    }
+    pthread_mutex_unlock(&s_runtime.mutex);
+#endif
+  }
+
+  if (spins > 0U) {
+    (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&s_runtime.stat_producer_spin_loops, spins);
   }
 
   /* Write the serialized event, then publish with a store-release. */
@@ -200,10 +276,16 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
   memcpy(slot->data, event, len);
   _NEI_LOG_ATOMIC_STORE32(&slot->state, 1U);
 
-  /* Wake the consumer.  WakeConditionVariable (Windows) may be called without
-   * owning the critical section.  pthread_cond_signal (POSIX) is safe here
-   * because the consumer uses a 10 ms timeout to handle any lost wakeup. */
+  /* Signal while holding the mutex so consumer-side wait has no lost-wakeup window. */
+#if defined(_WIN32)
+  EnterCriticalSection(&s_runtime.mutex);
   _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
+  LeaveCriticalSection(&s_runtime.mutex);
+#else
+  pthread_mutex_lock(&s_runtime.mutex);
+  _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
+  pthread_mutex_unlock(&s_runtime.mutex);
+#endif
   return 0;
 }
 
@@ -281,39 +363,45 @@ static void *_nei_log_consumer_thread(void *arg) {
 #if defined(_WIN32)
   EnterCriticalSection(&rt->mutex);
   for (;;) {
-    /* Sleep until a slot is committed, stop is requested, or 10 ms elapses.
-     * The timeout handles the rare case where a producer's WakeConditionVariable
-     * fires before the consumer has entered SleepConditionVariableCS. */
     while (!_nei_log_ring_has_ready_slot(&rt->ring) && !rt->stop_requested) {
-      SleepConditionVariableCS(&rt->cond, &rt->mutex, 10 /* ms */);
+      SleepConditionVariableCS(&rt->cond, &rt->mutex, INFINITE);
+      (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_wakeups, 1U);
     }
     if (rt->stop_requested && !_nei_log_ring_has_ready_slot(&rt->ring)) {
       LeaveCriticalSection(&rt->mutex);
-      _nei_log_drain_ring(&rt->ring); /* final drain */
+      (void)_nei_log_drain_ring(&rt->ring); /* final drain */
       break;
     }
     LeaveCriticalSection(&rt->mutex);
-    _nei_log_drain_ring(&rt->ring);
+    if (_nei_log_drain_ring(&rt->ring) > 0U) {
+      EnterCriticalSection(&rt->mutex);
+      _NEI_LOG_BROADCAST_COND(&rt->cond);
+      LeaveCriticalSection(&rt->mutex);
+      EnterCriticalSection(&rt->mutex);
+      continue;
+    }
     EnterCriticalSection(&rt->mutex);
   }
 #else
   pthread_mutex_lock(&rt->mutex);
   for (;;) {
-    struct timespec ts;
-    /* 10 ms timeout: handles lost wakeup when producer signals without lock. */
     while (!_nei_log_ring_has_ready_slot(&rt->ring) && !rt->stop_requested) {
-      clock_gettime(CLOCK_REALTIME, &ts);
-      ts.tv_nsec += 10000000L; /* +10 ms */
-      if (ts.tv_nsec >= 1000000000L) { ts.tv_sec += 1; ts.tv_nsec -= 1000000000L; }
-      pthread_cond_timedwait(&rt->cond, &rt->mutex, &ts);
+      pthread_cond_wait(&rt->cond, &rt->mutex);
+      (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_wakeups, 1U);
     }
     if (rt->stop_requested && !_nei_log_ring_has_ready_slot(&rt->ring)) {
       pthread_mutex_unlock(&rt->mutex);
-      _nei_log_drain_ring(&rt->ring); /* final drain */
+      (void)_nei_log_drain_ring(&rt->ring); /* final drain */
       break;
     }
     pthread_mutex_unlock(&rt->mutex);
-    _nei_log_drain_ring(&rt->ring);
+    if (_nei_log_drain_ring(&rt->ring) > 0U) {
+      pthread_mutex_lock(&rt->mutex);
+      _NEI_LOG_BROADCAST_COND(&rt->cond);
+      pthread_mutex_unlock(&rt->mutex);
+      pthread_mutex_lock(&rt->mutex);
+      continue;
+    }
     pthread_mutex_lock(&rt->mutex);
   }
 #endif
