@@ -8,6 +8,55 @@ static _NEI_LOG_TLS uint8_t _s_tls_event_buf[_NEI_LOG_EVENT_BUFFER_SIZE];
  * or a sink that itself calls a log API). Depth > 1 → drop silently.
  */
 static _NEI_LOG_TLS int _s_tls_log_depth = 0;
+/**
+ * @brief Per-thread snapshot version of the global config table.
+ * When this matches the global s_config_snapshot, _s_tls_config_ptrs is valid
+ * for all slots and the read-lock can be skipped entirely.
+ */
+static _NEI_LOG_TLS uint64_t _s_tls_config_snapshot = 0U;
+/**
+ * @brief Per-thread cached copy of all config slot pointers (16 × ptr = 128 B).
+ * Populated once per snapshot epoch; amortises the rwlock cost across every
+ * log call on a thread, regardless of which config handle is used.
+ */
+static _NEI_LOG_TLS nei_log_config_st *_s_tls_config_ptrs[_NEI_LOG_MAX_CONFIGS];
+
+/**
+ * @brief Lock-free config lookup for the hot logging path.
+ *
+ * Fast path  (config table unchanged since last call on this thread):
+ *   One atomic acquire-load of the global snapshot counter, then a direct
+ *   array index into the TLS copy — no lock, no cross-thread cache-line
+ *   traffic.
+ *
+ * Slow path  (first call on this thread, or any config slot was modified):
+ *   Acquire the shared read-lock once, re-read the snapshot for consistency,
+ *   copy all _NEI_LOG_MAX_CONFIGS pointers into TLS, then release the lock.
+ *   Subsequent calls on this thread skip this path until the next config change.
+ */
+static nei_log_config_st *_nei_log_get_config_fast(nei_log_config_handle_t handle) {
+  uint64_t snap;
+  size_t slot;
+
+  snap = _nei_log_config_snapshot_load();
+  if (_s_tls_config_snapshot != snap) {
+    /* Slow path: repopulate the full TLS cache under the read-lock so that
+     * the pointer array and the snapshot value are mutually consistent.
+     * (The snapshot is only bumped under the write-lock, so reading it while
+     * holding the read-lock gives a stable value paired with the array.) */
+    _nei_log_config_lock_read();
+    _nei_log_ensure_config_table_initialized();
+    snap = _nei_log_config_snapshot_load();
+    memcpy(_s_tls_config_ptrs, s_config_ptrs, sizeof(_s_tls_config_ptrs));
+    _nei_log_config_unlock_read();
+    _s_tls_config_snapshot = snap;
+  }
+
+  if (_nei_log_slot_from_handle(handle, &slot) != 0) {
+    return NULL;
+  }
+  return _s_tls_config_ptrs[slot];
+}
 
 static int _nei_log_is_consumer_thread(void) {
   if (!s_runtime.initialized) {
@@ -40,7 +89,7 @@ void nei_llog(nei_log_config_handle_t config_handle,
   (void)_nei_log_ensure_runtime_initialized();
 
   /* Early filter: check if this level is enabled before serialization. */
-  config = nei_log_get_config(config_handle);
+  config = _nei_log_get_config_fast(config_handle);
   if (config != NULL) {
     const uint32_t mask = (uint32_t)(1U << (uint32_t)level);
     if (level < (int32_t)NEI_L_VERBOSE || level > (int32_t)NEI_L_FATAL ||
@@ -80,7 +129,7 @@ void nei_vlog(nei_log_config_handle_t config_handle,
   (void)_nei_log_ensure_runtime_initialized();
 
   /* Early filter: check if this verbose level passes threshold before serialization. */
-  config = nei_log_get_config(config_handle);
+  config = _nei_log_get_config_fast(config_handle);
   if (config != NULL && config->verbose_threshold >= 0 && verbose > config->verbose_threshold) {
     --_s_tls_log_depth;
     return; /* Verbose level exceeds threshold, skip serialization. */
