@@ -100,7 +100,7 @@ int _nei_log_ensure_runtime_initialized(void) {
   return 0;
 }
 
-uint32_t _nei_log_runtime_init_count_for_test(void) {
+uint32_t _nei_log_get_runtime_init_count_for_test(void) {
   return s_runtime_init_count;
 }
 

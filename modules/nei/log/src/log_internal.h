@@ -159,7 +159,7 @@ void _nei_log_shutdown_runtime(void);
 int _nei_log_enqueue_event(const uint8_t *event, size_t len);
 void _nei_log_wait_until_buffer_not_consuming(nei_log_runtime_st *rt, int buffer_index);
 void _nei_log_publish_pending_buffer(nei_log_runtime_st *rt, int pending_index);
-uint32_t _nei_log_runtime_init_count_for_test(void);
+uint32_t _nei_log_get_runtime_init_count_for_test(void);
 
 /* From log_thread_id.c */
 void _nei_log_tls_thread_id_cstr(const char **out_str, size_t *out_len);

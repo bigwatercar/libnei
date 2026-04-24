@@ -223,7 +223,7 @@ TEST(LogCTest, ConcurrentFirstUseInitializationIsSafe) {
   config.sinks[1] = nullptr;
   nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
   ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
-  const uint32_t init_count_before = nei_log_runtime_init_count_for_test();
+  const uint32_t init_count_before = nei_log_get_runtime_init_count_for_test();
 
   constexpr int kThreadCount = 128;
   std::atomic<int> ready{0};
@@ -258,7 +258,7 @@ TEST(LogCTest, ConcurrentFirstUseInitializationIsSafe) {
       EXPECT_NE(msg.find("x"), std::string::npos);
     }
   }
-  EXPECT_EQ(nei_log_runtime_init_count_for_test(), (init_count_before == 0U) ? 1U : init_count_before);
+  EXPECT_EQ(nei_log_get_runtime_init_count_for_test(), (init_count_before == 0U) ? 1U : init_count_before);
 
   nei_log_remove_config(cfg_handle);
 }

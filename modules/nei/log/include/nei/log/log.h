@@ -431,7 +431,7 @@ NEI_API void nei_log_flush(void);
  *
  * @return Process-wide runtime initialization execution count.
  */
-NEI_API uint32_t nei_log_runtime_init_count_for_test(void);
+NEI_API uint32_t nei_log_get_runtime_init_count_for_test(void);
 
 /** @} */ /* end of nei_log_functions */
 
