@@ -92,7 +92,8 @@ typedef volatile uint64_t _nei_log_atomic64_t;
  */
 #define _NEI_LOG_RING_WAIT_RELAX_ITERS 64U
 #define _NEI_LOG_RING_WAIT_YIELD_ITERS 2048U
-#define _NEI_LOG_FLUSH_SPIN_ITERS 256U
+#define _NEI_LOG_FLUSH_SPIN_ITERS 1024U
+#define _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS 256U
 #define _NEI_LOG_DEFAULT_FILE_SINK_MAGIC 0x4B4E5346U
 
 /// @brief Compact serialized payload type tags.

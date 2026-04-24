@@ -347,6 +347,7 @@ static DWORD WINAPI _nei_log_consumer_thread(LPVOID arg) {
 #else
 static void *_nei_log_consumer_thread(void *arg) {
 #endif
+  uint32_t idle_spin = 0U;
   nei_log_runtime_st *rt = (nei_log_runtime_st *)arg;
   if (rt == NULL) {
 #if defined(_WIN32)
@@ -377,6 +378,16 @@ static void *_nei_log_consumer_thread(void *arg) {
       EnterCriticalSection(&rt->mutex);
       _NEI_LOG_BROADCAST_COND(&rt->cond);
       LeaveCriticalSection(&rt->mutex);
+      for (idle_spin = 0U; idle_spin < _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS; ++idle_spin) {
+        if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
+          break;
+        }
+        if ((idle_spin & 31U) == 31U) {
+          _NEI_LOG_THREAD_YIELD();
+        } else {
+          _NEI_LOG_CPU_YIELD();
+        }
+      }
       EnterCriticalSection(&rt->mutex);
       continue;
     }
@@ -399,6 +410,16 @@ static void *_nei_log_consumer_thread(void *arg) {
       pthread_mutex_lock(&rt->mutex);
       _NEI_LOG_BROADCAST_COND(&rt->cond);
       pthread_mutex_unlock(&rt->mutex);
+      for (idle_spin = 0U; idle_spin < _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS; ++idle_spin) {
+        if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
+          break;
+        }
+        if ((idle_spin & 31U) == 31U) {
+          _NEI_LOG_THREAD_YIELD();
+        } else {
+          _NEI_LOG_CPU_YIELD();
+        }
+      }
       pthread_mutex_lock(&rt->mutex);
       continue;
     }
