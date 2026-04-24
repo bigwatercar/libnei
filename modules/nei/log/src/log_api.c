@@ -168,7 +168,10 @@ void nei_vlog_literal(nei_log_config_handle_t config_handle,
 
 void nei_log_flush(void) {
   uint64_t flush_target;
+  uint64_t consumer_pos;
+  uint64_t backlog;
   uint32_t spin;
+  uint32_t spin_limit;
 
   if (!s_runtime.initialized) {
     return;
@@ -184,12 +187,22 @@ void nei_log_flush(void) {
   if (flush_target == 0U) {
     return;
   }
-  if (_NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos) >= flush_target) {
+  consumer_pos = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos);
+  if (consumer_pos >= flush_target) {
     return;
   }
 
-  /* Short spin fast path for frequent flush calls (e.g. per-call benchmark). */
-  for (spin = 0U; spin < _NEI_LOG_FLUSH_SPIN_ITERS; ++spin) {
+  backlog = flush_target - consumer_pos;
+  if (backlog <= 2U) {
+    spin_limit = _NEI_LOG_FLUSH_SPIN_SHALLOW_ITERS;
+  } else if (backlog <= 8U) {
+    spin_limit = _NEI_LOG_FLUSH_SPIN_MID_ITERS;
+  } else {
+    spin_limit = _NEI_LOG_FLUSH_SPIN_BASE_ITERS;
+  }
+
+  /* Adaptive spin fast path: aggressive for tiny backlog (typical per-call flush). */
+  for (spin = 0U; spin < spin_limit; ++spin) {
     if (_NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos) >= flush_target) {
       return;
     }
