@@ -182,4 +182,8 @@ void nei_log_flush(void) {
 #endif
 }
 
+uint32_t nei_log_runtime_init_count_for_test(void) {
+  return _nei_log_runtime_init_count_for_test();
+}
+
 #pragma endregion

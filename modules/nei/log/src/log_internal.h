@@ -158,6 +158,7 @@ int _nei_log_ensure_runtime_initialized(void);
 void _nei_log_shutdown_runtime(void);
 int _nei_log_enqueue_event(const uint8_t *event, size_t len);
 void _nei_log_ensure_active_not_consuming(nei_log_runtime_st *rt);
+uint32_t _nei_log_runtime_init_count_for_test(void);
 
 /* From log_thread_id.c */
 void _nei_log_tls_thread_id_cstr(const char **out_str, size_t *out_len);

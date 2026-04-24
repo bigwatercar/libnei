@@ -5,6 +5,7 @@
 #include <cwchar>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <mutex>
 #include <string>
@@ -15,6 +16,8 @@
 
 #if defined(_WIN32)
 #include <Windows.h>
+#else
+#include <unistd.h>
 #endif
 
 namespace {
@@ -148,6 +151,24 @@ static std::string ExpectedMbFromWideForLogCTest(const wchar_t *ws) {
   return out;
 #endif
 }
+
+static std::string CurrentTestExecutablePath() {
+#if defined(_WIN32)
+  char path[MAX_PATH] = {0};
+  const DWORD n = GetModuleFileNameA(NULL, path, static_cast<DWORD>(sizeof(path)));
+  if (n == 0U || n >= static_cast<DWORD>(sizeof(path))) {
+    return std::string();
+  }
+  return std::string(path, static_cast<size_t>(n));
+#else
+  char path[4096] = {0};
+  const ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 1U);
+  if (n <= 0) {
+    return std::string();
+  }
+  return std::string(path, static_cast<size_t>(n));
+#endif
+}
 } // namespace
 
 TEST(LogCTest, FlushFromSinkCallbackDoesNotDeadlock) {
@@ -189,6 +210,71 @@ TEST(LogCTest, FlushFromSinkCallbackDoesNotDeadlock) {
     EXPECT_NE(collector.messages[0].find("v=3"), std::string::npos);
   }
   nei_log_remove_config(cfg_handle);
+}
+
+TEST(LogCTest, ConcurrentFirstUseInitializationIsSafe) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+  const uint32_t init_count_before = nei_log_runtime_init_count_for_test();
+
+  constexpr int kThreadCount = 128;
+  std::atomic<int> ready{0};
+  std::atomic<bool> start{false};
+  std::vector<std::thread> workers;
+  workers.reserve(static_cast<size_t>(kThreadCount));
+
+  for (int i = 0; i < kThreadCount; ++i) {
+    workers.emplace_back([&ready, &start, cfg_handle, i]() {
+      ready.fetch_add(1, std::memory_order_relaxed);
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      nei_llog_literal(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "concurrent-init", "x", 1U);
+    });
+  }
+
+  while (ready.load(std::memory_order_acquire) != kThreadCount) {
+    std::this_thread::yield();
+  }
+  start.store(true, std::memory_order_release);
+
+  for (auto &t : workers) {
+    t.join();
+  }
+
+  nei_log_flush();
+  {
+    std::lock_guard<std::mutex> lock(collector.mu);
+    ASSERT_GT(collector.messages.size(), 0U);
+    ASSERT_LE(collector.messages.size(), static_cast<size_t>(kThreadCount));
+    for (const auto &msg : collector.messages) {
+      EXPECT_NE(msg.find("x"), std::string::npos);
+    }
+  }
+  EXPECT_EQ(nei_log_runtime_init_count_for_test(), (init_count_before == 0U) ? 1U : init_count_before);
+
+  nei_log_remove_config(cfg_handle);
+}
+
+TEST(LogCTest, ConcurrentFirstUseInitializationStress) {
+  const std::string exe = CurrentTestExecutablePath();
+  ASSERT_FALSE(exe.empty());
+
+  constexpr int kRounds = 16;
+  for (int i = 0; i < kRounds; ++i) {
+    const std::string cmd =
+        "\"" + exe + "\" --gtest_filter=LogCTest.ConcurrentFirstUseInitializationIsSafe --gtest_brief=1";
+    const int rc = std::system(cmd.c_str());
+    ASSERT_EQ(rc, 0) << "round=" << i;
+  }
 }
 
 TEST(LogCTest, AsyncPipelineDeepCopiesStringPayload) {

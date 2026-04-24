@@ -18,37 +18,90 @@ nei_log_runtime_st s_runtime = {
     .initialized = 0,
 };
 
+static uint32_t s_runtime_init_count = 0U;
+
+#if defined(_WIN32)
+static INIT_ONCE s_runtime_init_once = INIT_ONCE_STATIC_INIT;
+static DWORD s_runtime_init_error = ERROR_SUCCESS;
+
+static BOOL CALLBACK _nei_log_runtime_init_once_callback(PINIT_ONCE init_once, PVOID param, PVOID *context) {
+  (void)init_once;
+  (void)param;
+  (void)context;
+
+  InitializeCriticalSection(&s_runtime.mutex);
+  InitializeConditionVariable(&s_runtime.cond);
+  s_runtime.thread = CreateThread(NULL, 0, _nei_log_consumer_thread, &s_runtime, 0, NULL);
+  if (s_runtime.thread == NULL) {
+    s_runtime_init_error = GetLastError();
+    DeleteCriticalSection(&s_runtime.mutex);
+    return FALSE;
+  }
+
+  s_runtime.stop_requested = 0;
+  s_runtime.initialized = 1;
+  s_runtime_init_count += 1U;
+  (void)atexit(_nei_log_shutdown_runtime);
+  s_runtime_init_error = ERROR_SUCCESS;
+  return TRUE;
+}
+#else
+static pthread_once_t s_runtime_init_once = PTHREAD_ONCE_INIT;
+static int s_runtime_init_error = 0;
+
+static void _nei_log_runtime_init_once_callback(void) {
+  int rc = 0;
+
+  rc = pthread_mutex_init(&s_runtime.mutex, NULL);
+  if (rc != 0) {
+    s_runtime_init_error = rc;
+    return;
+  }
+  rc = pthread_cond_init(&s_runtime.cond, NULL);
+  if (rc != 0) {
+    s_runtime_init_error = rc;
+    pthread_mutex_destroy(&s_runtime.mutex);
+    return;
+  }
+  rc = pthread_create(&s_runtime.thread, NULL, _nei_log_consumer_thread, &s_runtime);
+  if (rc != 0) {
+    s_runtime_init_error = rc;
+    pthread_cond_destroy(&s_runtime.cond);
+    pthread_mutex_destroy(&s_runtime.mutex);
+    return;
+  }
+
+  s_runtime.stop_requested = 0;
+  s_runtime.initialized = 1;
+  s_runtime_init_count += 1U;
+  (void)atexit(_nei_log_shutdown_runtime);
+  s_runtime_init_error = 0;
+}
+#endif
+
 int _nei_log_ensure_runtime_initialized(void) {
   if (s_runtime.initialized) {
     return 0;
   }
 
 #if defined(_WIN32)
-  InitializeCriticalSection(&s_runtime.mutex);
-  InitializeConditionVariable(&s_runtime.cond);
-  s_runtime.thread = CreateThread(NULL, 0, _nei_log_consumer_thread, &s_runtime, 0, NULL);
-  if (s_runtime.thread == NULL) {
-    DeleteCriticalSection(&s_runtime.mutex);
+  if (!InitOnceExecuteOnce(&s_runtime_init_once, _nei_log_runtime_init_once_callback, NULL, NULL)) {
     return -1;
   }
 #else
-  if (pthread_mutex_init(&s_runtime.mutex, NULL) != 0) {
-    return -1;
-  }
-  if (pthread_cond_init(&s_runtime.cond, NULL) != 0) {
-    pthread_mutex_destroy(&s_runtime.mutex);
-    return -1;
-  }
-  if (pthread_create(&s_runtime.thread, NULL, _nei_log_consumer_thread, &s_runtime) != 0) {
-    pthread_cond_destroy(&s_runtime.cond);
-    pthread_mutex_destroy(&s_runtime.mutex);
+  if (pthread_once(&s_runtime_init_once, _nei_log_runtime_init_once_callback) != 0) {
     return -1;
   }
 #endif
 
-  s_runtime.initialized = 1;
-  atexit(_nei_log_shutdown_runtime);
+  if (!s_runtime.initialized || s_runtime_init_error != 0) {
+    return -1;
+  }
   return 0;
+}
+
+uint32_t _nei_log_runtime_init_count_for_test(void) {
+  return s_runtime_init_count;
 }
 
 void _nei_log_shutdown_runtime(void) {

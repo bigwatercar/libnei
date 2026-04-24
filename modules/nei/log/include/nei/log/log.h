@@ -422,6 +422,17 @@ NEI_API void nei_vlog_literal(nei_log_config_handle_t config_handle,
  */
 NEI_API void nei_log_flush(void);
 
+/**
+ * @brief Return how many times the log runtime one-time initialization callback has executed.
+ *
+ * @details This API is intended for tests and diagnostics only. In a correct process-wide setup,
+ * the returned value should remain @c 0 before any logging API first-use and become @c 1 after
+ * initialization, without increasing again.
+ *
+ * @return Process-wide runtime initialization execution count.
+ */
+NEI_API uint32_t nei_log_runtime_init_count_for_test(void);
+
 /** @} */ /* end of nei_log_functions */
 
 /**
