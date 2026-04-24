@@ -185,6 +185,9 @@ typedef struct _nei_log_default_file_sink_ctx_st {
   FILE *fp;
   uint32_t flush_counter;  /* Batch flush: count logs since last fflush. */
   uint32_t flush_interval; /* Flush after this many logs (0=disable batching, always fflush). */
+  char *write_batch_buf;
+  size_t write_batch_cap;
+  size_t write_batch_used;
 } nei_log_default_file_sink_ctx_st;
 
 #define _NEI_LOG_MAX_CONFIGS 16U // includes default config
