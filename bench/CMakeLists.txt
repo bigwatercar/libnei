@@ -29,6 +29,11 @@ if(NEI_BENCHMARK_SPDLOG)
 
   add_executable(log_bench_compare log_bench_compare.cpp)
   target_link_libraries(log_bench_compare PRIVATE nei::all spdlog::spdlog)
+
+  if(BUILD_TESTING AND NEI_ENABLE_LONG_BENCH_TESTS)
+    add_test(NAME LogBenchCompareLong COMMAND log_bench_compare)
+    set_tests_properties(LogBenchCompareLong PROPERTIES LABELS "benchmark;long" TIMEOUT 1800)
+  endif()
 endif()
 
 if(WIN32 AND BUILD_SHARED_LIBS)

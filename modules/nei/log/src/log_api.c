@@ -168,6 +168,7 @@ void nei_vlog_literal(nei_log_config_handle_t config_handle,
 
 void nei_log_flush(void) {
   uint64_t flush_target;
+  uint32_t spin;
 
   if (!s_runtime.initialized) {
     return;
@@ -182,6 +183,21 @@ void nei_log_flush(void) {
   flush_target = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.write_pos);
   if (flush_target == 0U) {
     return;
+  }
+  if (_NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos) >= flush_target) {
+    return;
+  }
+
+  /* Short spin fast path for frequent flush calls (e.g. per-call benchmark). */
+  for (spin = 0U; spin < _NEI_LOG_FLUSH_SPIN_ITERS; ++spin) {
+    if (_NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos) >= flush_target) {
+      return;
+    }
+    if ((spin & 31U) == 31U) {
+      _NEI_LOG_THREAD_YIELD();
+    } else {
+      _NEI_LOG_CPU_YIELD();
+    }
   }
 
 #if defined(_WIN32)
