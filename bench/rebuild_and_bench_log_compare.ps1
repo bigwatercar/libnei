@@ -26,7 +26,11 @@ $logFiles = @(
     'C:\var\nei_cmp_multi_sync.log',
     'C:\var\spdlog_cmp_multi_sync.log',
     'C:\var\nei_cmp_literal_sync.log',
-    'C:\var\nei_cmp_vlog_literal_sync.log'
+    'C:\var\nei_cmp_vlog_literal_sync.log',
+    'C:\var\nei_cmp_simple_strict.log',
+    'C:\var\spdlog_cmp_simple_strict.log',
+    'C:\var\nei_cmp_multi_strict.log',
+    'C:\var\spdlog_cmp_multi_strict.log'
 )
 
 Get-Process -ErrorAction SilentlyContinue |
@@ -55,7 +59,7 @@ function Get-CompareCanonicalName {
 
     $name = $Benchmark -replace '^\[[^\]]+\]\s*', ''
     $name = $name -replace '^file\s+', ''
-    $name = $name -replace '\s*\((flush each log|async logger \+ flush each log)\)$', ''
+    $name = $name -replace '\s*\((flush request each log|async logger \+ flush request each log|sync flush each log)\)$', ''
     $name = $name.Trim()
 
     switch -Regex ($name) {
@@ -226,7 +230,8 @@ function Invoke-LogCompareBenchmark {
     $sectionOrder = @(
         'Memory (async, minimal sink)',
         'File (async file sink)',
-        'File (per-call delivery over async pipeline)'
+        'File (per-call flush request over async pipeline)',
+        'File (strict sync flush semantics)'
     )
 
     $benchmarkOrder = @(
@@ -243,12 +248,16 @@ function Invoke-LogCompareBenchmark {
         '[spdlog] file multi',
         '[NEI] file llog_literal',
         '[NEI] file vlog_literal',
-        '[NEI] file sync simple (flush each log)',
-        '[spdlog] file sync simple (async logger + flush each log)',
-        '[NEI] file sync multi (flush each log)',
-        '[spdlog] file sync multi (async logger + flush each log)',
-        '[NEI] file sync llog_literal (flush each log)',
-        '[NEI] file sync vlog_literal (flush each log)'
+        '[NEI] file sync simple (flush request each log)',
+        '[spdlog] file sync simple (async logger + flush request each log)',
+        '[NEI] file sync multi (flush request each log)',
+        '[spdlog] file sync multi (async logger + flush request each log)',
+        '[NEI] file sync llog_literal (flush request each log)',
+        '[NEI] file sync vlog_literal (flush request each log)',
+        '[NEI] file strict simple (sync flush each log)',
+        '[spdlog] file strict simple (sync flush each log)',
+        '[NEI] file strict multi (sync flush each log)',
+        '[spdlog] file strict multi (sync flush each log)'
     )
 
     $summary = @()

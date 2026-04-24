@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <fstream>
 #include <functional>
@@ -46,6 +47,64 @@ constexpr int kFileIters = 100'000;
  * Keep this high to stress per-call delivery behavior consistently.
  */
 constexpr int kFileSyncIters = 10'000;
+
+/**
+ * Strict sync mode uses fewer iterations because both sides execute true
+ * per-call disk flush behavior.
+ */
+constexpr int kFileStrictSyncIters = 5'000;
+
+class ScopedEnvVar {
+public:
+  ScopedEnvVar(const char *name, const char *value)
+      : name_(name), had_old_(false) {
+    if (name_ == nullptr || name_[0] == '\0') {
+      return;
+    }
+    const char *old = std::getenv(name_);
+    if (old != nullptr) {
+      had_old_ = true;
+      old_value_ = old;
+    }
+    set(value);
+  }
+
+  ~ScopedEnvVar() {
+    if (name_ == nullptr || name_[0] == '\0') {
+      return;
+    }
+    if (had_old_) {
+      set(old_value_.c_str());
+    } else {
+      unset();
+    }
+  }
+
+private:
+  void set(const char *value) {
+    if (value == nullptr) {
+      unset();
+      return;
+    }
+#if defined(_WIN32)
+    (void)_putenv_s(name_, value);
+#else
+    (void)setenv(name_, value, 1);
+#endif
+  }
+
+  void unset() {
+#if defined(_WIN32)
+    (void)_putenv_s(name_, "");
+#else
+    (void)unsetenv(name_);
+#endif
+  }
+
+  const char *name_;
+  bool had_old_;
+  std::string old_value_;
+};
 
 void ensure_out_dir() {
 #ifdef _WIN32
@@ -252,6 +311,17 @@ NeiBenchResult time_nei_file_sync_ms(F &&f, int iters, const char *path) {
   return result;
 }
 
+/**
+ * NEI strict sync: force sink to fflush each record and disable sink-side write batching,
+ * then keep per-call nei_log_flush as delivery barrier.
+ */
+template <class F>
+NeiBenchResult time_nei_file_strict_sync_ms(F &&f, int iters, const char *path) {
+  ScopedEnvVar env_flush_interval("NEI_LOG_FILE_FLUSH_INTERVAL", "1");
+  ScopedEnvVar env_write_batch("NEI_LOG_FILE_WRITE_BATCH_BYTES", "0");
+  return time_nei_file_sync_ms(std::forward<F>(f), iters, path);
+}
+
 // ---------------------------------------------------------------------------
 // spdlog: async + counter sink (memory) or basic_file_sink_mt (file)
 // ---------------------------------------------------------------------------
@@ -331,6 +401,24 @@ int64_t time_spdlog_file_sync_ms(F &&f, int iters, const std::string &path) {
   return micros;
 }
 
+/**
+ * Strict sync path for spdlog: synchronous logger + flush per call.
+ */
+template <class F>
+int64_t time_spdlog_file_strict_sync_ms(F &&f, int iters, const std::string &path) {
+  (void)std::remove(path.c_str());
+  auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path, true);
+  auto logger = std::make_shared<spdlog::logger>("nei_cmp_sync_strict", spdlog::sinks_init_list{sink});
+  const auto t0 = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < iters; ++i) {
+    f(logger);
+    logger->flush();
+  }
+  logger->flush();
+  const auto t1 = std::chrono::high_resolution_clock::now();
+  return std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+}
+
 } // namespace
 
 int main() {
@@ -338,7 +426,8 @@ int main() {
   std::cout << "==========================================\n";
   std::cout << "Memory:     " << kMemoryIters << " iters; sink = atomic++ only; time includes flush.\n";
   std::cout << "File async: " << kFileIters << " iters; async + file sink; both sides delete old files before run.\n";
-  std::cout << "Per-call:   " << kFileSyncIters << " iters; async logger + flush after each log on both sides.\n";
+  std::cout << "Per-call:   " << kFileSyncIters << " iters; async logger + flush request after each log on both sides.\n";
+  std::cout << "Strict:     " << kFileStrictSyncIters << " iters; per-call flush with strict sync semantics.\n";
   std::cout << "Fairness knobs: NEI log_thread_id forced OFF during benchmark.\n\n";
 
   std::cout << "--- Memory (async, minimal sink) ---\n\n";
@@ -510,7 +599,7 @@ int main() {
     }
   }
 
-  std::cout << "--- File (per-call delivery over async pipeline) ---\n\n";
+  std::cout << "--- File (per-call flush request over async pipeline) ---\n\n";
 
   const std::string nei_simple_sync = out_file("nei_cmp_simple_sync.log");
   const std::string spd_simple_sync = out_file("spdlog_cmp_simple_sync.log");
@@ -527,7 +616,7 @@ int main() {
     if (result.micros < 0) {
       std::cout << "[NEI] file sync simple: failed to create sink\n\n";
     } else {
-      print_stats("[NEI] file sync simple (flush each log)", kFileSyncIters, result.micros, result.stats);
+      print_stats("[NEI] file sync simple (flush request each log)", kFileSyncIters, result.micros, result.stats);
       print_file_size(nei_simple_sync);
     }
   }
@@ -537,7 +626,7 @@ int main() {
         [](const std::shared_ptr<spdlog::logger> &log) { log->info("test message {}", "test"); },
         kFileSyncIters,
         spd_simple_sync);
-    print_stats("[spdlog] file sync simple (async logger + flush each log)", kFileSyncIters, us);
+    print_stats("[spdlog] file sync simple (async logger + flush request each log)", kFileSyncIters, us);
     print_file_size(spd_simple_sync);
   }
 
@@ -559,7 +648,7 @@ int main() {
     if (result.micros < 0) {
       std::cout << "[NEI] file sync multi: failed to create sink\n\n";
     } else {
-      print_stats("[NEI] file sync multi (flush each log)", kFileSyncIters, result.micros, result.stats);
+      print_stats("[NEI] file sync multi (flush request each log)", kFileSyncIters, result.micros, result.stats);
       print_file_size(nei_multi_sync);
     }
   }
@@ -569,7 +658,7 @@ int main() {
         [](const std::shared_ptr<spdlog::logger> &log) { log->info("number={}, string={}, count={}", 42, "hello", 3); },
         kFileSyncIters,
         spd_multi_sync);
-    print_stats("[spdlog] file sync multi (async logger + flush each log)", kFileSyncIters, us);
+    print_stats("[spdlog] file sync multi (async logger + flush request each log)", kFileSyncIters, us);
     print_file_size(spd_multi_sync);
   }
 
@@ -588,7 +677,7 @@ int main() {
     if (result.micros < 0) {
       std::cout << "[NEI] file sync llog_literal: failed to create sink\n\n";
     } else {
-      print_stats("[NEI] file sync llog_literal (flush each log)", kFileSyncIters, result.micros, result.stats);
+      print_stats("[NEI] file sync llog_literal (flush request each log)", kFileSyncIters, result.micros, result.stats);
       print_file_size(nei_lit_sync);
     }
   }
@@ -604,9 +693,72 @@ int main() {
     if (result.micros < 0) {
       std::cout << "[NEI] file sync vlog_literal: failed to create sink\n\n";
     } else {
-      print_stats("[NEI] file sync vlog_literal (flush each log)", kFileSyncIters, result.micros, result.stats);
+      print_stats("[NEI] file sync vlog_literal (flush request each log)", kFileSyncIters, result.micros, result.stats);
       print_file_size(nei_vlit_sync);
     }
+  }
+
+  std::cout << "--- File (strict sync flush semantics) ---\n\n";
+
+  const std::string nei_simple_strict = out_file("nei_cmp_simple_strict.log");
+  const std::string spd_simple_strict = out_file("spdlog_cmp_simple_strict.log");
+  const std::string nei_multi_strict = out_file("nei_cmp_multi_strict.log");
+  const std::string spd_multi_strict = out_file("spdlog_cmp_multi_strict.log");
+
+  {
+    const auto result = time_nei_file_strict_sync_ms(
+        [] {
+          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", "test message %s", "test");
+        },
+        kFileStrictSyncIters,
+        nei_simple_strict.c_str());
+    if (result.micros < 0) {
+      std::cout << "[NEI] file strict simple: failed to create sink\n\n";
+    } else {
+      print_stats("[NEI] file strict simple (sync flush each log)", kFileStrictSyncIters, result.micros, result.stats);
+      print_file_size(nei_simple_strict);
+    }
+  }
+
+  {
+    const int64_t us = time_spdlog_file_strict_sync_ms(
+        [](const std::shared_ptr<spdlog::logger> &log) { log->info("test message {}", "test"); },
+        kFileStrictSyncIters,
+        spd_simple_strict);
+    print_stats("[spdlog] file strict simple (sync flush each log)", kFileStrictSyncIters, us);
+    print_file_size(spd_simple_strict);
+  }
+
+  {
+    const auto result = time_nei_file_strict_sync_ms(
+        [] {
+          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
+                   NEI_L_INFO,
+                   __FILE__,
+                   __LINE__,
+                   "bench",
+                   "number=%d, string=%s, count=%d",
+                   42,
+                   "hello",
+                   3);
+        },
+        kFileStrictSyncIters,
+        nei_multi_strict.c_str());
+    if (result.micros < 0) {
+      std::cout << "[NEI] file strict multi: failed to create sink\n\n";
+    } else {
+      print_stats("[NEI] file strict multi (sync flush each log)", kFileStrictSyncIters, result.micros, result.stats);
+      print_file_size(nei_multi_strict);
+    }
+  }
+
+  {
+    const int64_t us = time_spdlog_file_strict_sync_ms(
+        [](const std::shared_ptr<spdlog::logger> &log) { log->info("number={}, string={}, count={}", 42, "hello", 3); },
+        kFileStrictSyncIters,
+        spd_multi_strict);
+    print_stats("[spdlog] file strict multi (sync flush each log)", kFileStrictSyncIters, us);
+    print_file_size(spd_multi_strict);
   }
 
   return 0;

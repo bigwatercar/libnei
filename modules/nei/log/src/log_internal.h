@@ -81,9 +81,13 @@ typedef volatile uint64_t _nei_log_atomic64_t;
 #define _NEI_LOG_MAX_STRING_COPY 4096U
 
 /** Number of fixed slots in the MPSC ring buffer.  Each slot holds one full
- *  serialized event (up to _NEI_LOG_EVENT_BUFFER_SIZE bytes).  Total ring
- *  memory: 256 * (4+4+8192) = ~2 MB, similar to the old double-buffer. */
+ *  serialized event (up to _NEI_LOG_EVENT_BUFFER_SIZE bytes).
+ *  Default is 256 and can be overridden via CMake option NEI_LOG_RING_SLOTS. */
+#if defined(NEI_LOG_RING_SLOTS)
+#define _NEI_LOG_RING_SLOTS ((uint32_t)(NEI_LOG_RING_SLOTS))
+#else
 #define _NEI_LOG_RING_SLOTS 256U
+#endif
 
 /** Producer wait strategy thresholds while reserved slot is still occupied.
  *  1) [1, RELAX_ITERS]      : cpu-relax (very short wait)

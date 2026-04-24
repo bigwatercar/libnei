@@ -17,6 +17,12 @@ target_include_directories(
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
+target_compile_definitions(
+    nei
+    PRIVATE
+        NEI_LOG_RING_SLOTS=${NEI_LOG_RING_SLOTS}
+)
+
 install(
     DIRECTORY include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
