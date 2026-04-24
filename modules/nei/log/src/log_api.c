@@ -167,6 +167,8 @@ void nei_vlog_literal(nei_log_config_handle_t config_handle,
 }
 
 void nei_log_flush(void) {
+  uint64_t flush_target;
+
   if (!s_runtime.initialized) {
     return;
   }
@@ -174,37 +176,25 @@ void nei_log_flush(void) {
     return;
   }
 
-#if defined(_WIN32)
-  EnterCriticalSection(&s_runtime.mutex);
-  for (;;) {
-    if (s_runtime.pending_index == -1 && s_runtime.used[s_runtime.active_index] > 0U) {
-      const int active = s_runtime.active_index;
-      _nei_log_publish_pending_buffer(&s_runtime, active);
-      WakeAllConditionVariable(&s_runtime.cond);
-    }
-    if (s_runtime.pending_index == -1 && s_runtime.consuming_index == -1
-        && s_runtime.used[s_runtime.active_index] == 0U) {
-      break;
-    }
-    SleepConditionVariableCS(&s_runtime.cond, &s_runtime.mutex, INFINITE);
+  /* Sample the current write position.  Everything enqueued before this point
+   * must be consumed before flush returns.  Producers that are mid-commit will
+   * finish writing their slot; the consumer will drain them as they commit. */
+  flush_target = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.write_pos);
+  if (flush_target == 0U) {
+    return;
   }
-  LeaveCriticalSection(&s_runtime.mutex);
-#else
-  pthread_mutex_lock(&s_runtime.mutex);
-  for (;;) {
-    if (s_runtime.pending_index == -1 && s_runtime.used[s_runtime.active_index] > 0U) {
-      const int active = s_runtime.active_index;
-      _nei_log_publish_pending_buffer(&s_runtime, active);
-      pthread_cond_broadcast(&s_runtime.cond);
-    }
-    if (s_runtime.pending_index == -1 && s_runtime.consuming_index == -1
-        && s_runtime.used[s_runtime.active_index] == 0U) {
-      break;
-    }
-    pthread_cond_wait(&s_runtime.cond, &s_runtime.mutex);
+
+  /* Wake the consumer (handles the case where it is asleep on the condvar). */
+  _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
+
+  /* Spin-yield until the consumer has processed all slots up to flush_target.
+   * Each iteration re-signals in case the previous signal was lost, then
+   * yields the CPU.  Worst-case latency is bounded by the consumer's 10 ms
+   * timeout.  flush() is not a hot path so spin-yield is acceptable. */
+  while (_NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos) < flush_target) {
+    _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
+    _NEI_LOG_CPU_YIELD();
   }
-  pthread_mutex_unlock(&s_runtime.mutex);
-#endif
 }
 
 uint32_t nei_log_get_runtime_init_count_for_test(void) {

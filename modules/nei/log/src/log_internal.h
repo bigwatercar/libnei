@@ -19,6 +19,7 @@
 #include <Windows.h>
 #else
 #include <pthread.h>
+#include <sched.h>
 #include <errno.h>
 #include <iconv.h>
 #endif
@@ -29,6 +30,41 @@
 #define _NEI_LOG_TLS __thread
 #endif
 
+/* ── Atomic primitive helpers (C99 / platform-specific) ──────────────────── *
+ * These wrap the minimal operations needed by the lock-free MPSC ring buffer.
+ * Windows: Interlocked* intrinsics.  POSIX: GCC/Clang __atomic builtins.    */
+#if defined(_WIN32)
+typedef volatile LONG     _nei_log_atomic32_t;
+typedef volatile LONGLONG _nei_log_atomic64_t;
+/** Acquire-load a 32-bit value (uses CAS(p,0,0) for acquire semantics). */
+#  define _NEI_LOG_ATOMIC_LOAD32(p) \
+      ((uint32_t)InterlockedCompareExchange((volatile LONG *)(p), 0L, 0L))
+/** Release-store a 32-bit value (full barrier via InterlockedExchange). */
+#  define _NEI_LOG_ATOMIC_STORE32(p, v) \
+      (void)InterlockedExchange((volatile LONG *)(p), (LONG)(v))
+/** Acquire-load a 64-bit value. */
+#  define _NEI_LOG_ATOMIC_LOAD64(p) \
+      ((uint64_t)InterlockedCompareExchange64((volatile LONGLONG *)(p), 0LL, 0LL))
+/** Release-store a 64-bit value. */
+#  define _NEI_LOG_ATOMIC_STORE64(p, v) \
+      (void)InterlockedExchange64((volatile LONGLONG *)(p), (LONGLONG)(v))
+/** Atomic fetch-and-add (returns old value, full barrier). */
+#  define _NEI_LOG_ATOMIC_FETCH_ADD64(p, v) \
+      ((uint64_t)InterlockedExchangeAdd64((volatile LONGLONG *)(p), (LONGLONG)(v)))
+/** Yield CPU hint inside a spin loop. */
+#  define _NEI_LOG_CPU_YIELD() YieldProcessor()
+#else
+typedef volatile uint32_t _nei_log_atomic32_t;
+typedef volatile uint64_t _nei_log_atomic64_t;
+#  define _NEI_LOG_ATOMIC_LOAD32(p)          __atomic_load_n((p),  __ATOMIC_ACQUIRE)
+#  define _NEI_LOG_ATOMIC_STORE32(p, v)      __atomic_store_n((p), (v), __ATOMIC_RELEASE)
+#  define _NEI_LOG_ATOMIC_LOAD64(p)          __atomic_load_n((p),  __ATOMIC_ACQUIRE)
+#  define _NEI_LOG_ATOMIC_STORE64(p, v)      __atomic_store_n((p), (v), __ATOMIC_RELEASE)
+#  define _NEI_LOG_ATOMIC_FETCH_ADD64(p, v)  __atomic_fetch_add((p), (v), __ATOMIC_ACQ_REL)
+#  define _NEI_LOG_CPU_YIELD()               sched_yield()
+#endif
+/* ─────────────────────────────────────────────────────────────────────────── */
+
 /// @brief Sentinel value used for non-verbose logs.
 #define _NEI_LOG_NOT_VERBOSE -1
 
@@ -38,8 +74,14 @@
 /// @brief Maximum deep-copy size for string arguments in bytes.
 #define _NEI_LOG_MAX_STRING_COPY 4096U
 
-/// @brief Capacity of each buffer in the global double-buffer, in bytes.
-#define _NEI_LOG_GLOBAL_BUFFER_CAPACITY (1024U * 1024U)
+/** Number of fixed slots in the MPSC ring buffer.  Each slot holds one full
+ *  serialized event (up to _NEI_LOG_EVENT_BUFFER_SIZE bytes).  Total ring
+ *  memory: 256 * (4+4+8192) = ~2 MB, similar to the old double-buffer. */
+#define _NEI_LOG_RING_SLOTS 256U
+
+/** Maximum spin iterations a producer will wait for a ring slot to become free
+ *  before dropping the event.  At ~1 ns/iteration this is ~10 µs of patience. */
+#define _NEI_LOG_RING_FULL_SPINS 10000
 #define _NEI_LOG_DEFAULT_FILE_SINK_MAGIC 0x4B4E5346U
 
 /// @brief Compact serialized payload type tags.
@@ -79,14 +121,32 @@ typedef struct _nei_log_event_header_st {
   char thread_id_str[23];
 } nei_log_event_header_st;
 
+/**
+ * @brief One slot in the MPSC ring buffer.
+ * @details Producers write here lock-free; the consumer reads in order.
+ *          `state` is the commit flag: 0 = empty (consumer owns), 1 = committed (data valid).
+ */
+typedef struct {
+  _nei_log_atomic32_t state; /**< 0 = empty; 1 = committed. */
+  uint32_t            size;  /**< Valid byte count in @ref data. */
+  uint8_t             data[_NEI_LOG_EVENT_BUFFER_SIZE];
+} nei_log_ring_slot_st;
+
+/**
+ * @brief MPSC lock-free ring buffer.
+ * @details Producers atomically fetch-add `write_pos` to reserve a slot;
+ *          the consumer advances `consumer_pos` sequentially.
+ *          Both positions are monotonically increasing uint64_t counters;
+ *          the actual slot index is `pos % _NEI_LOG_RING_SLOTS`.
+ */
+typedef struct {
+  nei_log_ring_slot_st slots[_NEI_LOG_RING_SLOTS];
+  _nei_log_atomic64_t  write_pos;    /**< Next slot to reserve (producers). */
+  _nei_log_atomic64_t  consumer_pos; /**< Next slot to consume (consumer + flush readers). */
+} nei_log_ring_st;
+
 typedef struct _nei_log_runtime_st {
-  uint8_t buffer_a[_NEI_LOG_GLOBAL_BUFFER_CAPACITY];
-  uint8_t buffer_b[_NEI_LOG_GLOBAL_BUFFER_CAPACITY];
-  size_t used[2];
-  int active_index;
-  int pending_index;
-  /** Buffer index currently being read by the consumer (-1 if none). */
-  int consuming_index;
+  nei_log_ring_st ring;
   int stop_requested;
   int initialized;
 #if defined(_WIN32)
@@ -157,8 +217,6 @@ void _nei_log_config_snapshot_bump(void);
 int _nei_log_ensure_runtime_initialized(void);
 void _nei_log_shutdown_runtime(void);
 int _nei_log_enqueue_event(const uint8_t *event, size_t len);
-void _nei_log_wait_until_buffer_not_consuming(nei_log_runtime_st *rt, int buffer_index);
-void _nei_log_publish_pending_buffer(nei_log_runtime_st *rt, int pending_index);
 uint32_t _nei_log_get_runtime_init_count_for_test(void);
 
 /* From log_thread_id.c */
