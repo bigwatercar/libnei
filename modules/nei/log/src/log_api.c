@@ -30,7 +30,6 @@ void nei_llog(nei_log_config_handle_t config_handle,
               const char *fmt,
               ...) {
   va_list args;
-  va_list scan_args;
   nei_log_config_st *config;
 
   if (++_s_tls_log_depth > 1) {
@@ -52,15 +51,13 @@ void nei_llog(nei_log_config_handle_t config_handle,
   }
 
   va_start(args, fmt);
-  va_copy(scan_args, args);
   {
     const size_t serialized_len = _nei_log_serialize_event(
-        _s_tls_event_buf, sizeof(_s_tls_event_buf), config_handle, file, line, func, (int32_t)level, _NEI_LOG_NOT_VERBOSE, fmt, scan_args);
+        _s_tls_event_buf, sizeof(_s_tls_event_buf), config_handle, file, line, func, (int32_t)level, _NEI_LOG_NOT_VERBOSE, fmt, args);
     if (serialized_len > 0U) {
       (void)_nei_log_enqueue_event(_s_tls_event_buf, serialized_len);
     }
   }
-  va_end(scan_args);
   va_end(args);
   --_s_tls_log_depth;
 }
@@ -73,7 +70,6 @@ void nei_vlog(nei_log_config_handle_t config_handle,
               const char *fmt,
               ...) {
   va_list args;
-  va_list scan_args;
   nei_log_config_st *config;
 
   if (++_s_tls_log_depth > 1) {
@@ -91,7 +87,6 @@ void nei_vlog(nei_log_config_handle_t config_handle,
   }
 
   va_start(args, fmt);
-  va_copy(scan_args, args);
   {
     const size_t serialized_len = _nei_log_serialize_event(_s_tls_event_buf,
                                                            sizeof(_s_tls_event_buf),
@@ -102,12 +97,11 @@ void nei_vlog(nei_log_config_handle_t config_handle,
                                                            (int32_t)NEI_L_VERBOSE,
                                                            (int32_t)verbose,
                                                            fmt,
-                                                           scan_args);
+                                                           args);
     if (serialized_len > 0U) {
       (void)_nei_log_enqueue_event(_s_tls_event_buf, serialized_len);
     }
   }
-  va_end(scan_args);
   va_end(args);
   --_s_tls_log_depth;
 }

@@ -14,6 +14,25 @@ static int _nei_log_is_digit_char(char c) {
   return (c >= '0') && (c <= '9');
 }
 
+static const char *_nei_log_wstr_to_mbs_or_placeholder(const wchar_t *ws, char *out, size_t out_size);
+
+typedef struct _nei_log_fmt_plan_op_st {
+  uint8_t payload_type;
+  uint8_t conv_lm;
+} _nei_log_fmt_plan_op_st;
+
+#define _NEI_LOG_FMT_PLAN_MAX_OPS 64U
+
+typedef struct _nei_log_fmt_plan_cache_st {
+  const char *fmt;
+  uint16_t op_count;
+  uint8_t ready;
+  uint8_t reject;
+  _nei_log_fmt_plan_op_st ops[_NEI_LOG_FMT_PLAN_MAX_OPS];
+} _nei_log_fmt_plan_cache_st;
+
+static _NEI_LOG_TLS _nei_log_fmt_plan_cache_st s_tls_fmt_plan_cache;
+
 static int _nei_log_payload_write_u8(uint8_t *out, size_t out_cap, size_t *used, uint8_t value) {
   if (out == NULL || used == NULL || *used + 1U > out_cap) {
     return -1;
@@ -50,6 +69,240 @@ static int _nei_log_payload_write_padded_zero(uint8_t *out, size_t out_cap, size
     *used += 1U;
   }
   return 0;
+}
+
+static int _nei_log_payload_emit_arg(uint8_t *out,
+                                     size_t out_cap,
+                                     size_t *used,
+                                     uint8_t payload_type,
+                                     uint8_t conv_lm,
+                                     va_list *args) {
+  if (_nei_log_payload_write_u8(out, out_cap, used, payload_type) != 0) {
+    return -1;
+  }
+
+  switch (payload_type) {
+  case _NEI_LOG_PAYLOAD_I32: {
+    int32_t v = (int32_t)va_arg(*args, int);
+    return _nei_log_payload_write_bytes(out, out_cap, used, &v, sizeof(v));
+  }
+  case _NEI_LOG_PAYLOAD_U32: {
+    uint32_t v = (uint32_t)va_arg(*args, unsigned int);
+    return _nei_log_payload_write_bytes(out, out_cap, used, &v, sizeof(v));
+  }
+  case _NEI_LOG_PAYLOAD_I64: {
+    int64_t v64 = 0;
+    if (conv_lm == 3U) {
+      v64 = (int64_t)va_arg(*args, long);
+    } else if (conv_lm == 4U) {
+      v64 = (int64_t)va_arg(*args, long long);
+    } else if (conv_lm == 5U) {
+      v64 = (int64_t)va_arg(*args, intmax_t);
+    } else if (conv_lm == 6U) {
+      v64 = (int64_t)va_arg(*args, ptrdiff_t);
+    } else if (conv_lm == 7U) {
+      v64 = (int64_t)va_arg(*args, ptrdiff_t);
+    } else {
+      v64 = (int64_t)va_arg(*args, long long);
+    }
+    return _nei_log_payload_write_bytes(out, out_cap, used, &v64, sizeof(v64));
+  }
+  case _NEI_LOG_PAYLOAD_U64: {
+    uint64_t v64 = 0;
+    if (conv_lm == 3U) {
+      v64 = (uint64_t)va_arg(*args, unsigned long);
+    } else if (conv_lm == 4U) {
+      v64 = (uint64_t)va_arg(*args, unsigned long long);
+    } else if (conv_lm == 5U) {
+      v64 = (uint64_t)va_arg(*args, uintmax_t);
+    } else if (conv_lm == 6U || conv_lm == 7U) {
+      v64 = (uint64_t)va_arg(*args, size_t);
+    } else {
+      v64 = (uint64_t)va_arg(*args, unsigned long long);
+    }
+    return _nei_log_payload_write_bytes(out, out_cap, used, &v64, sizeof(v64));
+  }
+  case _NEI_LOG_PAYLOAD_DOUBLE: {
+    double v = va_arg(*args, double);
+    return _nei_log_payload_write_bytes(out, out_cap, used, &v, sizeof(v));
+  }
+  case _NEI_LOG_PAYLOAD_LONGDOUBLE: {
+    long double ld = va_arg(*args, long double);
+    uint8_t raw[_NEI_LOG_LONGDOUBLE_STORAGE];
+    memset(raw, 0, sizeof(raw));
+    memcpy(raw, &ld, sizeof(ld) < sizeof(raw) ? sizeof(ld) : sizeof(raw));
+    return _nei_log_payload_write_bytes(out, out_cap, used, raw, sizeof(raw));
+  }
+  case _NEI_LOG_PAYLOAD_CHAR: {
+    char ch = (char)va_arg(*args, int);
+    return _nei_log_payload_write_bytes(out, out_cap, used, &ch, sizeof(ch));
+  }
+  case _NEI_LOG_PAYLOAD_PTR: {
+    uintptr_t raw = (uintptr_t)va_arg(*args, const void *);
+    return _nei_log_payload_write_bytes(out, out_cap, used, &raw, sizeof(raw));
+  }
+  case _NEI_LOG_PAYLOAD_CSTR: {
+    const char *s = NULL;
+    char ws_buf[_NEI_LOG_MAX_STRING_COPY + 1U];
+    uint16_t len16;
+    size_t len;
+    if (conv_lm == 3U) {
+      const wchar_t *ws = va_arg(*args, const wchar_t *);
+      s = _nei_log_wstr_to_mbs_or_placeholder(ws, ws_buf, sizeof(ws_buf));
+    } else {
+      s = va_arg(*args, const char *);
+      if (s == NULL)
+        s = "(null)";
+    }
+    len = strlen(s);
+    if (len > _NEI_LOG_MAX_STRING_COPY)
+      len = _NEI_LOG_MAX_STRING_COPY;
+    len16 = (uint16_t)len;
+    if (_nei_log_payload_write_u16(out, out_cap, used, len16) != 0)
+      return -1;
+    return _nei_log_payload_write_bytes(out, out_cap, used, s, len);
+  }
+  default:
+    return -1;
+  }
+}
+
+/* 1=ready plan, 0=fallback to scanner path, -1=hard reject (%n). */
+static int _nei_log_build_fmt_plan(const char *fmt, _nei_log_fmt_plan_cache_st *plan) {
+  const char *scan_ptr = fmt;
+  if (fmt == NULL || plan == NULL) {
+    return 0;
+  }
+
+  plan->op_count = 0U;
+  plan->ready = 0U;
+  plan->reject = 0U;
+
+  while (*scan_ptr) {
+    const char *p = scan_ptr;
+    uint8_t payload_type = 0U;
+    uint8_t conv_lm = 0U;
+    if (*p != '%') {
+      ++scan_ptr;
+      continue;
+    }
+    ++p;
+    if (*p == '%') {
+      scan_ptr = p + 1;
+      continue;
+    }
+    while (*p && _nei_log_is_flag_char(*p))
+      ++p;
+    if (*p == '*') {
+      if (plan->op_count >= _NEI_LOG_FMT_PLAN_MAX_OPS) {
+        return 0;
+      }
+      plan->ops[plan->op_count].payload_type = _NEI_LOG_PAYLOAD_I32;
+      plan->ops[plan->op_count].conv_lm = 0U;
+      ++plan->op_count;
+      ++p;
+    } else {
+      while (*p && _nei_log_is_digit_char(*p))
+        ++p;
+    }
+    if (*p == '.') {
+      ++p;
+      if (*p == '*') {
+        if (plan->op_count >= _NEI_LOG_FMT_PLAN_MAX_OPS) {
+          return 0;
+        }
+        plan->ops[plan->op_count].payload_type = _NEI_LOG_PAYLOAD_I32;
+        plan->ops[plan->op_count].conv_lm = 0U;
+        ++plan->op_count;
+        ++p;
+      } else {
+        while (*p && _nei_log_is_digit_char(*p))
+          ++p;
+      }
+    }
+    if (*p == 'h') {
+      ++p;
+      if (*p == 'h') {
+        ++p;
+        conv_lm = 1U;
+      } else {
+        conv_lm = 2U;
+      }
+    } else if (*p == 'l') {
+      ++p;
+      if (*p == 'l') {
+        ++p;
+        conv_lm = 4U;
+      } else {
+        conv_lm = 3U;
+      }
+    } else if (*p == 'j') {
+      ++p;
+      conv_lm = 5U;
+    } else if (*p == 'z') {
+      ++p;
+      conv_lm = 6U;
+    } else if (*p == 't') {
+      ++p;
+      conv_lm = 7U;
+    } else if (*p == 'L') {
+      ++p;
+      conv_lm = 8U;
+    }
+    if (*p == '\0') {
+      break;
+    }
+    if (*p == 'n') {
+      plan->reject = 1U;
+      return -1;
+    }
+    switch (*p) {
+    case 'f':
+    case 'F':
+    case 'e':
+    case 'E':
+    case 'g':
+    case 'G':
+    case 'a':
+    case 'A':
+      payload_type = (conv_lm == 8U) ? _NEI_LOG_PAYLOAD_LONGDOUBLE : _NEI_LOG_PAYLOAD_DOUBLE;
+      break;
+    case 'd':
+    case 'i':
+      payload_type = (conv_lm <= 2U) ? _NEI_LOG_PAYLOAD_I32 : _NEI_LOG_PAYLOAD_I64;
+      break;
+    case 'u':
+    case 'x':
+    case 'X':
+    case 'o':
+      payload_type = (conv_lm <= 2U) ? _NEI_LOG_PAYLOAD_U32 : _NEI_LOG_PAYLOAD_U64;
+      break;
+    case 'c':
+      payload_type = _NEI_LOG_PAYLOAD_CHAR;
+      break;
+    case 's':
+      payload_type = _NEI_LOG_PAYLOAD_CSTR;
+      break;
+    case 'p':
+      payload_type = _NEI_LOG_PAYLOAD_PTR;
+      break;
+    default:
+      payload_type = 0U;
+      break;
+    }
+    if (payload_type != 0U) {
+      if (plan->op_count >= _NEI_LOG_FMT_PLAN_MAX_OPS) {
+        return 0;
+      }
+      plan->ops[plan->op_count].payload_type = payload_type;
+      plan->ops[plan->op_count].conv_lm = conv_lm;
+      ++plan->op_count;
+    }
+    scan_ptr = p + 1;
+  }
+
+  plan->ready = 1U;
+  return 1;
 }
 
 /** Windows: ACP (ANSI code page). POSIX: UTF-8 via iconv from WCHAR_T. */
@@ -191,6 +444,8 @@ size_t _nei_log_serialize_event(uint8_t *out,
   size_t used;
   size_t aligned_size;
   const char *scan_ptr;
+  const _nei_log_fmt_plan_cache_st *plan = NULL;
+  uint16_t op_idx;
   nei_log_event_header_st header;
 
   if (out == NULL || fmt == NULL || out_cap < sizeof(nei_log_event_header_st)) {
@@ -210,6 +465,42 @@ size_t _nei_log_serialize_event(uint8_t *out,
 
   /* Reserve header space; write header once after total_size is known. */
   used = sizeof(header);
+
+  if (s_tls_fmt_plan_cache.fmt != fmt) {
+    int plan_rc;
+    s_tls_fmt_plan_cache.fmt = fmt;
+    plan_rc = _nei_log_build_fmt_plan(fmt, &s_tls_fmt_plan_cache);
+    if (plan_rc < 0) {
+      return 0;
+    }
+  }
+
+  if (s_tls_fmt_plan_cache.fmt == fmt && s_tls_fmt_plan_cache.ready != 0U && s_tls_fmt_plan_cache.reject == 0U) {
+    plan = &s_tls_fmt_plan_cache;
+  }
+
+  if (plan != NULL) {
+    for (op_idx = 0U; op_idx < plan->op_count; ++op_idx) {
+      if (_nei_log_payload_emit_arg(out,
+                                    out_cap,
+                                    &used,
+                                    plan->ops[op_idx].payload_type,
+                                    plan->ops[op_idx].conv_lm,
+                                    &args) != 0) {
+        return 0;
+      }
+    }
+
+    aligned_size = _nei_log_align_up_8(used);
+    if (_nei_log_payload_write_padded_zero(out, out_cap, &used, aligned_size) != 0) {
+      return 0;
+    }
+
+    header.total_size = (uint32_t)used;
+    memcpy(out, &header, sizeof(header));
+    return used;
+  }
+
   scan_ptr = fmt;
 
   while (*scan_ptr) {
@@ -331,108 +622,7 @@ size_t _nei_log_serialize_event(uint8_t *out,
       break;
     }
     if (payload_type != 0) {
-      if (_nei_log_payload_write_u8(out, out_cap, &used, payload_type) != 0)
-        return 0;
-      switch (payload_type) {
-      case _NEI_LOG_PAYLOAD_I32: {
-        int32_t v = (int32_t)va_arg(args, int);
-        if (_nei_log_payload_write_bytes(out, out_cap, &used, &v, sizeof(v)) != 0)
-          return 0;
-        break;
-      }
-      case _NEI_LOG_PAYLOAD_U32: {
-        uint32_t v = (uint32_t)va_arg(args, unsigned int);
-        if (_nei_log_payload_write_bytes(out, out_cap, &used, &v, sizeof(v)) != 0)
-          return 0;
-        break;
-      }
-      case _NEI_LOG_PAYLOAD_I64: {
-        int64_t v64 = 0;
-        if (conv_lm == 3) {
-          v64 = (int64_t)va_arg(args, long);
-        } else if (conv_lm == 4) {
-          v64 = (int64_t)va_arg(args, long long);
-        } else if (conv_lm == 5) {
-          v64 = (int64_t)va_arg(args, intmax_t);
-        } else if (conv_lm == 6) {
-          v64 = (int64_t)va_arg(args, ptrdiff_t);
-        } else if (conv_lm == 7) {
-          v64 = (int64_t)va_arg(args, ptrdiff_t);
-        } else {
-          v64 = (int64_t)va_arg(args, long long);
-        }
-        if (_nei_log_payload_write_bytes(out, out_cap, &used, &v64, sizeof(v64)) != 0)
-          return 0;
-        break;
-      }
-      case _NEI_LOG_PAYLOAD_U64: {
-        uint64_t v64 = 0;
-        if (conv_lm == 3) {
-          v64 = (uint64_t)va_arg(args, unsigned long);
-        } else if (conv_lm == 4) {
-          v64 = (uint64_t)va_arg(args, unsigned long long);
-        } else if (conv_lm == 5) {
-          v64 = (uint64_t)va_arg(args, uintmax_t);
-        } else if (conv_lm == 6 || conv_lm == 7) {
-          v64 = (uint64_t)va_arg(args, size_t);
-        } else {
-          v64 = (uint64_t)va_arg(args, unsigned long long);
-        }
-        if (_nei_log_payload_write_bytes(out, out_cap, &used, &v64, sizeof(v64)) != 0)
-          return 0;
-        break;
-      }
-      case _NEI_LOG_PAYLOAD_DOUBLE: {
-        double v = va_arg(args, double);
-        if (_nei_log_payload_write_bytes(out, out_cap, &used, &v, sizeof(v)) != 0)
-          return 0;
-        break;
-      }
-      case _NEI_LOG_PAYLOAD_LONGDOUBLE: {
-        long double ld = va_arg(args, long double);
-        uint8_t raw[_NEI_LOG_LONGDOUBLE_STORAGE];
-        memset(raw, 0, sizeof(raw));
-        memcpy(raw, &ld, sizeof(ld) < sizeof(raw) ? sizeof(ld) : sizeof(raw));
-        if (_nei_log_payload_write_bytes(out, out_cap, &used, raw, sizeof(raw)) != 0)
-          return 0;
-        break;
-      }
-      case _NEI_LOG_PAYLOAD_CHAR: {
-        char ch = (char)va_arg(args, int);
-        if (_nei_log_payload_write_bytes(out, out_cap, &used, &ch, sizeof(ch)) != 0)
-          return 0;
-        break;
-      }
-      case _NEI_LOG_PAYLOAD_PTR: {
-        uintptr_t raw = (uintptr_t)va_arg(args, const void *);
-        if (_nei_log_payload_write_bytes(out, out_cap, &used, &raw, sizeof(raw)) != 0)
-          return 0;
-        break;
-      }
-      case _NEI_LOG_PAYLOAD_CSTR: {
-        const char *s = NULL;
-        char ws_buf[_NEI_LOG_MAX_STRING_COPY + 1U];
-        uint16_t len16;
-        size_t len;
-        if (conv_lm == 3) {
-          const wchar_t *ws = va_arg(args, const wchar_t *);
-          s = _nei_log_wstr_to_mbs_or_placeholder(ws, ws_buf, sizeof(ws_buf));
-        } else {
-          s = va_arg(args, const char *);
-          if (s == NULL)
-            s = "(null)";
-        }
-        len = strlen(s);
-        if (len > _NEI_LOG_MAX_STRING_COPY)
-          len = _NEI_LOG_MAX_STRING_COPY;
-        len16 = (uint16_t)len;
-        if (_nei_log_payload_write_u16(out, out_cap, &used, len16) != 0)
-          return 0;
-        if (_nei_log_payload_write_bytes(out, out_cap, &used, s, len) != 0)
-          return 0;
-        break;
-      }
-      default:
+      if (_nei_log_payload_emit_arg(out, out_cap, &used, payload_type, (uint8_t)conv_lm, &args) != 0) {
         return 0;
       }
     }
