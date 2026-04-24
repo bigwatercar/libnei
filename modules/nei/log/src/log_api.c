@@ -150,9 +150,7 @@ void nei_log_flush(void) {
   for (;;) {
     if (s_runtime.pending_index == -1 && s_runtime.used[s_runtime.active_index] > 0U) {
       const int active = s_runtime.active_index;
-      s_runtime.pending_index = active;
-      s_runtime.active_index = 1 - active;
-      _nei_log_ensure_active_not_consuming(&s_runtime);
+      _nei_log_publish_pending_buffer(&s_runtime, active);
       WakeAllConditionVariable(&s_runtime.cond);
     }
     if (s_runtime.pending_index == -1 && s_runtime.consuming_index == -1
@@ -167,9 +165,7 @@ void nei_log_flush(void) {
   for (;;) {
     if (s_runtime.pending_index == -1 && s_runtime.used[s_runtime.active_index] > 0U) {
       const int active = s_runtime.active_index;
-      s_runtime.pending_index = active;
-      s_runtime.active_index = 1 - active;
-      _nei_log_ensure_active_not_consuming(&s_runtime);
+      _nei_log_publish_pending_buffer(&s_runtime, active);
       pthread_cond_broadcast(&s_runtime.cond);
     }
     if (s_runtime.pending_index == -1 && s_runtime.consuming_index == -1

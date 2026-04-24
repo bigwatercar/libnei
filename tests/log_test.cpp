@@ -253,8 +253,7 @@ TEST(LogCTest, ConcurrentFirstUseInitializationIsSafe) {
   nei_log_flush();
   {
     std::lock_guard<std::mutex> lock(collector.mu);
-    ASSERT_GT(collector.messages.size(), 0U);
-    ASSERT_LE(collector.messages.size(), static_cast<size_t>(kThreadCount));
+    ASSERT_EQ(collector.messages.size(), static_cast<size_t>(kThreadCount));
     for (const auto &msg : collector.messages) {
       EXPECT_NE(msg.find("x"), std::string::npos);
     }

@@ -130,14 +130,22 @@ void _nei_log_shutdown_runtime(void) {
   s_runtime.initialized = 0;
 }
 
-void _nei_log_ensure_active_not_consuming(nei_log_runtime_st *rt) {
-  while (rt->consuming_index >= 0 && rt->active_index == rt->consuming_index) {
+void _nei_log_wait_until_buffer_not_consuming(nei_log_runtime_st *rt, int buffer_index) {
+  while (rt->consuming_index >= 0 && buffer_index == rt->consuming_index) {
 #if defined(_WIN32)
     SleepConditionVariableCS(&rt->cond, &rt->mutex, INFINITE);
 #else
     pthread_cond_wait(&rt->cond, &rt->mutex);
 #endif
   }
+}
+
+void _nei_log_publish_pending_buffer(nei_log_runtime_st *rt, int pending_index) {
+  const int next_active = 1 - pending_index;
+
+  _nei_log_wait_until_buffer_not_consuming(rt, next_active);
+  rt->pending_index = pending_index;
+  rt->active_index = next_active;
 }
 
 int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
@@ -159,19 +167,15 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
       memcpy(dst + s_runtime.used[active], event, len);
       s_runtime.used[active] += len;
       if (s_runtime.pending_index == -1) {
-        s_runtime.pending_index = active;
-        s_runtime.active_index = 1 - active;
-        _nei_log_ensure_active_not_consuming(&s_runtime);
-  _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
+        _nei_log_publish_pending_buffer(&s_runtime, active);
+        _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
       }
       break;
     }
 
     if (s_runtime.pending_index == -1 && s_runtime.used[active] > 0U) {
-      s_runtime.pending_index = active;
-      s_runtime.active_index = 1 - active;
-      _nei_log_ensure_active_not_consuming(&s_runtime);
-  _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
+      _nei_log_publish_pending_buffer(&s_runtime, active);
+      _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
       continue;
     }
 
@@ -273,9 +277,7 @@ static void *_nei_log_consumer_thread(void *arg) {
     }
     if (rt->pending_index == -1 && rt->stop_requested) {
       if (rt->used[rt->active_index] > 0U) {
-        rt->pending_index = rt->active_index;
-        rt->active_index = 1 - rt->active_index;
-        _nei_log_ensure_active_not_consuming(rt);
+        _nei_log_publish_pending_buffer(rt, rt->active_index);
       } else {
         LeaveCriticalSection(&rt->mutex);
         break;
@@ -288,9 +290,7 @@ static void *_nei_log_consumer_thread(void *arg) {
     }
     if (rt->pending_index == -1 && rt->stop_requested) {
       if (rt->used[rt->active_index] > 0U) {
-        rt->pending_index = rt->active_index;
-        rt->active_index = 1 - rt->active_index;
-        _nei_log_ensure_active_not_consuming(rt);
+        _nei_log_publish_pending_buffer(rt, rt->active_index);
       } else {
         pthread_mutex_unlock(&rt->mutex);
         break;
