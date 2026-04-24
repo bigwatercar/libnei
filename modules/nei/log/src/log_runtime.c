@@ -399,20 +399,35 @@ static void *_nei_log_consumer_thread(void *arg) {
       break;
     }
     LeaveCriticalSection(&rt->mutex);
-    if (_nei_log_drain_ring(&rt->ring) > 0U) {
-      _nei_log_notify_waiters_after_drain(rt);
-      for (idle_spin = 0U; idle_spin < _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS; ++idle_spin) {
-        if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
-          break;
-        }
-        if ((idle_spin & 31U) == 31U) {
-          _NEI_LOG_THREAD_YIELD();
+    {
+      uint64_t drained = _nei_log_drain_ring(&rt->ring);
+      if (drained > 0U) {
+        /* Adaptive idle spin: longer in quiet/sync mode (small drain batch) so the
+         * consumer stays hot between per-call flushes; shorter in burst/async mode
+         * to avoid burning CPU between large drain batches. */
+        uint32_t adaptive_iters;
+        if (drained >= 16U) {
+          adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 4U; /* 128: burst */
+        } else if (drained >= 4U) {
+          adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 2U; /* 256: medium */
         } else {
-          _NEI_LOG_CPU_YIELD();
+          adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS;       /* 512: sync/quiet */
         }
+        _nei_log_notify_waiters_after_drain(rt);
+        for (idle_spin = 0U; idle_spin < adaptive_iters; ++idle_spin) {
+          if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
+            break;
+          }
+          /* SwitchToThread every 64th iter (less OS overhead than every 32nd). */
+          if ((idle_spin & 63U) == 63U) {
+            _NEI_LOG_THREAD_YIELD();
+          } else {
+            _NEI_LOG_CPU_YIELD();
+          }
+        }
+        EnterCriticalSection(&rt->mutex);
+        continue;
       }
-      EnterCriticalSection(&rt->mutex);
-      continue;
     }
     EnterCriticalSection(&rt->mutex);
   }
@@ -429,20 +444,31 @@ static void *_nei_log_consumer_thread(void *arg) {
       break;
     }
     pthread_mutex_unlock(&rt->mutex);
-    if (_nei_log_drain_ring(&rt->ring) > 0U) {
-      _nei_log_notify_waiters_after_drain(rt);
-      for (idle_spin = 0U; idle_spin < _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS; ++idle_spin) {
-        if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
-          break;
-        }
-        if ((idle_spin & 31U) == 31U) {
-          _NEI_LOG_THREAD_YIELD();
+    {
+      uint64_t drained = _nei_log_drain_ring(&rt->ring);
+      if (drained > 0U) {
+        uint32_t adaptive_iters;
+        if (drained >= 16U) {
+          adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 4U;
+        } else if (drained >= 4U) {
+          adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 2U;
         } else {
-          _NEI_LOG_CPU_YIELD();
+          adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS;
         }
+        _nei_log_notify_waiters_after_drain(rt);
+        for (idle_spin = 0U; idle_spin < adaptive_iters; ++idle_spin) {
+          if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
+            break;
+          }
+          if ((idle_spin & 63U) == 63U) {
+            _NEI_LOG_THREAD_YIELD();
+          } else {
+            _NEI_LOG_CPU_YIELD();
+          }
+        }
+        pthread_mutex_lock(&rt->mutex);
+        continue;
       }
-      pthread_mutex_lock(&rt->mutex);
-      continue;
     }
     pthread_mutex_lock(&rt->mutex);
   }
