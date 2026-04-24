@@ -221,9 +221,32 @@ static uint64_t _nei_log_drain_ring(nei_log_ring_st *ring) {
   return drained;
 }
 
+static void _nei_log_notify_waiters_after_drain(nei_log_runtime_st *rt) {
+  const uint64_t backlog = _NEI_LOG_ATOMIC_LOAD64(&rt->ring.write_pos) - _NEI_LOG_ATOMIC_LOAD64(&rt->ring.consumer_pos);
+#if defined(_WIN32)
+  EnterCriticalSection(&rt->mutex);
+  if (backlog > 8U) {
+    _NEI_LOG_BROADCAST_COND(&rt->cond);
+  } else {
+    _NEI_LOG_SIGNAL_COND(&rt->cond);
+  }
+  LeaveCriticalSection(&rt->mutex);
+#else
+  pthread_mutex_lock(&rt->mutex);
+  if (backlog > 8U) {
+    _NEI_LOG_BROADCAST_COND(&rt->cond);
+  } else {
+    _NEI_LOG_SIGNAL_COND(&rt->cond);
+  }
+  pthread_mutex_unlock(&rt->mutex);
+#endif
+}
+
 int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
   uint64_t pos;
   uint64_t spins = 0U;
+  uint64_t consumer_pos_snapshot;
+  uint64_t depth_after_commit;
   uint32_t idx;
   nei_log_ring_slot_st *slot;
 
@@ -235,7 +258,9 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
   pos = _NEI_LOG_ATOMIC_FETCH_ADD64(&s_runtime.ring.write_pos, 1U);
   idx = (uint32_t)(pos % (uint64_t)_NEI_LOG_RING_SLOTS);
   slot = &s_runtime.ring.slots[idx];
-  _nei_log_update_ring_hwm((pos + 1U) - _NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos));
+  consumer_pos_snapshot = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos);
+  depth_after_commit = (pos + 1U) - consumer_pos_snapshot;
+  _nei_log_update_ring_hwm(depth_after_commit);
 
   /* Spin-wait for the reserved slot to be released by the consumer.
    * IMPORTANT: once write_pos is incremented we must eventually publish this
@@ -375,9 +400,7 @@ static void *_nei_log_consumer_thread(void *arg) {
     }
     LeaveCriticalSection(&rt->mutex);
     if (_nei_log_drain_ring(&rt->ring) > 0U) {
-      EnterCriticalSection(&rt->mutex);
-      _NEI_LOG_BROADCAST_COND(&rt->cond);
-      LeaveCriticalSection(&rt->mutex);
+      _nei_log_notify_waiters_after_drain(rt);
       for (idle_spin = 0U; idle_spin < _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS; ++idle_spin) {
         if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
           break;
@@ -407,9 +430,7 @@ static void *_nei_log_consumer_thread(void *arg) {
     }
     pthread_mutex_unlock(&rt->mutex);
     if (_nei_log_drain_ring(&rt->ring) > 0U) {
-      pthread_mutex_lock(&rt->mutex);
-      _NEI_LOG_BROADCAST_COND(&rt->cond);
-      pthread_mutex_unlock(&rt->mutex);
+      _nei_log_notify_waiters_after_drain(rt);
       for (idle_spin = 0U; idle_spin < _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS; ++idle_spin) {
         if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
           break;
