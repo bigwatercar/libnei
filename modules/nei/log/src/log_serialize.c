@@ -13,6 +13,8 @@ typedef struct _nei_log_fmt_plan_op_st {
   uint8_t conv_lm;
 } _nei_log_fmt_plan_op_st;
 
+typedef int (*_nei_log_fmt_emit_cb_fn)(void *ctx, uint8_t payload_type, uint8_t conv_lm);
+
 #define _NEI_LOG_FMT_PLAN_MAX_OPS 64U
 
 typedef struct _nei_log_fmt_plan_cache_st {
@@ -24,6 +26,17 @@ typedef struct _nei_log_fmt_plan_cache_st {
 } _nei_log_fmt_plan_cache_st;
 
 static _NEI_LOG_TLS _nei_log_fmt_plan_cache_st s_tls_fmt_plan_cache;
+
+typedef struct _nei_log_serialize_emit_ctx_st {
+  uint8_t *out;
+  size_t out_cap;
+  size_t *used;
+#if defined(_WIN32)
+  va_list *args;
+#else
+  va_list args;
+#endif
+} _nei_log_serialize_emit_ctx_st;
 
 static int _nei_log_payload_write_u8(uint8_t *out, size_t out_cap, size_t *used, uint8_t value) {
   if (out == NULL || used == NULL || *used + 1U > out_cap) {
@@ -169,59 +182,88 @@ static int _nei_log_payload_emit_arg(uint8_t *out,
   }
 }
 
-/* 1=ready plan, 0=fallback to scanner path, -1=hard reject (%n). */
-static int _nei_log_build_fmt_plan(const char *fmt, _nei_log_fmt_plan_cache_st *plan) {
+static uint8_t _nei_log_payload_type_from_spec(char spec, uint8_t conv_lm) {
+  switch (spec) {
+  case 'f':
+  case 'F':
+  case 'e':
+  case 'E':
+  case 'g':
+  case 'G':
+  case 'a':
+  case 'A':
+    return (conv_lm == 8U) ? _NEI_LOG_PAYLOAD_LONGDOUBLE : _NEI_LOG_PAYLOAD_DOUBLE;
+  case 'd':
+  case 'i':
+    return (conv_lm <= 2U) ? _NEI_LOG_PAYLOAD_I32 : _NEI_LOG_PAYLOAD_I64;
+  case 'u':
+  case 'x':
+  case 'X':
+  case 'o':
+    return (conv_lm <= 2U) ? _NEI_LOG_PAYLOAD_U32 : _NEI_LOG_PAYLOAD_U64;
+  case 'c':
+    return _NEI_LOG_PAYLOAD_CHAR;
+  case 's':
+    return _NEI_LOG_PAYLOAD_CSTR;
+  case 'p':
+    return _NEI_LOG_PAYLOAD_PTR;
+  default:
+    return 0U;
+  }
+}
+
+/* 1=success, 0=callback aborted (caller decides fallback/error), -1=hard reject (%n). */
+static int _nei_log_scan_fmt_emit_ops(const char *fmt, _nei_log_fmt_emit_cb_fn emit_cb, void *emit_ctx) {
   const char *scan_ptr = fmt;
-  if (fmt == NULL || plan == NULL) {
+  if (fmt == NULL || emit_cb == NULL) {
     return 0;
   }
 
-  plan->op_count = 0U;
-  plan->ready = 0U;
-  plan->reject = 0U;
-
   while (*scan_ptr) {
     const char *p = scan_ptr;
-    uint8_t payload_type = 0U;
     uint8_t conv_lm = 0U;
+    uint8_t payload_type;
+
     if (*p != '%') {
       ++scan_ptr;
       continue;
     }
+
     ++p;
     if (*p == '%') {
       scan_ptr = p + 1;
       continue;
     }
-    while (*p && _nei_log_is_flag_char(*p))
+
+    while (*p && _nei_log_is_flag_char(*p)) {
       ++p;
+    }
+
     if (*p == '*') {
-      if (plan->op_count >= _NEI_LOG_FMT_PLAN_MAX_OPS) {
+      if (emit_cb(emit_ctx, _NEI_LOG_PAYLOAD_I32, 0U) != 0) {
         return 0;
       }
-      plan->ops[plan->op_count].payload_type = _NEI_LOG_PAYLOAD_I32;
-      plan->ops[plan->op_count].conv_lm = 0U;
-      ++plan->op_count;
       ++p;
     } else {
-      while (*p && _nei_log_is_digit_char(*p))
+      while (*p && _nei_log_is_digit_char(*p)) {
         ++p;
+      }
     }
+
     if (*p == '.') {
       ++p;
       if (*p == '*') {
-        if (plan->op_count >= _NEI_LOG_FMT_PLAN_MAX_OPS) {
+        if (emit_cb(emit_ctx, _NEI_LOG_PAYLOAD_I32, 0U) != 0) {
           return 0;
         }
-        plan->ops[plan->op_count].payload_type = _NEI_LOG_PAYLOAD_I32;
-        plan->ops[plan->op_count].conv_lm = 0U;
-        ++plan->op_count;
         ++p;
       } else {
-        while (*p && _nei_log_is_digit_char(*p))
+        while (*p && _nei_log_is_digit_char(*p)) {
           ++p;
+        }
       }
     }
+
     if (*p == 'h') {
       ++p;
       if (*p == 'h') {
@@ -251,56 +293,70 @@ static int _nei_log_build_fmt_plan(const char *fmt, _nei_log_fmt_plan_cache_st *
       ++p;
       conv_lm = 8U;
     }
+
     if (*p == '\0') {
       break;
     }
     if (*p == 'n') {
-      plan->reject = 1U;
       return -1;
     }
-    switch (*p) {
-    case 'f':
-    case 'F':
-    case 'e':
-    case 'E':
-    case 'g':
-    case 'G':
-    case 'a':
-    case 'A':
-      payload_type = (conv_lm == 8U) ? _NEI_LOG_PAYLOAD_LONGDOUBLE : _NEI_LOG_PAYLOAD_DOUBLE;
-      break;
-    case 'd':
-    case 'i':
-      payload_type = (conv_lm <= 2U) ? _NEI_LOG_PAYLOAD_I32 : _NEI_LOG_PAYLOAD_I64;
-      break;
-    case 'u':
-    case 'x':
-    case 'X':
-    case 'o':
-      payload_type = (conv_lm <= 2U) ? _NEI_LOG_PAYLOAD_U32 : _NEI_LOG_PAYLOAD_U64;
-      break;
-    case 'c':
-      payload_type = _NEI_LOG_PAYLOAD_CHAR;
-      break;
-    case 's':
-      payload_type = _NEI_LOG_PAYLOAD_CSTR;
-      break;
-    case 'p':
-      payload_type = _NEI_LOG_PAYLOAD_PTR;
-      break;
-    default:
-      payload_type = 0U;
-      break;
-    }
+
+    payload_type = _nei_log_payload_type_from_spec(*p, conv_lm);
     if (payload_type != 0U) {
-      if (plan->op_count >= _NEI_LOG_FMT_PLAN_MAX_OPS) {
+      if (emit_cb(emit_ctx, payload_type, conv_lm) != 0) {
         return 0;
       }
-      plan->ops[plan->op_count].payload_type = payload_type;
-      plan->ops[plan->op_count].conv_lm = conv_lm;
-      ++plan->op_count;
     }
+
     scan_ptr = p + 1;
+  }
+
+  return 1;
+}
+
+static int _nei_log_fmt_plan_emit_cb(void *ctx, uint8_t payload_type, uint8_t conv_lm) {
+  _nei_log_fmt_plan_cache_st *plan = (_nei_log_fmt_plan_cache_st *)ctx;
+  if (plan == NULL || plan->op_count >= _NEI_LOG_FMT_PLAN_MAX_OPS) {
+    return -1;
+  }
+  plan->ops[plan->op_count].payload_type = payload_type;
+  plan->ops[plan->op_count].conv_lm = conv_lm;
+  ++plan->op_count;
+  return 0;
+}
+
+static int _nei_log_serialize_emit_cb(void *ctx, uint8_t payload_type, uint8_t conv_lm) {
+  _nei_log_serialize_emit_ctx_st *emit_ctx = (_nei_log_serialize_emit_ctx_st *)ctx;
+  if (emit_ctx == NULL) {
+    return -1;
+  }
+#if defined(_WIN32)
+  return _nei_log_payload_emit_arg(
+      emit_ctx->out, emit_ctx->out_cap, emit_ctx->used, payload_type, conv_lm, emit_ctx->args);
+#else
+  return _nei_log_payload_emit_arg(
+      emit_ctx->out, emit_ctx->out_cap, emit_ctx->used, payload_type, conv_lm, emit_ctx->args);
+#endif
+}
+
+/* 1=ready plan, 0=fallback to scanner path, -1=hard reject (%n). */
+static int _nei_log_build_fmt_plan(const char *fmt, _nei_log_fmt_plan_cache_st *plan) {
+  int rc;
+  if (fmt == NULL || plan == NULL) {
+    return 0;
+  }
+
+  plan->op_count = 0U;
+  plan->ready = 0U;
+  plan->reject = 0U;
+
+  rc = _nei_log_scan_fmt_emit_ops(fmt, _nei_log_fmt_plan_emit_cb, plan);
+  if (rc < 0) {
+    plan->reject = 1U;
+    return -1;
+  }
+  if (rc == 0) {
+    return 0;
   }
 
   plan->ready = 1U;
@@ -445,8 +501,8 @@ size_t _nei_log_serialize_event(uint8_t *out,
                                 va_list args) {
   size_t used;
   size_t aligned_size;
-  const char *scan_ptr;
   const _nei_log_fmt_plan_cache_st *plan = NULL;
+  _nei_log_serialize_emit_ctx_st serialize_emit_ctx;
   uint16_t op_idx;
   nei_log_event_header_st header;
 
@@ -503,133 +559,23 @@ size_t _nei_log_serialize_event(uint8_t *out,
     return used;
   }
 
-  scan_ptr = fmt;
-
-  while (*scan_ptr) {
-    const char *p = scan_ptr;
-    uint8_t payload_type = 0;
-    int conv_lm = 0;
-    if (*p != '%') {
-      ++scan_ptr;
-      continue;
-    }
-    ++p;
-    if (*p == '%') {
-      scan_ptr = p + 1;
-      continue;
-    }
-    while (*p && _nei_log_is_flag_char(*p))
-      ++p;
-    if (*p == '*') {
-      int32_t v = va_arg(args, int);
-      if (_nei_log_payload_write_u8(out, out_cap, &used, _NEI_LOG_PAYLOAD_I32) != 0)
-        return 0;
-      if (_nei_log_payload_write_bytes(out, out_cap, &used, &v, sizeof(v)) != 0)
-        return 0;
-      ++p;
-    } else {
-      while (*p && _nei_log_is_digit_char(*p))
-        ++p;
-    }
-    if (*p == '.') {
-      ++p;
-      if (*p == '*') {
-        int32_t v = va_arg(args, int);
-        if (_nei_log_payload_write_u8(out, out_cap, &used, _NEI_LOG_PAYLOAD_I32) != 0)
-          return 0;
-        if (_nei_log_payload_write_bytes(out, out_cap, &used, &v, sizeof(v)) != 0)
-          return 0;
-        ++p;
-      } else {
-        while (*p && _nei_log_is_digit_char(*p))
-          ++p;
-      }
-    }
-    if (*p == 'h') {
-      ++p;
-      if (*p == 'h') {
-        ++p;
-        conv_lm = 1;
-      } else {
-        conv_lm = 2;
-      }
-    } else if (*p == 'l') {
-      ++p;
-      if (*p == 'l') {
-        ++p;
-        conv_lm = 4;
-      } else {
-        conv_lm = 3;
-      }
-    } else if (*p == 'j') {
-      ++p;
-      conv_lm = 5;
-    } else if (*p == 'z') {
-      ++p;
-      conv_lm = 6;
-    } else if (*p == 't') {
-      ++p;
-      conv_lm = 7;
-    } else if (*p == 'L') {
-      ++p;
-      conv_lm = 8;
-    }
-    if (*p == '\0') {
-      break;
-    }
-    /* Reject %n: writing through a captured pointer is unsafe for async/binary logs. */
-    if (*p == 'n') {
-      return 0;
-    }
-    switch (*p) {
-    case 'f':
-    case 'F':
-    case 'e':
-    case 'E':
-    case 'g':
-    case 'G':
-    case 'a':
-    case 'A':
-      payload_type = (conv_lm == 8) ? _NEI_LOG_PAYLOAD_LONGDOUBLE : _NEI_LOG_PAYLOAD_DOUBLE;
-      break;
-    case 'd':
-    case 'i':
-      if (conv_lm == 0 || conv_lm == 1 || conv_lm == 2) {
-        payload_type = _NEI_LOG_PAYLOAD_I32;
-      } else {
-        payload_type = _NEI_LOG_PAYLOAD_I64;
-      }
-      break;
-    case 'u':
-    case 'x':
-    case 'X':
-    case 'o':
-      if (conv_lm == 0 || conv_lm == 1 || conv_lm == 2) {
-        payload_type = _NEI_LOG_PAYLOAD_U32;
-      } else {
-        payload_type = _NEI_LOG_PAYLOAD_U64;
-      }
-      break;
-    case 'c':
-      payload_type = _NEI_LOG_PAYLOAD_CHAR;
-      break;
-    case 's':
-      payload_type = _NEI_LOG_PAYLOAD_CSTR;
-      break;
-    case 'p':
-      payload_type = _NEI_LOG_PAYLOAD_PTR;
-      break;
-    default:
-      payload_type = 0;
-      break;
-    }
-    if (payload_type != 0) {
-      if (_nei_log_payload_emit_arg(out, out_cap, &used, payload_type, (uint8_t)conv_lm, _NEI_LOG_VA_PASS(args)) != 0) {
-        return 0;
-      }
-    }
-    scan_ptr = (*p) ? (p + 1) : p;
+  serialize_emit_ctx.out = out;
+  serialize_emit_ctx.out_cap = out_cap;
+  serialize_emit_ctx.used = &used;
+#if defined(_WIN32)
+  serialize_emit_ctx.args = &args;
+#else
+  va_copy(serialize_emit_ctx.args, args);
+#endif
+  if (_nei_log_scan_fmt_emit_ops(fmt, _nei_log_serialize_emit_cb, &serialize_emit_ctx) <= 0) {
+#if !defined(_WIN32)
+    va_end(serialize_emit_ctx.args);
+#endif
+    return 0;
   }
+#if !defined(_WIN32)
+  va_end(serialize_emit_ctx.args);
+#endif
 
   aligned_size = _nei_log_align_up_8(used);
   if (_nei_log_payload_write_padded_zero(out, out_cap, &used, aligned_size) != 0) {
