@@ -1,5 +1,11 @@
 #include "log_internal.h"
 
+#if !defined(_WIN32)
+#include <errno.h>
+#include <sys/uio.h>
+#include <unistd.h>
+#endif
+
 #pragma region sink implementation
 
 static uint32_t _nei_log_parse_env_u32(const char *name, uint32_t fallback) {
@@ -18,6 +24,67 @@ static uint32_t _nei_log_parse_env_u32(const char *name, uint32_t fallback) {
 
 static void _nei_log_file_write_line(FILE *fp, const char *message, size_t length);
 static void _nei_log_file_sink_flush_pending(nei_log_default_file_sink_ctx_st *ctx, int flush_stream);
+static void _nei_log_file_sink_configure_stream_buffer(FILE *fp, uint32_t file_buffer_bytes);
+
+#if !defined(_WIN32)
+static int _nei_log_file_write_all_fd(int fd, const char *data, size_t length) {
+  while (length > 0U) {
+    const ssize_t written = write(fd, data, length);
+    if (written > 0) {
+      data += (size_t)written;
+      length -= (size_t)written;
+      continue;
+    }
+    if (written < 0 && errno == EINTR) {
+      continue;
+    }
+    return -1;
+  }
+  return 0;
+}
+
+static int _nei_log_file_writev_all_fd(int fd, const char *message, size_t length) {
+  struct iovec iov[2];
+  const char newline = '\n';
+  int iov_count = 2;
+
+  iov[0].iov_base = (void *)message;
+  iov[0].iov_len = length;
+  iov[1].iov_base = (void *)&newline;
+  iov[1].iov_len = 1U;
+
+  while (iov_count > 0) {
+    const ssize_t written = writev(fd, iov, iov_count);
+    if (written > 0) {
+      size_t remaining = (size_t)written;
+      int index = 0;
+      while (index < iov_count && remaining > 0U) {
+        if (remaining >= iov[index].iov_len) {
+          remaining -= iov[index].iov_len;
+          ++index;
+        } else {
+          iov[index].iov_base = (char *)iov[index].iov_base + remaining;
+          iov[index].iov_len -= remaining;
+          remaining = 0U;
+        }
+      }
+      if (index > 0) {
+        int dst = 0;
+        while (index < iov_count) {
+          iov[dst++] = iov[index++];
+        }
+        iov_count = dst;
+      }
+      continue;
+    }
+    if (written < 0 && errno == EINTR) {
+      continue;
+    }
+    return -1;
+  }
+  return 0;
+}
+#endif
 
 static FILE *_nei_log_open_default_file_sink_file(const char *filename) {
   FILE *fp = NULL;
@@ -32,6 +99,17 @@ static FILE *_nei_log_open_default_file_sink_file(const char *filename) {
   fp = fopen(filename, "ab");
 #endif
   return fp;
+}
+
+static void _nei_log_file_sink_configure_stream_buffer(FILE *fp, uint32_t file_buffer_bytes) {
+  if (fp == NULL) {
+    return;
+  }
+  if (file_buffer_bytes > 0U) {
+    (void)setvbuf(fp, NULL, _IOFBF, (size_t)file_buffer_bytes);
+  } else {
+    (void)setvbuf(fp, NULL, _IONBF, 0U);
+  }
 }
 
 static size_t _nei_log_file_sink_measure_size(FILE *fp) {
@@ -125,6 +203,7 @@ static int _nei_log_file_sink_rotate(nei_log_default_file_sink_ctx_st *ctx) {
   if (new_fp == NULL) {
     return -1;
   }
+  _nei_log_file_sink_configure_stream_buffer(new_fp, ctx->file_buffer_bytes);
   ctx->fp = new_fp;
   ctx->current_size = _nei_log_file_sink_measure_size(new_fp);
   return 0;
@@ -161,13 +240,16 @@ static void _nei_log_file_sink_write_line_and_flush(nei_log_default_file_sink_ct
 }
 
 static void _nei_log_file_sink_flush_pending(nei_log_default_file_sink_ctx_st *ctx, int flush_stream) {
-  size_t written;
   if (ctx == NULL || ctx->fp == NULL) {
     return;
   }
   if (ctx->write_batch_used > 0U) {
-    written = fwrite(ctx->write_batch_buf, 1U, ctx->write_batch_used, ctx->fp);
+#if !defined(_WIN32)
+    (void)_nei_log_file_write_all_fd(fileno(ctx->fp), ctx->write_batch_buf, ctx->write_batch_used);
+#else
+    size_t written = fwrite(ctx->write_batch_buf, 1U, ctx->write_batch_used, ctx->fp);
     (void)written;
+#endif
     ctx->write_batch_used = 0U;
   }
   if (flush_stream != 0) {
@@ -211,6 +293,16 @@ static void _nei_log_file_write_line(FILE *fp, const char *message, size_t lengt
   if (fp == NULL || message == NULL) {
     return;
   }
+
+#if !defined(_WIN32)
+  {
+    const int fd = fileno(fp);
+    if (fd >= 0) {
+      (void)_nei_log_file_writev_all_fd(fd, message, length);
+      return;
+    }
+  }
+#endif
 
   /* Fast path for short lines: one fwrite call avoids extra libc overhead. */
   if (length <= 1023U) {
@@ -343,9 +435,10 @@ nei_log_sink_st *nei_log_create_default_file_sink_with_rotation(const char *file
   flush_interval = _nei_log_parse_env_u32("NEI_LOG_FILE_FLUSH_INTERVAL", 256U);
   file_buffer_bytes = _nei_log_parse_env_u32("NEI_LOG_FILE_BUFFER_BYTES", 1024U * 1024U);
   write_batch_bytes = _nei_log_parse_env_u32("NEI_LOG_FILE_WRITE_BATCH_BYTES", 64U * 1024U);
-  if (file_buffer_bytes > 0U) {
-    (void)setvbuf(fp, NULL, _IOFBF, (size_t)file_buffer_bytes);
+  if (write_batch_bytes > 0U) {
+    file_buffer_bytes = 0U;
   }
+  _nei_log_file_sink_configure_stream_buffer(fp, file_buffer_bytes);
 
   sink = (nei_log_sink_st *)calloc(1U, sizeof(*sink));
   ctx = (nei_log_default_file_sink_ctx_st *)calloc(1U, sizeof(*ctx));
@@ -362,6 +455,7 @@ nei_log_sink_st *nei_log_create_default_file_sink_with_rotation(const char *file
   ctx->fp = fp;
   ctx->flush_counter = 0U;
   ctx->flush_interval = flush_interval; /* default 256; 0 means always fflush. */
+  ctx->file_buffer_bytes = file_buffer_bytes;
   ctx->filename = _nei_log_file_sink_dup_filename(filename);
   ctx->max_backup_files = max_backup_files;
   ctx->write_batch_buf = NULL;
