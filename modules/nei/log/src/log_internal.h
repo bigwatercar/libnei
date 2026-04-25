@@ -169,6 +169,7 @@ typedef struct _nei_log_runtime_st {
   _nei_log_atomic64_t stat_flush_wait_loops;
   _nei_log_atomic64_t stat_consumer_wakeups;
   _nei_log_atomic64_t stat_ring_high_watermark;
+  _nei_log_atomic32_t consumer_sleeping;
   int stop_requested;
   int initialized;
 #if defined(_WIN32)
@@ -242,6 +243,7 @@ void _nei_log_config_snapshot_bump(void);
 int _nei_log_ensure_runtime_initialized(void);
 void _nei_log_shutdown_runtime(void);
 int _nei_log_enqueue_event(const uint8_t *event, size_t len);
+void _nei_log_signal_consumer_if_sleeping(void);
 uint32_t _nei_log_get_runtime_init_count_for_test(void);
 int _nei_log_get_perf_stats_for_test(nei_log_perf_stats_st *out_stats);
 void _nei_log_reset_perf_stats_for_test(void);

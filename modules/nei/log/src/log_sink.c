@@ -18,6 +18,20 @@ static uint32_t _nei_log_parse_env_u32(const char *name, uint32_t fallback) {
 
 static void _nei_log_file_write_line(FILE *fp, const char *message, size_t length);
 
+static int _nei_log_file_sink_is_immediate_flush(const nei_log_default_file_sink_ctx_st *ctx) {
+  return ctx != NULL && (ctx->flush_interval <= 1U) && (ctx->write_batch_buf == NULL || ctx->write_batch_cap == 0U);
+}
+
+static void _nei_log_file_sink_write_line_and_flush(nei_log_default_file_sink_ctx_st *ctx,
+                                                    const char *message,
+                                                    size_t length) {
+  if (ctx == NULL || ctx->fp == NULL || message == NULL) {
+    return;
+  }
+  _nei_log_file_write_line(ctx->fp, message, length);
+  (void)fflush(ctx->fp);
+}
+
 static void _nei_log_file_sink_flush_pending(nei_log_default_file_sink_ctx_st *ctx, int flush_stream) {
   size_t written;
   if (ctx == NULL || ctx->fp == NULL) {
@@ -88,6 +102,10 @@ void _nei_log_default_file_llog(const nei_log_sink_st *sink, nei_log_level_e lev
   if (ctx == NULL || ctx->magic != _NEI_LOG_DEFAULT_FILE_SINK_MAGIC || ctx->fp == NULL) {
     return;
   }
+  if (_nei_log_file_sink_is_immediate_flush(ctx)) {
+    _nei_log_file_sink_write_line_and_flush(ctx, message, length);
+    return;
+  }
   _nei_log_file_sink_append_line(ctx, message, length);
   /* Batch flush: only fflush after every N logs (default 256). */
   if (ctx->flush_interval > 0U) {
@@ -111,6 +129,10 @@ void _nei_log_default_file_vlog(const nei_log_sink_st *sink, int verbose, const 
     return;
   }
   (void)verbose;
+  if (_nei_log_file_sink_is_immediate_flush(ctx)) {
+    _nei_log_file_sink_write_line_and_flush(ctx, message, length);
+    return;
+  }
   _nei_log_file_sink_append_line(ctx, message, length);
   /* Batch flush: only fflush after every N logs (default 256). */
   if (ctx->flush_interval > 0U) {

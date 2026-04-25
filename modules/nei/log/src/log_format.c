@@ -222,29 +222,66 @@ typedef struct _nei_log_fmt_cache_st {
   const char *fmt;
   size_t fmt_len;
   int has_percent;
+  int simple_replay;
 } nei_log_fmt_cache_st;
 
 static _NEI_LOG_TLS nei_log_fmt_cache_st s_tls_fmt_cache;
 
-static void _nei_log_get_fmt_meta_cached(const char *fmt, int *out_has_percent, size_t *out_len) {
-  if (out_has_percent == NULL || out_len == NULL) {
+static int _nei_log_is_flag_char(char c);
+static int _nei_log_is_digit_char(char c);
+static void _nei_log_snprintf_i64(const char *spec, char *tmp, size_t tcap, int64_t v);
+static void _nei_log_snprintf_u64(const char *spec, char *tmp, size_t tcap, uint64_t v);
+
+static int _nei_log_is_simple_replay_fmt(const char *fmt) {
+  const char *p = fmt;
+  if (fmt == NULL) {
+    return 0;
+  }
+  while (*p) {
+    if (*p != '%') {
+      ++p;
+      continue;
+    }
+    ++p;
+    if (*p == '%') {
+      ++p;
+      continue;
+    }
+    if (*p == '\0') {
+      return 0;
+    }
+    if (*p == 'd' || *p == 'i' || *p == 'u' || *p == 's') {
+      ++p;
+      continue;
+    }
+    return 0;
+  }
+  return 1;
+}
+
+static void _nei_log_get_fmt_meta_cached(const char *fmt, int *out_has_percent, size_t *out_len, int *out_simple_replay) {
+  if (out_has_percent == NULL || out_len == NULL || out_simple_replay == NULL) {
     return;
   }
   if (fmt == NULL) {
     *out_has_percent = 0;
     *out_len = 0U;
+    *out_simple_replay = 0;
     return;
   }
   if (s_tls_fmt_cache.fmt == fmt) {
     *out_has_percent = s_tls_fmt_cache.has_percent;
     *out_len = s_tls_fmt_cache.fmt_len;
+    *out_simple_replay = s_tls_fmt_cache.simple_replay;
     return;
   }
   s_tls_fmt_cache.fmt = fmt;
   s_tls_fmt_cache.fmt_len = strlen(fmt);
   s_tls_fmt_cache.has_percent = (strchr(fmt, '%') != NULL) ? 1 : 0;
+  s_tls_fmt_cache.simple_replay = _nei_log_is_simple_replay_fmt(fmt);
   *out_has_percent = s_tls_fmt_cache.has_percent;
   *out_len = s_tls_fmt_cache.fmt_len;
+  *out_simple_replay = s_tls_fmt_cache.simple_replay;
 }
 
 static int _nei_log_append_char(char *out, size_t cap, size_t *used, char c) {
@@ -269,6 +306,149 @@ static int _nei_log_append_nstr(char *out, size_t cap, size_t *used, const char 
 
 static int _nei_log_append_cstr(char *out, size_t cap, size_t *used, const char *s) {
   return _nei_log_append_nstr(out, cap, used, s, strlen(s));
+}
+
+static int _nei_log_append_u64_decimal(char *out, size_t cap, size_t *used, uint64_t v) {
+  char buf[32];
+  char *p = buf + sizeof(buf);
+  do {
+    --p;
+    *p = (char)('0' + (char)(v % 10U));
+    v /= 10U;
+  } while (v != 0U);
+  return _nei_log_append_nstr(out, cap, used, p, (size_t)((buf + sizeof(buf)) - p));
+}
+
+static int _nei_log_append_i64_decimal(char *out, size_t cap, size_t *used, int64_t v) {
+  uint64_t mag;
+  if (v < 0) {
+    if (_nei_log_append_char(out, cap, used, '-') != 0) {
+      return -1;
+    }
+    mag = (uint64_t)(-(v + 1)) + 1U;
+  } else {
+    mag = (uint64_t)v;
+  }
+  return _nei_log_append_u64_decimal(out, cap, used, mag);
+}
+
+static int _nei_log_is_simple_spec(const char *spec) {
+  if (spec == NULL || spec[0] != '%') {
+    return 0;
+  }
+  if (spec[1] == '%' && spec[2] == '\0') {
+    return 0;
+  }
+  const char *p = spec + 1;
+  if (!_nei_log_is_flag_char(*p) && !_nei_log_is_digit_char(*p) && *p != '-' && *p != '+' && *p != ' ' &&
+      *p != '#' && *p != '0' && *p != '.' && *p != '*') {
+    if (*p == 'l') {
+      ++p;
+      if (*p == 'l') {
+        ++p;
+      }
+    } else if (*p == 'h') {
+      ++p;
+      if (*p == 'h') {
+        ++p;
+      }
+    }
+    if ((*p == 'd' || *p == 'i' || *p == 'u' || *p == 's' || *p == 'x' || *p == 'X' || *p == 'o') && p[1] == '\0') {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int _nei_log_append_from_spec(const char *spec,
+                                      uint8_t payload_type,
+                                      const uint8_t **cursor,
+                                      const uint8_t *end,
+                                      char *out,
+                                      size_t out_cap,
+                                      size_t *used) {
+  if (spec == NULL || spec[1] == '\0') {
+    return -1;
+  }
+  const char *p = spec + 1;
+  if (*p == 'l') {
+    ++p;
+    if (*p == 'l') {
+      ++p;
+    }
+  } else if (*p == 'h') {
+    ++p;
+    if (*p == 'h') {
+      ++p;
+    }
+  }
+  char conv_char = *p;
+  switch (conv_char) {
+  case 'd':
+  case 'i': {
+    int64_t v = 0;
+    if (payload_type == _NEI_LOG_PAYLOAD_I32) {
+      int32_t v32 = 0;
+      if (_nei_log_read_bytes(cursor, end, &v32, sizeof(v32)) != 0) {
+        return -1;
+      }
+      v = (int64_t)v32;
+    } else if (payload_type == _NEI_LOG_PAYLOAD_I64) {
+      if (_nei_log_read_bytes(cursor, end, &v, sizeof(v)) != 0) {
+        return -1;
+      }
+    } else {
+      return -1;
+    }
+    return _nei_log_append_i64_decimal(out, out_cap, used, v);
+  }
+  case 'u':
+  case 'x':
+  case 'X':
+  case 'o': {
+    uint64_t v = 0U;
+    if (payload_type == _NEI_LOG_PAYLOAD_U32) {
+      uint32_t v32 = 0U;
+      if (_nei_log_read_bytes(cursor, end, &v32, sizeof(v32)) != 0) {
+        return -1;
+      }
+      v = (uint64_t)v32;
+    } else if (payload_type == _NEI_LOG_PAYLOAD_U64) {
+      if (_nei_log_read_bytes(cursor, end, &v, sizeof(v)) != 0) {
+        return -1;
+      }
+    } else {
+      return -1;
+    }
+    if (conv_char == 'u') {
+      return _nei_log_append_u64_decimal(out, out_cap, used, v);
+    } else {
+      char buf[32];
+      snprintf(buf, sizeof(buf), (conv_char == 'x') ? "%llx" : (conv_char == 'X') ? "%llX" : "%llo",
+               (unsigned long long)v);
+      return _nei_log_append_cstr(out, out_cap, used, buf);
+    }
+  }
+  case 's': {
+    uint16_t len16 = 0;
+    if (payload_type != _NEI_LOG_PAYLOAD_CSTR) {
+      return -1;
+    }
+    if (_nei_log_read_u16(cursor, end, &len16) != 0) {
+      return -1;
+    }
+    if (len16 > _NEI_LOG_MAX_STRING_COPY || *cursor + len16 > end) {
+      return -1;
+    }
+    if (len16 > 0U && _nei_log_append_nstr(out, out_cap, used, (const char *)(*cursor), (size_t)len16) != 0) {
+      return -1;
+    }
+    *cursor += len16;
+    return 0;
+  }
+  default:
+    return -1;
+  }
 }
 
 static int _nei_log_read_u16(const uint8_t **cursor, const uint8_t *end, uint16_t *out_value) {
@@ -462,6 +642,109 @@ static int _nei_log_build_runtime_conversion_spec(const char *scan,
   return 0;
 }
 
+static int _nei_log_format_simple_replay(const char *fmt,
+                                         const uint8_t **cursor,
+                                         const uint8_t *end,
+                                         char *out,
+                                         size_t out_cap,
+                                         size_t *used) {
+  const char *scan = fmt;
+  if (fmt == NULL || cursor == NULL || *cursor == NULL || end == NULL || out == NULL || used == NULL) {
+    return -1;
+  }
+
+  while (*scan) {
+    if (*scan != '%') {
+      if (_nei_log_append_char(out, out_cap, used, *scan) != 0) {
+        return -1;
+      }
+      ++scan;
+      continue;
+    }
+
+    ++scan;
+    if (*scan == '%') {
+      if (_nei_log_append_char(out, out_cap, used, '%') != 0) {
+        return -1;
+      }
+      ++scan;
+      continue;
+    }
+    if (*scan == '\0' || *cursor >= end) {
+      return -1;
+    }
+
+    {
+      uint8_t payload_type = *(*cursor)++;
+      switch (*scan) {
+      case 'd':
+      case 'i': {
+        int64_t v = 0;
+        if (payload_type == _NEI_LOG_PAYLOAD_I32) {
+          int32_t v32 = 0;
+          if (_nei_log_read_bytes(cursor, end, &v32, sizeof(v32)) != 0) {
+            return -1;
+          }
+          v = (int64_t)v32;
+        } else if (payload_type == _NEI_LOG_PAYLOAD_I64) {
+          if (_nei_log_read_bytes(cursor, end, &v, sizeof(v)) != 0) {
+            return -1;
+          }
+        } else {
+          return -1;
+        }
+        if (_nei_log_append_i64_decimal(out, out_cap, used, v) != 0) {
+          return -1;
+        }
+        break;
+      }
+      case 'u': {
+        uint64_t v = 0U;
+        if (payload_type == _NEI_LOG_PAYLOAD_U32) {
+          uint32_t v32 = 0U;
+          if (_nei_log_read_bytes(cursor, end, &v32, sizeof(v32)) != 0) {
+            return -1;
+          }
+          v = (uint64_t)v32;
+        } else if (payload_type == _NEI_LOG_PAYLOAD_U64) {
+          if (_nei_log_read_bytes(cursor, end, &v, sizeof(v)) != 0) {
+            return -1;
+          }
+        } else {
+          return -1;
+        }
+        if (_nei_log_append_u64_decimal(out, out_cap, used, v) != 0) {
+          return -1;
+        }
+        break;
+      }
+      case 's': {
+        uint16_t len16 = 0;
+        if (payload_type != _NEI_LOG_PAYLOAD_CSTR) {
+          return -1;
+        }
+        if (_nei_log_read_u16(cursor, end, &len16) != 0) {
+          return -1;
+        }
+        if (len16 > _NEI_LOG_MAX_STRING_COPY || *cursor + len16 > end) {
+          return -1;
+        }
+        if (len16 > 0U && _nei_log_append_nstr(out, out_cap, used, (const char *)(*cursor), (size_t)len16) != 0) {
+          return -1;
+        }
+        *cursor += len16;
+        break;
+      }
+      default:
+        return -1;
+      }
+    }
+    ++scan;
+  }
+
+  return 0;
+}
+
 static const char *_nei_log_basename(const char *path) {
   const char *slash;
   const char *backslash;
@@ -618,10 +901,23 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
   fmt = header->fmt_ptr;
   {
     int has_percent = 0;
+    int simple_replay = 0;
     size_t fmt_len = 0U;
-    _nei_log_get_fmt_meta_cached(fmt, &has_percent, &fmt_len);
+    _nei_log_get_fmt_meta_cached(fmt, &has_percent, &fmt_len, &simple_replay);
     if (has_percent == 0) {
       if (fmt_len > 0U && _nei_log_append_nstr(out, out_cap, &used, fmt, fmt_len) != 0) {
+        return -1;
+      }
+      if (log_location != 0 && log_location_after_message != 0 && (header->file_ptr != NULL || header->func_ptr != NULL)) {
+        if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
+          return -1;
+        if (_nei_log_append_location_block(header, short_path, out, out_cap, &used) != 0)
+          return -1;
+      }
+      return 0;
+    }
+    if (simple_replay != 0) {
+      if (_nei_log_format_simple_replay(fmt, &cursor, end, out, out_cap, &used) != 0) {
         return -1;
       }
       if (log_location != 0 && log_location_after_message != 0 && (header->file_ptr != NULL || header->func_ptr != NULL)) {
@@ -659,6 +955,13 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
       }
       {
         const uint8_t payload_type = *cursor++;
+        if (_nei_log_is_simple_spec(conv_spec)) {
+          if (_nei_log_append_from_spec(conv_spec, payload_type, &cursor, end, out, out_cap, &used) != 0) {
+            return -1;
+          }
+          scan = after;
+          continue;
+        }
         char tmp[256];
         switch (payload_type) {
         case _NEI_LOG_PAYLOAD_I32: {
@@ -740,17 +1043,26 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
         }
         case _NEI_LOG_PAYLOAD_CSTR: {
           uint16_t len16 = 0;
-          char strbuf[_NEI_LOG_MAX_STRING_COPY + 1U];
           if (_nei_log_read_u16(&cursor, end, &len16) != 0)
             return -1;
           if (len16 > _NEI_LOG_MAX_STRING_COPY || cursor + len16 > end)
             return -1;
-          memcpy(strbuf, cursor, len16);
-          strbuf[len16] = '\0';
-          cursor += len16;
-          snprintf(tmp, sizeof(tmp), conv_spec, strbuf);
-          if (_nei_log_append_cstr(out, out_cap, &used, tmp) != 0)
-            return -1;
+          if (conv_spec[0] == '%' && conv_spec[1] == 's' && conv_spec[2] == '\0') {
+            if (len16 > 0U && _nei_log_append_nstr(out, out_cap, &used, (const char *)cursor, (size_t)len16) != 0) {
+              return -1;
+            }
+            cursor += len16;
+            break;
+          }
+          {
+            char strbuf[_NEI_LOG_MAX_STRING_COPY + 1U];
+            memcpy(strbuf, cursor, len16);
+            strbuf[len16] = '\0';
+            cursor += len16;
+            snprintf(tmp, sizeof(tmp), conv_spec, strbuf);
+            if (_nei_log_append_cstr(out, out_cap, &used, tmp) != 0)
+              return -1;
+          }
           break;
         }
         default:

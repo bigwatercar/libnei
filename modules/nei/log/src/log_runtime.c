@@ -19,6 +19,26 @@ nei_log_runtime_st s_runtime = {
 
 static uint32_t s_runtime_init_count = 0U;
 
+void _nei_log_signal_consumer_if_sleeping(void) {
+  if (_NEI_LOG_ATOMIC_LOAD32(&s_runtime.consumer_sleeping) == 0U) {
+    return;
+  }
+
+#if defined(_WIN32)
+  EnterCriticalSection(&s_runtime.mutex);
+  if (_NEI_LOG_ATOMIC_LOAD32(&s_runtime.consumer_sleeping) != 0U) {
+    _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
+  }
+  LeaveCriticalSection(&s_runtime.mutex);
+#else
+  pthread_mutex_lock(&s_runtime.mutex);
+  if (_NEI_LOG_ATOMIC_LOAD32(&s_runtime.consumer_sleeping) != 0U) {
+    pthread_cond_signal(&s_runtime.cond);
+  }
+  pthread_mutex_unlock(&s_runtime.mutex);
+#endif
+}
+
 static void _nei_log_update_ring_hwm(uint64_t depth) {
 #if defined(_WIN32)
   for (;;) {
@@ -301,16 +321,8 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
   memcpy(slot->data, event, len);
   _NEI_LOG_ATOMIC_STORE32(&slot->state, 1U);
 
-  /* Signal while holding the mutex so consumer-side wait has no lost-wakeup window. */
-#if defined(_WIN32)
-  EnterCriticalSection(&s_runtime.mutex);
-  _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
-  LeaveCriticalSection(&s_runtime.mutex);
-#else
-  pthread_mutex_lock(&s_runtime.mutex);
-  _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
-  pthread_mutex_unlock(&s_runtime.mutex);
-#endif
+  /* Fast path: only wake the consumer when it has actually gone to sleep. */
+  _nei_log_signal_consumer_if_sleeping();
   return 0;
 }
 
@@ -390,10 +402,17 @@ static void *_nei_log_consumer_thread(void *arg) {
   EnterCriticalSection(&rt->mutex);
   for (;;) {
     while (!_nei_log_ring_has_ready_slot(&rt->ring) && !rt->stop_requested) {
+      _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 1U);
+      if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
+        _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 0U);
+        break;
+      }
       SleepConditionVariableCS(&rt->cond, &rt->mutex, INFINITE);
+      _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 0U);
       (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_wakeups, 1U);
     }
     if (rt->stop_requested && !_nei_log_ring_has_ready_slot(&rt->ring)) {
+      _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 0U);
       LeaveCriticalSection(&rt->mutex);
       (void)_nei_log_drain_ring(&rt->ring); /* final drain */
       break;
@@ -435,10 +454,17 @@ static void *_nei_log_consumer_thread(void *arg) {
   pthread_mutex_lock(&rt->mutex);
   for (;;) {
     while (!_nei_log_ring_has_ready_slot(&rt->ring) && !rt->stop_requested) {
+      _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 1U);
+      if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
+        _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 0U);
+        break;
+      }
       pthread_cond_wait(&rt->cond, &rt->mutex);
+      _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 0U);
       (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_wakeups, 1U);
     }
     if (rt->stop_requested && !_nei_log_ring_has_ready_slot(&rt->ring)) {
+      _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 0U);
       pthread_mutex_unlock(&rt->mutex);
       (void)_nei_log_drain_ring(&rt->ring); /* final drain */
       break;

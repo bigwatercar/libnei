@@ -258,7 +258,9 @@ void nei_log_flush(void) {
 
 #if defined(_WIN32)
   EnterCriticalSection(&s_runtime.mutex);
-  _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
+  if (_NEI_LOG_ATOMIC_LOAD32(&s_runtime.consumer_sleeping) != 0U) {
+    _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
+  }
   while (_NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos) < flush_target) {
     (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&s_runtime.stat_flush_wait_loops, 1U);
     SleepConditionVariableCS(&s_runtime.cond, &s_runtime.mutex, INFINITE);
@@ -266,7 +268,9 @@ void nei_log_flush(void) {
   LeaveCriticalSection(&s_runtime.mutex);
 #else
   pthread_mutex_lock(&s_runtime.mutex);
-  _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
+  if (_NEI_LOG_ATOMIC_LOAD32(&s_runtime.consumer_sleeping) != 0U) {
+    pthread_cond_signal(&s_runtime.cond);
+  }
   while (_NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos) < flush_target) {
     (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&s_runtime.stat_flush_wait_loops, 1U);
     pthread_cond_wait(&s_runtime.cond, &s_runtime.mutex);
