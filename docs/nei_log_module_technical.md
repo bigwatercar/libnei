@@ -133,8 +133,8 @@ nei_log_flush 语义：等待调用前已入队事件被消费完成。
 
 ### 5.3 Sink API
 
+- nei_log_default_file_sink_options
 - nei_log_create_default_file_sink
-- nei_log_create_default_file_sink_with_rotation
 - nei_log_destroy_sink
 
 ### 5.4 宏 API

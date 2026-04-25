@@ -8,20 +8,6 @@
 
 #pragma region sink implementation
 
-static uint32_t _nei_log_parse_env_u32(const char *name, uint32_t fallback) {
-  const char *s = getenv(name);
-  char *end = NULL;
-  unsigned long v = 0UL;
-  if (s == NULL || s[0] == '\0') {
-    return fallback;
-  }
-  v = strtoul(s, &end, 10);
-  if (end == s || (end != NULL && *end != '\0') || v > 0xFFFFFFFFUL) {
-    return fallback;
-  }
-  return (uint32_t)v;
-}
-
 static void _nei_log_file_write_line(FILE *fp, const char *message, size_t length);
 static void _nei_log_file_sink_flush_pending(nei_log_default_file_sink_ctx_st *ctx, int flush_stream);
 static void _nei_log_file_sink_configure_stream_buffer(FILE *fp, uint32_t file_buffer_bytes);
@@ -413,18 +399,45 @@ void _nei_log_emit_message(const nei_log_config_st *config, int32_t level, int32
 
 #pragma region public API
 
-nei_log_sink_st *nei_log_create_default_file_sink_with_rotation(const char *filename,
-                                                               size_t max_file_bytes,
-                                                               uint32_t max_backup_files) {
+#define _NEI_LOG_DEFAULT_FLUSH_INTERVAL    256U
+#define _NEI_LOG_DEFAULT_FILE_BUFFER_BYTES  (1024U * 1024U)
+#define _NEI_LOG_DEFAULT_WRITE_BATCH_BYTES  (64U * 1024U)
+
+nei_log_default_file_sink_options_st nei_log_default_file_sink_options(void) {
+  nei_log_default_file_sink_options_st opts;
+  opts.max_file_bytes    = 0U;
+  opts.max_backup_files  = 0U;
+  opts.flush_interval    = _NEI_LOG_DEFAULT_FLUSH_INTERVAL;
+  opts.file_buffer_bytes = _NEI_LOG_DEFAULT_FILE_BUFFER_BYTES;
+  opts.write_batch_bytes = _NEI_LOG_DEFAULT_WRITE_BATCH_BYTES;
+  return opts;
+}
+
+nei_log_sink_st *nei_log_create_default_file_sink(const char *filename,
+                                                  const nei_log_default_file_sink_options_st *options) {
   nei_log_sink_st *sink = NULL;
   nei_log_default_file_sink_ctx_st *ctx = NULL;
   FILE *fp = NULL;
   uint32_t flush_interval = 0U;
   uint32_t file_buffer_bytes = 0U;
   uint32_t write_batch_bytes = 0U;
+  size_t max_file_bytes = 0U;
+  uint32_t max_backup_files = 0U;
 
   if (filename == NULL || filename[0] == '\0') {
     return NULL;
+  }
+
+  if (options != NULL) {
+    flush_interval    = options->flush_interval;
+    file_buffer_bytes = options->file_buffer_bytes;
+    write_batch_bytes = options->write_batch_bytes;
+    max_file_bytes    = options->max_file_bytes;
+    max_backup_files  = options->max_backup_files;
+  } else {
+    flush_interval    = _NEI_LOG_DEFAULT_FLUSH_INTERVAL;
+    file_buffer_bytes = _NEI_LOG_DEFAULT_FILE_BUFFER_BYTES;
+    write_batch_bytes = _NEI_LOG_DEFAULT_WRITE_BATCH_BYTES;
   }
 
   fp = _nei_log_open_default_file_sink_file(filename);
@@ -432,9 +445,6 @@ nei_log_sink_st *nei_log_create_default_file_sink_with_rotation(const char *file
     return NULL;
   }
 
-  flush_interval = _nei_log_parse_env_u32("NEI_LOG_FILE_FLUSH_INTERVAL", 256U);
-  file_buffer_bytes = _nei_log_parse_env_u32("NEI_LOG_FILE_BUFFER_BYTES", 1024U * 1024U);
-  write_batch_bytes = _nei_log_parse_env_u32("NEI_LOG_FILE_WRITE_BATCH_BYTES", 64U * 1024U);
   if (write_batch_bytes > 0U) {
     file_buffer_bytes = 0U;
   }
@@ -454,7 +464,7 @@ nei_log_sink_st *nei_log_create_default_file_sink_with_rotation(const char *file
   ctx->magic = _NEI_LOG_DEFAULT_FILE_SINK_MAGIC;
   ctx->fp = fp;
   ctx->flush_counter = 0U;
-  ctx->flush_interval = flush_interval; /* default 256; 0 means always fflush. */
+  ctx->flush_interval = flush_interval; /* 0 means always fflush; default is 256. */
   ctx->file_buffer_bytes = file_buffer_bytes;
   ctx->filename = _nei_log_file_sink_dup_filename(filename);
   ctx->max_backup_files = max_backup_files;
@@ -480,10 +490,6 @@ nei_log_sink_st *nei_log_create_default_file_sink_with_rotation(const char *file
   sink->vlog = _nei_log_default_file_vlog;
   sink->opaque = ctx;
   return sink;
-}
-
-nei_log_sink_st *nei_log_create_default_file_sink(const char *filename) {
-  return nei_log_create_default_file_sink_with_rotation(filename, 0U, 0U);
 }
 
 void nei_log_destroy_sink(nei_log_sink_st *sink) {

@@ -3,7 +3,7 @@
 
 int main() {
   printf("NEI Log Demo - Demonstrating logging functionality\n");
-  nei_log_sink_st *sink = nei_log_create_default_file_sink("test.log");
+  nei_log_sink_st *sink = nei_log_create_default_file_sink("test.log", NULL);
   if (sink == NULL) {
     return 1;
   }

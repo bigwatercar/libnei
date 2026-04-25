@@ -203,7 +203,7 @@ void run_file_log_benchmark(const std::string &name,
                             int iterations = 100000) {
   nei_log_perf_stats_st stats = {};
 
-  nei_log_sink_st *file_sink = nei_log_create_default_file_sink(filename.c_str());
+  nei_log_sink_st *file_sink = nei_log_create_default_file_sink(filename.c_str(), NULL);
   if (!file_sink) {
     std::cout << "Failed to create file sink for " << filename << "\n";
     return;

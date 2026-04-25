@@ -277,7 +277,7 @@ NeiBenchResult time_nei_memory_vlog_ms(F &&f, int iters) {
 template <class F>
 NeiBenchResult time_nei_file_ms(F &&f, int iters, const char *path) {
   (void)std::remove(path);
-  nei_log_sink_st *fs = nei_log_create_default_file_sink(path);
+  nei_log_sink_st *fs = nei_log_create_default_file_sink(path, NULL);
   if (!fs) {
     return {};
   }
@@ -304,7 +304,7 @@ NeiBenchResult time_nei_file_ms(F &&f, int iters, const char *path) {
 template <class F>
 NeiBenchResult time_nei_file_sync_ms(F &&f, int iters, const char *path) {
   (void)std::remove(path);
-  nei_log_sink_st *fs = nei_log_create_default_file_sink(path);
+  nei_log_sink_st *fs = nei_log_create_default_file_sink(path, NULL);
   if (!fs) {
     return {};
   }
@@ -333,9 +333,31 @@ NeiBenchResult time_nei_file_sync_ms(F &&f, int iters, const char *path) {
  */
 template <class F>
 NeiBenchResult time_nei_file_strict_sync_ms(F &&f, int iters, const char *path) {
-  ScopedEnvVar env_flush_interval("NEI_LOG_FILE_FLUSH_INTERVAL", "1");
-  ScopedEnvVar env_write_batch("NEI_LOG_FILE_WRITE_BATCH_BYTES", "0");
-  return time_nei_file_sync_ms(std::forward<F>(f), iters, path);
+  (void)std::remove(path);
+  nei_log_default_file_sink_options_st opts = nei_log_default_file_sink_options();
+  opts.flush_interval    = 1U; /* fflush after every record */
+  opts.write_batch_bytes = 0U; /* disable batch writing */
+  nei_log_sink_st *fs = nei_log_create_default_file_sink(path, &opts);
+  if (!fs) {
+    return {};
+  }
+  NeiBenchResult result;
+  result.micros = -1;
+  {
+    NeiConfigGuard guard;
+    guard.set_primary(fs);
+    nei_log_reset_perf_stats_for_test();
+    const auto t0 = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < iters; ++i) {
+      f();
+      nei_log_flush();
+    }
+    const auto t1 = std::chrono::high_resolution_clock::now();
+    result.micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+    (void)nei_log_get_perf_stats_for_test(&result.stats);
+  }
+  nei_log_destroy_sink(fs);
+  return result;
 }
 
 // ---------------------------------------------------------------------------

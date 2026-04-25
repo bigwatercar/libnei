@@ -886,7 +886,7 @@ TEST(LogCTest, BuiltinFileSinkOwnsFileHandleLifecycle) {
   const std::string file_path = std::string(tmp_name) + ".log";
   (void)std::remove(file_path.c_str());
 
-  nei_log_sink_st *sink = nei_log_create_default_file_sink(file_path.c_str());
+  nei_log_sink_st *sink = nei_log_create_default_file_sink(file_path.c_str(), NULL);
   ASSERT_NE(sink, nullptr);
 
   nei_log_config_st cfg = *nei_log_default_config();
@@ -933,7 +933,10 @@ TEST(LogCTest, BuiltinFileSinkRotatesAtConfiguredSize) {
   (void)std::remove(file_path_1.c_str());
   (void)std::remove(file_path_2.c_str());
 
-  nei_log_sink_st *sink = nei_log_create_default_file_sink_with_rotation(file_path.c_str(), 64U, 2U);
+  nei_log_default_file_sink_options_st rotate_opts = nei_log_default_file_sink_options();
+  rotate_opts.max_file_bytes   = 64U;
+  rotate_opts.max_backup_files = 2U;
+  nei_log_sink_st *sink = nei_log_create_default_file_sink(file_path.c_str(), &rotate_opts);
   ASSERT_NE(sink, nullptr);
 
   nei_log_config_st cfg = *nei_log_default_config();

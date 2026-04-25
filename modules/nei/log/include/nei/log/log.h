@@ -311,9 +311,73 @@ NEI_API nei_log_config_st *nei_log_default_config(void);
  */
 
 /**
+ * @brief Options for the built-in default file sink.
+ *
+ * @details Pass a pointer to this struct to
+ * @ref nei_log_create_default_file_sink to control write
+ * buffering, batch write, periodic flush, and size-based rotation.
+ * Initialise with @ref nei_log_default_file_sink_options to get a
+ * struct pre-filled with the built-in defaults, then override only
+ * the fields you care about.
+ *
+ * @par Field semantics
+ * | Field               | Meaning of 0                         | Built-in default |
+ * |---------------------|--------------------------------------|-----------------|
+ * | flush_interval      | Flush after every record             | 256             |
+ * | file_buffer_bytes   | No stdio stream buffering            | 1 MiB           |
+ * | write_batch_bytes   | Disable batch writing                | 64 KiB          |
+ * | max_file_bytes      | Disable rotation                     | (none)          |
+ * | max_backup_files    | Disable rotation                     | (none)          |
+ *
+ * @note When @c write_batch_bytes > 0, @c file_buffer_bytes is ignored
+ * because the batch buffer replaces the stdio stream buffer.
+ */
+typedef struct nei_log_default_file_sink_options_st {
+  /** @brief Rotate before writing a line that would make the active file
+   *  exceed this size. @c 0 disables rotation. */
+  size_t max_file_bytes;
+  /** @brief Number of rotated backup files to keep (.1, .2, ...).
+   *  @c 0 disables rotation. */
+  uint32_t max_backup_files;
+  /** @brief Call @c fflush after this many records.
+   *  @c 0 flushes after every record. Built-in default is 256. */
+  uint32_t flush_interval;
+  /** @brief @c setvbuf buffer size for the stdio stream.
+   *  @c 0 disables stream buffering.
+   *  Ignored when @c write_batch_bytes > 0. Built-in default is 1 MiB. */
+  uint32_t file_buffer_bytes;
+  /** @brief Batch-write buffer size for the sink; records are accumulated
+   *  in this buffer and written to the file in larger chunks.
+   *  @c 0 disables batch writing. Built-in default is 64 KiB. */
+  uint32_t write_batch_bytes;
+} nei_log_default_file_sink_options_st;
+
+/**
+ * @brief Return a @ref nei_log_default_file_sink_options_st pre-filled with
+ * the built-in defaults.
+ *
+ * @details Use this as a starting point and override only the fields you need:
+ * @code
+ * nei_log_default_file_sink_options_st opts = nei_log_default_file_sink_options();
+ * opts.flush_interval = 1;   // flush every record
+ * opts.write_batch_bytes = 0; // disable batch writing
+ * nei_log_sink_st *sink = nei_log_create_default_file_sink(path, &opts);
+ * @endcode
+ *
+ * @return Options struct pre-filled with built-in defaults
+ *         (flush_interval=256, file_buffer_bytes=1 MiB, write_batch_bytes=64 KiB,
+ *          max_file_bytes=0, max_backup_files=0).
+ */
+NEI_API nei_log_default_file_sink_options_st nei_log_default_file_sink_options(void);
+
+/**
  * @brief Create a built-in file sink.
  *
  * @param[in] filename Output file path (opened in append-binary mode).
+ * @param[in] options Sink options. Pass NULL to use all built-in defaults
+ *            (flush_interval=256, file_buffer_bytes=1 MiB, write_batch_bytes=64 KiB,
+ *            rotation disabled). Use @ref nei_log_default_file_sink_options as a
+ *            starting point and override only the fields you need.
  * @return Heap-allocated sink pointer, or NULL on failure.
  *
  * @note Level and verbose filtering are controlled by the owning
@@ -321,25 +385,14 @@ NEI_API nei_log_config_st *nei_log_default_config(void);
  * @ref nei_log_config_st::verbose_threshold). Custom per-sink state should use
  * @ref nei_log_sink_st::opaque on a sink you own; release the sink with
  * @ref nei_log_destroy_sink.
- */
-NEI_API nei_log_sink_st *nei_log_create_default_file_sink(const char *filename);
-
-/**
- * @brief Create a built-in file sink with size-based rotation.
  *
- * @param[in] filename Output file path for the active log file.
- * @param[in] max_file_bytes Rotate before writing a line that would make the
- * active file exceed this size. Pass 0 to disable rotation.
- * @param[in] max_backup_files Number of rotated backup files to keep using
- * suffixes like ".1", ".2", ... Pass 0 to disable rotation.
- * @return Heap-allocated sink pointer, or NULL on failure.
- *
- * @details When rotation is enabled, the current file is renamed to
+ * @details When @c options->max_file_bytes and @c options->max_backup_files are
+ * both non-zero, size-based rotation is enabled: the active file is renamed to
  * `filename.1`, older backups are shifted up by one index, and the oldest file
- * beyond @p max_backup_files is removed.
+ * beyond @c max_backup_files is removed.
  */
 NEI_API nei_log_sink_st *
-nei_log_create_default_file_sink_with_rotation(const char *filename, size_t max_file_bytes, uint32_t max_backup_files);
+nei_log_create_default_file_sink(const char *filename, const nei_log_default_file_sink_options_st *options);
 
 /**
  * @brief Destroy a log sink structure allocated by the library (e.g.
