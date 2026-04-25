@@ -105,8 +105,8 @@ if [[ ! -d "$BUILD_DIR" ]]; then
   exit 1
 fi
 
-pkill -f log_bench >/dev/null 2>&1 || true
-pkill -f nei_tests >/dev/null 2>&1 || true
+pkill -x log_bench >/dev/null 2>&1 || true
+pkill -x nei_tests >/dev/null 2>&1 || true
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
   echo "==> Building..."

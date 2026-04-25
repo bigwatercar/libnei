@@ -63,74 +63,84 @@ static int _nei_log_payload_write_padded_zero(uint8_t *out, size_t out_cap, size
   return 0;
 }
 
+#if defined(_WIN32)
+#define _NEI_LOG_VA_PARAM va_list *
+#define _NEI_LOG_VA_PASS(ap) (&(ap))
+#define _NEI_LOG_VA_ARG(ap, type) va_arg(*(ap), type)
+#else
+#define _NEI_LOG_VA_PARAM va_list
+#define _NEI_LOG_VA_PASS(ap) (ap)
+#define _NEI_LOG_VA_ARG(ap, type) va_arg((ap), type)
+#endif
+
 static int _nei_log_payload_emit_arg(uint8_t *out,
                                      size_t out_cap,
                                      size_t *used,
                                      uint8_t payload_type,
                                      uint8_t conv_lm,
-                                     va_list args) {
+                                     _NEI_LOG_VA_PARAM args) {
   if (_nei_log_payload_write_u8(out, out_cap, used, payload_type) != 0) {
     return -1;
   }
 
   switch (payload_type) {
   case _NEI_LOG_PAYLOAD_I32: {
-    int32_t v = (int32_t)va_arg(args, int);
+    int32_t v = (int32_t)_NEI_LOG_VA_ARG(args, int);
     return _nei_log_payload_write_bytes(out, out_cap, used, &v, sizeof(v));
   }
   case _NEI_LOG_PAYLOAD_U32: {
-    uint32_t v = (uint32_t)va_arg(args, unsigned int);
+    uint32_t v = (uint32_t)_NEI_LOG_VA_ARG(args, unsigned int);
     return _nei_log_payload_write_bytes(out, out_cap, used, &v, sizeof(v));
   }
   case _NEI_LOG_PAYLOAD_I64: {
     int64_t v64 = 0;
     if (conv_lm == 3U) {
-      v64 = (int64_t)va_arg(args, long);
+      v64 = (int64_t)_NEI_LOG_VA_ARG(args, long);
     } else if (conv_lm == 4U) {
-      v64 = (int64_t)va_arg(args, long long);
+      v64 = (int64_t)_NEI_LOG_VA_ARG(args, long long);
     } else if (conv_lm == 5U) {
-      v64 = (int64_t)va_arg(args, intmax_t);
+      v64 = (int64_t)_NEI_LOG_VA_ARG(args, intmax_t);
     } else if (conv_lm == 6U) {
-      v64 = (int64_t)va_arg(args, ptrdiff_t);
+      v64 = (int64_t)_NEI_LOG_VA_ARG(args, ptrdiff_t);
     } else if (conv_lm == 7U) {
-      v64 = (int64_t)va_arg(args, ptrdiff_t);
+      v64 = (int64_t)_NEI_LOG_VA_ARG(args, ptrdiff_t);
     } else {
-      v64 = (int64_t)va_arg(args, long long);
+      v64 = (int64_t)_NEI_LOG_VA_ARG(args, long long);
     }
     return _nei_log_payload_write_bytes(out, out_cap, used, &v64, sizeof(v64));
   }
   case _NEI_LOG_PAYLOAD_U64: {
     uint64_t v64 = 0;
     if (conv_lm == 3U) {
-      v64 = (uint64_t)va_arg(args, unsigned long);
+      v64 = (uint64_t)_NEI_LOG_VA_ARG(args, unsigned long);
     } else if (conv_lm == 4U) {
-      v64 = (uint64_t)va_arg(args, unsigned long long);
+      v64 = (uint64_t)_NEI_LOG_VA_ARG(args, unsigned long long);
     } else if (conv_lm == 5U) {
-      v64 = (uint64_t)va_arg(args, uintmax_t);
+      v64 = (uint64_t)_NEI_LOG_VA_ARG(args, uintmax_t);
     } else if (conv_lm == 6U || conv_lm == 7U) {
-      v64 = (uint64_t)va_arg(args, size_t);
+      v64 = (uint64_t)_NEI_LOG_VA_ARG(args, size_t);
     } else {
-      v64 = (uint64_t)va_arg(args, unsigned long long);
+      v64 = (uint64_t)_NEI_LOG_VA_ARG(args, unsigned long long);
     }
     return _nei_log_payload_write_bytes(out, out_cap, used, &v64, sizeof(v64));
   }
   case _NEI_LOG_PAYLOAD_DOUBLE: {
-    double v = va_arg(args, double);
+    double v = _NEI_LOG_VA_ARG(args, double);
     return _nei_log_payload_write_bytes(out, out_cap, used, &v, sizeof(v));
   }
   case _NEI_LOG_PAYLOAD_LONGDOUBLE: {
-    long double ld = va_arg(args, long double);
+    long double ld = _NEI_LOG_VA_ARG(args, long double);
     uint8_t raw[_NEI_LOG_LONGDOUBLE_STORAGE];
     memset(raw, 0, sizeof(raw));
     memcpy(raw, &ld, sizeof(ld) < sizeof(raw) ? sizeof(ld) : sizeof(raw));
     return _nei_log_payload_write_bytes(out, out_cap, used, raw, sizeof(raw));
   }
   case _NEI_LOG_PAYLOAD_CHAR: {
-    char ch = (char)va_arg(args, int);
+    char ch = (char)_NEI_LOG_VA_ARG(args, int);
     return _nei_log_payload_write_bytes(out, out_cap, used, &ch, sizeof(ch));
   }
   case _NEI_LOG_PAYLOAD_PTR: {
-    uintptr_t raw = (uintptr_t)va_arg(args, const void *);
+    uintptr_t raw = (uintptr_t)_NEI_LOG_VA_ARG(args, const void *);
     return _nei_log_payload_write_bytes(out, out_cap, used, &raw, sizeof(raw));
   }
   case _NEI_LOG_PAYLOAD_CSTR: {
@@ -139,10 +149,10 @@ static int _nei_log_payload_emit_arg(uint8_t *out,
     uint16_t len16;
     size_t len;
     if (conv_lm == 3U) {
-      const wchar_t *ws = va_arg(args, const wchar_t *);
+      const wchar_t *ws = _NEI_LOG_VA_ARG(args, const wchar_t *);
       s = _nei_log_wstr_to_mbs_or_placeholder(ws, ws_buf, sizeof(ws_buf));
     } else {
-      s = va_arg(args, const char *);
+      s = _NEI_LOG_VA_ARG(args, const char *);
       if (s == NULL)
         s = "(null)";
     }
@@ -478,7 +488,7 @@ size_t _nei_log_serialize_event(uint8_t *out,
                                     &used,
                                     plan->ops[op_idx].payload_type,
                                     plan->ops[op_idx].conv_lm,
-                                    args) != 0) {
+                                    _NEI_LOG_VA_PASS(args)) != 0) {
         return 0;
       }
     }
@@ -614,7 +624,7 @@ size_t _nei_log_serialize_event(uint8_t *out,
       break;
     }
     if (payload_type != 0) {
-      if (_nei_log_payload_emit_arg(out, out_cap, &used, payload_type, (uint8_t)conv_lm, args) != 0) {
+      if (_nei_log_payload_emit_arg(out, out_cap, &used, payload_type, (uint8_t)conv_lm, _NEI_LOG_VA_PASS(args)) != 0) {
         return 0;
       }
     }
