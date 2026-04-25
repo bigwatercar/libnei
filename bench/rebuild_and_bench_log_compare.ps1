@@ -64,6 +64,7 @@ function Get-CompareCanonicalName {
 
     switch -Regex ($name) {
         '^simple\s' { return 'simple' }
+        '^multi printf \(fmt_plan cache miss\)' { return 'multi (cache miss)' }
         '^multi\s' { return 'multi' }
         '^llog_literal(\s|$)' { return 'literal' }
         '^literal only$' { return 'literal' }
@@ -239,6 +240,7 @@ function Invoke-LogCompareBenchmark {
         '[spdlog] simple {}',
         '[NEI]  multi printf',
         '[spdlog] multi fmt',
+        '[NEI]  multi printf (fmt_plan cache miss)',
         '[NEI]  llog_literal (opaque body)',
         '[spdlog] literal only',
         '[NEI]  vlog_literal (opaque body)',

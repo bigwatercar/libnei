@@ -473,6 +473,41 @@ int main() {
                   kMemoryIters));
 
   {
+    /**
+     * Cache-miss scenario: alternate between two different fmt string literals on every
+     * call so the TLS fmt_plan cache invalidates each iteration. This measures the
+     * worst-case producer overhead when the cache is always cold (e.g. many distinct
+     * call sites interleaved on the same thread, or a logging helper that wraps
+     * multiple format strings).
+     *
+     * The two fmt strings use the same argument types (int, const char*, double) as the
+     * cache-hit "multi printf" benchmark above, so the only variable between the two
+     * scenarios is cache hit vs miss — not format string complexity.
+     */
+    const auto result = time_nei_memory_ms(
+        [] {
+          /* Two distinct string-literal array addresses with identical argument
+           * structure to the cache-hit "multi printf" scenario (%d, %s, %.2f). */
+          static const char fmt_a[] = "number=%d, string=%s, float=%.2f";
+          static const char fmt_b[] = "count=%d, label=%s, value=%.2f";
+          static int s_toggle = 0;
+          const int idx = s_toggle & 1;
+          s_toggle ^= 1;
+          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
+                   NEI_L_INFO,
+                   __FILE__,
+                   __LINE__,
+                   "bench",
+                   idx ? fmt_b : fmt_a,
+                   idx ? 99 : 42,
+                   idx ? "world" : "hello",
+                   idx ? 2.71 : 3.14);
+        },
+        kMemoryIters);
+    print_stats("[NEI]  multi printf (fmt_plan cache miss)", kMemoryIters, result.micros, result.stats);
+  }
+
+  {
     const auto result = time_nei_memory_ms(
           [] {
             static const char body[] = "info-only";
