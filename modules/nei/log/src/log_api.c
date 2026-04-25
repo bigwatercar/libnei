@@ -162,12 +162,26 @@ void nei_llog_literal(nei_log_config_handle_t config_handle,
                       const char *func,
                       const char *message,
                       size_t length) {
+  nei_log_config_st *config;
+
   if (++_s_tls_log_depth > 1) {
     --_s_tls_log_depth;
     return;
   }
 
   (void)_nei_log_ensure_runtime_initialized();
+
+  /* Early filter: check if this level is enabled before serialization. */
+  config = _nei_log_get_config_fast(config_handle);
+  if (config != NULL) {
+    const uint32_t mask = (uint32_t)(1U << (uint32_t)level);
+    if (level < (int32_t)NEI_L_VERBOSE || level > (int32_t)NEI_L_FATAL ||
+        (config->level_flags.all & mask) == 0U) {
+      --_s_tls_log_depth;
+      return;
+    }
+  }
+
   {
     const size_t serialized_len = _nei_log_serialize_literal_msg(
         _s_tls_event_buf, sizeof(_s_tls_event_buf), config_handle, file, line, func, (int32_t)level, _NEI_LOG_NOT_VERBOSE, message, length);
@@ -185,12 +199,22 @@ void nei_vlog_literal(nei_log_config_handle_t config_handle,
                       const char *func,
                       const char *message,
                       size_t length) {
+  nei_log_config_st *config;
+
   if (++_s_tls_log_depth > 1) {
     --_s_tls_log_depth;
     return;
   }
 
   (void)_nei_log_ensure_runtime_initialized();
+
+  /* Early filter: check if this verbose level passes threshold before serialization. */
+  config = _nei_log_get_config_fast(config_handle);
+  if (config != NULL && config->verbose_threshold >= 0 && verbose > config->verbose_threshold) {
+    --_s_tls_log_depth;
+    return;
+  }
+
   {
     const size_t serialized_len = _nei_log_serialize_literal_msg(_s_tls_event_buf,
                                                                  sizeof(_s_tls_event_buf),

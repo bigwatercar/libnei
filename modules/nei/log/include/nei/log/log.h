@@ -338,9 +338,8 @@ NEI_API nei_log_sink_st *nei_log_create_default_file_sink(const char *filename);
  * `filename.1`, older backups are shifted up by one index, and the oldest file
  * beyond @p max_backup_files is removed.
  */
-NEI_API nei_log_sink_st *nei_log_create_default_file_sink_with_rotation(const char *filename,
-                                                                        size_t max_file_bytes,
-                                                                        uint32_t max_backup_files);
+NEI_API nei_log_sink_st *
+nei_log_create_default_file_sink_with_rotation(const char *filename, size_t max_file_bytes, uint32_t max_backup_files);
 
 /**
  * @brief Destroy a log sink structure allocated by the library (e.g.
@@ -492,6 +491,7 @@ NEI_API void nei_log_reset_perf_stats_for_test(void);
  * @brief Convenience logging macros.
  * @{
  */
+#if !defined(NEI_LOG_DISABLE_MACROS)
 
 /**
  * @brief Log a TRACE message (convenience macro)
@@ -549,6 +549,16 @@ NEI_API void nei_log_reset_perf_stats_for_test(void);
  */
 #define NEI_LOG_VERBOSE(verbose, fmt, ...)                                                                             \
   nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, verbose, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+
+#else
+#define NEI_LOG_TRACE(fmt, ...) void(0)
+#define NEI_LOG_DEBUG(fmt, ...) void(0)
+#define NEI_LOG_INFO(fmt, ...) void(0)
+#define NEI_LOG_WARN(fmt, ...) void(0)
+#define NEI_LOG_ERROR(fmt, ...) void(0)
+#define NEI_LOG_FATAL(fmt, ...) void(0)
+#define NEI_LOG_VERBOSE(verbose, fmt, ...) void(0)
+#endif // NEI_LOG_DISABLE_MACROS
 
 /** @} */ /* end of nei_log_macros */
 
