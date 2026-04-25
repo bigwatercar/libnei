@@ -198,18 +198,6 @@ void _nei_log_shutdown_runtime(void) {
   s_runtime.initialized = 0;
 }
 
-void _nei_log_wait_until_buffer_not_consuming(nei_log_runtime_st *rt, int buffer_index) {
-  (void)rt;
-  (void)buffer_index;
-  /* Intentionally empty: retained only so existing callers compile during transition. */
-}
-
-void _nei_log_publish_pending_buffer(nei_log_runtime_st *rt, int pending_index) {
-  (void)rt;
-  (void)pending_index;
-  /* Intentionally empty: replaced by the lock-free ring buffer. */
-}
-
 /* ── Ring-buffer helpers (consumer-side) ──────────────────────────────────── */
 
 /** Returns non-zero if the next slot the consumer should read is committed. */

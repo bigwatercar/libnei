@@ -30,6 +30,14 @@
 #define _NEI_LOG_TLS __thread
 #endif
 
+static inline int _nei_log_is_flag_char(char c) {
+  return (c == '-') || (c == '+') || (c == ' ') || (c == '#') || (c == '0');
+}
+
+static inline int _nei_log_is_digit_char(char c) {
+  return (c >= '0') && (c <= '9');
+}
+
 #if defined(_WIN32)
 #  define _NEI_LOG_THREAD_YIELD() SwitchToThread()
 #else

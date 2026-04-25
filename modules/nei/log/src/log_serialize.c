@@ -6,14 +6,6 @@ static inline size_t _nei_log_align_up_8(size_t n) {
   return (n + 7U) & ~(size_t)7U;
 }
 
-static int _nei_log_is_flag_char(char c) {
-  return (c == '-') || (c == '+') || (c == ' ') || (c == '#') || (c == '0');
-}
-
-static int _nei_log_is_digit_char(char c) {
-  return (c >= '0') && (c <= '9');
-}
-
 static const char *_nei_log_wstr_to_mbs_or_placeholder(const wchar_t *ws, char *out, size_t out_size);
 
 typedef struct _nei_log_fmt_plan_op_st {

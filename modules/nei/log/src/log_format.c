@@ -227,8 +227,6 @@ typedef struct _nei_log_fmt_cache_st {
 
 static _NEI_LOG_TLS nei_log_fmt_cache_st s_tls_fmt_cache;
 
-static int _nei_log_is_flag_char(char c);
-static int _nei_log_is_digit_char(char c);
 static void _nei_log_snprintf_i64(const char *spec, char *tmp, size_t tcap, int64_t v);
 static void _nei_log_snprintf_u64(const char *spec, char *tmp, size_t tcap, uint64_t v);
 
@@ -505,14 +503,6 @@ static void _nei_log_snprintf_u64(const char *spec, char *tmp, size_t tcap, uint
   } else {
     snprintf(tmp, tcap, spec, (unsigned int)v);
   }
-}
-
-static int _nei_log_is_flag_char(char c) {
-  return (c == '-') || (c == '+') || (c == ' ') || (c == '#') || (c == '0');
-}
-
-static int _nei_log_is_digit_char(char c) {
-  return (c >= '0') && (c <= '9');
 }
 
 static int _nei_log_build_runtime_conversion_spec(const char *scan,
