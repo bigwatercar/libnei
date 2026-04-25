@@ -1,11 +1,11 @@
 #include "log_internal.h"
 
-/** @brief Per-thread scratch buffer for event serialization — avoids 8 KB stack allocation. */
+/** @brief Per-thread scratch buffer for event serialization - avoids 8 KB stack allocation. */
 static _NEI_LOG_TLS uint8_t _s_tls_event_buf[_NEI_LOG_EVENT_BUFFER_SIZE];
 /**
  * @brief Per-thread reentrancy depth counter.
  * Guards against same-thread reentrant log calls (e.g. from a signal handler
- * or a sink that itself calls a log API). Depth > 1 → drop silently.
+ * or a sink that itself calls a log API). Depth > 1 -> drop silently.
  */
 static _NEI_LOG_TLS int _s_tls_log_depth = 0;
 /**
@@ -15,7 +15,7 @@ static _NEI_LOG_TLS int _s_tls_log_depth = 0;
  */
 static _NEI_LOG_TLS uint64_t _s_tls_config_snapshot = 0U;
 /**
- * @brief Per-thread cached copy of all config slot pointers (16 × ptr = 128 B).
+ * @brief Per-thread cached copy of all config slot pointers (16 x ptr = 128 B).
  * Populated once per snapshot epoch; amortises the rwlock cost across every
  * log call on a thread, regardless of which config handle is used.
  */
@@ -26,7 +26,7 @@ static _NEI_LOG_TLS nei_log_config_st *_s_tls_config_ptrs[_NEI_LOG_MAX_CONFIGS];
  *
  * Fast path  (config table unchanged since last call on this thread):
  *   One atomic acquire-load of the global snapshot counter, then a direct
- *   array index into the TLS copy — no lock, no cross-thread cache-line
+ *   array index into the TLS copy - no lock, no cross-thread cache-line
  *   traffic.
  *
  * Slow path  (first call on this thread, or any config slot was modified):

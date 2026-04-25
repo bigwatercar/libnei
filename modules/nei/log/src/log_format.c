@@ -229,6 +229,8 @@ static _NEI_LOG_TLS nei_log_fmt_cache_st s_tls_fmt_cache;
 
 static void _nei_log_snprintf_i64(const char *spec, char *tmp, size_t tcap, int64_t v);
 static void _nei_log_snprintf_u64(const char *spec, char *tmp, size_t tcap, uint64_t v);
+static int _nei_log_read_u16(const uint8_t **cursor, const uint8_t *end, uint16_t *out_value);
+static int _nei_log_read_bytes(const uint8_t **cursor, const uint8_t *end, void *dst, size_t n);
 
 static int _nei_log_is_simple_replay_fmt(const char *fmt) {
   const char *p = fmt;
