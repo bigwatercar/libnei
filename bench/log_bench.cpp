@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <cerrno>
 #include <atomic>
 #include <chrono>
 #include <fstream>
@@ -74,6 +75,37 @@ struct BenchmarkConfigGuard {
   BenchmarkConfigGuard &operator=(const BenchmarkConfigGuard &) = delete;
 };
 } // namespace
+
+static bool ensure_output_dir(const std::string &out_dir) {
+  if (out_dir.empty()) {
+    return false;
+  }
+#ifdef _WIN32
+  if (_mkdir(out_dir.c_str()) == 0 || errno == EEXIST) {
+    return true;
+  }
+#else
+  if (mkdir(out_dir.c_str(), 0755) == 0 || errno == EEXIST) {
+    return true;
+  }
+#endif
+  return false;
+}
+
+static std::string join_path(const std::string &dir, const char *name) {
+  if (dir.empty()) {
+    return std::string(name);
+  }
+  const char last = dir[dir.size() - 1U];
+  if (last == '/' || last == '\\') {
+    return dir + name;
+  }
+#ifdef _WIN32
+  return dir + "\\" + name;
+#else
+  return dir + "/" + name;
+#endif
+}
 
 void run_log_benchmark(const std::string &name, std::function<void()> log_func, int iterations = 1000000) {
   LogCollector collector;
@@ -170,12 +202,6 @@ void run_file_log_benchmark(const std::string &name,
                             const std::string &filename,
                             int iterations = 100000) {
   nei_log_perf_stats_st stats = {};
-  // Create directory if it doesn't exist
-#ifdef _WIN32
-  _mkdir("C:\\var");
-#else
-  mkdir("C:/var", 0755);
-#endif
 
   nei_log_sink_st *file_sink = nei_log_create_default_file_sink(filename.c_str());
   if (!file_sink) {
@@ -234,11 +260,20 @@ void run_file_log_benchmark(const std::string &name,
 }
 
 int main(int argc, char **argv) {
-  (void)argc;
-  (void)argv;
+  if (argc < 2 || argv[1] == NULL || argv[1][0] == '\0') {
+    std::cerr << "Usage: " << ((argv != NULL && argv[0] != NULL) ? argv[0] : "log_bench") << " <output_dir>\n";
+    return 1;
+  }
+
+  const std::string out_dir = argv[1];
+  if (!ensure_output_dir(out_dir)) {
+    std::cerr << "Failed to create output dir: " << out_dir << "\n";
+    return 1;
+  }
 
   std::cout << "Log Performance Benchmark\n";
   std::cout << "=========================\n\n";
+  std::cout << "Output dir: " << out_dir << "\n\n";
 
   // Benchmark different log levels
   run_log_benchmark("Log Info", []() {
@@ -330,14 +365,14 @@ int main(int argc, char **argv) {
       []() {
         nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", "test message %s", "test");
       },
-      "C:\\var\\log_bench_info.log");
+      join_path(out_dir, "log_bench_info.log"));
 
   run_file_log_benchmark(
       "File Log Warn",
       []() {
         nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_WARN, __FILE__, __LINE__, "benchmark", "test message %s", "test");
       },
-      "C:\\var\\log_bench_warn.log");
+      join_path(out_dir, "log_bench_warn.log"));
 
   run_file_log_benchmark(
       "File Log Error",
@@ -345,7 +380,7 @@ int main(int argc, char **argv) {
         nei_llog(
             NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_ERROR, __FILE__, __LINE__, "benchmark", "test message %s", "test");
       },
-      "C:\\var\\log_bench_error.log");
+      join_path(out_dir, "log_bench_error.log"));
 
   run_file_log_benchmark(
       "File Log with Formatting",
@@ -360,14 +395,14 @@ int main(int argc, char **argv) {
                  "hello",
                  3);
       },
-      "C:\\var\\log_bench_format.log");
+              join_path(out_dir, "log_bench_format.log"));
 
   run_file_log_benchmark(
       "File Log Verbose",
       []() {
         nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", "verbose message %s", "verbose");
       },
-      "C:\\var\\log_bench_verbose.log");
+      join_path(out_dir, "log_bench_verbose.log"));
 
   run_file_log_benchmark(
       "File Log Info (literal)",
@@ -376,7 +411,7 @@ int main(int argc, char **argv) {
         nei_llog_literal(
             NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", body, sizeof(body) - 1U);
       },
-      "C:\\var\\log_bench_info_literal.log");
+      join_path(out_dir, "log_bench_info_literal.log"));
 
   run_file_log_benchmark(
       "File Log Verbose (literal)",
@@ -384,7 +419,7 @@ int main(int argc, char **argv) {
         static const char body[] = "verbose literal line";
         nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", body, sizeof(body) - 1U);
       },
-      "C:\\var\\log_bench_verbose_literal.log");
+      join_path(out_dir, "log_bench_verbose_literal.log"));
 
   return 0;
 }

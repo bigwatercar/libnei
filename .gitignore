@@ -53,3 +53,4 @@ compile_commands.json
 log_bench_latest.md
 log_bench_compare_latest.md
 threadpool_bench_latest.md
+bench/output/

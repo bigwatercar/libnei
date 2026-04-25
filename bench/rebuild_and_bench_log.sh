@@ -11,6 +11,7 @@ set -euo pipefail
 RUNS=5
 SKIP_BUILD=0
 BUILD_DIR=""
+OUTPUT_DIR=""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -24,6 +25,7 @@ Options:
   --runs N         Number of runs (default: 5)
   --skip-build     Skip cmake --build
   --build-dir PATH Build directory override
+  --output-dir PATH Log output directory (default: <repo>/bench/output)
   --out-md PATH    Markdown output path (default: <repo>/log_bench_latest.md)
   -h, --help       Show help
 EOF
@@ -41,6 +43,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --build-dir)
       BUILD_DIR="$2"
+      shift 2
+      ;;
+    --output-dir)
+      OUTPUT_DIR="$2"
       shift 2
       ;;
     --out-md)
@@ -78,14 +84,20 @@ fi
 
 EXE_PATH="$BUILD_DIR/bench/log_bench"
 
+if [[ -z "$OUTPUT_DIR" ]]; then
+  OUTPUT_DIR="$REPO_ROOT/bench/output"
+fi
+
+mkdir -p "$OUTPUT_DIR"
+
 LOG_FILES=(
-  'C:\var\log_bench_info.log'
-  'C:\var\log_bench_warn.log'
-  'C:\var\log_bench_error.log'
-  'C:\var\log_bench_format.log'
-  'C:\var\log_bench_verbose.log'
-  'C:\var\log_bench_info_literal.log'
-  'C:\var\log_bench_verbose_literal.log'
+  "$OUTPUT_DIR/log_bench_info.log"
+  "$OUTPUT_DIR/log_bench_warn.log"
+  "$OUTPUT_DIR/log_bench_error.log"
+  "$OUTPUT_DIR/log_bench_format.log"
+  "$OUTPUT_DIR/log_bench_verbose.log"
+  "$OUTPUT_DIR/log_bench_info_literal.log"
+  "$OUTPUT_DIR/log_bench_verbose_literal.log"
 )
 
 if [[ ! -d "$BUILD_DIR" ]]; then
@@ -182,7 +194,7 @@ for ((r=1; r<=RUNS; r++)); do
 
   echo "  Running log_bench (run $r/$RUNS)"
   run_out="$(mktemp)"
-  "$EXE_PATH" > "$run_out"
+  "$EXE_PATH" "$OUTPUT_DIR" > "$run_out"
   parse_run "$r" "$run_out"
   rm -f "$run_out"
 done

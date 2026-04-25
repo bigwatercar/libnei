@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cerrno>
 #include <cstdlib>
 #include <cstdio>
 #include <fstream>
@@ -106,19 +107,34 @@ private:
   std::string old_value_;
 };
 
-void ensure_out_dir() {
+bool ensure_out_dir(const std::string &out_dir) {
+  if (out_dir.empty()) {
+    return false;
+  }
 #ifdef _WIN32
-  _mkdir("C:\\var");
+  if (_mkdir(out_dir.c_str()) == 0 || errno == EEXIST) {
+    return true;
+  }
 #else
-  mkdir("/tmp/nei_bench", 0755);
+  if (mkdir(out_dir.c_str(), 0755) == 0 || errno == EEXIST) {
+    return true;
+  }
 #endif
+  return false;
 }
 
-std::string out_file(const char *name) {
+std::string out_file(const std::string &out_dir, const char *name) {
+  if (out_dir.empty()) {
+    return std::string(name);
+  }
+  const char last = out_dir[out_dir.size() - 1U];
+  if (last == '/' || last == '\\') {
+    return out_dir + name;
+  }
 #ifdef _WIN32
-  return std::string("C:\\var\\") + name;
+  return out_dir + "\\" + name;
 #else
-  return std::string("/tmp/nei_bench/") + name;
+  return out_dir + "/" + name;
 #endif
 }
 
@@ -421,9 +437,22 @@ int64_t time_spdlog_file_strict_sync_ms(F &&f, int iters, const std::string &pat
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+  if (argc < 2 || argv[1] == NULL || argv[1][0] == '\0') {
+    std::cerr << "Usage: " << ((argv != NULL && argv[0] != NULL) ? argv[0] : "log_bench_compare")
+              << " <output_dir>\n";
+    return 1;
+  }
+
+  const std::string out_dir = argv[1];
+  if (!ensure_out_dir(out_dir)) {
+    std::cerr << "Failed to create output dir: " << out_dir << "\n";
+    return 1;
+  }
+
   std::cout << "NEI vs spdlog - aligned benchmark scaffold\n";
   std::cout << "==========================================\n";
+  std::cout << "Output dir: " << out_dir << "\n";
   std::cout << "Memory:     " << kMemoryIters << " iters; sink = atomic++ only; time includes flush.\n";
   std::cout << "File async: " << kFileIters << " iters; async + file sink; both sides delete old files before run.\n";
   std::cout << "Per-call:   " << kFileSyncIters << " iters; async logger + flush request after each log on both sides.\n";
@@ -535,12 +564,11 @@ int main() {
   }
 
   std::cout << "--- File (async file sink) ---\n\n";
-  ensure_out_dir();
 
-  const std::string nei_simple = out_file("nei_cmp_simple.log");
-  const std::string spd_simple = out_file("spdlog_cmp_simple.log");
-  const std::string nei_multi = out_file("nei_cmp_multi.log");
-  const std::string spd_multi = out_file("spdlog_cmp_multi.log");
+  const std::string nei_simple = out_file(out_dir, "nei_cmp_simple.log");
+  const std::string spd_simple = out_file(out_dir, "spdlog_cmp_simple.log");
+  const std::string nei_multi = out_file(out_dir, "nei_cmp_multi.log");
+  const std::string spd_multi = out_file(out_dir, "spdlog_cmp_multi.log");
 
   {
     const auto result = time_nei_file_ms(
@@ -598,8 +626,8 @@ int main() {
     print_file_size(spd_multi);
   }
 
-  const std::string nei_lit = out_file("nei_cmp_literal.log");
-  const std::string nei_vlit = out_file("nei_cmp_vlog_literal.log");
+  const std::string nei_lit = out_file(out_dir, "nei_cmp_literal.log");
+  const std::string nei_vlit = out_file(out_dir, "nei_cmp_vlog_literal.log");
 
   {
     const auto result = time_nei_file_ms(
@@ -636,10 +664,10 @@ int main() {
 
   std::cout << "--- File (per-call flush request over async pipeline) ---\n\n";
 
-  const std::string nei_simple_sync = out_file("nei_cmp_simple_sync.log");
-  const std::string spd_simple_sync = out_file("spdlog_cmp_simple_sync.log");
-  const std::string nei_multi_sync = out_file("nei_cmp_multi_sync.log");
-  const std::string spd_multi_sync = out_file("spdlog_cmp_multi_sync.log");
+  const std::string nei_simple_sync = out_file(out_dir, "nei_cmp_simple_sync.log");
+  const std::string spd_simple_sync = out_file(out_dir, "spdlog_cmp_simple_sync.log");
+  const std::string nei_multi_sync = out_file(out_dir, "nei_cmp_multi_sync.log");
+  const std::string spd_multi_sync = out_file(out_dir, "spdlog_cmp_multi_sync.log");
 
   {
     const auto result = time_nei_file_sync_ms(
@@ -697,8 +725,8 @@ int main() {
     print_file_size(spd_multi_sync);
   }
 
-  const std::string nei_lit_sync = out_file("nei_cmp_literal_sync.log");
-  const std::string nei_vlit_sync = out_file("nei_cmp_vlog_literal_sync.log");
+  const std::string nei_lit_sync = out_file(out_dir, "nei_cmp_literal_sync.log");
+  const std::string nei_vlit_sync = out_file(out_dir, "nei_cmp_vlog_literal_sync.log");
 
   {
     const auto result = time_nei_file_sync_ms(
@@ -735,10 +763,10 @@ int main() {
 
   std::cout << "--- File (strict sync flush semantics) ---\n\n";
 
-  const std::string nei_simple_strict = out_file("nei_cmp_simple_strict.log");
-  const std::string spd_simple_strict = out_file("spdlog_cmp_simple_strict.log");
-  const std::string nei_multi_strict = out_file("nei_cmp_multi_strict.log");
-  const std::string spd_multi_strict = out_file("spdlog_cmp_multi_strict.log");
+  const std::string nei_simple_strict = out_file(out_dir, "nei_cmp_simple_strict.log");
+  const std::string spd_simple_strict = out_file(out_dir, "spdlog_cmp_simple_strict.log");
+  const std::string nei_multi_strict = out_file(out_dir, "nei_cmp_multi_strict.log");
+  const std::string spd_multi_strict = out_file(out_dir, "spdlog_cmp_multi_strict.log");
 
   {
     const auto result = time_nei_file_strict_sync_ms(

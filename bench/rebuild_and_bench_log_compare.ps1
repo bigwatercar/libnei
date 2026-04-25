@@ -3,7 +3,8 @@
 param(
     [int]$Runs = 5,
     [switch]$SkipBuild,
-    [string]$BuildDir
+    [string]$BuildDir,
+    [string]$OutputDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,24 +14,29 @@ $buildDir = if ($BuildDir) { $BuildDir } else { "$repoRoot\build\windows-vs2022-
 $runtimeDir = "$buildDir\bench\Release"
 $exePath = "$runtimeDir\log_bench_compare.exe"
 $outMd = "$repoRoot\log_bench_compare_latest.md"
+$outputDirResolved = if ($OutputDir) { $OutputDir } else { "$repoRoot\bench\output" }
+
+if (-not (Test-Path $outputDirResolved)) {
+    $null = New-Item -ItemType Directory -Path $outputDirResolved -Force
+}
 
 $logFiles = @(
-    'C:\var\nei_cmp_simple.log',
-    'C:\var\spdlog_cmp_simple.log',
-    'C:\var\nei_cmp_multi.log',
-    'C:\var\spdlog_cmp_multi.log',
-    'C:\var\nei_cmp_literal.log',
-    'C:\var\nei_cmp_vlog_literal.log',
-    'C:\var\nei_cmp_simple_sync.log',
-    'C:\var\spdlog_cmp_simple_sync.log',
-    'C:\var\nei_cmp_multi_sync.log',
-    'C:\var\spdlog_cmp_multi_sync.log',
-    'C:\var\nei_cmp_literal_sync.log',
-    'C:\var\nei_cmp_vlog_literal_sync.log',
-    'C:\var\nei_cmp_simple_strict.log',
-    'C:\var\spdlog_cmp_simple_strict.log',
-    'C:\var\nei_cmp_multi_strict.log',
-    'C:\var\spdlog_cmp_multi_strict.log'
+    (Join-Path $outputDirResolved 'nei_cmp_simple.log'),
+    (Join-Path $outputDirResolved 'spdlog_cmp_simple.log'),
+    (Join-Path $outputDirResolved 'nei_cmp_multi.log'),
+    (Join-Path $outputDirResolved 'spdlog_cmp_multi.log'),
+    (Join-Path $outputDirResolved 'nei_cmp_literal.log'),
+    (Join-Path $outputDirResolved 'nei_cmp_vlog_literal.log'),
+    (Join-Path $outputDirResolved 'nei_cmp_simple_sync.log'),
+    (Join-Path $outputDirResolved 'spdlog_cmp_simple_sync.log'),
+    (Join-Path $outputDirResolved 'nei_cmp_multi_sync.log'),
+    (Join-Path $outputDirResolved 'spdlog_cmp_multi_sync.log'),
+    (Join-Path $outputDirResolved 'nei_cmp_literal_sync.log'),
+    (Join-Path $outputDirResolved 'nei_cmp_vlog_literal_sync.log'),
+    (Join-Path $outputDirResolved 'nei_cmp_simple_strict.log'),
+    (Join-Path $outputDirResolved 'spdlog_cmp_simple_strict.log'),
+    (Join-Path $outputDirResolved 'nei_cmp_multi_strict.log'),
+    (Join-Path $outputDirResolved 'spdlog_cmp_multi_strict.log')
 )
 
 Get-Process -ErrorAction SilentlyContinue |
@@ -159,7 +165,7 @@ function Invoke-LogCompareBenchmark {
 
         $current = $null
         $section = $null
-        foreach ($line in (& $ExecutablePath)) {
+        foreach ($line in (& $ExecutablePath $outputDirResolved)) {
             if ($line -match $sectionPattern) {
                 $section = $Matches['name']
                 continue

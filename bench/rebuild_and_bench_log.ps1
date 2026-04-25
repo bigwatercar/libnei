@@ -7,7 +7,8 @@
 param(
     [int]$Runs = 5,
     [switch]$SkipBuild,
-    [string]$BuildDir
+    [string]$BuildDir,
+    [string]$OutputDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,16 +19,21 @@ $buildDir  = if ($BuildDir) { $BuildDir } else { "$repoRoot\build\windows-vs2022
 $runtimeDir = "$buildDir\bench\Release"
 $exePath   = "$runtimeDir\log_bench.exe"
 $outMd     = "$repoRoot\log_bench_latest.md"
+$outputDirResolved = if ($OutputDir) { $OutputDir } else { "$repoRoot\bench\output" }
+
+if (-not (Test-Path $outputDirResolved)) {
+    $null = New-Item -ItemType Directory -Path $outputDirResolved -Force
+}
 
 # log files written by log_bench (opened in append mode — must delete before each run)
 $logFiles = @(
-    'C:\var\log_bench_info.log',
-    'C:\var\log_bench_warn.log',
-    'C:\var\log_bench_error.log',
-    'C:\var\log_bench_format.log',
-    'C:\var\log_bench_verbose.log',
-    'C:\var\log_bench_info_literal.log',
-    'C:\var\log_bench_verbose_literal.log'
+    (Join-Path $outputDirResolved 'log_bench_info.log'),
+    (Join-Path $outputDirResolved 'log_bench_warn.log'),
+    (Join-Path $outputDirResolved 'log_bench_error.log'),
+    (Join-Path $outputDirResolved 'log_bench_format.log'),
+    (Join-Path $outputDirResolved 'log_bench_verbose.log'),
+    (Join-Path $outputDirResolved 'log_bench_info_literal.log'),
+    (Join-Path $outputDirResolved 'log_bench_verbose_literal.log')
 )
 
 # ── build ────────────────────────────────────────────────────────────────────
@@ -135,7 +141,7 @@ function Invoke-LogBenchmark {
         Write-Host ("  Running log_bench (run {0}/{1})" -f $r, $TotalRuns)
 
         $current = $null
-        foreach ($line in (& $ExecutablePath)) {
+        foreach ($line in (& $ExecutablePath $outputDirResolved)) {
             if ($line -match $namePattern) {
                 $current = [ordered]@{
                     run              = $r
