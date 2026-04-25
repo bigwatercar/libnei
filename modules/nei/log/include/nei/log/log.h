@@ -325,6 +325,24 @@ NEI_API nei_log_config_st *nei_log_default_config(void);
 NEI_API nei_log_sink_st *nei_log_create_default_file_sink(const char *filename);
 
 /**
+ * @brief Create a built-in file sink with size-based rotation.
+ *
+ * @param[in] filename Output file path for the active log file.
+ * @param[in] max_file_bytes Rotate before writing a line that would make the
+ * active file exceed this size. Pass 0 to disable rotation.
+ * @param[in] max_backup_files Number of rotated backup files to keep using
+ * suffixes like ".1", ".2", ... Pass 0 to disable rotation.
+ * @return Heap-allocated sink pointer, or NULL on failure.
+ *
+ * @details When rotation is enabled, the current file is renamed to
+ * `filename.1`, older backups are shifted up by one index, and the oldest file
+ * beyond @p max_backup_files is removed.
+ */
+NEI_API nei_log_sink_st *nei_log_create_default_file_sink_with_rotation(const char *filename,
+                                                                        size_t max_file_bytes,
+                                                                        uint32_t max_backup_files);
+
+/**
  * @brief Destroy a log sink structure allocated by the library (e.g.
  * @ref nei_log_create_default_file_sink).
  *

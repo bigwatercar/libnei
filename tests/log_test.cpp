@@ -919,6 +919,65 @@ TEST(LogCTest, BuiltinFileSinkOwnsFileHandleLifecycle) {
   (void)std::remove(file_path.c_str());
 }
 
+TEST(LogCTest, BuiltinFileSinkRotatesAtConfiguredSize) {
+  char tmp_name[L_tmpnam] = {};
+#if defined(_WIN32)
+  ASSERT_EQ(tmpnam_s(tmp_name, L_tmpnam), 0);
+#else
+  ASSERT_NE(std::tmpnam(tmp_name), nullptr);
+#endif
+  const std::string file_path = std::string(tmp_name) + ".log";
+  const std::string file_path_1 = file_path + ".1";
+  const std::string file_path_2 = file_path + ".2";
+  (void)std::remove(file_path.c_str());
+  (void)std::remove(file_path_1.c_str());
+  (void)std::remove(file_path_2.c_str());
+
+  nei_log_sink_st *sink = nei_log_create_default_file_sink_with_rotation(file_path.c_str(), 64U, 2U);
+  ASSERT_NE(sink, nullptr);
+
+  nei_log_config_st cfg = *nei_log_default_config();
+  cfg.log_to_console = 0;
+  cfg.level_flags = {};
+  cfg.level_flags.flags.info = 1U;
+  cfg.timestamp_style = NEI_LOG_TIMESTAMP_STYLE_NONE;
+  cfg.short_level_tag = 0U;
+  cfg.log_location = 0U;
+  cfg.log_thread_id = 0U;
+  cfg.sinks[0] = sink;
+  cfg.sinks[1] = nullptr;
+
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&cfg, &cfg_handle), 0);
+
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "rotate", "entry-111111111111111111111111111111");
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "rotate", "entry-222222222222222222222222222222");
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "rotate", "entry-333333333333333333333333333333");
+  nei_log_flush();
+
+  nei_log_remove_config(cfg_handle);
+  nei_log_destroy_sink(sink);
+
+  std::ifstream current(file_path, std::ios::binary);
+  std::ifstream rotated1(file_path_1, std::ios::binary);
+  std::ifstream rotated2(file_path_2, std::ios::binary);
+  ASSERT_TRUE(current.good());
+  ASSERT_TRUE(rotated1.good());
+  ASSERT_TRUE(rotated2.good());
+
+  const std::string current_content((std::istreambuf_iterator<char>(current)), std::istreambuf_iterator<char>());
+  const std::string rotated1_content((std::istreambuf_iterator<char>(rotated1)), std::istreambuf_iterator<char>());
+  const std::string rotated2_content((std::istreambuf_iterator<char>(rotated2)), std::istreambuf_iterator<char>());
+
+  EXPECT_NE(current_content.find("entry-333333333333333333333333333333"), std::string::npos);
+  EXPECT_NE(rotated1_content.find("entry-222222222222222222222222222222"), std::string::npos);
+  EXPECT_NE(rotated2_content.find("entry-111111111111111111111111111111"), std::string::npos);
+
+  (void)std::remove(file_path.c_str());
+  (void)std::remove(file_path_1.c_str());
+  (void)std::remove(file_path_2.c_str());
+}
+
 TEST(LogCTest, ConfigAddRemoveIsThreadSafeAtRuntime) {
   LogCollector collector;
   nei_log_sink_st sink = {};
