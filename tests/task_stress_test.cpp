@@ -5,7 +5,9 @@
 #include <chrono>
 #include <future>
 #include <mutex>
+#include <random>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include <neixx/functional/callback.h>
@@ -13,6 +15,7 @@
 #include <neixx/task/sequenced_task_runner.h>
 #include <neixx/task/task_traits.h>
 #include <neixx/task/thread_pool.h>
+#include <neixx/threading/sequence_local_storage_slot.h>
 
 TEST(TaskStressTest, HighVolumeMixedTraitsEventuallyCompletes) {
   nei::ThreadPoolOptions options;
@@ -365,4 +368,108 @@ TEST(TaskStressTest, TenThousandMixedPriorityTasksEventuallyComplete) {
   EXPECT_GT(user_blocking_executed.load(std::memory_order_acquire), 0);
   EXPECT_GT(user_visible_executed.load(std::memory_order_acquire), 0);
   EXPECT_GT(best_effort_executed.load(std::memory_order_acquire), 0);
+}
+
+TEST(TaskStressTest, SequenceLocalStorageRemainsIsolatedUnderHighConcurrency) {
+  nei::ThreadPoolOptions options;
+  options.worker_count = 6;
+  options.best_effort_worker_count = 2;
+  options.enable_compensation = true;
+  options.enable_best_effort_compensation = true;
+  options.max_compensation_workers = 4;
+  options.best_effort_max_compensation_workers = 2;
+  options.compensation_spawn_delay = std::chrono::milliseconds(0);
+
+  nei::ThreadPool thread_pool(options);
+
+  constexpr int kSequenceCount = 24;
+  constexpr int kTasksPerSequence = 240;
+  constexpr int kTotalTasks = kSequenceCount * kTasksPerSequence;
+  constexpr int kPosterThreads = 6;
+
+  std::vector<std::shared_ptr<nei::SequencedTaskRunner>> sequences;
+  sequences.reserve(kSequenceCount);
+  for (int i = 0; i < kSequenceCount; ++i) {
+    sequences.push_back(thread_pool.CreateSequencedTaskRunner());
+  }
+
+  // Per-sequence SLS payload: should follow sequence execution, not physical thread.
+  struct SequencePayload {
+    int sequence_id = -1;
+    int last_index = -1;
+    std::uint64_t checksum = 0;
+  };
+
+  nei::SequenceLocalStorageSlot<SequencePayload> slot;
+
+  std::atomic<int> remaining{kTotalTasks};
+  std::atomic<int> serial_violations{0};
+  std::atomic<int> cross_sequence_leaks{0};
+  std::atomic<int> missing_payload_errors{0};
+  std::promise<void> all_done;
+  std::future<void> all_done_future = all_done.get_future();
+
+  std::vector<std::thread> posters;
+  posters.reserve(kPosterThreads);
+
+  for (int poster = 0; poster < kPosterThreads; ++poster) {
+    posters.emplace_back([&, poster]() {
+      // Poster-local deterministic shuffle to maximize cross-sequence interleaving.
+      std::mt19937 rng(static_cast<std::mt19937::result_type>(0xC0FFEEu + poster));
+      std::uniform_int_distribution<int> pick_sequence(0, kSequenceCount - 1);
+
+      const int tasks_for_this_poster = kTotalTasks / kPosterThreads;
+      for (int n = 0; n < tasks_for_this_poster; ++n) {
+        const int seq_index = pick_sequence(rng);
+        auto runner = sequences[static_cast<std::size_t>(seq_index)];
+
+        runner->PostTask(FROM_HERE,
+                         nei::BindOnce(
+                             [&](int expected_seq) {
+                               SequencePayload *payload = slot.Get();
+                               if (payload == nullptr) {
+                                 payload = slot.Emplace();
+                                 payload->sequence_id = expected_seq;
+                               }
+
+                               // Sequence isolation: payload must never belong to another sequence.
+                               if (payload->sequence_id != expected_seq) {
+                                 cross_sequence_leaks.fetch_add(1, std::memory_order_acq_rel);
+                               }
+
+                               const int next_index = payload->last_index + 1;
+                               if (next_index <= payload->last_index) {
+                                 serial_violations.fetch_add(1, std::memory_order_acq_rel);
+                               }
+
+                               payload->last_index = next_index;
+                               payload->checksum = payload->checksum * 1315423911ull
+                                                   + static_cast<std::uint64_t>(expected_seq)
+                                                   + static_cast<std::uint64_t>(next_index);
+
+                               // Re-fetch to ensure storage remains mounted throughout task body.
+                               SequencePayload *payload_again = slot.Get();
+                               if (payload_again == nullptr || payload_again->sequence_id != expected_seq) {
+                                 missing_payload_errors.fetch_add(1, std::memory_order_acq_rel);
+                               }
+
+                               if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                                 all_done.set_value();
+                               }
+                             },
+                             seq_index));
+      }
+    });
+  }
+
+  for (std::thread &poster : posters) {
+    poster.join();
+  }
+
+  ASSERT_EQ(all_done_future.wait_for(std::chrono::seconds(20)), std::future_status::ready);
+
+  EXPECT_EQ(remaining.load(std::memory_order_acquire), 0);
+  EXPECT_EQ(serial_violations.load(std::memory_order_acquire), 0);
+  EXPECT_EQ(cross_sequence_leaks.load(std::memory_order_acquire), 0);
+  EXPECT_EQ(missing_payload_errors.load(std::memory_order_acquire), 0);
 }

@@ -254,6 +254,18 @@ private:
   }
 
   void RunLoop() {
+    class ScopedRunLoopCleanup final {
+    public:
+      ScopedRunLoopCleanup() = default;
+
+      ~ScopedRunLoopCleanup() {
+        TaskTracer::SetCurrentTaskLocation(nullptr);
+      }
+
+      ScopedRunLoopCleanup(const ScopedRunLoopCleanup &) = delete;
+      ScopedRunLoopCleanup &operator=(const ScopedRunLoopCleanup &) = delete;
+    } scoped_cleanup;
+
     if (!thread_name_.empty()) {
       PlatformThread::SetName(thread_name_);
     }

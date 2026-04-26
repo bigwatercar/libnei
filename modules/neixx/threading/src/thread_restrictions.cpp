@@ -44,4 +44,8 @@ bool ThreadRestrictions::BlockingAllowed() {
   return g_blocking_allowed;
 }
 
+void ThreadRestrictions::RestoreBlockingAllowed(bool allowed) {
+  g_blocking_allowed = allowed;
+}
+
 } // namespace nei

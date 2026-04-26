@@ -3,6 +3,7 @@ target_sources(
     PRIVATE
         src/platform_thread_win.cpp
         src/platform_thread_posix.cpp
+    src/sequence_local_storage_slot.cpp
         src/thread_restrictions.cpp
 )
 

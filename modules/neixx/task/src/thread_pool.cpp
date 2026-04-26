@@ -667,6 +667,24 @@ private:
   }
 
   void RunLoop(WorkerGroup *group, bool is_compensation_worker) {
+    class ScopedRunLoopCleanup final {
+    public:
+      explicit ScopedRunLoopCleanup(Impl *impl)
+          : impl_(impl) {
+      }
+
+      ~ScopedRunLoopCleanup() {
+        TaskTracer::SetCurrentTaskLocation(nullptr);
+        impl_->current_impl_ = nullptr;
+      }
+
+      ScopedRunLoopCleanup(const ScopedRunLoopCleanup &) = delete;
+      ScopedRunLoopCleanup &operator=(const ScopedRunLoopCleanup &) = delete;
+
+    private:
+      Impl *impl_ = nullptr;
+    } scoped_cleanup(this);
+
     current_impl_ = this; // Set thread-local impl for ScopedBlockingCall
     // Reuse allocation across outer-loop iterations; capacity is retained on clear().
     std::vector<ScheduledTask> local_batch;

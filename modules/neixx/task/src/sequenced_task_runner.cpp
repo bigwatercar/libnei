@@ -7,6 +7,7 @@
 
 #include <neixx/functional/callback.h>
 #include <neixx/task/thread_pool.h>
+#include <neixx/threading/sequence_local_storage_slot.h>
 
 namespace nei {
 
@@ -66,6 +67,8 @@ private:
 
     std::mutex mutex;
     std::queue<ScheduledEntry> tasks;
+    std::shared_ptr<SequenceLocalStorageMap> sequence_local_storage_map =
+      std::make_shared<SequenceLocalStorageMap>();
     bool scheduled = false;
     bool shutdown = false;
   };
@@ -88,6 +91,27 @@ private:
       state->tasks.pop();
     }
 
+    class ScopedBindSequenceLocalStorage final {
+    public:
+      explicit ScopedBindSequenceLocalStorage(SequenceLocalStorageMap *map)
+          : previous_(SequenceLocalStorageMap::SwapCurrentForThread(map)) {
+      }
+
+      ~ScopedBindSequenceLocalStorage() {
+        SequenceLocalStorageMap::SwapCurrentForThread(previous_);
+      }
+
+      ScopedBindSequenceLocalStorage(const ScopedBindSequenceLocalStorage &) = delete;
+      ScopedBindSequenceLocalStorage &operator=(const ScopedBindSequenceLocalStorage &) = delete;
+
+    private:
+      SequenceLocalStorageMap *previous_ = nullptr;
+    };
+
+    // Keep this bind scope tightly wrapped around the actual task invocation.
+    // If binding is widened across scheduling/pre-fetch phases, batched dispatch
+    // may leak one sequence's state into another task's execution window.
+    ScopedBindSequenceLocalStorage bind_scope(state->sequence_local_storage_map.get());
     std::move(entry.task).Run();
 
     bool has_more = false;

@@ -44,6 +44,7 @@ add_executable(
     cjk_width_test.cpp
     platform_thread_test.cpp
     thread_restrictions_test.cpp
+    sequence_local_storage_slot_test.cpp
 )
 
 target_link_libraries(

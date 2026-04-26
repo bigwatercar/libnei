@@ -47,6 +47,9 @@ public:
   // Returns whether blocking is currently allowed on this thread.
   static bool BlockingAllowed();
 
+  // Restores blocking state for the current thread.
+  static void RestoreBlockingAllowed(bool allowed);
+
 private:
   ThreadRestrictions() = delete;
   ~ThreadRestrictions() = delete;
@@ -60,9 +63,7 @@ public:
   }
 
   ~ScopedDisallowBlocking() noexcept {
-    if (previous_blocking_allowed_) {
-      ThreadRestrictions::SetBlockingAllowed();
-    }
+    ThreadRestrictions::RestoreBlockingAllowed(previous_blocking_allowed_);
   }
 
   // Non-copyable and non-movable
@@ -83,9 +84,7 @@ public:
   }
 
   ~ScopedAllowBlocking() noexcept {
-    if (!previous_blocking_allowed_) {
-      ThreadRestrictions::SetBlockingDisallowed();
-    }
+    ThreadRestrictions::RestoreBlockingAllowed(previous_blocking_allowed_);
   }
 
   // Non-copyable and non-movable
