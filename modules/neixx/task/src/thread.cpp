@@ -290,7 +290,7 @@ private:
         }
       }
       ScopedTaskTrace trace_scope(scheduled.from_here);
-      
+
       // Apply thread restrictions based on task traits
       // If the task may_block is false, disallow blocking operations during execution
       if (!scheduled.traits.may_block()) {

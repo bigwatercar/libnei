@@ -26,12 +26,12 @@ TEST_F(ThreadRestrictionsTest, BlockingAllowedByDefault) {
 // Test that ScopedDisallowBlocking disables blocking
 TEST_F(ThreadRestrictionsTest, ScopedDisallowBlockingDisables) {
   EXPECT_TRUE(ThreadRestrictions::BlockingAllowed());
-  
+
   {
     ScopedDisallowBlocking disallow;
     EXPECT_FALSE(ThreadRestrictions::BlockingAllowed());
   }
-  
+
   EXPECT_TRUE(ThreadRestrictions::BlockingAllowed());
 }
 
@@ -39,50 +39,50 @@ TEST_F(ThreadRestrictionsTest, ScopedDisallowBlockingDisables) {
 TEST_F(ThreadRestrictionsTest, ScopedAllowBlockingEnables) {
   ThreadRestrictions::SetBlockingDisallowed();
   EXPECT_FALSE(ThreadRestrictions::BlockingAllowed());
-  
+
   {
     ScopedAllowBlocking allow;
     EXPECT_TRUE(ThreadRestrictions::BlockingAllowed());
   }
-  
+
   EXPECT_FALSE(ThreadRestrictions::BlockingAllowed());
 }
 
 // Test nested scopes: allow inside disallow
 TEST_F(ThreadRestrictionsTest, NestedAllowInsideDisallow) {
   EXPECT_TRUE(ThreadRestrictions::BlockingAllowed());
-  
+
   {
     ScopedDisallowBlocking disallow;
     EXPECT_FALSE(ThreadRestrictions::BlockingAllowed());
-    
+
     {
       ScopedAllowBlocking allow;
       EXPECT_TRUE(ThreadRestrictions::BlockingAllowed());
     }
-    
+
     EXPECT_FALSE(ThreadRestrictions::BlockingAllowed());
   }
-  
+
   EXPECT_TRUE(ThreadRestrictions::BlockingAllowed());
 }
 
 // Test nested scopes: disallow inside allow
 TEST_F(ThreadRestrictionsTest, NestedDisallowInsideAllow) {
   ThreadRestrictions::SetBlockingDisallowed();
-  
+
   {
     ScopedAllowBlocking allow;
     EXPECT_TRUE(ThreadRestrictions::BlockingAllowed());
-    
+
     {
       ScopedDisallowBlocking disallow;
       EXPECT_FALSE(ThreadRestrictions::BlockingAllowed());
     }
-    
+
     EXPECT_TRUE(ThreadRestrictions::BlockingAllowed());
   }
-  
+
   EXPECT_FALSE(ThreadRestrictions::BlockingAllowed());
 }
 
@@ -90,7 +90,7 @@ TEST_F(ThreadRestrictionsTest, NestedDisallowInsideAllow) {
 TEST_F(ThreadRestrictionsTest, AssertBlockingAllowedMacroWorks) {
   // This should not crash when blocking is allowed
   ASSERT_BLOCKING_ALLOWED();
-  
+
   // This should work at runtime
   EXPECT_TRUE(ThreadRestrictions::BlockingAllowed());
 }
@@ -108,12 +108,12 @@ protected:
 TEST_F(TaskWithBlockingRestrictionsTest, MayBlockTaskAllowsBlocking) {
   Thread thread("BlockingThread");
   auto runner = thread.GetTaskRunner();
-  
+
   bool blocking_was_allowed = false;
   std::condition_variable cv;
   std::mutex mutex;
   bool task_executed = false;
-  
+
   // Post a task with MayBlock() trait
   runner->PostTaskWithTraits(
       FROM_HERE,
@@ -126,14 +126,14 @@ TEST_F(TaskWithBlockingRestrictionsTest, MayBlockTaskAllowsBlocking) {
         }
         cv.notify_one();
       });
-  
+
   {
     std::unique_lock<std::mutex> lock(mutex);
     cv.wait(lock, [&]() { return task_executed; });
   }
-  
+
   thread.Shutdown();
-  
+
   EXPECT_TRUE(blocking_was_allowed);
 }
 
@@ -141,12 +141,12 @@ TEST_F(TaskWithBlockingRestrictionsTest, MayBlockTaskAllowsBlocking) {
 TEST_F(TaskWithBlockingRestrictionsTest, NonBlockingTaskDisallowsBlocking) {
   Thread thread("NonBlockingThread");
   auto runner = thread.GetTaskRunner();
-  
+
   bool blocking_was_disallowed = false;
   std::condition_variable cv;
   std::mutex mutex;
   bool task_executed = false;
-  
+
   // Post a task without MayBlock() trait (default is may_block=false)
   runner->PostTaskWithTraits(
       FROM_HERE,
@@ -159,14 +159,14 @@ TEST_F(TaskWithBlockingRestrictionsTest, NonBlockingTaskDisallowsBlocking) {
         }
         cv.notify_one();
       });
-  
+
   {
     std::unique_lock<std::mutex> lock(mutex);
     cv.wait(lock, [&]() { return task_executed; });
   }
-  
+
   thread.Shutdown();
-  
+
   EXPECT_TRUE(blocking_was_disallowed);
 }
 
@@ -174,10 +174,10 @@ TEST_F(TaskWithBlockingRestrictionsTest, NonBlockingTaskDisallowsBlocking) {
 TEST_F(TaskWithBlockingRestrictionsTest, NestedTasksRespectRestrictions) {
   Thread thread("NestedThread");
   auto runner = thread.GetTaskRunner();
-  
+
   bool inner_task_blocking_allowed = false;
   bool outer_setup_done = false;
-  
+
   // Outer task without MayBlock disallows blocking
   runner->PostTaskWithTraits(
       FROM_HERE,
@@ -185,7 +185,7 @@ TEST_F(TaskWithBlockingRestrictionsTest, NestedTasksRespectRestrictions) {
       [&]() {
         // Inside a disallowed context
         EXPECT_FALSE(ThreadRestrictions::BlockingAllowed());
-        
+
         // Post inner task with MayBlock - temporarily restores blocking
         auto inner_runner = runner;
         inner_runner->PostTaskWithTraits(
@@ -194,12 +194,12 @@ TEST_F(TaskWithBlockingRestrictionsTest, NestedTasksRespectRestrictions) {
             [&inner_task_blocking_allowed]() {
               inner_task_blocking_allowed = ThreadRestrictions::BlockingAllowed();
             });
-        
+
         outer_setup_done = true;
       });
-  
+
   thread.Shutdown();
-  
+
   EXPECT_TRUE(outer_setup_done);
   EXPECT_TRUE(inner_task_blocking_allowed);
 }
@@ -208,41 +208,41 @@ TEST_F(TaskWithBlockingRestrictionsTest, NestedTasksRespectRestrictions) {
 TEST_F(TaskWithBlockingRestrictionsTest, ScopedAllowBlockingWithinRestrictedTask) {
   Thread thread("AllowWithinRestrictedThread");
   auto runner = thread.GetTaskRunner();
-  
+
   bool blocking_was_disallowed_initially = false;
   bool blocking_allowed_with_scoped = false;
   bool blocking_disallowed_again = false;
     std::condition_variable cv;
     std::mutex mutex;
     bool task_executed = false;
-  
+
     runner->PostTaskWithTraits(
         FROM_HERE,
         TaskTraits(TaskPriority::USER_VISIBLE),
         [&]() {
           blocking_was_disallowed_initially = !ThreadRestrictions::BlockingAllowed();
-        
+
           {
             ScopedAllowBlocking allow;
             blocking_allowed_with_scoped = ThreadRestrictions::BlockingAllowed();
           }
-        
+
           blocking_disallowed_again = !ThreadRestrictions::BlockingAllowed();
-        
+
           {
             std::lock_guard<std::mutex> lock(mutex);
             task_executed = true;
           }
           cv.notify_one();
         });
-  
+
     {
       std::unique_lock<std::mutex> lock(mutex);
       cv.wait(lock, [&]() { return task_executed; });
     }
-  
+
     thread.Shutdown();
-  
+
   EXPECT_TRUE(blocking_was_disallowed_initially);
   EXPECT_TRUE(blocking_allowed_with_scoped);
   EXPECT_TRUE(blocking_disallowed_again);
