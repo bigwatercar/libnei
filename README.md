@@ -19,6 +19,24 @@ A modular C/C++ library built with CMake. Sources live under `modules/`, but the
 
 Include paths follow `include/nei/...` under each module; after install, use `#include <nei/log/log.h>` etc.
 
+## Documentation
+
+### Process
+
+- Technical design: docs/neixx_process_technical.md
+- API usage examples: docs/neixx_process_api_examples.md
+- Quick reference: docs/neixx_process_quick_reference.md
+
+### Existing module docs
+
+- docs/neixx_io_technical.md
+- docs/neixx_io_api_examples.md
+- docs/neixx_io_quick_reference.md
+- docs/neixx_command_line_technical.md
+- docs/neixx_command_line_quick_reference.md
+- docs/neixx_task_module_technical.md
+- docs/neixx_strings_technical.md
+
 ## Layout
 
 ```text

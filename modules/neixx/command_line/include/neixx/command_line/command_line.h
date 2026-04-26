@@ -81,6 +81,9 @@ public:
   // Returns child program token (raw argv[0]) in UTF-8/UTF-16.
   std::string GetProgram() const;
   std::u16string GetProgramUTF16() const;
+  // Resolves argv[0] against PATH and caches the result for repeated launches
+  // with the same PATH content.
+  std::string ResolveProgramPathForEnv(std::string_view path_env) const;
 
   // Switch presence queries. Names may include prefix, matching is
   // ASCII case-insensitive after normalization.

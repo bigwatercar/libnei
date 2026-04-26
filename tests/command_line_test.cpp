@@ -263,6 +263,18 @@ TEST(CommandLineTest, PrependWrapperUTF16OverloadAddsWrapperTokens) {
   EXPECT_EQ(argv_view[3], u"child");
 }
 
+TEST(CommandLineTest, ResolveProgramPathForEnvKeepsSlashProgramUnchanged) {
+#if defined(_WIN32)
+  const char *argv[] = {"C:/Windows/System32/cmd.exe"};
+  nei::CommandLine command_line(static_cast<int>(std::size(argv)), argv);
+  EXPECT_EQ(command_line.ResolveProgramPathForEnv(""), "C:/Windows/System32/cmd.exe");
+#else
+  const char *argv[] = {"/bin/sh"};
+  nei::CommandLine command_line(static_cast<int>(std::size(argv)), argv);
+  EXPECT_EQ(command_line.ResolveProgramPathForEnv(""), "/bin/sh");
+#endif
+}
+
 #if defined(_WIN32)
 TEST(CommandLineTest, ParsesWindowsSlashAndColonSwitches) {
   const char *argv[] = {"prog.exe", "/test", "/name:value", "tail"};

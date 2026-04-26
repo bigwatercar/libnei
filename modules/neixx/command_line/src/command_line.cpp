@@ -12,6 +12,8 @@
 #include <windows.h>
 
 #include <shellapi.h>
+#else
+#include <unistd.h>
 #endif
 
 namespace nei {
@@ -223,12 +225,66 @@ public:
   std::vector<std::u16string> args;
   mutable std::vector<std::u16string> full_argv_cache;
   mutable bool full_argv_dirty = true;
+  mutable bool resolved_program_cache_valid = false;
+  mutable std::string resolved_program_cache_path_env;
+  mutable std::string resolved_program_cache_value;
 };
 
 namespace {
 
 void MarkFullArgvDirty(CommandLine::Impl *impl) {
   impl->full_argv_dirty = true;
+}
+
+void MarkResolvedProgramCacheDirty(CommandLine::Impl *impl) {
+  impl->resolved_program_cache_valid = false;
+  impl->resolved_program_cache_path_env.clear();
+  impl->resolved_program_cache_value.clear();
+}
+
+std::string ResolveProgramPathWithPathEnv(std::string_view program, std::string_view path_env) {
+  if (program.empty()) {
+    return std::string();
+  }
+
+#if defined(_WIN32)
+  (void)path_env;
+  return std::string(program);
+#else
+  if (program.find('/') != std::string_view::npos) {
+    return std::string(program);
+  }
+
+  if (path_env.empty()) {
+    path_env = "/bin:/usr/bin";
+  }
+
+  std::size_t start = 0;
+  while (start <= path_env.size()) {
+    const std::size_t end = path_env.find(':', start);
+    std::string_view dir = (end == std::string_view::npos) ? path_env.substr(start) : path_env.substr(start, end - start);
+    if (dir.empty()) {
+      dir = ".";
+    }
+
+    std::string candidate;
+    candidate.reserve(dir.size() + 1 + program.size());
+    candidate.append(dir);
+    candidate.push_back('/');
+    candidate.append(program);
+
+    if (access(candidate.c_str(), X_OK) == 0) {
+      return candidate;
+    }
+
+    if (end == std::string_view::npos) {
+      break;
+    }
+    start = end + 1;
+  }
+
+  return std::string();
+#endif
 }
 
 const CommandLine::StringVector &GetCachedFullArgv(const CommandLine::Impl *impl) {
@@ -345,6 +401,24 @@ std::u16string CommandLine::GetProgramUTF16() const {
     return std::u16string();
   }
   return impl_->argv.front();
+}
+
+std::string CommandLine::ResolveProgramPathForEnv(std::string_view path_env) const {
+  const std::string program = GetProgram();
+  if (program.empty()) {
+    return std::string();
+  }
+
+  const std::string path_key(path_env);
+  if (impl_->resolved_program_cache_valid
+      && impl_->resolved_program_cache_path_env == path_key) {
+    return impl_->resolved_program_cache_value;
+  }
+
+  impl_->resolved_program_cache_value = ResolveProgramPathWithPathEnv(program, path_env);
+  impl_->resolved_program_cache_path_env = path_key;
+  impl_->resolved_program_cache_valid = true;
+  return impl_->resolved_program_cache_value;
 }
 
 bool CommandLine::HasSwitch(std::string_view name) const {
@@ -564,6 +638,7 @@ void CommandLine::ParseFromUTF16Argv(const std::vector<std::u16string> &argv) {
   impl_->switches.clear();
   impl_->args.clear();
   MarkFullArgvDirty(impl_.get());
+  MarkResolvedProgramCacheDirty(impl_.get());
 
   bool parse_switches = true;
   for (std::size_t i = 1; i < impl_->argv.size(); ++i) {
