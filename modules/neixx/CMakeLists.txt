@@ -21,5 +21,6 @@ endif()
 
 add_subdirectory(functional)
 add_subdirectory(memory)
+add_subdirectory(command_line)
 add_subdirectory(task)
 add_subdirectory(strings)

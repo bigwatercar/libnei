@@ -22,6 +22,9 @@ target_link_libraries(task_may_block_demo PRIVATE nei::all)
 add_executable(string_util_demo string_util_demo.cpp)
 target_link_libraries(string_util_demo PRIVATE nei::all)
 
+add_executable(command_line_demo command_line_demo.cpp)
+target_link_libraries(command_line_demo PRIVATE nei::all)
+
 add_executable(flake_id_demo flake_id_demo.c)
 target_link_libraries(flake_id_demo PRIVATE nei::all)
 
@@ -43,5 +46,6 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_copy_runtime_dlls(task_shutdown_demo)
   nei_copy_runtime_dlls(task_may_block_demo)
   nei_copy_runtime_dlls(string_util_demo)
+  nei_copy_runtime_dlls(command_line_demo)
   nei_copy_runtime_dlls(flake_id_demo)
 endif()

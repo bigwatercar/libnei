@@ -26,6 +26,7 @@ add_executable(
     split_string_test.cpp
     string_number_conversions_test.cpp
     utf_string_conversions_test.cpp
+    command_line_test.cpp
     cancelable_callback_test.cpp
     task_callback_test.cpp
     task_environment_test.cpp
