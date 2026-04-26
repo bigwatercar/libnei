@@ -17,6 +17,7 @@
 #include <neixx/task/task_tracer.h>
 #include <neixx/task/time_source.h>
 #include <neixx/threading/platform_thread.h>
+#include <neixx/threading/thread_restrictions.h>
 
 #include "single_thread_task_runner.h"
 
@@ -289,7 +290,15 @@ private:
         }
       }
       ScopedTaskTrace trace_scope(scheduled.from_here);
-      std::move(scheduled.task).Run();
+      
+      // Apply thread restrictions based on task traits
+      // If the task may_block is false, disallow blocking operations during execution
+      if (!scheduled.traits.may_block()) {
+        ScopedDisallowBlocking disallow_blocking;
+        std::move(scheduled.task).Run();
+      } else {
+        std::move(scheduled.task).Run();
+      }
     }
   }
 

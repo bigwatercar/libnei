@@ -43,6 +43,7 @@ add_executable(
     text_normalization_test.cpp
     cjk_width_test.cpp
     platform_thread_test.cpp
+    thread_restrictions_test.cpp
 )
 
 target_link_libraries(
