@@ -27,15 +27,25 @@ typedef struct _nei_log_fmt_plan_cache_st {
 
 static _NEI_LOG_TLS _nei_log_fmt_plan_cache_st s_tls_fmt_plan_cache;
 
+#if defined(_WIN32)
+#define _NEI_LOG_VA_PARAM va_list *
+#define _NEI_LOG_VA_PASS(ap) (&(ap))
+#define _NEI_LOG_VA_ARG(ap, type) va_arg(*(ap), type)
+#define _NEI_LOG_VA_INIT(dst, src) ((dst) = &(src))
+#define _NEI_LOG_VA_CLEANUP(ap) ((void)0)
+#else
+#define _NEI_LOG_VA_PARAM va_list
+#define _NEI_LOG_VA_PASS(ap) (ap)
+#define _NEI_LOG_VA_ARG(ap, type) va_arg((ap), type)
+#define _NEI_LOG_VA_INIT(dst, src) va_copy((dst), (src))
+#define _NEI_LOG_VA_CLEANUP(ap) va_end((ap))
+#endif
+
 typedef struct _nei_log_serialize_emit_ctx_st {
   uint8_t *out;
   size_t out_cap;
   size_t *used;
-#if defined(_WIN32)
-  va_list *args;
-#else
-  va_list args;
-#endif
+  _NEI_LOG_VA_PARAM args;
 } _nei_log_serialize_emit_ctx_st;
 
 static int _nei_log_payload_write_u8(uint8_t *out, size_t out_cap, size_t *used, uint8_t value) {
@@ -75,16 +85,6 @@ static int _nei_log_payload_write_padded_zero(uint8_t *out, size_t out_cap, size
   }
   return 0;
 }
-
-#if defined(_WIN32)
-#define _NEI_LOG_VA_PARAM va_list *
-#define _NEI_LOG_VA_PASS(ap) (&(ap))
-#define _NEI_LOG_VA_ARG(ap, type) va_arg(*(ap), type)
-#else
-#define _NEI_LOG_VA_PARAM va_list
-#define _NEI_LOG_VA_PASS(ap) (ap)
-#define _NEI_LOG_VA_ARG(ap, type) va_arg((ap), type)
-#endif
 
 static int _nei_log_payload_emit_arg(uint8_t *out,
                                      size_t out_cap,
@@ -330,13 +330,8 @@ static int _nei_log_serialize_emit_cb(void *ctx, uint8_t payload_type, uint8_t c
   if (emit_ctx == NULL) {
     return -1;
   }
-#if defined(_WIN32)
   return _nei_log_payload_emit_arg(
       emit_ctx->out, emit_ctx->out_cap, emit_ctx->used, payload_type, conv_lm, emit_ctx->args);
-#else
-  return _nei_log_payload_emit_arg(
-      emit_ctx->out, emit_ctx->out_cap, emit_ctx->used, payload_type, conv_lm, emit_ctx->args);
-#endif
 }
 
 /* 1=ready plan, 0=fallback to scanner path, -1=hard reject (%n). */
@@ -562,20 +557,12 @@ size_t _nei_log_serialize_event(uint8_t *out,
   serialize_emit_ctx.out = out;
   serialize_emit_ctx.out_cap = out_cap;
   serialize_emit_ctx.used = &used;
-#if defined(_WIN32)
-  serialize_emit_ctx.args = &args;
-#else
-  va_copy(serialize_emit_ctx.args, args);
-#endif
+  _NEI_LOG_VA_INIT(serialize_emit_ctx.args, args);
   if (_nei_log_scan_fmt_emit_ops(fmt, _nei_log_serialize_emit_cb, &serialize_emit_ctx) <= 0) {
-#if !defined(_WIN32)
-    va_end(serialize_emit_ctx.args);
-#endif
+    _NEI_LOG_VA_CLEANUP(serialize_emit_ctx.args);
     return 0;
   }
-#if !defined(_WIN32)
-  va_end(serialize_emit_ctx.args);
-#endif
+  _NEI_LOG_VA_CLEANUP(serialize_emit_ctx.args);
 
   aligned_size = _nei_log_align_up_8(used);
   if (_nei_log_payload_write_padded_zero(out, out_cap, &used, aligned_size) != 0) {
