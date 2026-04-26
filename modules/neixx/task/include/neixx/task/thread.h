@@ -4,6 +4,7 @@
 #define NEI_TASK_THREAD_H
 
 #include <memory>
+#include <string>
 
 #include <nei/macros/nei_export.h>
 #include <neixx/task/task_runner.h>
@@ -22,6 +23,8 @@ public:
 
   Thread();
   explicit Thread(std::shared_ptr<const TimeSource> time_source);
+  explicit Thread(const std::string &name);
+  Thread(const std::string &name, std::shared_ptr<const TimeSource> time_source);
   ~Thread();
 
   Thread(const Thread &) = delete;

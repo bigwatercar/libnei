@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <string>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -15,6 +16,7 @@
 
 #include <neixx/task/task_tracer.h>
 #include <neixx/task/time_source.h>
+#include <neixx/threading/platform_thread.h>
 
 #include "single_thread_task_runner.h"
 
@@ -35,12 +37,13 @@ std::shared_ptr<const TimeSource> SharedSystemTimeSource() {
 
 class Thread::Impl {
 public:
-  explicit Impl(std::shared_ptr<const TimeSource> time_source)
+  explicit Impl(std::shared_ptr<const TimeSource> time_source, std::string name = {})
       : runner_(std::make_shared<SingleThreadTaskRunner>(SingleThreadTaskRunner::EnqueueDelegate{
             this,
             &Impl::EnqueueThunk,
         }))
-      , time_source_(std::move(time_source)) {
+      , time_source_(std::move(time_source))
+      , thread_name_(std::move(name)) {
     ready_tasks_.reserve(MIN_READY_TASK_CAPACITY);
     delayed_tasks_.reserve(MIN_DELAYED_TASK_CAPACITY);
     worker_ = std::thread([this]() { RunLoop(); });
@@ -250,6 +253,10 @@ private:
   }
 
   void RunLoop() {
+    if (!thread_name_.empty()) {
+      PlatformThread::SetName(thread_name_);
+    }
+    
     for (;;) {
       ScheduledTask scheduled;
       {
@@ -288,6 +295,7 @@ private:
 
   std::shared_ptr<SingleThreadTaskRunner> runner_;
   std::shared_ptr<const TimeSource> time_source_;
+  std::string thread_name_;
   std::mutex mutex_;
   std::condition_variable cv_;
   std::vector<ScheduledTask> ready_tasks_;
@@ -299,11 +307,23 @@ private:
 };
 
 Thread::Thread()
-    : Thread(SharedSystemTimeSource()) {
+    : Thread("")
+{
 }
 
 Thread::Thread(std::shared_ptr<const TimeSource> time_source)
-    : impl_(std::make_unique<Impl>(time_source ? std::move(time_source) : SharedSystemTimeSource())) {
+    : Thread("", std::move(time_source))
+{
+}
+
+Thread::Thread(const std::string &name)
+    : Thread(name, SharedSystemTimeSource())
+{
+}
+
+Thread::Thread(const std::string &name, std::shared_ptr<const TimeSource> time_source)
+    : impl_(std::make_unique<Impl>(time_source ? std::move(time_source) : SharedSystemTimeSource(), name))
+{
 }
 
 Thread::~Thread() = default;

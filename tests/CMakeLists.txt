@@ -42,6 +42,7 @@ add_executable(
     scoped_blocking_call_shutdown_test.cpp
     text_normalization_test.cpp
     cjk_width_test.cpp
+    platform_thread_test.cpp
 )
 
 target_link_libraries(
