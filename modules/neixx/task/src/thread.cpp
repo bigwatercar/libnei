@@ -256,7 +256,7 @@ private:
     if (!thread_name_.empty()) {
       PlatformThread::SetName(thread_name_);
     }
-    
+
     for (;;) {
       ScheduledTask scheduled;
       {

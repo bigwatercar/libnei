@@ -51,7 +51,7 @@ void PlatformThread::SetPriority(ThreadPriority priority) {
   // On Linux, we use the standard scheduling policy
   struct sched_param param;
   int policy = SCHED_OTHER;
-  
+
   switch (priority) {
   case ThreadPriority::BACKGROUND:
     param.sched_priority = sched_get_priority_min(SCHED_OTHER);
@@ -68,7 +68,7 @@ void PlatformThread::SetPriority(ThreadPriority priority) {
     param.sched_priority = sched_get_priority_min(SCHED_FIFO);
     break;
   }
-  
+
   // Attempt to set priority, but don't fail silently if EPERM (permission denied)
   (void)pthread_setschedparam(pthread_self(), policy, &param);
 #else

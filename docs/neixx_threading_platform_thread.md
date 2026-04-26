@@ -27,13 +27,16 @@ enum class ThreadPriority {
 
 #### SetName(const std::string& name)
 设置当前线程的名称
-- Windows: 使用 SetThreadDescription (Windows 10.0.15063+，动态加载)
-- Linux: 使用 prctl(PR_SET_NAME) 
+- Windows:
+  - 首先尝试 SetThreadDescription (Windows 10.0.15563+，更完整的支持)
+  - 降级到异常方法 (Windows 7/Vista/XP，通过 RaiseException(0x406D1388) 与调试器通信)
+  - **支持所有 Windows 版本**
+- Linux: 使用 prctl(PR_SET_NAME)
 - 其他POSIX: 使用 pthread_setname_np (如可用)
 
 #### SetPriority(ThreadPriority priority)
 设置当前线程的优先级
-- Windows: 使用 SetThreadPriority 
+- Windows: 使用 SetThreadPriority
 - Linux: 使用 pthread_setschedparam，支持 SCHED_FIFO 用于 REALTIME_AUDIO
 - 其他系统: 无操作（权限限制）
 
@@ -89,10 +92,11 @@ make                             # Linux/POSIX
 
 | 平台 | CurrentId | SetName | SetPriority | 备注 |
 |------|-----------|---------|------------|------|
-| Windows | ✓ | ✓* | ✓ | *需要 Windows 10.0.15063+ |
-| Linux | ✓ | ✓ | ✓** | **需要 SCHED_FIFO 权限 |
-| macOS | ✓ | ✓ | × | 线程优先级需要特殊权限 |
-| Other POSIX | ✓ | ○ | × | ○ 取决于系统支持 |
+| Windows 10.0.15563+ | ✓ | ✓ (现代方法) | ✓ | 使用 SetThreadDescription |
+| Windows Vista/7/XP | ✓ | ✓ (异常方法) | ✓ | 使用 RaiseException 与调试器通信 |
+| Linux | ✓ | ✓ | ✓* | *需要 SCHED_FIFO 权限用于高优先级 |
+| macOS | ✓ | ✓ | ✗ | 线程优先级需要特殊权限 |
+| Other POSIX | ✓ | ○ | ✗ | ○ 取决于系统支持 |
 
 ## 使用示例
 
@@ -111,13 +115,34 @@ nei::PlatformThread::SetPriority(nei::ThreadPriority::DISPLAY);
 
 ## 注意事项
 
-1. Windows SetThreadDescription 是通过动态加载实现的，因此在不支持的系统上会无声失败
-2. Linux SIGCHLD 信号管理由 Process 模块处理（通过 signalfd）
-3. 线程优先级设置可能需要提升权限（特别是 REALTIME_AUDIO）
-4. 线程名称限制：
-   - Windows: 无限制
-   - Linux: 15 字符 + 空终止符
-   - macOS: 限制长度
+### Windows 线程命名兼容性
+
+SetName() 在 Windows 上使用**分层降级方案**实现最大兼容性：
+
+1. **Windows 10.0.15563+**:
+   - 使用 SetThreadDescription API
+   - 提供最完整的功能（Unicode 支持无限制）
+   - 与 Visual Studio、WinDbg 等现代调试器兼容
+
+2. **Windows Vista/7/XP**:
+   - 使用经典的异常方法（0x406D1388）
+   - 向调试器发送异常信号以设置线程名称
+   - 限制名称长度为 31 字符（历史限制）
+   - 与 Visual Studio 2005+ 调试器兼容
+   - 工具链、性能分析器也可以识别（如 ETW）
+
+3. **特殊情况**:
+   - 空字符串会被忽略（不设置名称）
+   - 长字符串在 Vista/7/XP 上自动截断到 31 字符
+   - UTF-8 输入自动转换为相应的编码
+   - 异常处理内置，不会导致程序崩溃
+
+### 其他平台
+
+1. Windows SetThreadDescription 的动态加载确保不会在早期 Windows 版本上导致链接错误
+2. Linux prctl(PR_SET_NAME) 限制为 15 字符 + 空终止符
+3. Linux SCHED_FIFO 需要 CAP_SYS_NICE 权限（通常需要提升）
+4. macOS pthread_setname_np 限制为 15 字符，仅设置 BSD 线程名称
 
 ## 后续增强建议
 

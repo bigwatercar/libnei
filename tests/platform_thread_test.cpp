@@ -36,16 +36,16 @@ TEST(ThreadNameTest, ThreadWithoutName) {
   Thread thread;
   auto runner = thread.GetTaskRunner();
   EXPECT_NE(runner, nullptr);
-  
+
   auto done = std::make_shared<std::atomic<bool>>(false);
   runner->PostTask(FROM_HERE, BindOnce([done]() {
     done->store(true, std::memory_order_release);
   }));
-  
+
   // Give the thread time to execute
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   EXPECT_TRUE(done->load(std::memory_order_acquire));
-  
+
   thread.Shutdown();
 }
 
@@ -53,16 +53,16 @@ TEST(ThreadNameTest, ThreadWithName) {
   Thread thread("TestWorkerThread");
   auto runner = thread.GetTaskRunner();
   EXPECT_NE(runner, nullptr);
-  
+
   auto done = std::make_shared<std::atomic<bool>>(false);
   runner->PostTask(FROM_HERE, BindOnce([done]() {
     done->store(true, std::memory_order_release);
   }));
-  
+
   // Give the thread time to execute
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   EXPECT_TRUE(done->load(std::memory_order_acquire));
-  
+
   thread.Shutdown();
 }
 
@@ -71,16 +71,16 @@ TEST(ThreadNameTest, ThreadWithNameAndCustomTimeSource) {
   Thread thread("CustomTimeThread");
   auto runner = thread.GetTaskRunner();
   EXPECT_NE(runner, nullptr);
-  
+
   auto done = std::make_shared<std::atomic<bool>>(false);
   runner->PostTask(FROM_HERE, BindOnce([done]() {
     done->store(true, std::memory_order_release);
   }));
-  
+
   // Give the thread time to execute
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   EXPECT_TRUE(done->load(std::memory_order_acquire));
-  
+
   thread.Shutdown();
 }
 
