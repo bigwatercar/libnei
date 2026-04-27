@@ -391,8 +391,8 @@ NEI_API nei_log_default_file_sink_options_st nei_log_default_file_sink_options(v
  * `filename.1`, older backups are shifted up by one index, and the oldest file
  * beyond @c max_backup_files is removed.
  */
-NEI_API nei_log_sink_st *
-nei_log_create_default_file_sink(const char *filename, const nei_log_default_file_sink_options_st *options);
+NEI_API nei_log_sink_st *nei_log_create_default_file_sink(const char *filename,
+                                                          const nei_log_default_file_sink_options_st *options);
 
 /**
  * @brief Destroy a log sink structure allocated by the library (e.g.
@@ -544,55 +544,143 @@ NEI_API void nei_log_reset_perf_stats_for_test(void);
  * @brief Convenience logging macros.
  * @{
  */
+
+#define NEI_LV NEI_L_VERBOSE
+#define NEI_LT NEI_L_TRACE
+#define NEI_LD NEI_L_DEBUG
+#define NEI_LI NEI_L_INFO
+#define NEI_LW NEI_L_WARN
+#define NEI_LE NEI_L_ERROR
+#define NEI_LF NEI_L_FATAL
+
 #if !defined(NEI_LOG_DISABLE_MACROS)
+
+/**
+ * @brief Log a level-based message (convenience macro)
+ * @param level @ref nei_log_level_e value
+ * @param fmt printf-style format string
+ * @param ... printf-style variadic arguments
+ */
+#define NEI_LOG(level, fmt, ...)                                                                                       \
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, level, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief Conditionally log a level-based message (convenience macro)
+ * @param condition Expression evaluated once; log is emitted when non-zero
+ * @param level @ref nei_log_level_e value
+ * @param fmt printf-style format string
+ * @param ... printf-style variadic arguments
+ */
+#define NEI_LOG_IF(condition, level, fmt, ...)                                                                         \
+  do {                                                                                                                 \
+    if (condition) {                                                                                                   \
+      NEI_LOG(level, fmt, ##__VA_ARGS__);                                                                              \
+    }                                                                                                                  \
+  } while (0)
+
+/**
+ * @brief Conditionally log a verbose message (convenience macro)
+ * @param condition Expression evaluated once; log is emitted when non-zero
+ * @param verbose Verbose sub-level (for finer-grained verbose output)
+ * @param fmt printf-style format string
+ * @param ... printf-style variadic arguments
+ */
+#define NEI_LOG_VERBOSE_IF(condition, verbose, fmt, ...)                                                               \
+  do {                                                                                                                 \
+    if (condition) {                                                                                                   \
+      nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, verbose, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__);              \
+    }                                                                                                                  \
+  } while (0)
 
 /**
  * @brief Log a TRACE message (convenience macro)
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_TRACE(fmt, ...)                                                                                        \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_TRACE, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+#define NEI_LOG_TRACE(fmt, ...) NEI_LOG(NEI_L_TRACE, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief Conditionally log a TRACE message (convenience macro)
+ * @param condition Expression evaluated once; log is emitted when non-zero
+ * @param fmt printf-style format string
+ * @param ... printf-style variadic arguments
+ */
+#define NEI_LOG_TRACE_IF(condition, fmt, ...) NEI_LOG_IF(condition, NEI_L_TRACE, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log a DEBUG message (convenience macro)
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_DEBUG(fmt, ...)                                                                                        \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_DEBUG, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+#define NEI_LOG_DEBUG(fmt, ...) NEI_LOG(NEI_L_DEBUG, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief Conditionally log a DEBUG message (convenience macro)
+ * @param condition Expression evaluated once; log is emitted when non-zero
+ * @param fmt printf-style format string
+ * @param ... printf-style variadic arguments
+ */
+#define NEI_LOG_DEBUG_IF(condition, fmt, ...) NEI_LOG_IF(condition, NEI_L_DEBUG, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log an INFO message (convenience macro)
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_INFO(fmt, ...)                                                                                         \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+#define NEI_LOG_INFO(fmt, ...) NEI_LOG(NEI_L_INFO, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief Conditionally log an INFO message (convenience macro)
+ * @param condition Expression evaluated once; log is emitted when non-zero
+ * @param fmt printf-style format string
+ * @param ... printf-style variadic arguments
+ */
+#define NEI_LOG_INFO_IF(condition, fmt, ...) NEI_LOG_IF(condition, NEI_L_INFO, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log a WARN message (convenience macro)
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_WARN(fmt, ...)                                                                                         \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_WARN, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+#define NEI_LOG_WARN(fmt, ...) NEI_LOG(NEI_L_WARN, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief Conditionally log a WARN message (convenience macro)
+ * @param condition Expression evaluated once; log is emitted when non-zero
+ * @param fmt printf-style format string
+ * @param ... printf-style variadic arguments
+ */
+#define NEI_LOG_WARN_IF(condition, fmt, ...) NEI_LOG_IF(condition, NEI_L_WARN, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log an ERROR message (convenience macro)
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_ERROR(fmt, ...)                                                                                        \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_ERROR, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+#define NEI_LOG_ERROR(fmt, ...) NEI_LOG(NEI_L_ERROR, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief Conditionally log an ERROR message (convenience macro)
+ * @param condition Expression evaluated once; log is emitted when non-zero
+ * @param fmt printf-style format string
+ * @param ... printf-style variadic arguments
+ */
+#define NEI_LOG_ERROR_IF(condition, fmt, ...) NEI_LOG_IF(condition, NEI_L_ERROR, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log a FATAL message (convenience macro)
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_FATAL(fmt, ...)                                                                                        \
-  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_FATAL, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+#define NEI_LOG_FATAL(fmt, ...) NEI_LOG(NEI_L_FATAL, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief Conditionally log a FATAL message (convenience macro)
+ * @param condition Expression evaluated once; log is emitted when non-zero
+ * @param fmt printf-style format string
+ * @param ... printf-style variadic arguments
+ */
+#define NEI_LOG_FATAL_IF(condition, fmt, ...) NEI_LOG_IF(condition, NEI_L_FATAL, fmt, ##__VA_ARGS__)
 
 /**
  * @brief Log a VERBOSE message (convenience macro)
@@ -604,13 +692,22 @@ NEI_API void nei_log_reset_perf_stats_for_test(void);
   nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, verbose, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 #else
-#define NEI_LOG_TRACE(fmt, ...) void(0)
-#define NEI_LOG_DEBUG(fmt, ...) void(0)
-#define NEI_LOG_INFO(fmt, ...) void(0)
-#define NEI_LOG_WARN(fmt, ...) void(0)
-#define NEI_LOG_ERROR(fmt, ...) void(0)
-#define NEI_LOG_FATAL(fmt, ...) void(0)
+#define NEI_LOG(level, fmt, ...) ((void)(level))
+#define NEI_LOG_TRACE(fmt, ...) NEI_LOG(NEI_L_TRACE, fmt, ##__VA_ARGS__)
+#define NEI_LOG_TRACE_IF(condition, fmt, ...) ((void)(condition))
+#define NEI_LOG_DEBUG(fmt, ...) NEI_LOG(NEI_L_DEBUG, fmt, ##__VA_ARGS__)
+#define NEI_LOG_DEBUG_IF(condition, fmt, ...) ((void)(condition))
+#define NEI_LOG_INFO(fmt, ...) NEI_LOG(NEI_L_INFO, fmt, ##__VA_ARGS__)
+#define NEI_LOG_INFO_IF(condition, fmt, ...) ((void)(condition))
+#define NEI_LOG_WARN(fmt, ...) NEI_LOG(NEI_L_WARN, fmt, ##__VA_ARGS__)
+#define NEI_LOG_WARN_IF(condition, fmt, ...) ((void)(condition))
+#define NEI_LOG_ERROR(fmt, ...) NEI_LOG(NEI_L_ERROR, fmt, ##__VA_ARGS__)
+#define NEI_LOG_ERROR_IF(condition, fmt, ...) ((void)(condition))
+#define NEI_LOG_FATAL(fmt, ...) NEI_LOG(NEI_L_FATAL, fmt, ##__VA_ARGS__)
+#define NEI_LOG_FATAL_IF(condition, fmt, ...) ((void)(condition))
 #define NEI_LOG_VERBOSE(verbose, fmt, ...) void(0)
+#define NEI_LOG_IF(condition, level, fmt, ...) ((void)(condition))
+#define NEI_LOG_VERBOSE_IF(condition, verbose, fmt, ...) ((void)(condition))
 #endif // NEI_LOG_DISABLE_MACROS
 
 /** @} */ /* end of nei_log_macros */

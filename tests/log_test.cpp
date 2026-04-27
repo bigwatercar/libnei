@@ -729,6 +729,53 @@ TEST(LogCTest, MacrosUseDefaultConfigAndEmitLevelTags) {
   EXPECT_NE(collector.messages[5].find("fatal=ab"), std::string::npos);
 }
 
+TEST(LogCTest, GenericLevelMacroUsesProvidedLevel) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  DefaultConfigSinkGuard guard;
+  guard.set_primary_sink(&sink);
+
+  NEI_LOG(NEI_L_WARN, "generic=%d", 7);
+  nei_log_flush();
+
+  std::lock_guard<std::mutex> lock(collector.mu);
+  ASSERT_EQ(collector.messages.size(), 1U);
+  EXPECT_NE(collector.messages[0].find("[W]"), std::string::npos);
+  EXPECT_NE(collector.messages[0].find("generic=7"), std::string::npos);
+}
+
+TEST(LogCTest, ConditionalLevelMacrosRespectConditionAndEvaluateOnce) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  DefaultConfigSinkGuard guard;
+  guard.set_primary_sink(&sink);
+
+  int cond_eval_count = 0;
+  NEI_LOG_IF((++cond_eval_count) == 1, NEI_L_INFO, "if-generic-true");
+  NEI_LOG_IF((++cond_eval_count) == 100, NEI_L_INFO, "if-generic-false");
+
+  int info_if_eval_count = 0;
+  NEI_LOG_INFO_IF((++info_if_eval_count) == 1, "if-info-true");
+  NEI_LOG_INFO_IF((++info_if_eval_count) == 100, "if-info-false");
+
+  nei_log_flush();
+
+  std::lock_guard<std::mutex> lock(collector.mu);
+  ASSERT_EQ(cond_eval_count, 2);
+  ASSERT_EQ(info_if_eval_count, 2);
+  ASSERT_EQ(collector.messages.size(), 2U);
+  EXPECT_NE(collector.messages[0].find("if-generic-true"), std::string::npos);
+  EXPECT_NE(collector.messages[1].find("if-info-true"), std::string::npos);
+  EXPECT_EQ(collector.messages[0].find("if-generic-false"), std::string::npos);
+  EXPECT_EQ(collector.messages[1].find("if-info-false"), std::string::npos);
+}
+
 TEST(LogCTest, VerboseMacroUsesVlogAndVerboseLevel) {
   LogCollector collector;
   nei_log_sink_st sink = {};
@@ -747,6 +794,29 @@ TEST(LogCTest, VerboseMacroUsesVlogAndVerboseLevel) {
   EXPECT_EQ(collector.last_verbose, 7);
   EXPECT_NE(collector.messages[0].find("[V]"), std::string::npos);
   EXPECT_NE(collector.messages[0].find("verb=42"), std::string::npos);
+}
+
+TEST(LogCTest, ConditionalVerboseMacroRespectsConditionAndVerboseLevel) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.vlog = CollectVerboseLog;
+  sink.opaque = &collector;
+
+  DefaultConfigSinkGuard guard;
+  guard.set_primary_sink(&sink);
+
+  int cond_eval_count = 0;
+  NEI_LOG_VERBOSE_IF((++cond_eval_count) == 1, 5, "verb-if-true=%d", 1);
+  NEI_LOG_VERBOSE_IF((++cond_eval_count) == 100, 6, "verb-if-false=%d", 2);
+
+  nei_log_flush();
+
+  std::lock_guard<std::mutex> lock(collector.mu);
+  ASSERT_EQ(cond_eval_count, 2);
+  ASSERT_EQ(collector.messages.size(), 1U);
+  EXPECT_EQ(collector.last_verbose, 5);
+  EXPECT_NE(collector.messages[0].find("verb-if-true=1"), std::string::npos);
+  EXPECT_EQ(collector.messages[0].find("verb-if-false=2"), std::string::npos);
 }
 
 TEST(LogCTest, AsyncBurstThenFlushDeliversEveryMessage) {
