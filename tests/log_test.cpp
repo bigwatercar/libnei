@@ -1236,3 +1236,36 @@ TEST(LogCTest, WsFormat_ConvertedPayloadNotAffectedByLaterWideBufferMutation) {
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
+
+TEST(LogCTest, ImmediateCrashOnFatalConfigurationOption) {
+  /* Verify that the immediate_crash_on_fatal flag can be set and read correctly.
+   * Note: We do not test the actual crash behavior here because that would
+   * terminate the test process. This test only verifies configuration. */
+  nei_log_config_st cfg = *nei_log_default_config();
+  
+  /* Initially should be disabled (0) by default */
+  EXPECT_EQ(cfg.immediate_crash_on_fatal, 0U);
+  
+  /* Enable the flag */
+  cfg.immediate_crash_on_fatal = 1U;
+  EXPECT_EQ(cfg.immediate_crash_on_fatal, 1U);
+  
+  /* Disable it again */
+  cfg.immediate_crash_on_fatal = 0U;
+  EXPECT_EQ(cfg.immediate_crash_on_fatal, 0U);
+  
+  /* Verify that a custom config with the flag set persists */
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  cfg.immediate_crash_on_fatal = 1U;
+  ASSERT_EQ(nei_log_add_config(&cfg, &cfg_handle), 0);
+  
+  nei_log_config_st *retrieved = nei_log_get_config(cfg_handle);
+  ASSERT_NE(retrieved, nullptr);
+  EXPECT_EQ(retrieved->immediate_crash_on_fatal, 1U);
+  
+  nei_log_remove_config(cfg_handle);
+  
+  /* Default config should still have it disabled after the above operations */
+  nei_log_config_st *default_cfg = nei_log_default_config();
+  EXPECT_EQ(default_cfg->immediate_crash_on_fatal, 0U);
+}

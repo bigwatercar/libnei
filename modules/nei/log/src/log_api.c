@@ -69,6 +69,13 @@ static int _nei_log_is_consumer_thread(void) {
 #endif
 }
 
+/* Crash handler for immediate_crash_on_fatal option */
+void _nei_log_immediate_crash(void) {
+  /* Dereference NULL pointer to trigger immediate crash */
+  volatile int *crash_ptr = NULL;
+  (void)(*crash_ptr);
+}
+
 #pragma region public API
 
 void nei_llog(nei_log_config_handle_t config_handle,
@@ -80,6 +87,7 @@ void nei_llog(nei_log_config_handle_t config_handle,
               ...) {
   va_list args;
   nei_log_config_st *config;
+  int should_crash = 0;
 
   if (++_s_tls_log_depth > 1) {
     --_s_tls_log_depth;
@@ -97,6 +105,10 @@ void nei_llog(nei_log_config_handle_t config_handle,
       --_s_tls_log_depth;
       return; /* Level not enabled, skip serialization. */
     }
+    /* Check if we need to crash on FATAL */
+    if (level == (int32_t)NEI_L_FATAL && config->immediate_crash_on_fatal) {
+      should_crash = 1;
+    }
   }
 
   va_start(args, fmt);
@@ -109,6 +121,11 @@ void nei_llog(nei_log_config_handle_t config_handle,
   }
   va_end(args);
   --_s_tls_log_depth;
+
+  /* Crash after logging if configured */
+  if (should_crash) {
+    _nei_log_immediate_crash();
+  }
 }
 
 void nei_vlog(nei_log_config_handle_t config_handle,
@@ -163,6 +180,7 @@ void nei_llog_literal(nei_log_config_handle_t config_handle,
                       const char *message,
                       size_t length) {
   nei_log_config_st *config;
+  int should_crash = 0;
 
   if (++_s_tls_log_depth > 1) {
     --_s_tls_log_depth;
@@ -180,6 +198,10 @@ void nei_llog_literal(nei_log_config_handle_t config_handle,
       --_s_tls_log_depth;
       return;
     }
+    /* Check if we need to crash on FATAL */
+    if (level == (int32_t)NEI_L_FATAL && config->immediate_crash_on_fatal) {
+      should_crash = 1;
+    }
   }
 
   {
@@ -190,6 +212,11 @@ void nei_llog_literal(nei_log_config_handle_t config_handle,
     }
   }
   --_s_tls_log_depth;
+
+  /* Crash after logging if configured */
+  if (should_crash) {
+    _nei_log_immediate_crash();
+  }
 }
 
 void nei_vlog_literal(nei_log_config_handle_t config_handle,
