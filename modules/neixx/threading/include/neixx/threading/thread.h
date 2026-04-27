@@ -1,7 +1,7 @@
 #pragma once
 
-#ifndef NEI_TASK_THREAD_H
-#define NEI_TASK_THREAD_H
+#ifndef NEIXX_THREADING_THREAD_H_
+#define NEIXX_THREADING_THREAD_H_
 
 #include <memory>
 #include <string>
@@ -48,4 +48,4 @@ private:
 
 } // namespace nei
 
-#endif // NEI_TASK_THREAD_H
+#endif // NEIXX_THREADING_THREAD_H_

@@ -5,7 +5,7 @@
 #include <string>
 #include <thread>
 
-#include <neixx/task/thread.h>
+#include <neixx/threading/thread.h>
 #include <neixx/task/task_runner.h>
 #include <neixx/threading/platform_thread.h>
 

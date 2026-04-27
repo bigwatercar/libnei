@@ -1211,7 +1211,7 @@ ScopedTaskTrace::~ScopedTaskTrace() {
 ## thread.cpp
 
 ```cpp
-#include <neixx/task/thread.h>
+#include <neixx/threading/thread.h>
 
 #include <algorithm>
 #include <chrono>

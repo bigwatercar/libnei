@@ -1,10 +1,10 @@
-﻿#include <neixx/threading/thread.h>
+#include <neixx/threading/thread.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
-#include <atomic>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -18,8 +18,9 @@
 #include <neixx/task/time_source.h>
 #include <neixx/threading/platform_thread.h>
 #include <neixx/threading/thread_restrictions.h>
+#include <neixx/threading/waitable_event.h>
 
-#include "single_thread_task_runner.h"
+#include "../../task/src/single_thread_task_runner.h"
 
 namespace nei {
 
@@ -44,10 +45,13 @@ public:
             &Impl::EnqueueThunk,
         }))
       , time_source_(std::move(time_source))
+      , started_event_(WaitableEvent::ResetPolicy::kManual, false)
       , thread_name_(std::move(name)) {
     ready_tasks_.reserve(MIN_READY_TASK_CAPACITY);
     delayed_tasks_.reserve(MIN_DELAYED_TASK_CAPACITY);
     worker_ = std::thread([this]() { RunLoop(); });
+    // Use WaitableEvent for startup sequencing to avoid startup races.
+    started_event_.Wait();
   }
 
   ~Impl() {
@@ -229,15 +233,8 @@ private:
   }
 
   void MoveReadyTasksFromDelayedLocked(const std::chrono::steady_clock::time_point now) {
-    std::size_t moved_count = 0;
-
     while (!delayed_tasks_.empty() && delayed_tasks_.front().run_at <= now) {
       PushReadyTaskLocked(PopDelayedTaskLocked());
-      ++moved_count;
-    }
-
-    if (moved_count == 0) {
-      return;
     }
   }
 
@@ -256,19 +253,16 @@ private:
   void RunLoop() {
     class ScopedRunLoopCleanup final {
     public:
-      ScopedRunLoopCleanup() = default;
-
       ~ScopedRunLoopCleanup() {
         TaskTracer::SetCurrentTaskLocation(nullptr);
       }
-
-      ScopedRunLoopCleanup(const ScopedRunLoopCleanup &) = delete;
-      ScopedRunLoopCleanup &operator=(const ScopedRunLoopCleanup &) = delete;
     } scoped_cleanup;
 
     if (!thread_name_.empty()) {
       PlatformThread::SetName(thread_name_);
     }
+
+    started_event_.Signal();
 
     for (;;) {
       ScheduledTask scheduled;
@@ -301,10 +295,8 @@ private:
           cv_.wait_until(lock, NextDelayedRunAtLocked());
         }
       }
-      ScopedTaskTrace trace_scope(scheduled.from_here);
 
-      // Apply thread restrictions based on task traits
-      // If the task may_block is false, disallow blocking operations during execution
+      ScopedTaskTrace trace_scope(scheduled.from_here);
       if (!scheduled.traits.may_block()) {
         ScopedDisallowBlocking disallow_blocking;
         std::move(scheduled.task).Run();
@@ -316,6 +308,7 @@ private:
 
   std::shared_ptr<SingleThreadTaskRunner> runner_;
   std::shared_ptr<const TimeSource> time_source_;
+  WaitableEvent started_event_;
   std::string thread_name_;
   std::mutex mutex_;
   std::condition_variable cv_;
@@ -328,23 +321,19 @@ private:
 };
 
 Thread::Thread()
-    : Thread("")
-{
+    : Thread("") {
 }
 
 Thread::Thread(std::shared_ptr<const TimeSource> time_source)
-    : Thread("", std::move(time_source))
-{
+    : Thread("", std::move(time_source)) {
 }
 
 Thread::Thread(const std::string &name)
-    : Thread(name, SharedSystemTimeSource())
-{
+    : Thread(name, SharedSystemTimeSource()) {
 }
 
 Thread::Thread(const std::string &name, std::shared_ptr<const TimeSource> time_source)
-    : impl_(std::make_unique<Impl>(time_source ? std::move(time_source) : SharedSystemTimeSource(), name))
-{
+    : impl_(std::make_unique<Impl>(time_source ? std::move(time_source) : SharedSystemTimeSource(), name)) {
 }
 
 Thread::~Thread() = default;

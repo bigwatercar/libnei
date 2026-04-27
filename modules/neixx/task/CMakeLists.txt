@@ -6,7 +6,6 @@
         src/time_source.cpp
         src/task_runner.cpp
         src/single_thread_task_runner.cpp
-        src/thread.cpp
         src/thread_pool.cpp
         src/scoped_blocking_call.cpp
         src/task_environment.cpp

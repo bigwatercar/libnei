@@ -108,7 +108,7 @@ void PlatformThread::SetName(const std::string &name) {
 
 ```cpp
 #include <neixx/threading/platform_thread.h>
-#include <neixx/task/thread.h>
+#include <neixx/threading/thread.h>
 
 // 方法 1: 在 Thread 构造时指定名称
 nei::Thread worker("BackgroundTask");
