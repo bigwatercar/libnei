@@ -1,6 +1,6 @@
 #include <neixx/functional/callback.h>
 #include <neixx/task/location.h>
-#include <neixx/task/thread.h>
+#include <neixx/threading/thread.h>
 
 #include <atomic>
 #include <chrono>

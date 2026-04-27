@@ -3,7 +3,7 @@
 #include <condition_variable>
 #include <mutex>
 
-#include <neixx/task/thread.h>
+#include <neixx/threading/thread.h>
 #include <neixx/threading/thread_restrictions.h>
 
 namespace nei {
