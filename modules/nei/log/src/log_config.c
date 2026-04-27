@@ -53,6 +53,7 @@ void _nei_log_fill_default_config(nei_log_config_st *cfg) {
   cfg->log_location_after_message = 1;
   cfg->log_thread_id = 1;
   cfg->log_to_console = 0;
+  cfg->immediate_crash_on_fatal = 0; /* Disabled by default */
   cfg->timestamp_style = NEI_LOG_TIMESTAMP_STYLE_DEFAULT;
 }
 

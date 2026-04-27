@@ -307,4 +307,7 @@ void _nei_log_emit_message(const nei_log_config_st *config, int32_t level, int32
 /* From log_serialize.c */
 uint64_t _nei_log_now_ns(void);
 
+/* Crash handler */
+void _nei_log_immediate_crash(void);
+
 #endif /* _NEI_LOG_INTERNAL_H_ */
