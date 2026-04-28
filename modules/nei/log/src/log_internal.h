@@ -19,6 +19,7 @@
 #if defined(_WIN32)
 #include <Windows.h>
 #include <DbgHelp.h>
+#include <strsafe.h>
 #else
 #include <execinfo.h>
 #include <pthread.h>

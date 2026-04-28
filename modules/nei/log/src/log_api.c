@@ -41,6 +41,24 @@ static nei_log_config_handle_t s_crash_config_handle = NEI_LOG_INVALID_CONFIG_HA
 static int s_in_crash_handler = 0;
 
 #if defined(_WIN32)
+static int _nei_log_win_printf(char *out, size_t out_cap, const char *fmt, ...) {
+  va_list args;
+  HRESULT hr;
+
+  if (out == NULL || out_cap == 0U || fmt == NULL) {
+    return 0;
+  }
+
+  va_start(args, fmt);
+  hr = StringCchVPrintfA(out, out_cap, fmt, args);
+  va_end(args);
+  out[out_cap - 1U] = '\0';
+  if (FAILED(hr)) {
+    return (int)strlen(out);
+  }
+  return (int)strlen(out);
+}
+
 static void _nei_log_format_windows_stack_line(char *out, size_t out_cap, unsigned frame_index, void *frame) {
   DWORD64 displacement = 0;
   HANDLE process = GetCurrentProcess();
@@ -61,18 +79,18 @@ static void _nei_log_format_windows_stack_line(char *out, size_t out_cap, unsign
   }
 
   if (symbol_name != NULL && symbol_name[0] != '\0') {
-    written = _snprintf(out,
-                        out_cap - 1U,
-                        "[nei][stack] #%u %s + 0x%llX [%p]",
-                        frame_index,
-                        symbol_name,
-                        (unsigned long long)displacement,
-                        frame);
+    written = _nei_log_win_printf(out,
+                                  out_cap,
+                                  "[nei][stack] #%u %s + 0x%llX [%p]",
+                                  frame_index,
+                                  symbol_name,
+                                  (unsigned long long)displacement,
+                                  frame);
   } else {
-    written = _snprintf(out, out_cap - 1U, "[nei][stack] #%u %p", frame_index, frame);
+    written = _nei_log_win_printf(out, out_cap, "[nei][stack] #%u %p", frame_index, frame);
   }
   if (written < 0) {
-    written = 0;
+    written = (int)strlen(out);
   }
   out[written] = '\0';
 }
@@ -87,16 +105,16 @@ static LONG WINAPI _nei_log_unhandled_exception_filter(EXCEPTION_POINTERS *excep
   s_in_crash_handler = 1;
 
   if (exception_info != NULL && exception_info->ExceptionRecord != NULL) {
-    line_len = _snprintf(line_buf,
-                         sizeof(line_buf) - 1,
-                         "[nei][crash] unhandled exception code=0x%08lX addr=%p",
-                         (unsigned long)exception_info->ExceptionRecord->ExceptionCode,
-                         exception_info->ExceptionRecord->ExceptionAddress);
+    line_len = _nei_log_win_printf(line_buf,
+                                   sizeof(line_buf),
+                                   "[nei][crash] unhandled exception code=0x%08lX addr=%p",
+                                   (unsigned long)exception_info->ExceptionRecord->ExceptionCode,
+                                   exception_info->ExceptionRecord->ExceptionAddress);
   } else {
-    line_len = _snprintf(line_buf, sizeof(line_buf) - 1, "[nei][crash] unhandled exception");
+    line_len = _nei_log_win_printf(line_buf, sizeof(line_buf), "[nei][crash] unhandled exception");
   }
   if (line_len < 0) {
-    line_len = 0;
+    line_len = (int)strlen(line_buf);
   }
   line_buf[line_len] = '\0';
   (void)fprintf(stderr, "%s\n", line_buf);
@@ -260,13 +278,42 @@ static int _nei_log_is_consumer_thread(void) {
 }
 
 static int _nei_log_env_flag_enabled(const char *name) {
-  const char *value;
+#if defined(_WIN32)
+  char *value = NULL;
+  size_t value_len = 0U;
+  int enabled = 0;
 
   if (name == NULL) {
     return 0;
   }
-  value = getenv(name);
-  return value != NULL && value[0] == '1' && value[1] == '\0';
+  if (_dupenv_s(&value, &value_len, name) != 0 || value == NULL) {
+    return 0;
+  }
+  enabled = (value[0] == '1' && value[1] == '\0') ? 1 : 0;
+  free(value);
+  return enabled;
+#else
+  const char *entry;
+  size_t name_len;
+  int i;
+  extern char **environ;
+
+  if (name == NULL) {
+    return 0;
+  }
+  name_len = strlen(name);
+  if (name_len == 0U || environ == NULL) {
+    return 0;
+  }
+  for (i = 0; environ[i] != NULL; ++i) {
+    entry = environ[i];
+    if (strncmp(entry, name, name_len) == 0 && entry[name_len] == '=') {
+      const char *value = entry + name_len + 1U;
+      return value[0] == '1' && value[1] == '\0';
+    }
+  }
+  return 0;
+#endif
 }
 
 /* Crash handler for immediate_crash_on_fatal option */

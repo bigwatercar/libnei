@@ -105,6 +105,25 @@ nei_log_flush 语义：等待调用前已入队事件被消费完成。
 - 支持按文件大小轮转与备份链（.1/.2/...）。
 - 通过环境变量可调 flush interval 与文件缓冲大小（用于 bench/调优）。
 
+### 4.7 Crash Handler 与崩溃回溯日志
+
+当前实现支持安装进程级 crash handler，并将崩溃信息同时输出到 stderr 与可选日志配置：
+
+- API：nei_log_install_crash_handler(config_handle)
+- Windows：通过 SetUnhandledExceptionFilter 捕获未处理异常
+  - 回溯采集：CaptureStackBackTrace
+  - 符号解析：DbgHelp（SymInitialize/SymFromAddr）
+- Linux/POSIX：通过 sigaction 处理常见致命信号（SIGSEGV/SIGILL/SIGABRT/SIGFPE，若可用含 SIGBUS）
+  - 回溯采集：backtrace/backtrace_symbols
+
+关键行为：
+
+- config_handle 可指定崩溃回溯写入哪个日志配置；传 NEI_LOG_INVALID_CONFIG_HANDLE 时仅写 stderr。
+- 崩溃路径会调用 nei_llog_literal(..., NEI_L_FATAL, ...) 将每帧回溯写入日志队列，并在 handler 尾部执行 nei_log_flush 进行 best-effort 排空。
+- 为避免 FATAL 日志触发 immediate_crash_on_fatal 递归崩溃，内部使用 s_in_crash_handler 抑制二次触发。
+
+注意：POSIX 信号处理路径中的格式化与 flush 属于“崩溃前 best-effort”策略，不以严格 async-signal-safe 为目标。
+
 ## 5. API 说明
 
 ### 5.1 配置 API
@@ -121,6 +140,7 @@ nei_log_flush 语义：等待调用前已入队事件被消费完成。
 - short_level_tag / short_path
 - log_location / log_location_after_message
 - log_thread_id / log_to_console
+- immediate_crash_on_fatal
 - sinks
 
 ### 5.2 记录 API
@@ -130,6 +150,7 @@ nei_log_flush 语义：等待调用前已入队事件被消费完成。
 - nei_llog_literal（level + 预格式化字节串）
 - nei_vlog_literal（verbose + 预格式化字节串）
 - nei_log_flush
+- nei_log_install_crash_handler
 
 ### 5.3 Sink API
 
@@ -140,12 +161,19 @@ nei_log_flush 语义：等待调用前已入队事件被消费完成。
 ### 5.4 宏 API
 
 - NEI_LOG_TRACE/DEBUG/INFO/WARN/ERROR/FATAL
+- NEI_LOG（默认配置下的通用 level 宏）
+- NEI_LOG_IF
+- NEI_LOG_C（显式 config_handle 的通用 level 宏）
+- NEI_LOG_C_IF
 - NEI_LOG_VERBOSE
+- NEI_LOG_VERBOSE_IF
 
 建议：
 
 - 已在业务侧完成格式化时优先使用 literal 接口，减少重复格式化成本。
 - 高频路径结合 level_flags/verbose_threshold 使用早过滤，避免无效日志负担。
+- 多配置场景优先使用 NEI_LOG_C/NEI_LOG_C_IF，避免隐式落到默认配置。
+- 若开启 immediate_crash_on_fatal，建议配合安装 crash handler，以便在崩溃前尽可能落盘回溯信息。
 
 ## 6. 性能与对比
 
