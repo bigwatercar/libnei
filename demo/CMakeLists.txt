@@ -1,6 +1,9 @@
 add_executable(log_demo log_demo.c)
 target_link_libraries(log_demo PRIVATE nei::all)
 
+add_executable(log_immediate_crash_demo log_immediate_crash_demo.c)
+target_link_libraries(log_immediate_crash_demo PRIVATE nei::all)
+
 add_executable(task_thread_demo task_thread_demo.cpp)
 target_link_libraries(task_thread_demo PRIVATE nei::all)
 
@@ -42,6 +45,7 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   endfunction()
 
   nei_copy_runtime_dlls(log_demo)
+  nei_copy_runtime_dlls(log_immediate_crash_demo)
   nei_copy_runtime_dlls(task_thread_demo)
   nei_copy_runtime_dlls(task_weak_ptr_demo)
   nei_copy_runtime_dlls(task_location_delay_demo)

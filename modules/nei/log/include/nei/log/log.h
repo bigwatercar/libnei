@@ -514,6 +514,29 @@ NEI_API void nei_vlog_literal(nei_log_config_handle_t config_handle,
 NEI_API void nei_log_flush(void);
 
 /**
+ * @brief Install process-level crash handlers and emit call stack on crash.
+ *
+ * @details
+ * After installation, the logger installs platform-specific handlers to print
+ * a best-effort stack trace to stderr and to the sinks of @p config_handle
+ * when the process hits fatal crash conditions.
+ * - Windows: installs an unhandled exception filter.
+ * - Linux/macOS: installs signal handlers for common fatal signals.
+ *
+ * Pass @ref NEI_LOG_INVALID_CONFIG_HANDLE to write to stderr only (no sink
+ * output). Pass @ref NEI_LOG_DEFAULT_CONFIG_HANDLE or any valid handle to
+ * additionally route crash messages to that config's registered sinks.
+ *
+ * This API is idempotent; repeated calls with the same handle return success.
+ * Calling again with a different handle updates the target config.
+ *
+ * @param config_handle Config whose sinks receive crash output, or
+ *                      @ref NEI_LOG_INVALID_CONFIG_HANDLE for stderr only.
+ * @return @c 0 on success, @c -1 on failure.
+ */
+NEI_API int nei_log_install_crash_handler(nei_log_config_handle_t config_handle);
+
+/**
  * @brief Return how many times the log runtime one-time initialization callback has executed.
  *
  * @details This API is intended for tests and diagnostics only. In a correct process-wide setup,
