@@ -1268,6 +1268,11 @@ TEST(LogCTest, ImmediateCrashOnFatalConfigurationOption) {
   EXPECT_EQ(default_cfg->immediate_crash_on_fatal, 0U);
 }
 
+TEST(LogCTest, InstallCrashHandlerIsIdempotent) {
+  EXPECT_EQ(nei_log_install_crash_handler(NEI_LOG_INVALID_CONFIG_HANDLE), 0);
+  EXPECT_EQ(nei_log_install_crash_handler(NEI_LOG_INVALID_CONFIG_HANDLE), 0);
+}
+
 TEST(LogCTest, ImmediateCrashOnFatalTriggersProcessExit) {
   /* This test uses EXPECT_DEATH to verify that emitting a FATAL log with
    * immediate_crash_on_fatal enabled actually crashes the process.
@@ -1291,4 +1296,44 @@ TEST(LogCTest, ImmediateCrashOnFatalTriggersProcessExit) {
     /* This line should never be reached */
     nei_log_remove_config(cfg_handle);
   }, ".*");  /* Expect any form of abnormal termination */
+}
+
+TEST(LogCTest, ImmediateCrashOnFatalFallbackPathTerminates) {
+#if defined(_WIN32)
+  EXPECT_EXIT({
+    _putenv_s("NEI_LOG_TEST_SKIP_PRIMARY_CRASH", "1");
+    _putenv_s("NEI_LOG_TEST_SKIP_SECONDARY_CRASH", "1");
+
+    nei_log_config_st cfg = *nei_log_default_config();
+    cfg.immediate_crash_on_fatal = 1U;
+    cfg.log_to_console = 0U;
+    cfg.level_flags.all = 0xFFFFFFFFu;
+
+    nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+    if (nei_log_add_config(&cfg, &cfg_handle) != 0) {
+      _Exit(3);
+    }
+
+    nei_llog(cfg_handle, NEI_L_FATAL, __FILE__, __LINE__, "crash_fallback", "fatal triggers fallback exit path");
+    _Exit(4);
+  }, ::testing::ExitedWithCode(0xEE), ".*");
+#else
+  EXPECT_EXIT({
+    setenv("NEI_LOG_TEST_SKIP_PRIMARY_CRASH", "1", 1);
+    setenv("NEI_LOG_TEST_SKIP_SECONDARY_CRASH", "1", 1);
+
+    nei_log_config_st cfg = *nei_log_default_config();
+    cfg.immediate_crash_on_fatal = 1U;
+    cfg.log_to_console = 0U;
+    cfg.level_flags.all = 0xFFFFFFFFu;
+
+    nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+    if (nei_log_add_config(&cfg, &cfg_handle) != 0) {
+      _Exit(3);
+    }
+
+    nei_llog(cfg_handle, NEI_L_FATAL, __FILE__, __LINE__, "crash_fallback", "fatal triggers fallback exit path");
+    _Exit(4);
+  }, ::testing::ExitedWithCode(134), ".*");
+#endif
 }

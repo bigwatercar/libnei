@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -17,11 +18,14 @@
 
 #if defined(_WIN32)
 #include <Windows.h>
+#include <DbgHelp.h>
 #else
+#include <execinfo.h>
 #include <pthread.h>
 #include <sched.h>
 #include <errno.h>
 #include <iconv.h>
+#include <unistd.h>
 #endif
 
 #if defined(_WIN32)

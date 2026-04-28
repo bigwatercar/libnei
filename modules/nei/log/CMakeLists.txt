@@ -23,6 +23,10 @@ target_compile_definitions(
         NEI_LOG_RING_SLOTS=${NEI_LOG_RING_SLOTS}
 )
 
+if(WIN32)
+    target_link_libraries(nei PRIVATE Dbghelp)
+endif()
+
 install(
     DIRECTORY include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
