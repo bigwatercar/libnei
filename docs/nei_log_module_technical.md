@@ -124,6 +124,24 @@ nei_log_flush 语义：等待调用前已入队事件被消费完成。
 
 注意：POSIX 信号处理路径中的格式化与 flush 属于“崩溃前 best-effort”策略，不以严格 async-signal-safe 为目标。
 
+### 4.8 Chromium 风格 Check 宏（nei/debug）
+
+当前实现在 `modules/nei/debug/include/nei/debug/check.h` 提供了一组 Chromium 风格断言宏（宏名不带 `NEI_` 前缀）：
+
+- CHECK(condition)
+- CHECK_EQ/NE/LT/LE/GT/GE
+- DCHECK(condition)
+- DCHECK_EQ/NE/LT/LE/GT/GE
+
+设计要点：
+
+- 统一总开关：`NEI_CHROMIUM_LIKE_CHECK`
+  - 默认值为 1；若设为 0，CHECK/DCHECK 系列均编译为 no-op。
+- DCHECK 独立开关：`NEI_DCHECK_IS_ON`
+  - 未显式定义时：Debug（未定义 `NDEBUG`）默认 1，Release（定义 `NDEBUG`）默认 0。
+  - 当 `NEI_DCHECK_IS_ON=0` 时，DCHECK 系列完全裁剪为 no-op（不执行表达式）。
+- 失败路径复用 log 能力：CHECK 失败会写 FATAL 日志、执行 `nei_log_flush()`，再 `abort()` 终止进程。
+
 ## 5. API 说明
 
 ### 5.1 配置 API
@@ -167,6 +185,13 @@ nei_log_flush 语义：等待调用前已入队事件被消费完成。
 - NEI_LOG_C_IF
 - NEI_LOG_VERBOSE
 - NEI_LOG_VERBOSE_IF
+- CHECK / CHECK_EQ / CHECK_NE / CHECK_LT / CHECK_LE / CHECK_GT / CHECK_GE
+- DCHECK / DCHECK_EQ / DCHECK_NE / DCHECK_LT / DCHECK_LE / DCHECK_GT / DCHECK_GE
+
+相关构建开关：
+
+- NEI_CHROMIUM_LIKE_CHECK：统一启停 check 宏能力（默认开启）
+- NEI_DCHECK_IS_ON：控制 DCHECK 是否参与编译（默认 Debug 开启、Release 关闭）
 
 建议：
 
@@ -174,6 +199,7 @@ nei_log_flush 语义：等待调用前已入队事件被消费完成。
 - 高频路径结合 level_flags/verbose_threshold 使用早过滤，避免无效日志负担。
 - 多配置场景优先使用 NEI_LOG_C/NEI_LOG_C_IF，避免隐式落到默认配置。
 - 若开启 immediate_crash_on_fatal，建议配合安装 crash handler，以便在崩溃前尽可能落盘回溯信息。
+- 线上 Release 默认建议保持 `NEI_DCHECK_IS_ON=0`，仅保留 CHECK 作为强约束；排障版本可按需显式开启 DCHECK。
 
 ## 6. 性能与对比
 
