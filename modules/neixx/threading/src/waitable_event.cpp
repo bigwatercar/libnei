@@ -43,7 +43,7 @@ public:
       std::lock_guard<std::mutex> lock(mutex_);
       signaled_ = true;
     }
-    if (reset_policy_ == ResetPolicy::Manual) {
+    if (reset_policy_ == ResetPolicy::kManual) {
       cv_.notify_all();
     } else {
       cv_.notify_one();
@@ -59,7 +59,7 @@ public:
 #else
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this]() { return signaled_; });
-    if (reset_policy_ == ResetPolicy::Automatic) {
+    if (reset_policy_ == ResetPolicy::kAutomatic) {
       signaled_ = false;
     }
 #endif
@@ -78,7 +78,7 @@ public:
     if (!signaled) {
       return false;
     }
-    if (reset_policy_ == ResetPolicy::Automatic) {
+    if (reset_policy_ == ResetPolicy::kAutomatic) {
       signaled_ = false;
     }
     return true;
