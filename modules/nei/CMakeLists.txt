@@ -28,6 +28,7 @@ else()
 endif()
 
 add_subdirectory(macros)
+add_subdirectory(debug)
 add_subdirectory(log)
 add_subdirectory(utils)
 add_subdirectory(xdr)
