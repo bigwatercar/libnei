@@ -177,26 +177,39 @@ TEST_F(TaskWithBlockingRestrictionsTest, NestedTasksRespectRestrictions) {
 
   bool inner_task_blocking_allowed = false;
   bool outer_setup_done = false;
+  std::condition_variable cv;
+  std::mutex mutex;
+  bool inner_task_executed = false;
 
   // Outer task without MayBlock disallows blocking
   runner->PostTaskWithTraits(
       FROM_HERE,
       TaskTraits(TaskPriority::USER_VISIBLE),
       [&]() {
-        // Inside a disallowed context
+        // Inside a non-MayBlock task, blocking should be disallowed.
         EXPECT_FALSE(ThreadRestrictions::BlockingAllowed());
 
-        // Post inner task with MayBlock - temporarily restores blocking
-        auto inner_runner = runner;
-        inner_runner->PostTaskWithTraits(
+        // Post inner task with MayBlock - it should have blocking allowed.
+        runner->PostTaskWithTraits(
             FROM_HERE,
             TaskTraits(TaskPriority::USER_BLOCKING).MayBlock(),
-            [&inner_task_blocking_allowed]() {
+            [&]() {
               inner_task_blocking_allowed = ThreadRestrictions::BlockingAllowed();
+              {
+                std::lock_guard<std::mutex> lock(mutex);
+                inner_task_executed = true;
+              }
+              cv.notify_one();
             });
 
         outer_setup_done = true;
       });
+
+  // Wait for the inner task to complete before shutting down.
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    cv.wait(lock, [&]() { return inner_task_executed; });
+  }
 
   thread.Shutdown();
 

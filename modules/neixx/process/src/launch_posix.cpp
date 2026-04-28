@@ -18,10 +18,11 @@
 #include "launch_internal.h"
 #include "process_internal.h"
 
+// POSIX global environ must be declared at global scope to match the C library symbol.
+extern char **environ;
+
 namespace nei {
 namespace detail {
-
-extern char **environ;
 
 namespace {
 
@@ -82,7 +83,7 @@ bool Dup2NoIntr(int from, int to) {
   do {
     rc = dup2(from, to);
   } while (rc < 0 && errno == EINTR);
-  return rc == 0;
+  return rc >= 0;
 }
 
 std::vector<std::string> BuildUtf8Argv(const CommandLine &command_line) {
