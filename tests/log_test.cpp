@@ -747,6 +747,87 @@ TEST(LogCTest, GenericLevelMacroUsesProvidedLevel) {
   EXPECT_NE(collector.messages[0].find("generic=7"), std::string::npos);
 }
 
+TEST(LogCTest, GenericLevelMacroWithConfigHandleUsesSpecifiedConfig) {
+  LogCollector default_collector;
+  LogCollector custom_collector;
+
+  nei_log_sink_st default_sink = {};
+  default_sink.llog = CollectLevelLog;
+  default_sink.opaque = &default_collector;
+
+  nei_log_sink_st custom_sink = {};
+  custom_sink.llog = CollectLevelLog;
+  custom_sink.opaque = &custom_collector;
+
+  DefaultConfigSinkGuard guard;
+  guard.set_primary_sink(&default_sink);
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.sinks[0] = &custom_sink;
+  config.sinks[1] = nullptr;
+
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+
+  NEI_LOG_C(cfg_handle, NEI_L_INFO, "cfg-specific=%d", 42);
+  nei_log_flush();
+
+  {
+    std::lock_guard<std::mutex> lock(custom_collector.mu);
+    ASSERT_EQ(custom_collector.messages.size(), 1U);
+    EXPECT_NE(custom_collector.messages[0].find("cfg-specific=42"), std::string::npos);
+    EXPECT_NE(custom_collector.messages[0].find("[I]"), std::string::npos);
+  }
+  {
+    std::lock_guard<std::mutex> lock(default_collector.mu);
+    EXPECT_TRUE(default_collector.messages.empty());
+  }
+
+  nei_log_remove_config(cfg_handle);
+}
+
+TEST(LogCTest, ConditionalGenericLevelMacroWithConfigHandleRespectsConditionAndRoutes) {
+  LogCollector default_collector;
+  LogCollector custom_collector;
+
+  nei_log_sink_st default_sink = {};
+  default_sink.llog = CollectLevelLog;
+  default_sink.opaque = &default_collector;
+
+  nei_log_sink_st custom_sink = {};
+  custom_sink.llog = CollectLevelLog;
+  custom_sink.opaque = &custom_collector;
+
+  DefaultConfigSinkGuard guard;
+  guard.set_primary_sink(&default_sink);
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.sinks[0] = &custom_sink;
+  config.sinks[1] = nullptr;
+
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+
+  int cond_eval_count = 0;
+  NEI_LOG_C_IF((++cond_eval_count) == 1, cfg_handle, NEI_L_INFO, "cfg-if-true=%d", 1);
+  NEI_LOG_C_IF((++cond_eval_count) == 100, cfg_handle, NEI_L_INFO, "cfg-if-false=%d", 2);
+  nei_log_flush();
+
+  EXPECT_EQ(cond_eval_count, 2);
+  {
+    std::lock_guard<std::mutex> lock(custom_collector.mu);
+    ASSERT_EQ(custom_collector.messages.size(), 1U);
+    EXPECT_NE(custom_collector.messages[0].find("cfg-if-true=1"), std::string::npos);
+    EXPECT_EQ(custom_collector.messages[0].find("cfg-if-false=2"), std::string::npos);
+  }
+  {
+    std::lock_guard<std::mutex> lock(default_collector.mu);
+    EXPECT_TRUE(default_collector.messages.empty());
+  }
+
+  nei_log_remove_config(cfg_handle);
+}
+
 TEST(LogCTest, ConditionalLevelMacrosRespectConditionAndEvaluateOnce) {
   LogCollector collector;
   nei_log_sink_st sink = {};

@@ -606,6 +606,40 @@ NEI_API void nei_log_reset_perf_stats_for_test(void);
   } while (0)
 
 /**
+ * @brief Log a level-based message to a specific config (convenience macro)
+ * @param config_handle @ref nei_log_config_handle_t target config handle
+ * @param level @ref nei_log_level_e value
+ * @param fmt printf-style format string
+ * @param ... printf-style variadic arguments
+ */
+#define NEI_LOG_C(config_handle, level, fmt, ...)                                                                       \
+  nei_llog(config_handle, level, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief Conditionally log a level-based message to a specific config (convenience macro)
+ * @param condition Expression evaluated once; log is emitted when non-zero
+ * @param config_handle @ref nei_log_config_handle_t target config handle
+ * @param level @ref nei_log_level_e value
+ * @param fmt printf-style format string
+ * @param ... printf-style variadic arguments
+ */
+#define NEI_LOG_C_IF(condition, config_handle, level, fmt, ...)                                                         \
+  do {                                                                                                                   \
+    if (condition) {                                                                                                     \
+      NEI_LOG_C(config_handle, level, fmt, ##__VA_ARGS__);                                                              \
+    }                                                                                                                    \
+  } while (0)
+
+/**
+ * @brief Log a VERBOSE message (convenience macro)
+ * @param verbose Verbose sub-level (for finer-grained verbose output)
+ * @param fmt printf-style format string
+ * @param ... printf-style variadic arguments
+ */
+#define NEI_LOG_VERBOSE(verbose, fmt, ...)                                                                             \
+  nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, verbose, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
+
+/**
  * @brief Conditionally log a verbose message (convenience macro)
  * @param condition Expression evaluated once; log is emitted when non-zero
  * @param verbose Verbose sub-level (for finer-grained verbose output)
@@ -709,17 +743,13 @@ NEI_API void nei_log_reset_perf_stats_for_test(void);
  */
 #define NEI_LOG_FATAL_IF(condition, fmt, ...) NEI_LOG_IF(condition, NEI_L_FATAL, fmt, ##__VA_ARGS__)
 
-/**
- * @brief Log a VERBOSE message (convenience macro)
- * @param verbose Verbose sub-level (for finer-grained verbose output)
- * @param fmt printf-style format string
- * @param ... printf-style variadic arguments
- */
-#define NEI_LOG_VERBOSE(verbose, fmt, ...)                                                                             \
-  nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, verbose, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
-
 #else
 #define NEI_LOG(level, fmt, ...) ((void)(level))
+#define NEI_LOG_IF(condition, level, fmt, ...) ((void)(condition))
+#define NEI_LOG_C(config_handle, level, fmt, ...) ((void)(config_handle), (void)(level))
+#define NEI_LOG_C_IF(condition, config_handle, level, fmt, ...) ((void)(condition), (void)(config_handle), (void)(level))
+#define NEI_LOG_VERBOSE(verbose, fmt, ...) void(0)
+#define NEI_LOG_VERBOSE_IF(condition, verbose, fmt, ...) ((void)(condition))
 #define NEI_LOG_TRACE(fmt, ...) NEI_LOG(NEI_L_TRACE, fmt, ##__VA_ARGS__)
 #define NEI_LOG_TRACE_IF(condition, fmt, ...) ((void)(condition))
 #define NEI_LOG_DEBUG(fmt, ...) NEI_LOG(NEI_L_DEBUG, fmt, ##__VA_ARGS__)
@@ -732,9 +762,6 @@ NEI_API void nei_log_reset_perf_stats_for_test(void);
 #define NEI_LOG_ERROR_IF(condition, fmt, ...) ((void)(condition))
 #define NEI_LOG_FATAL(fmt, ...) NEI_LOG(NEI_L_FATAL, fmt, ##__VA_ARGS__)
 #define NEI_LOG_FATAL_IF(condition, fmt, ...) ((void)(condition))
-#define NEI_LOG_VERBOSE(verbose, fmt, ...) void(0)
-#define NEI_LOG_IF(condition, level, fmt, ...) ((void)(condition))
-#define NEI_LOG_VERBOSE_IF(condition, verbose, fmt, ...) ((void)(condition))
 #endif // NEI_LOG_DISABLE_MACROS
 
 /** @} */ /* end of nei_log_macros */
