@@ -1,5 +1,7 @@
 #include <neixx/threading/waitable_event.h>
 
+#include <neixx/threading/thread_restrictions.h>
+
 #if defined(_WIN32)
 #include <Windows.h>
 #endif
@@ -112,6 +114,7 @@ void WaitableEvent::Signal() {
 }
 
 void WaitableEvent::Wait() {
+  ThreadRestrictions::AssertBaseSyncPrimitivesAllowed();
   impl_->Wait();
 }
 

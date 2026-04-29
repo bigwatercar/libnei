@@ -47,6 +47,20 @@ public:
   // Returns whether blocking is currently allowed on this thread.
   static bool BlockingAllowed();
 
+  // Checks that base sync primitives (for example WaitableEvent::Wait) are
+  // allowed on the current thread.
+  static void AssertBaseSyncPrimitivesAllowed();
+
+  // Returns whether base sync primitives are currently allowed on this thread.
+  static bool BaseSyncPrimitivesAllowed();
+
+  // Temporarily allows base sync primitives on this thread and returns the
+  // previous nesting depth.
+  static int PushAllowBaseSyncPrimitives();
+
+  // Restores the temporary base sync primitive allowance depth.
+  static void PopAllowBaseSyncPrimitives(int previous_depth);
+
   // Restores blocking state for the current thread.
   static void RestoreBlockingAllowed(bool allowed);
 
@@ -97,15 +111,42 @@ private:
   const bool previous_blocking_allowed_;
 };
 
+// RAII class to allow base sync primitives in a narrow scope even when blocking
+// is disallowed (for example waiting on WaitableEvent).
+class NEI_API ScopedAllowBaseSyncPrimitives {
+public:
+  ScopedAllowBaseSyncPrimitives() noexcept
+      : previous_allow_depth_(ThreadRestrictions::PushAllowBaseSyncPrimitives()) {
+  }
+
+  ~ScopedAllowBaseSyncPrimitives() noexcept {
+    ThreadRestrictions::PopAllowBaseSyncPrimitives(previous_allow_depth_);
+  }
+
+  ScopedAllowBaseSyncPrimitives(const ScopedAllowBaseSyncPrimitives &) = delete;
+  ScopedAllowBaseSyncPrimitives &operator=(const ScopedAllowBaseSyncPrimitives &) = delete;
+  ScopedAllowBaseSyncPrimitives(ScopedAllowBaseSyncPrimitives &&) = delete;
+  ScopedAllowBaseSyncPrimitives &operator=(ScopedAllowBaseSyncPrimitives &&) = delete;
+
+private:
+  const int previous_allow_depth_;
+};
+
 // Convenience macros for assertions and logging
 #if defined(NDEBUG)
 // In release builds, these are no-ops
 #define ASSERT_BLOCKING_ALLOWED() ((void)0)
+#define ASSERT_BASE_SYNC_PRIMITIVES_ALLOWED() ((void)0)
 #else
 // In debug builds, these check and report violations
 #define ASSERT_BLOCKING_ALLOWED() \
   do { \
     ::nei::ThreadRestrictions::AssertBlockingAllowed(); \
+  } while (0)
+
+#define ASSERT_BASE_SYNC_PRIMITIVES_ALLOWED() \
+  do { \
+    ::nei::ThreadRestrictions::AssertBaseSyncPrimitivesAllowed(); \
   } while (0)
 #endif
 

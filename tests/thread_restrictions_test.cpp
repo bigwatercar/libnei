@@ -5,6 +5,7 @@
 
 #include <neixx/threading/thread.h>
 #include <neixx/threading/thread_restrictions.h>
+#include <neixx/threading/waitable_event.h>
 
 namespace nei {
 
@@ -93,6 +94,57 @@ TEST_F(ThreadRestrictionsTest, AssertBlockingAllowedMacroWorks) {
 
   // This should work at runtime
   EXPECT_TRUE(ThreadRestrictions::BlockingAllowed());
+}
+
+TEST_F(ThreadRestrictionsTest, ScopedAllowBaseSyncPrimitivesEnablesWithinRestrictedScope) {
+  ThreadRestrictions::SetBlockingDisallowed();
+  EXPECT_FALSE(ThreadRestrictions::BaseSyncPrimitivesAllowed());
+
+  {
+    ScopedAllowBaseSyncPrimitives allow_base_sync;
+    EXPECT_TRUE(ThreadRestrictions::BaseSyncPrimitivesAllowed());
+  }
+
+  EXPECT_FALSE(ThreadRestrictions::BaseSyncPrimitivesAllowed());
+}
+
+TEST_F(ThreadRestrictionsTest, ScopedAllowBaseSyncPrimitivesSupportsNesting) {
+  ThreadRestrictions::SetBlockingDisallowed();
+  EXPECT_FALSE(ThreadRestrictions::BaseSyncPrimitivesAllowed());
+
+  {
+    ScopedAllowBaseSyncPrimitives outer;
+    EXPECT_TRUE(ThreadRestrictions::BaseSyncPrimitivesAllowed());
+    {
+      ScopedAllowBaseSyncPrimitives inner;
+      EXPECT_TRUE(ThreadRestrictions::BaseSyncPrimitivesAllowed());
+    }
+    EXPECT_TRUE(ThreadRestrictions::BaseSyncPrimitivesAllowed());
+  }
+
+  EXPECT_FALSE(ThreadRestrictions::BaseSyncPrimitivesAllowed());
+}
+
+#if !defined(NDEBUG)
+TEST_F(ThreadRestrictionsTest, WaitableEventWaitCrashesWhenBaseSyncPrimitivesDisallowed) {
+  ThreadRestrictions::SetBlockingDisallowed();
+  EXPECT_DEATH(
+      {
+        WaitableEvent event(WaitableEvent::ResetPolicy::kManual, true);
+        event.Wait();
+      },
+      ".*");
+}
+#endif
+
+TEST_F(ThreadRestrictionsTest, WaitableEventWaitAllowedByScopedAllowBaseSyncPrimitives) {
+  ThreadRestrictions::SetBlockingDisallowed();
+
+  WaitableEvent event(WaitableEvent::ResetPolicy::kManual, true);
+  {
+    ScopedAllowBaseSyncPrimitives allow_base_sync;
+    EXPECT_NO_THROW(event.Wait());
+  }
 }
 
 class TaskWithBlockingRestrictionsTest : public ::testing::Test {
