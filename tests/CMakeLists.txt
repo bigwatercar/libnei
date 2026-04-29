@@ -46,6 +46,7 @@ add_executable(
     platform_thread_test.cpp
     thread_restrictions_test.cpp
     sequence_local_storage_slot_test.cpp
+    sequence_checker_test.cpp
     check_macro_test.cpp
 )
 
