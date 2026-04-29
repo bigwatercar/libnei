@@ -17,6 +17,7 @@
 #include <neixx/task/task_tracer.h>
 #include <neixx/task/time_source.h>
 #include <neixx/threading/platform_thread.h>
+#include <neixx/threading/thread_id_name_manager.h>
 #include <neixx/threading/thread_restrictions.h>
 #include <neixx/threading/waitable_event.h>
 
@@ -254,6 +255,7 @@ private:
     class ScopedRunLoopCleanup final {
     public:
       ~ScopedRunLoopCleanup() {
+        ThreadIdNameManager::GetInstance()->RemoveThread(PlatformThread::CurrentId());
         TaskTracer::SetCurrentTaskLocation(nullptr);
       }
     } scoped_cleanup;

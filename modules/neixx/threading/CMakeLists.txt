@@ -4,6 +4,7 @@ target_sources(
         src/platform_thread_win.cpp
         src/platform_thread_posix.cpp
         src/thread.cpp
+    src/thread_id_name_manager.cpp
         src/waitable_event.cpp
         src/scoped_blocking_call.cpp
         src/thread_local_storage.cpp

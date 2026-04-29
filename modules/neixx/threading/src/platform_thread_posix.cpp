@@ -1,12 +1,14 @@
 #if !defined(_WIN32)
 
 #include <neixx/threading/platform_thread.h>
+#include <neixx/threading/thread_id_name_manager.h>
 
 #include <cerrno>
 #include <cstring>
 
 #if defined(__linux__)
 #include <sys/prctl.h>
+#include <sys/syscall.h>
 #include <pthread.h>
 #include <sched.h>
 #elif defined(__APPLE__)
@@ -21,7 +23,7 @@ namespace nei {
 
 PlatformThreadId PlatformThread::CurrentId() {
 #if defined(__linux__)
-  return getpid();
+  return static_cast<PlatformThreadId>(syscall(SYS_gettid));
 #else
   return pthread_self();
 #endif
@@ -44,6 +46,8 @@ void PlatformThread::SetName(const std::string &name) {
   // Note: some systems limit this to ~15 characters
   pthread_setname_np(pthread_self(), name.c_str());
 #endif
+
+  ThreadIdNameManager::GetInstance()->RegisterThread(CurrentId(), name);
 }
 
 void PlatformThread::SetPriority(ThreadPriority priority) {

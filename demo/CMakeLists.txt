@@ -34,6 +34,9 @@ target_link_libraries(process_async_stdout_demo PRIVATE nei::all)
 add_executable(flake_id_demo flake_id_demo.c)
 target_link_libraries(flake_id_demo PRIVATE nei::all)
 
+add_executable(thread_id_name_manager_demo thread_id_name_manager_demo.cpp)
+target_link_libraries(thread_id_name_manager_demo PRIVATE nei::all)
+
 if(WIN32 AND BUILD_SHARED_LIBS)
   function(nei_copy_runtime_dlls target_name)
     add_custom_command(
@@ -56,4 +59,5 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_copy_runtime_dlls(command_line_demo)
   nei_copy_runtime_dlls(process_async_stdout_demo)
   nei_copy_runtime_dlls(flake_id_demo)
+  nei_copy_runtime_dlls(thread_id_name_manager_demo)
 endif()

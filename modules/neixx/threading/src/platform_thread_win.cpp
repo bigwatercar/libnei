@@ -1,6 +1,7 @@
 #if defined(_WIN32)
 
 #include <neixx/threading/platform_thread.h>
+#include <neixx/threading/thread_id_name_manager.h>
 
 #include <Windows.h>
 #include <processthreadsapi.h>
@@ -95,12 +96,12 @@ void PlatformThread::SetName(const std::string &name) {
   }
 
   // Try modern method first (Windows 10.0.15063+)
-  if (TrySetThreadNameModern(name)) {
-    return;
+  if (!TrySetThreadNameModern(name)) {
+    // Fall back to legacy method for older Windows versions (Windows 7, Vista, XP, etc.)
+    SetThreadNameLegacy(name);
   }
 
-  // Fall back to legacy method for older Windows versions (Windows 7, Vista, XP, etc.)
-  SetThreadNameLegacy(name);
+  ThreadIdNameManager::GetInstance()->RegisterThread(CurrentId(), name);
 }
 
 void PlatformThread::SetPriority(ThreadPriority priority) {
