@@ -20,12 +20,12 @@ enum class StdioMode {
   kRedirect,
 };
 
-struct NEI_API StdioConfig {
+struct StdioConfig {
   StdioMode mode = StdioMode::kInherit;
   FileHandle redirect;
 };
 
-struct NEI_API LaunchOptions {
+struct LaunchOptions {
   StdioConfig stdin_config;
   StdioConfig stdout_config;
   StdioConfig stderr_config;

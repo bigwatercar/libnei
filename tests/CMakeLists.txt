@@ -63,6 +63,12 @@ include(GoogleTest)
 #
 gtest_discover_tests(nei_tests DISCOVERY_MODE PRE_TEST)
 
+# Optional compile-fail check for scoped_refptr constraints.
+# This target is excluded from default builds and is intended to be invoked
+# manually to inspect diagnostic readability.
+add_executable(ref_counted_compile_fail EXCLUDE_FROM_ALL ref_counted_compile_fail.cpp)
+target_link_libraries(ref_counted_compile_fail PRIVATE nei::all)
+
 # MSVC + shared libs: put nei.dll and googletest DLLs next to nei_tests.exe (and
 # sync googletest DLLs to nei.dll's output dir) so gtest_discover_tests and
 # ctest can run the executable without PATH tricks.

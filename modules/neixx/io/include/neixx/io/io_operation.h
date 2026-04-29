@@ -1,11 +1,9 @@
 #ifndef NEIXX_IO_IO_OPERATION_H_
 #define NEIXX_IO_IO_OPERATION_H_
 
-#include <atomic>
 #include <chrono>
 #include <functional>
 #include <memory>
-#include <mutex>
 
 #include <nei/macros/nei_export.h>
 #include <neixx/memory/ref_counted.h>
@@ -29,10 +27,10 @@ private:
   friend class RefCountedThreadSafe<IOOperationToken>;
   ~IOOperationToken();
 
-  scoped_refptr<IOOperationState> state_;
+  IOOperationState* state_ = nullptr;
 };
 
-struct NEI_API IOOperationOptions {
+struct IOOperationOptions {
   std::chrono::milliseconds timeout{0};
   // TaskRunner for driving timeout via PostDelayedTask (avoiding extra watchdog threads).
   // If nullptr, timeout is disabled even if timeout > 0.
@@ -41,6 +39,8 @@ struct NEI_API IOOperationOptions {
 
 class NEI_API IOOperationState final : public RefCountedThreadSafe<IOOperationState> {
 public:
+  class Impl;
+
   IOOperationState();
 
   void BindCancelHook(std::function<void()> hook);
@@ -63,23 +63,7 @@ private:
   friend class RefCountedThreadSafe<IOOperationState>;
   ~IOOperationState();
 
-  enum class FinalState : int {
-    kPending = 0,
-    kCompleted,
-    kCancelled,
-    kTimedOut,
-  };
-
-  bool TransitionPendingTo(FinalState target, int result);
-  void FireCancelHookOnce();
-
-  std::atomic<int> state_{static_cast<int>(FinalState::kPending)};
-  std::atomic<int> last_result_{0};
-
-  std::mutex hook_mutex_;
-  std::function<void()> cancel_hook_;
-  std::atomic<bool> cancel_requested_{false};
-  std::atomic<bool> cancel_hook_fired_{false};
+  std::unique_ptr<Impl> impl_;
 };
 
 } // namespace nei

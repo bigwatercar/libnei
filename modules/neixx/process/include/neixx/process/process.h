@@ -45,7 +45,7 @@ private:
 
   std::unique_ptr<Impl> impl_;
 
-  friend Process LaunchProcess(const CommandLine &command_line, LaunchOptions options);
+  friend NEI_API Process LaunchProcess(const CommandLine &command_line, LaunchOptions options);
 };
 
 } // namespace nei
