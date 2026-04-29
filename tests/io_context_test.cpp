@@ -23,9 +23,9 @@ public:
     return false;
   }
 
-  bool DoDelayedWork(IOContext::TimePoint *next_run_time) override {
+  bool DoDelayedWork(std::chrono::steady_clock::time_point *next_run_time) override {
     if (next_run_time != nullptr) {
-      *next_run_time = IOContext::TimePoint{};
+      *next_run_time = std::chrono::steady_clock::time_point{};
     }
     return false;
   }
@@ -53,7 +53,7 @@ public:
     return false;
   }
 
-  bool DoDelayedWork(IOContext::TimePoint *next_run_time) override {
+  bool DoDelayedWork(std::chrono::steady_clock::time_point *next_run_time) override {
     delayed_work_calls_.fetch_add(1, std::memory_order_acq_rel);
     if (next_run_time != nullptr) {
       *next_run_time = std::chrono::steady_clock::now() + std::chrono::milliseconds(40);

@@ -3,6 +3,10 @@ add_library(nei::nei ALIAS nei)
 
 target_compile_features(nei PUBLIC c_std_99)
 
+if(WIN32)
+    target_compile_definitions(nei PUBLIC NOMINMAX)
+endif()
+
 if(NOT WIN32)
     target_link_options(nei INTERFACE -rdynamic)
 endif()

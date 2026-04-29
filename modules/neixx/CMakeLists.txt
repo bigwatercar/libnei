@@ -4,6 +4,10 @@ add_library(nei::neixx ALIAS neixx)
 target_compile_features(neixx PUBLIC cxx_std_17)
 target_link_libraries(neixx PUBLIC nei)
 
+if(WIN32)
+    target_compile_definitions(neixx PUBLIC NOMINMAX)
+endif()
+
 if(BUILD_SHARED_LIBS)
     target_compile_definitions(neixx PRIVATE NEI_EXPORTS)
     if(NOT WIN32)

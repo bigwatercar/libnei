@@ -15,14 +15,12 @@ class AsyncHandle;
 
 class NEI_API IOContext final {
 public:
-  using TimePoint = std::chrono::steady_clock::time_point;
-
   class Delegate {
   public:
     virtual ~Delegate() = default;
 
     virtual bool DoWork() = 0;
-    virtual bool DoDelayedWork(TimePoint *next_run_time) = 0;
+    virtual bool DoDelayedWork(std::chrono::steady_clock::time_point *next_run_time) = 0;
   };
 
   IOContext();

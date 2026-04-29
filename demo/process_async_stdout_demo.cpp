@@ -19,9 +19,9 @@ public:
     return false;
   }
 
-  bool DoDelayedWork(nei::IOContext::TimePoint *next_run_time) override {
+  bool DoDelayedWork(std::chrono::steady_clock::time_point *next_run_time) override {
     if (next_run_time != nullptr) {
-      *next_run_time = nei::IOContext::TimePoint{};
+      *next_run_time = std::chrono::steady_clock::time_point{};
     }
     return false;
   }

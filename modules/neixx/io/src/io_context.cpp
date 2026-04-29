@@ -33,14 +33,14 @@ void IOContext::Run(Delegate *delegate) {
       continue;
     }
 
-    TimePoint next_run_time{};
+    std::chrono::steady_clock::time_point next_run_time{};
     if (delegate->DoDelayedWork(&next_run_time)) {
       continue;
     }
 
     std::chrono::milliseconds timeout = kInfiniteWait;
-    if (next_run_time != TimePoint{}) {
-      const TimePoint now = std::chrono::steady_clock::now();
+    if (next_run_time != std::chrono::steady_clock::time_point{}) {
+      const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
       if (next_run_time <= now) {
         timeout = std::chrono::milliseconds::zero();
       } else {
