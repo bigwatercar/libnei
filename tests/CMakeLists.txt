@@ -44,6 +44,7 @@ add_executable(
     text_normalization_test.cpp
     cjk_width_test.cpp
     platform_thread_test.cpp
+    thread_local_storage_test.cpp
     thread_restrictions_test.cpp
     sequence_local_storage_slot_test.cpp
     sequence_checker_test.cpp

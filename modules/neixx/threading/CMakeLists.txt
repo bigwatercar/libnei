@@ -4,7 +4,8 @@ target_sources(
         src/platform_thread_win.cpp
         src/platform_thread_posix.cpp
         src/thread.cpp
-    src/waitable_event.cpp
+        src/waitable_event.cpp
+        src/thread_local_storage.cpp
         src/sequence_local_storage_slot.cpp
         src/thread_restrictions.cpp
 )
