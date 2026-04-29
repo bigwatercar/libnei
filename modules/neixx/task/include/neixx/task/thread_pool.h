@@ -15,7 +15,6 @@
 namespace nei {
 
 class SequencedTaskRunner;
-class ScopedBlockingCall; // Forward declaration for friend access
 
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -93,7 +92,6 @@ struct ThreadPoolOptions {
 class NEI_API ThreadPool final {
 public:
   class Impl;
-  friend class ScopedBlockingCall; // Allow ScopedBlockingCall to access Impl
 
   explicit ThreadPool(const ThreadPoolOptions &options);
   ThreadPool(const ThreadPoolOptions &options, std::shared_ptr<const TimeSource> time_source);
@@ -133,10 +131,6 @@ public:
   std::size_t ActiveBlockingCallCountForTesting();
   // Returns count of compensation workers spawned so far (cumulative)
   std::size_t SpawnedCompensationWorkersForTesting();
-
-  // Internal: Called by ScopedBlockingCall to notify scheduler
-  static void NotifyBlockingRegionEntered();
-  static void NotifyBlockingRegionExited();
 
 private:
   std::unique_ptr<Impl> impl_;

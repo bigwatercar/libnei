@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <neixx/task/scoped_blocking_call.h>
+#include <neixx/threading/scoped_blocking_call.h>
 #include <neixx/task/task_environment.h>
 #include <neixx/task/task_traits.h>
 #include <neixx/task/thread_pool.h>

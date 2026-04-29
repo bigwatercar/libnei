@@ -1,8 +1,9 @@
 #include <gtest/gtest.h>
 #include <neixx/task/task_environment.h>
 #include <neixx/task/thread_pool.h>
-#include <neixx/task/scoped_blocking_call.h>
+#include <neixx/threading/scoped_blocking_call.h>
 #include <neixx/task/task_runner.h>
+#include <neixx/threading/thread_restrictions.h>
 #include <thread>
 #include <chrono>
 
@@ -83,5 +84,29 @@ TEST_F(ScopedBlockingCallTest, NestedBlockingCalls) {
   env_.RunUntilIdle();
   EXPECT_EQ(count.load(), 2);
 }
+
+TEST_F(ScopedBlockingCallTest, SupportsWillBlockType) {
+  std::atomic<int> task_done{0};
+
+  env_.thread_pool().PostTask(FROM_HERE, [&]() {
+    ScopedBlockingCall blocking(BlockingType::WILL_BLOCK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    task_done.fetch_add(1, std::memory_order_release);
+  });
+
+  env_.RunUntilIdle();
+  EXPECT_EQ(task_done.load(std::memory_order_acquire), 1);
+}
+
+#if !defined(NDEBUG)
+TEST_F(ScopedBlockingCallTest, CrashesWhenBlockingDisallowed) {
+  ThreadRestrictions::SetBlockingDisallowed();
+  EXPECT_DEATH(
+      {
+        ScopedBlockingCall blocked;
+      },
+      ".*");
+}
+#endif
 
 } // namespace nei

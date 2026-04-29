@@ -1,5 +1,6 @@
 #include <neixx/task/thread_pool.h>
 #include <neixx/task/sequenced_task_runner.h>
+#include <neixx/threading/scoped_blocking_call.h>
 
 #include <algorithm>
 #include <atomic>
@@ -181,9 +182,6 @@ bool TrySetCurrentThreadAffinity(std::uint64_t, std::size_t) {
 
 class ThreadPool::Impl {
 public:
-  // Thread-local current impl pointer for ScopedBlockingCall to notify scheduler
-  thread_local static Impl *current_impl_;
-
   struct ResolvedOptions {
     std::size_t normal_worker_count = 0;
     std::size_t best_effort_worker_count = 0;
@@ -667,25 +665,48 @@ private:
   }
 
   void RunLoop(WorkerGroup *group, bool is_compensation_worker) {
+    class WorkerBlockingObserver final : public BlockingObserver {
+    public:
+      WorkerBlockingObserver(Impl *impl, WorkerGroup *group)
+          : impl_(impl)
+          , group_(group) {
+      }
+
+      void BlockingStarted(BlockingType blocking_type) override {
+        if (impl_ != nullptr && group_ != nullptr) {
+          impl_->OnWorkerBlockingStarted(*group_, blocking_type);
+        }
+      }
+
+      void BlockingEnded() override {
+        if (impl_ != nullptr && group_ != nullptr) {
+          impl_->OnWorkerBlockingEnded(*group_);
+        }
+      }
+
+    private:
+      Impl *impl_ = nullptr;
+      WorkerGroup *group_ = nullptr;
+    } worker_observer(this, group);
+
     class ScopedRunLoopCleanup final {
     public:
-      explicit ScopedRunLoopCleanup(Impl *impl)
-          : impl_(impl) {
+      explicit ScopedRunLoopCleanup(BlockingObserver *previous_observer)
+          : previous_observer_(previous_observer) {
       }
 
       ~ScopedRunLoopCleanup() {
         TaskTracer::SetCurrentTaskLocation(nullptr);
-        impl_->current_impl_ = nullptr;
+        ScopedBlockingCall::SetObserverForCurrentThread(previous_observer_);
       }
 
       ScopedRunLoopCleanup(const ScopedRunLoopCleanup &) = delete;
       ScopedRunLoopCleanup &operator=(const ScopedRunLoopCleanup &) = delete;
 
     private:
-      Impl *impl_ = nullptr;
-    } scoped_cleanup(this);
+      BlockingObserver *previous_observer_ = nullptr;
+    } scoped_cleanup(ScopedBlockingCall::SetObserverForCurrentThread(&worker_observer));
 
-    current_impl_ = this; // Set thread-local impl for ScopedBlockingCall
     // Reuse allocation across outer-loop iterations; capacity is retained on clear().
     std::vector<ScheduledTask> local_batch;
     local_batch.reserve(WORKER_LOCAL_BATCH_SIZE);
@@ -905,74 +926,44 @@ private:
   WorkerGroup best_effort_group_;
   std::mutex compensation_timer_mutex_;
 
-public:
-  // Notify scheduler that current thread is entering a blocking region (e.g., I/O wait).
-  // Call from any worker thread to signal temporary blocking without task trait.
-  void NotifyBlockingRegionEntered() {
-    WorkerGroup *group = nullptr;
-    {
-      std::lock_guard<std::mutex> lock(normal_group_.mutex);
-      if (normal_group_.workers.empty() && normal_group_.spawned_compensation_workers == 0) {
-        goto check_best_effort;
-      }
-      // Simple heuristic: if thread is running, it's in normal_group unless it's best_effort
-      // For now, we'll mark the blocking in the normal group's stats
-      group = &normal_group_;
-      ++group->scoped_blocking_call_count;
-      if (group->scoped_blocking_call_count == 1) {
-        // First scoped blocking call; treat it like a may_block task
-        ++group->active_may_block_workers;
-        const auto now = time_source_->Now();
-        ArmCompensationSpawnLocked(*group, now);
+private:
+  void OnWorkerBlockingStarted(WorkerGroup &group, BlockingType blocking_type) {
+    std::lock_guard<std::mutex> lock(group.mutex);
+    ++group.scoped_blocking_call_count;
+    if (group.scoped_blocking_call_count != 1) {
+      return;
+    }
+
+    ++group.active_may_block_workers;
+    const auto now = time_source_->Now();
+
+    if (blocking_type == BlockingType::WILL_BLOCK) {
+      // WILL_BLOCK is treated as urgent: try immediate compensation first.
+      const bool spawned_now = TrySpawnCompensationWorkerLocked(group, now);
+      if (!spawned_now && HasPendingTasksLocked(group) && !group.pending_compensation_spawn) {
+        group.pending_compensation_spawn = true;
+        group.compensation_spawn_deadline = now;
+        StartCompensationSpawnTimer(&group);
       }
       return;
     }
-  check_best_effort: {
-    std::lock_guard<std::mutex> lock(best_effort_group_.mutex);
-    group = &best_effort_group_;
-    ++group->scoped_blocking_call_count;
-    if (group->scoped_blocking_call_count == 1) {
-      ++group->active_may_block_workers;
-      const auto now = time_source_->Now();
-      ArmCompensationSpawnLocked(*group, now);
-    }
-  }
+
+    ArmCompensationSpawnLocked(group, now);
   }
 
-  // Notify scheduler that current thread is exiting a blocking region.
-  void NotifyBlockingRegionExited() {
-    // Try to exit from the group where the scoped blocking count is non-zero
-    // We'll try normal group first, then best_effort
-    bool found = false;
-    {
-      std::lock_guard<std::mutex> lock(normal_group_.mutex);
-      if (normal_group_.scoped_blocking_call_count > 0) {
-        --normal_group_.scoped_blocking_call_count;
-        if (normal_group_.scoped_blocking_call_count == 0 && normal_group_.active_may_block_workers > 0) {
-          --normal_group_.active_may_block_workers;
-          if (normal_group_.active_may_block_workers == 0 || !HasPendingTasksLocked(normal_group_)) {
-            CancelPendingCompensationSpawnLocked(normal_group_);
-          }
-        }
-        found = true;
-      }
+  void OnWorkerBlockingEnded(WorkerGroup &group) {
+    std::lock_guard<std::mutex> lock(group.mutex);
+    if (group.scoped_blocking_call_count == 0) {
+      return;
     }
-    if (!found) {
-      std::lock_guard<std::mutex> lock(best_effort_group_.mutex);
-      if (best_effort_group_.scoped_blocking_call_count > 0) {
-        --best_effort_group_.scoped_blocking_call_count;
-        if (best_effort_group_.scoped_blocking_call_count == 0 && best_effort_group_.active_may_block_workers > 0) {
-          --best_effort_group_.active_may_block_workers;
-          if (best_effort_group_.active_may_block_workers == 0 || !HasPendingTasksLocked(best_effort_group_)) {
-            CancelPendingCompensationSpawnLocked(best_effort_group_);
-          }
-        }
-      }
-    }
-  }
 
-  static Impl *CurrentImpl() {
-    return current_impl_;
+    --group.scoped_blocking_call_count;
+    if (group.scoped_blocking_call_count == 0 && group.active_may_block_workers > 0) {
+      --group.active_may_block_workers;
+      if (group.active_may_block_workers == 0 || !HasPendingTasksLocked(group)) {
+        CancelPendingCompensationSpawnLocked(group);
+      }
+    }
   }
 
   std::vector<std::thread> compensation_spawn_timers_;
@@ -1071,22 +1062,5 @@ std::size_t ThreadPool::ActiveBlockingCallCountForTesting() {
 std::size_t ThreadPool::SpawnedCompensationWorkersForTesting() {
   return impl_->SpawnedCompensationWorkersForTesting();
 }
-
-void ThreadPool::NotifyBlockingRegionEntered() {
-  ThreadPool::Impl *impl = ThreadPool::Impl::CurrentImpl();
-  if (impl != nullptr) {
-    impl->NotifyBlockingRegionEntered();
-  }
-}
-
-void ThreadPool::NotifyBlockingRegionExited() {
-  ThreadPool::Impl *impl = ThreadPool::Impl::CurrentImpl();
-  if (impl != nullptr) {
-    impl->NotifyBlockingRegionExited();
-  }
-}
-
-// Define thread-local current impl
-thread_local ThreadPool::Impl *ThreadPool::Impl::current_impl_ = nullptr;
 
 } // namespace nei
