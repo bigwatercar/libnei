@@ -24,8 +24,22 @@ constexpr const char *kTestEnvKey = "NEI_PROCESS_TEST_ENV";
 
 class IOContextThread final {
 public:
+  class Delegate final : public IOContext::Delegate {
+  public:
+    bool DoWork() override {
+      return false;
+    }
+
+    bool DoDelayedWork(IOContext::TimePoint *next_run_time) override {
+      if (next_run_time != nullptr) {
+        *next_run_time = IOContext::TimePoint{};
+      }
+      return false;
+    }
+  };
+
   IOContextThread()
-      : thread_([this]() { context_.Run(); }) {
+      : thread_([this]() { context_.Run(&delegate_); }) {
   }
 
   ~IOContextThread() {
@@ -41,6 +55,7 @@ public:
 
 private:
   IOContext context_;
+  Delegate delegate_;
   std::thread thread_;
 };
 

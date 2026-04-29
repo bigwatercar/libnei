@@ -11,6 +11,16 @@
 
 namespace nei {
 
+namespace {
+
+void DrainWakeEventFd(int wake_fd) {
+  uint64_t counter = 0;
+  while (read(wake_fd, &counter, sizeof(counter)) > 0) {
+  }
+}
+
+} // namespace
+
 IOContext::Impl::Impl() {
   epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
   wake_fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
@@ -34,45 +44,50 @@ IOContext::Impl::~Impl() {
   }
 }
 
-void IOContext::Impl::Run() {
+void IOContext::Impl::WaitForWork(std::chrono::milliseconds timeout) {
   if (epoll_fd_ < 0 || wake_fd_ < 0) {
     return;
   }
 
-  while (true) {
-    epoll_event events[8] = {};
-    const int n = epoll_wait(epoll_fd_, events, 8, -1);
-    if (n < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      break;
+  int timeout_ms = -1;
+  if (timeout.count() >= 0) {
+    const long long timeout_count = timeout.count();
+    timeout_ms = static_cast<int>(timeout_count <= 0 ? 0 : timeout_count);
+  }
+
+  epoll_event events[8] = {};
+  const int n = epoll_wait(epoll_fd_, events, 8, timeout_ms);
+  if (n < 0) {
+    if (errno == EINTR) {
+      return;
+    }
+    return;
+  }
+
+  for (int i = 0; i < n; ++i) {
+    if (events[i].data.fd == wake_fd_) {
+      DrainWakeEventFd(wake_fd_);
+      continue;
     }
 
-    for (int i = 0; i < n; ++i) {
-      if (events[i].data.fd == wake_fd_) {
-        uint64_t counter = 0;
-        while (read(wake_fd_, &counter, sizeof(counter)) > 0) {
-        }
-        continue;
-      }
-
-      IOContext::EventCallback callback;
-      {
-        std::lock_guard<std::mutex> lock(descriptors_mutex_);
-        auto it = descriptors_.find(events[i].data.fd);
-        if (it != descriptors_.end()) {
-          callback = it->second.callback;
-        }
-      }
-      if (callback) {
-        callback(static_cast<uint32_t>(events[i].events));
+    IOContext::EventCallback callback;
+    {
+      std::lock_guard<std::mutex> lock(descriptors_mutex_);
+      auto it = descriptors_.find(events[i].data.fd);
+      if (it != descriptors_.end()) {
+        callback = it->second.callback;
       }
     }
-
-    if (stopping_.load(std::memory_order_acquire)) {
-      break;
+    if (callback) {
+      callback(static_cast<uint32_t>(events[i].events));
     }
+  }
+}
+
+void IOContext::Impl::Notify() {
+  if (wake_fd_ >= 0) {
+    const uint64_t one = 1;
+    (void)write(wake_fd_, &one, sizeof(one));
   }
 }
 
@@ -82,10 +97,7 @@ void IOContext::Impl::Stop() {
     return;
   }
 
-  if (wake_fd_ >= 0) {
-    const uint64_t one = 1;
-    (void)write(wake_fd_, &one, sizeof(one));
-  }
+  Notify();
 }
 
 bool IOContext::Impl::RegisterDescriptor(PlatformHandle handle, IOContext::EventCallback callback) {
@@ -102,6 +114,7 @@ bool IOContext::Impl::RegisterDescriptor(PlatformHandle handle, IOContext::Event
 
   std::lock_guard<std::mutex> lock(descriptors_mutex_);
   descriptors_[handle] = DescriptorEntry{std::move(callback), static_cast<uint32_t>(ev.events)};
+  Notify();
   return true;
 }
 
@@ -130,6 +143,7 @@ bool IOContext::Impl::UpdateDescriptorInterest(PlatformHandle handle, bool want_
   if (it != descriptors_.end()) {
     it->second.events = events;
   }
+  Notify();
   return true;
 }
 
@@ -143,6 +157,11 @@ void IOContext::Impl::UnregisterDescriptor(PlatformHandle handle) {
 
   std::lock_guard<std::mutex> lock(descriptors_mutex_);
   descriptors_.erase(handle);
+  Notify();
+}
+
+bool IOContext::Impl::IsStopping() const {
+  return stopping_.load(std::memory_order_acquire);
 }
 
 } // namespace nei

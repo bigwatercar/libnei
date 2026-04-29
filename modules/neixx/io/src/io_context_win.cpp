@@ -7,6 +7,7 @@
 
 namespace nei {
 
+constexpr ULONG_PTR kWakeupKey = 1;
 constexpr ULONG_PTR kStopWakeKey = 2;
 
 IOContext::Impl::Impl() {
@@ -21,33 +22,46 @@ IOContext::Impl::~Impl() {
   }
 }
 
-void IOContext::Impl::Run() {
+void IOContext::Impl::WaitForWork(std::chrono::milliseconds timeout) {
   if (port_ == nullptr) {
     return;
   }
 
-  while (true) {
-    BOOL ok = FALSE;
-    DWORD bytes = 0;
-    ULONG_PTR key = 0;
-    OVERLAPPED *ov = nullptr;
-    ok = GetQueuedCompletionStatus(port_, &bytes, &key, &ov, INFINITE);
+  DWORD wait_ms = INFINITE;
+  if (timeout.count() >= 0) {
+    const long long timeout_count = timeout.count();
+    wait_ms = static_cast<DWORD>(timeout_count <= 0 ? 0 : timeout_count);
+  }
 
-    if (key == kStopWakeKey && ov == nullptr) {
-      break;
-    }
+  BOOL ok = FALSE;
+  DWORD bytes = 0;
+  ULONG_PTR key = 0;
+  OVERLAPPED *ov = nullptr;
+  ok = GetQueuedCompletionStatus(port_, &bytes, &key, &ov, wait_ms);
 
-    if (ov != nullptr) {
-      IOOverlappedBase *base = reinterpret_cast<IOOverlappedBase *>(ov);
-      DWORD err = ok ? ERROR_SUCCESS : GetLastError();
-      if (base->on_complete != nullptr) {
-        base->on_complete(base, bytes, err);
-      }
+  if (!ok && ov == nullptr) {
+    const DWORD error = GetLastError();
+    if (error == WAIT_TIMEOUT) {
+      return;
     }
+  }
 
-    if (stopping_.load(std::memory_order_acquire)) {
-      break;
+  if ((key == kWakeupKey || key == kStopWakeKey) && ov == nullptr) {
+    return;
+  }
+
+  if (ov != nullptr) {
+    IOOverlappedBase *base = reinterpret_cast<IOOverlappedBase *>(ov);
+    DWORD err = ok ? ERROR_SUCCESS : GetLastError();
+    if (base->on_complete != nullptr) {
+      base->on_complete(base, bytes, err);
     }
+  }
+}
+
+void IOContext::Impl::Notify() {
+  if (port_ != nullptr) {
+    (void)PostQueuedCompletionStatus(port_, 0, kWakeupKey, nullptr);
   }
 }
 
@@ -67,6 +81,10 @@ bool IOContext::Impl::BindHandleToIOCP(PlatformHandle handle) {
     return false;
   }
   return CreateIoCompletionPort(handle, port_, 0, 0) != nullptr;
+}
+
+bool IOContext::Impl::IsStopping() const {
+  return stopping_.load(std::memory_order_acquire);
 }
 
 } // namespace nei

@@ -1,6 +1,7 @@
 #ifndef NEIXX_IO_IO_CONTEXT_H_
 #define NEIXX_IO_IO_CONTEXT_H_
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -14,6 +15,16 @@ class AsyncHandle;
 
 class NEI_API IOContext final {
 public:
+  using TimePoint = std::chrono::steady_clock::time_point;
+
+  class Delegate {
+  public:
+    virtual ~Delegate() = default;
+
+    virtual bool DoWork() = 0;
+    virtual bool DoDelayedWork(TimePoint *next_run_time) = 0;
+  };
+
   IOContext();
   ~IOContext();
 
@@ -23,7 +34,8 @@ public:
   IOContext(IOContext &&) noexcept;
   IOContext &operator=(IOContext &&) noexcept;
 
-  void Run();
+  void Run(Delegate *delegate);
+  void Notify();
   void Stop();
 
 private:

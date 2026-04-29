@@ -11,9 +11,28 @@
 #include <memory>
 #include <thread>
 
+namespace {
+
+class DemoIOContextDelegate final : public nei::IOContext::Delegate {
+public:
+  bool DoWork() override {
+    return false;
+  }
+
+  bool DoDelayedWork(nei::IOContext::TimePoint *next_run_time) override {
+    if (next_run_time != nullptr) {
+      *next_run_time = nei::IOContext::TimePoint{};
+    }
+    return false;
+  }
+};
+
+} // namespace
+
 int main() {
   nei::IOContext io_context;
-  std::thread io_thread([&io_context]() { io_context.Run(); });
+  DemoIOContextDelegate delegate;
+  std::thread io_thread([&io_context, &delegate]() { io_context.Run(&delegate); });
 
 #if defined(_WIN32)
   const char *argv[] = {"cmd", "/c", "ping 127.0.0.1 -n 3"};

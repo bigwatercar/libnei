@@ -2,6 +2,7 @@
 #define NEIXX_IO_IO_CONTEXT_IMPL_H_
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <unordered_map>
@@ -22,8 +23,10 @@ public:
   Impl(const Impl &) = delete;
   Impl &operator=(const Impl &) = delete;
 
-  void Run();
+  void WaitForWork(std::chrono::milliseconds timeout);
+  void Notify();
   void Stop();
+  bool IsStopping() const;
 
 #if defined(_WIN32)
   bool BindHandleToIOCP(PlatformHandle handle);

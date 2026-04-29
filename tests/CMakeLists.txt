@@ -24,6 +24,7 @@ add_executable(
     flake_id_test.cpp
     io_buffer_test.cpp
     io_operation_test.cpp
+    io_context_test.cpp
     process_test.cpp
     log_test.cpp
     utils_crypto_uuid_test.cpp
