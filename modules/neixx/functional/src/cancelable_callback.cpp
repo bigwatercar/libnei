@@ -1,5 +1,5 @@
 #include <neixx/functional/cancelable_callback.h>
-#include <neixx/functional/callback.h>
+#include <neixx/functional/bind.h>
 #include <neixx/memory/weak_ptr.h>
 
 #include <atomic>

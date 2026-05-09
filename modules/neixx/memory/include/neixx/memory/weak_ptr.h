@@ -3,11 +3,17 @@
 #ifndef NEI_TASK_WEAK_PTR_H
 #define NEI_TASK_WEAK_PTR_H
 
+#include <cassert>
 #include <memory>
+#include <thread>
+#include <type_traits>
 
-#include <neixx/task/internal_flag.h>
+#include <neixx/memory/internal_flag.h>
 
 namespace nei {
+
+template <typename T>
+struct WeakPtrThreadSafe : std::false_type {};
 
 template <typename T>
 class WeakPtr;
@@ -17,7 +23,8 @@ class WeakPtrFactory {
 public:
   explicit WeakPtrFactory(T *ptr)
       : ptr_(ptr)
-      , flag_(std::make_shared<InternalFlag>()) {
+      , flag_(std::make_shared<InternalFlag>())
+      , bound_thread_(std::this_thread::get_id()) {
   }
 
   ~WeakPtrFactory() {
@@ -28,7 +35,7 @@ public:
   WeakPtrFactory &operator=(const WeakPtrFactory &) = delete;
 
   WeakPtr<T> GetWeakPtr() const {
-    return WeakPtr<T>(ptr_, flag_);
+    return WeakPtr<T>(ptr_, flag_, bound_thread_);
   }
 
   void InvalidateWeakPtrs() {
@@ -42,6 +49,7 @@ public:
 private:
   T *ptr_;
   std::shared_ptr<InternalFlag> flag_;
+  std::thread::id bound_thread_;
 };
 
 template <typename T>
@@ -50,6 +58,9 @@ public:
   WeakPtr() = default;
 
   T *get() const {
+#if !defined(NDEBUG)
+    AssertThreadSafeDereference();
+#endif
     return IsValid() ? ptr_ : nullptr;
   }
 
@@ -68,9 +79,10 @@ public:
 private:
   friend class WeakPtrFactory<T>;
 
-  WeakPtr(T *ptr, const std::shared_ptr<InternalFlag> &flag)
+  WeakPtr(T *ptr, const std::shared_ptr<InternalFlag> &flag, std::thread::id bound_thread)
       : ptr_(ptr)
-      , flag_(flag) {
+      , flag_(flag)
+      , bound_thread_(std::move(bound_thread)) {
   }
 
   bool IsValid() const {
@@ -78,8 +90,19 @@ private:
     return flag && flag->IsValid();
   }
 
+#if !defined(NDEBUG)
+  void AssertThreadSafeDereference() const {
+    if (ptr_ == nullptr || WeakPtrThreadSafe<T>::value) {
+      return;
+    }
+    assert(bound_thread_ == std::this_thread::get_id()
+           && "WeakPtr dereferenced across threads without WeakPtrThreadSafe opt-in");
+  }
+#endif
+
   T *ptr_ = nullptr;
   std::weak_ptr<InternalFlag> flag_;
+  std::thread::id bound_thread_{};
 };
 
 } // namespace nei

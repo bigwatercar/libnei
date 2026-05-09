@@ -1,8 +1,10 @@
 target_sources(
     neixx
     PRIVATE
-        src/internal_flag.cpp
+        src/waitable_event.cpp
 )
+
+
 
 target_include_directories(
     neixx

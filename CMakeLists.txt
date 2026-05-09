@@ -68,17 +68,17 @@ add_library(nei::all ALIAS nei_all)
 set_target_properties(nei_all PROPERTIES EXPORT_NAME all)
 target_link_libraries(nei_all INTERFACE nei neixx)
 
-if(NEI_BUILD_TESTS)
-    add_subdirectory(tests)
-endif()
+ if(NEI_BUILD_TESTS)
+     add_subdirectory(tests)
+ endif()
 
-if(NEI_BUILD_BENCHMARKS)
-    add_subdirectory(bench)
-endif()
+ if(NEI_BUILD_BENCHMARKS)
+     add_subdirectory(bench)
+ endif()
 
-if(NEI_BUILD_DEMOS)
-    add_subdirectory(demo)
-endif()
+ if(NEI_BUILD_DEMOS)
+     add_subdirectory(demo)
+ endif()
 
 install(
     TARGETS nei neixx nei_all

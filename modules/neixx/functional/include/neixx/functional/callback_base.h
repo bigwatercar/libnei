@@ -1,7 +1,7 @@
 #pragma once
 
-#ifndef NEI_TASK_CALLBACK_BASE_H
-#define NEI_TASK_CALLBACK_BASE_H
+#ifndef NEIXX_FUNCTIONAL_CALLBACK_BASE_H_
+#define NEIXX_FUNCTIONAL_CALLBACK_BASE_H_
 
 #include <nei/macros/nei_export.h>
 
@@ -32,4 +32,4 @@ private:
 
 } // namespace nei
 
-#endif // NEI_TASK_CALLBACK_BASE_H
+#endif // NEIXX_FUNCTIONAL_CALLBACK_BASE_H_

@@ -1,7 +1,7 @@
 target_sources(
     neixx
     PRIVATE
-        src/internal_flag.cpp
+        src/time_source.cpp
 )
 
 target_include_directories(

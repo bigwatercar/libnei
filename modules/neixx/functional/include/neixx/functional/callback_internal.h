@@ -1,11 +1,14 @@
 ﻿#pragma once
 
-#ifndef NEI_TASK_CALLBACK_INTERNAL_H
-#define NEI_TASK_CALLBACK_INTERNAL_H
+#ifndef NEIXX_FUNCTIONAL_CALLBACK_INTERNAL_H_
+#define NEIXX_FUNCTIONAL_CALLBACK_INTERNAL_H_
 
 #include <cstddef>
 #include <new>
 #include <type_traits>
+#include <utility>
+
+#include <neixx/memory/unretained_wrapper.h>
 
 namespace nei {
 
@@ -16,6 +19,11 @@ namespace nei {
 template <typename T>
 class WeakPtr;
 
+// Forward declaration so that nei::detail can reference nei::PassedWrapper
+// before the full class definition below.
+template <typename T>
+class PassedWrapper;
+
 namespace detail {
 
 // --- Allocation primitives ---------------------------------------------------
@@ -25,12 +33,19 @@ namespace detail {
 // a custom memory pool.  Thread-safety during replacement is the caller's
 // responsibility.
 //
-inline void *callback_alloc(std::size_t bytes) {
-  return ::operator new(bytes);
+inline void *callback_alloc(std::size_t bytes, std::size_t alignment = alignof(std::max_align_t)) {
+  if (alignment <= alignof(std::max_align_t)) {
+    return ::operator new(bytes);
+  }
+  return ::operator new(bytes, std::align_val_t(alignment));
 }
 
-inline void callback_free(void *ptr) noexcept {
-  ::operator delete(ptr);
+inline void callback_free(void *ptr, std::size_t alignment = alignof(std::max_align_t)) noexcept {
+  if (alignment <= alignof(std::max_align_t)) {
+    ::operator delete(ptr);
+    return;
+  }
+  ::operator delete(ptr, std::align_val_t(alignment));
 }
 
 // --- SBO eligibility ---------------------------------------------------------
@@ -53,7 +68,114 @@ struct is_weak_ptr<nei::WeakPtr<T>> : std::true_type {};
 template <typename T>
 constexpr bool is_weak_ptr_v = is_weak_ptr<T>::value;
 
+template <typename T>
+struct is_unretained_wrapper : std::false_type {};
+
+template <typename T>
+struct is_unretained_wrapper<nei::UnretainedWrapper<T>> : std::true_type {};
+
+template <typename T>
+constexpr bool is_unretained_wrapper_v = is_unretained_wrapper<T>::value;
+
+// --- PassedWrapper detection -------------------------------------------------
+
+template <typename T>
+struct is_passed_wrapper : std::false_type {};
+
+template <typename T>
+struct is_passed_wrapper<nei::PassedWrapper<T>> : std::true_type {};
+
+template <typename T>
+constexpr bool is_passed_wrapper_v = is_passed_wrapper<T>::value;
+
+template <typename T>
+struct bind_arg_storage_impl {
+  using type = std::decay_t<T>;
+
+  template <typename U>
+  static type Store(U &&value) {
+    return std::forward<U>(value);
+  }
+};
+
+template <typename T>
+struct bind_arg_storage_impl<nei::UnretainedWrapper<T>> {
+  using type = T *;
+
+  static type Store(nei::UnretainedWrapper<T> value) {
+    return value.get();
+  }
+};
+
+// PassedWrapper: unwrap immediately at bind time - store the held object
+// directly as std::decay_t<T>.  At invoke time the regular UnwrapBoundArg
+// overload moves it out as an rvalue, satisfying one-shot move semantics.
+template <typename T>
+struct bind_arg_storage_impl<nei::PassedWrapper<T>> {
+  using type = std::decay_t<T>;
+
+  static type Store(nei::PassedWrapper<T> value) {
+    return value.Take();
+  }
+};
+
+template <typename T>
+struct bind_arg_storage : bind_arg_storage_impl<std::remove_cv_t<std::remove_reference_t<T>>> {};
+
+template <typename T>
+using bind_arg_storage_t = typename bind_arg_storage<std::remove_cv_t<std::remove_reference_t<T>>>::type;
+
+template <typename T>
+bind_arg_storage_t<T> StoreBoundArg(T &&value) {
+  return bind_arg_storage<T>::Store(std::forward<T>(value));
+}
+
+// --- UnwrapBoundArg ----------------------------------------------------------
+//
+// Called at invoke time to extract the argument from its stored form.
+// All bound args (including those that originated from Passed()) are stored
+// as plain values, so a single unconditional move covers every case.
+
+template <typename T>
+T &&UnwrapBoundArg(T &arg) noexcept {
+  return std::move(arg);
+}
+
 } // namespace detail
+
+// --- PassedWrapper -----------------------------------------------------------
+//
+// Wraps a move-only object so that BindOnce can accept and forward it without
+// copying.  The object is moved into the wrapper at bind time and moved out
+// of it exactly once when the resulting OnceCallback is invoked.
+//
+// Usage:
+//   auto ptr = std::make_unique<Foo>();
+//   auto cb = BindOnce(&HandleFoo, Passed(std::move(ptr)));
+//
+template <typename T>
+class PassedWrapper {
+public:
+  explicit PassedWrapper(T &&t) : value_(std::move(t)) {}
+
+  PassedWrapper(const PassedWrapper &) = delete;
+  PassedWrapper &operator=(const PassedWrapper &) = delete;
+  PassedWrapper(PassedWrapper &&) = default;
+  PassedWrapper &operator=(PassedWrapper &&) = default;
+
+  // Extract the held value.  Must only be called once.
+  T &&Take() { return std::move(value_); }
+
+private:
+  T value_;
+};
+
+// Convenience factory - mirrors Chromium's base::Passed().
+template <typename T>
+PassedWrapper<std::decay_t<T>> Passed(T &&t) {
+  return PassedWrapper<std::decay_t<T>>(std::forward<T>(t));
+}
+
 } // namespace nei
 
-#endif // NEI_TASK_CALLBACK_INTERNAL_H
+#endif // NEIXX_FUNCTIONAL_CALLBACK_INTERNAL_H_

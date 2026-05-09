@@ -19,37 +19,21 @@ add_executable(
     nei_tests
     base64_test.cpp
   checksum_hash_test.cpp
+    check_macro_test.cpp
+    cjk_width_test.cpp
+    command_line_test.cpp
     core_test.cpp
-    file_handle_test.cpp
     flake_id_test.cpp
-    io_buffer_test.cpp
-    io_operation_test.cpp
-    io_context_test.cpp
-    process_test.cpp
     log_test.cpp
-    utils_crypto_uuid_test.cpp
-    string_util_test.cpp
+  functional_test.cpp
+    # ref_counted_compile_fail.cpp
     split_string_test.cpp
     string_number_conversions_test.cpp
-    utf_string_conversions_test.cpp
-    command_line_test.cpp
-    cancelable_callback_test.cpp
-    task_callback_test.cpp
-    task_environment_test.cpp
-    task_scheduler_test.cpp
-    task_weak_ptr_test.cpp
-    task_stress_test.cpp
-    scoped_blocking_call_test.cpp
-    mixed_load_test.cpp
-    scoped_blocking_call_shutdown_test.cpp
+    string_util_test.cpp
     text_normalization_test.cpp
-    cjk_width_test.cpp
-    platform_thread_test.cpp
-    thread_local_storage_test.cpp
-    thread_restrictions_test.cpp
-    sequence_local_storage_slot_test.cpp
-    sequence_checker_test.cpp
-    check_macro_test.cpp
+  utf_string_conversions_test.cpp
+    utils_crypto_uuid_test.cpp
+    xdr_test.cpp
 )
 
 target_link_libraries(

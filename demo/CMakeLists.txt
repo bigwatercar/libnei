@@ -4,38 +4,14 @@ target_link_libraries(log_demo PRIVATE nei::all)
 add_executable(log_immediate_crash_demo log_immediate_crash_demo.c)
 target_link_libraries(log_immediate_crash_demo PRIVATE nei::all)
 
-add_executable(task_thread_demo task_thread_demo.cpp)
-target_link_libraries(task_thread_demo PRIVATE nei::all)
-
-add_executable(task_weak_ptr_demo task_weak_ptr_demo.cpp)
-target_link_libraries(task_weak_ptr_demo PRIVATE nei::all)
-
-add_executable(task_location_delay_demo task_location_delay_demo.cpp)
-target_link_libraries(task_location_delay_demo PRIVATE nei::all)
-
-add_executable(task_priority_demo task_priority_demo.cpp)
-target_link_libraries(task_priority_demo PRIVATE nei::all)
-
-add_executable(task_shutdown_demo task_shutdown_demo.cpp)
-target_link_libraries(task_shutdown_demo PRIVATE nei::all)
-
-add_executable(task_may_block_demo task_may_block_demo.cpp)
-target_link_libraries(task_may_block_demo PRIVATE nei::all)
-
 add_executable(string_util_demo string_util_demo.cpp)
 target_link_libraries(string_util_demo PRIVATE nei::all)
 
 add_executable(command_line_demo command_line_demo.cpp)
 target_link_libraries(command_line_demo PRIVATE nei::all)
 
-add_executable(process_async_stdout_demo process_async_stdout_demo.cpp)
-target_link_libraries(process_async_stdout_demo PRIVATE nei::all)
-
 add_executable(flake_id_demo flake_id_demo.c)
 target_link_libraries(flake_id_demo PRIVATE nei::all)
-
-add_executable(thread_id_name_manager_demo thread_id_name_manager_demo.cpp)
-target_link_libraries(thread_id_name_manager_demo PRIVATE nei::all)
 
 if(WIN32 AND BUILD_SHARED_LIBS)
   function(nei_copy_runtime_dlls target_name)
@@ -49,15 +25,7 @@ if(WIN32 AND BUILD_SHARED_LIBS)
 
   nei_copy_runtime_dlls(log_demo)
   nei_copy_runtime_dlls(log_immediate_crash_demo)
-  nei_copy_runtime_dlls(task_thread_demo)
-  nei_copy_runtime_dlls(task_weak_ptr_demo)
-  nei_copy_runtime_dlls(task_location_delay_demo)
-  nei_copy_runtime_dlls(task_priority_demo)
-  nei_copy_runtime_dlls(task_shutdown_demo)
-  nei_copy_runtime_dlls(task_may_block_demo)
   nei_copy_runtime_dlls(string_util_demo)
   nei_copy_runtime_dlls(command_line_demo)
-  nei_copy_runtime_dlls(process_async_stdout_demo)
   nei_copy_runtime_dlls(flake_id_demo)
-  nei_copy_runtime_dlls(thread_id_name_manager_demo)
 endif()
