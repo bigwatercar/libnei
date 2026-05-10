@@ -1,6 +1,7 @@
 target_sources(
     neixx
     PRIVATE
+        src/location.cpp
         src/time.cpp
         src/time_source.cpp
 )

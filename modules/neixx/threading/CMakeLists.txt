@@ -2,9 +2,11 @@ target_sources(
     neixx
     PRIVATE
         include/neixx/threading/platform_thread.h
+    include/neixx/threading/thread_local_storage.h
         src/platform_thread.cpp
         src/platform_thread_win.cpp
         src/platform_thread_posix.cpp
+    src/thread_local_storage.cpp
 )
 
 target_include_directories(

@@ -32,6 +32,9 @@ add_executable(
     platform_thread_test.cpp
     message_pump_test.cpp
     message_pump_default_test.cpp
+    task_sequence_token_test.cpp
+    task_internal_task_test.cpp
+    thread_local_storage_test.cpp
     split_string_test.cpp
     string_number_conversions_test.cpp
     string_util_test.cpp
