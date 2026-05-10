@@ -29,6 +29,7 @@ add_executable(
     log_test.cpp
   functional_test.cpp
     # ref_counted_compile_fail.cpp
+    platform_thread_test.cpp
     split_string_test.cpp
     string_number_conversions_test.cpp
     string_util_test.cpp

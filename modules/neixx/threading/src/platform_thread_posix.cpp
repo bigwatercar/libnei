@@ -1,0 +1,123 @@
+#if !defined(_WIN32)
+
+#include <pthread.h>
+
+#include <chrono>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <thread>
+
+#include <neixx/threading/platform_thread.h>
+
+#include "platform_thread_internal.h"
+
+namespace {
+
+std::string TruncateThreadName(const std::string &name) {
+  constexpr std::size_t kMaxThreadNameLen = 15;
+  if (name.size() <= kMaxThreadNameLen) {
+    return name;
+  }
+  return name.substr(0, kMaxThreadNameLen);
+}
+
+void *ThreadEntry(void *param) {
+  std::unique_ptr<nei::StartState> start(static_cast<nei::StartState *>(param));
+  start->delegate->ThreadMain();
+  return nullptr;
+}
+
+} // namespace
+
+namespace nei {
+
+PlatformThread::PlatformThreadId PlatformThread::CurrentId() {
+  pthread_t self = pthread_self();
+  PlatformThread::PlatformThreadId id = 0;
+  const std::size_t copy_size = sizeof(self) < sizeof(id) ? sizeof(self) : sizeof(id);
+  std::memcpy(&id, &self, copy_size);
+  return id;
+}
+
+void PlatformThread::YieldCurrentThread() {
+  std::this_thread::yield();
+}
+
+void PlatformThread::Sleep(TimeDelta duration) {
+  if (duration.InMicroseconds() <= 0) {
+    return;
+  }
+  std::this_thread::sleep_for(std::chrono::microseconds(duration.InMicroseconds()));
+}
+
+bool PlatformThread::CreateWithType(std::size_t stack_size,
+                                    Delegate *delegate,
+                                    Handle *handle,
+                                    ThreadType thread_type) {
+  if (delegate == nullptr || handle == nullptr) {
+    return false;
+  }
+
+  pthread_attr_t attr;
+  if (pthread_attr_init(&attr) != 0) {
+    return false;
+  }
+
+  if (stack_size != 0) {
+    const std::size_t minimum_stack = PTHREAD_STACK_MIN;
+    const std::size_t requested_stack = stack_size < minimum_stack ? minimum_stack : stack_size;
+    (void)pthread_attr_setstacksize(&attr, requested_stack);
+  }
+
+  auto *start_state = new nei::StartState();
+  start_state->delegate = delegate;
+  start_state->thread_type = thread_type;
+  pthread_t native_handle{};
+  const int create_result = pthread_create(&native_handle, &attr, &ThreadEntry, start_state);
+  (void)pthread_attr_destroy(&attr);
+  if (create_result != 0) {
+    delete start_state;
+    return false;
+  }
+
+  handle->impl_ = std::make_unique<Handle::Impl>();
+  handle->impl_->native_handle = native_handle;
+  handle->impl_->joinable = true;
+  return true;
+}
+
+bool PlatformThread::Join(Handle *handle) {
+  if (handle == nullptr || handle->impl_ == nullptr || !handle->impl_->joinable) {
+    return false;
+  }
+  (void)pthread_join(handle->impl_->native_handle, nullptr);
+  handle->impl_.reset();
+  return true;
+}
+
+bool PlatformThread::Detach(Handle *handle) {
+  if (handle == nullptr || handle->impl_ == nullptr || !handle->impl_->joinable) {
+    return false;
+  }
+  (void)pthread_detach(handle->impl_->native_handle);
+  handle->impl_.reset();
+  return true;
+}
+
+void PlatformThread::SetCurrentThreadName(const std::string &name) {
+#if defined(__APPLE__)
+  (void)pthread_setname_np(TruncateThreadName(name).c_str());
+#else
+  (void)pthread_setname_np(pthread_self(), TruncateThreadName(name).c_str());
+#endif
+}
+
+bool PlatformThread::SetCurrentThreadType(ThreadType thread_type) {
+  (void)thread_type;
+  return true;
+}
+
+} // namespace nei
+
+#endif // !defined(_WIN32)
