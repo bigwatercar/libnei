@@ -9,8 +9,8 @@ const SystemTimeSource &SystemTimeSource::Instance() {
   return instance;
 }
 
-std::chrono::steady_clock::time_point SystemTimeSource::Now() const {
-  return std::chrono::steady_clock::now();
+TimeTicks SystemTimeSource::Now() const {
+  return TimeTicks::Now();
 }
 
 } // namespace nei

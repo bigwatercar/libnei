@@ -4,11 +4,12 @@
 #define NEI_TASK_WEAK_PTR_H
 
 #include <cassert>
-#include <memory>
 #include <thread>
 #include <type_traits>
+#include <utility>
 
 #include <neixx/memory/internal_flag.h>
+#include <neixx/memory/ref_counted.h>
 
 namespace nei {
 
@@ -23,7 +24,7 @@ class WeakPtrFactory {
 public:
   explicit WeakPtrFactory(T *ptr)
       : ptr_(ptr)
-      , flag_(std::make_shared<InternalFlag>())
+      , flag_(MakeRefCounted<InternalFlag>())
       , bound_thread_(std::this_thread::get_id()) {
   }
 
@@ -48,7 +49,7 @@ public:
 
 private:
   T *ptr_;
-  std::shared_ptr<InternalFlag> flag_;
+  scoped_refptr<InternalFlag> flag_;
   std::thread::id bound_thread_;
 };
 
@@ -79,15 +80,14 @@ public:
 private:
   friend class WeakPtrFactory<T>;
 
-  WeakPtr(T *ptr, const std::shared_ptr<InternalFlag> &flag, std::thread::id bound_thread)
+  WeakPtr(T *ptr, scoped_refptr<InternalFlag> flag, std::thread::id bound_thread)
       : ptr_(ptr)
-      , flag_(flag)
+      , flag_(std::move(flag))
       , bound_thread_(std::move(bound_thread)) {
   }
 
   bool IsValid() const {
-    std::shared_ptr<InternalFlag> flag = flag_.lock();
-    return flag && flag->IsValid();
+    return flag_ && flag_->IsValid();
   }
 
 #if !defined(NDEBUG)
@@ -101,7 +101,7 @@ private:
 #endif
 
   T *ptr_ = nullptr;
-  std::weak_ptr<InternalFlag> flag_;
+  scoped_refptr<InternalFlag> flag_;
   std::thread::id bound_thread_{};
 };
 

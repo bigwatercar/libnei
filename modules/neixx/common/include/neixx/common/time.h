@@ -16,6 +16,15 @@ public:
     constexpr TimeDelta() : delta_(0) {}
 
     // Factory methods.
+    static constexpr TimeDelta FromDays(int64_t days) {
+        return TimeDelta(days * kMicrosecondsPerDay);
+    }
+    static constexpr TimeDelta FromHours(int64_t hours) {
+        return TimeDelta(hours * kMicrosecondsPerHour);
+    }
+    static constexpr TimeDelta FromMinutes(int64_t minutes) {
+        return TimeDelta(minutes * kMicrosecondsPerMinute);
+    }
     static constexpr TimeDelta FromSeconds(int64_t seconds) {
         return TimeDelta(seconds * kMicrosecondsPerSecond);
     }
@@ -27,13 +36,38 @@ public:
     }
 
     // Accessors.
+    constexpr int64_t InDays() const {
+        return delta_ / kMicrosecondsPerDay;
+    }
+    constexpr int64_t InHours() const {
+        return delta_ / kMicrosecondsPerHour;
+    }
+    constexpr int64_t InMinutes() const {
+        return delta_ / kMicrosecondsPerMinute;
+    }
     constexpr int64_t InSeconds() const {
         return delta_ / kMicrosecondsPerSecond;
+    }
+    constexpr double InSecondsF() const {
+        return static_cast<double>(delta_) / static_cast<double>(kMicrosecondsPerSecond);
     }
     constexpr int64_t InMilliseconds() const {
         return delta_ / kMicrosecondsPerMillisecond;
     }
+    constexpr double InMillisecondsF() const {
+        return static_cast<double>(delta_) / static_cast<double>(kMicrosecondsPerMillisecond);
+    }
     constexpr int64_t InMicroseconds() const { return delta_; }
+
+    constexpr bool is_zero() const {
+        return delta_ == 0;
+    }
+    constexpr bool is_positive() const {
+        return delta_ > 0;
+    }
+    constexpr bool is_negative() const {
+        return delta_ < 0;
+    }
 
     // Arithmetic operators.
     constexpr TimeDelta operator+(TimeDelta other) const {
@@ -78,6 +112,9 @@ public:
     }
 
 private:
+    static constexpr int64_t kMicrosecondsPerDay = 86'400'000'000LL;
+    static constexpr int64_t kMicrosecondsPerHour = 3'600'000'000LL;
+    static constexpr int64_t kMicrosecondsPerMinute = 60'000'000LL;
     static constexpr int64_t kMicrosecondsPerSecond = 1'000'000LL;
     static constexpr int64_t kMicrosecondsPerMillisecond = 1'000LL;
 
@@ -93,6 +130,93 @@ static_assert(sizeof(TimeDelta) == sizeof(int64_t),
 inline constexpr TimeDelta operator*(int64_t scalar, TimeDelta delta) {
     return delta * scalar;
 }
+
+// ---------------------------------------------------------------------------
+
+// Time represents a wall-clock timestamp measured in microseconds since Unix
+// epoch (1970-01-01 00:00:00 UTC). Non-PIMPL: sizeof(Time) == sizeof(int64_t).
+class NEI_API Time {
+public:
+    constexpr Time() : us_since_unix_epoch_(0) {}
+
+    // Returns the current wall-clock time.
+    // Windows: GetSystemTimeAsFileTime.
+    // POSIX:   clock_gettime(CLOCK_REALTIME).
+    static Time Now();
+
+    static constexpr Time UnixEpoch() {
+        return Time(0);
+    }
+
+    static constexpr Time FromUnixSeconds(int64_t seconds) {
+        return Time(seconds * kMicrosecondsPerSecond);
+    }
+    static constexpr Time FromUnixMilliseconds(int64_t ms) {
+        return Time(ms * kMicrosecondsPerMillisecond);
+    }
+    static constexpr Time FromUnixMicroseconds(int64_t us) {
+        return Time(us);
+    }
+
+    constexpr int64_t ToUnixSeconds() const {
+        return us_since_unix_epoch_ / kMicrosecondsPerSecond;
+    }
+    constexpr int64_t ToUnixMilliseconds() const {
+        return us_since_unix_epoch_ / kMicrosecondsPerMillisecond;
+    }
+    constexpr int64_t ToUnixMicroseconds() const {
+        return us_since_unix_epoch_;
+    }
+
+    constexpr Time operator+(TimeDelta delta) const {
+        return Time(us_since_unix_epoch_ + delta.InMicroseconds());
+    }
+    constexpr Time operator-(TimeDelta delta) const {
+        return Time(us_since_unix_epoch_ - delta.InMicroseconds());
+    }
+    constexpr Time &operator+=(TimeDelta delta) {
+        us_since_unix_epoch_ += delta.InMicroseconds();
+        return *this;
+    }
+    constexpr Time &operator-=(TimeDelta delta) {
+        us_since_unix_epoch_ -= delta.InMicroseconds();
+        return *this;
+    }
+    constexpr TimeDelta operator-(Time other) const {
+        return TimeDelta::FromMicroseconds(us_since_unix_epoch_ - other.us_since_unix_epoch_);
+    }
+
+    constexpr bool operator==(Time other) const {
+        return us_since_unix_epoch_ == other.us_since_unix_epoch_;
+    }
+    constexpr bool operator!=(Time other) const {
+        return us_since_unix_epoch_ != other.us_since_unix_epoch_;
+    }
+    constexpr bool operator<(Time other) const {
+        return us_since_unix_epoch_ < other.us_since_unix_epoch_;
+    }
+    constexpr bool operator<=(Time other) const {
+        return us_since_unix_epoch_ <= other.us_since_unix_epoch_;
+    }
+    constexpr bool operator>(Time other) const {
+        return us_since_unix_epoch_ > other.us_since_unix_epoch_;
+    }
+    constexpr bool operator>=(Time other) const {
+        return us_since_unix_epoch_ >= other.us_since_unix_epoch_;
+    }
+
+private:
+    static constexpr int64_t kMicrosecondsPerSecond = 1'000'000LL;
+    static constexpr int64_t kMicrosecondsPerMillisecond = 1'000LL;
+
+    explicit constexpr Time(int64_t us_since_unix_epoch)
+        : us_since_unix_epoch_(us_since_unix_epoch) {}
+
+    int64_t us_since_unix_epoch_;
+};
+
+static_assert(sizeof(Time) == sizeof(int64_t),
+              "Time must be exactly sizeof(int64_t)");
 
 // ---------------------------------------------------------------------------
 
