@@ -1,13 +1,14 @@
 cmake_minimum_required(VERSION 3.23)
 
 project(
-    nei
-    VERSION 0.1.0
-    DESCRIPTION "A modular C/C++ library template"
-    LANGUAGES C CXX
+  nei
+  VERSION 0.1.0
+  DESCRIPTION "A modular C/C++ library template"
+  LANGUAGES C CXX
 )
 
-# Export compile_commands.json for clangd / IDE tooling (no code changes required).
+# Export compile_commands.json for clangd / IDE tooling (no code changes
+# required).
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_C_STANDARD 99)
@@ -25,39 +26,60 @@ option(NEI_BUILD_TESTS "Build nei tests" ON)
 option(NEI_BUILD_BENCHMARKS "Build nei benchmarks" ON)
 option(NEI_BUILD_DEMOS "Build nei demos" ON)
 option(NEI_ENABLE_WARNINGS "Enable strict warnings" ON)
-option(NEI_ENABLE_LONG_BENCH_TESTS "Enable long-running benchmark tests in CTest" OFF)
+option(NEI_ENABLE_LONG_BENCH_TESTS
+       "Enable long-running benchmark tests in CTest" OFF
+)
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
-set(NEI_LOG_RING_SLOTS "256" CACHE STRING "Log MPSC ring slots (power of two)")
+set(NEI_LOG_RING_SLOTS
+    "256"
+    CACHE STRING "Log MPSC ring slots (power of two)"
+)
 
 if(NOT NEI_LOG_RING_SLOTS MATCHES "^[0-9]+$")
-    message(FATAL_ERROR "NEI_LOG_RING_SLOTS must be a positive integer, got: ${NEI_LOG_RING_SLOTS}")
+  message(
+    FATAL_ERROR
+      "NEI_LOG_RING_SLOTS must be a positive integer, got: ${NEI_LOG_RING_SLOTS}"
+  )
 endif()
 math(EXPR _nei_log_ring_slots_val "${NEI_LOG_RING_SLOTS}")
 if(_nei_log_ring_slots_val LESS 64)
-    message(FATAL_ERROR "NEI_LOG_RING_SLOTS must be >= 64, got: ${NEI_LOG_RING_SLOTS}")
+  message(
+    FATAL_ERROR "NEI_LOG_RING_SLOTS must be >= 64, got: ${NEI_LOG_RING_SLOTS}"
+  )
 endif()
-math(EXPR _nei_log_ring_slots_pow2_check "${_nei_log_ring_slots_val} & (${_nei_log_ring_slots_val} - 1)")
+math(EXPR _nei_log_ring_slots_pow2_check
+     "${_nei_log_ring_slots_val} & (${_nei_log_ring_slots_val} - 1)"
+)
 if(NOT _nei_log_ring_slots_pow2_check EQUAL 0)
-    message(FATAL_ERROR "NEI_LOG_RING_SLOTS must be a power of two, got: ${NEI_LOG_RING_SLOTS}")
+  message(
+    FATAL_ERROR
+      "NEI_LOG_RING_SLOTS must be a power of two, got: ${NEI_LOG_RING_SLOTS}"
+  )
 endif()
 
 # Compatible with both single-config and multi-config generators.
 set(NEI_SUPPORTED_CONFIGS Debug Release RelWithDebInfo MinSizeRel)
 if(CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_CONFIGURATION_TYPES "${NEI_SUPPORTED_CONFIGS}" CACHE STRING "Available build configurations" FORCE)
+  set(CMAKE_CONFIGURATION_TYPES
+      "${NEI_SUPPORTED_CONFIGS}"
+      CACHE STRING "Available build configurations" FORCE
+  )
 else()
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS ${NEI_SUPPORTED_CONFIGS})
-    if(NOT CMAKE_BUILD_TYPE)
-        set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
-    endif()
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS ${NEI_SUPPORTED_CONFIGS})
+  if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE
+        Debug
+        CACHE STRING "Build type" FORCE
+    )
+  endif()
 endif()
 
 if(NEI_ENABLE_WARNINGS)
-    if(MSVC)
-        add_compile_options(/W4 /permissive-)
-    else()
-        add_compile_options(-Wall -Wextra -Wpedantic)
-    endif()
+  if(MSVC)
+    add_compile_options(/W4 /permissive-)
+  else()
+    add_compile_options(-Wall -Wextra -Wpedantic)
+  endif()
 endif()
 
 add_subdirectory(modules/nei)
@@ -68,48 +90,45 @@ add_library(nei::all ALIAS nei_all)
 set_target_properties(nei_all PROPERTIES EXPORT_NAME all)
 target_link_libraries(nei_all INTERFACE nei neixx)
 
- if(NEI_BUILD_TESTS)
-     add_subdirectory(tests)
- endif()
+if(NEI_BUILD_TESTS)
+  add_subdirectory(tests)
+endif()
 
- if(NEI_BUILD_BENCHMARKS)
-     add_subdirectory(bench)
- endif()
+if(NEI_BUILD_BENCHMARKS)
+  add_subdirectory(bench)
+endif()
 
- if(NEI_BUILD_DEMOS)
-     add_subdirectory(demo)
- endif()
+if(NEI_BUILD_DEMOS)
+  add_subdirectory(demo)
+endif()
 
 install(
-    TARGETS nei neixx nei_all
-    EXPORT neiTargets
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  TARGETS nei neixx nei_all
+  EXPORT neiTargets
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
 install(
-    EXPORT neiTargets
-    FILE neiTargets.cmake
-    NAMESPACE nei::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/nei
+  EXPORT neiTargets
+  FILE neiTargets.cmake
+  NAMESPACE nei::
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/nei
 )
 
 configure_package_config_file(
-    cmake/neiConfig.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/neiConfig.cmake
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/nei
+  cmake/neiConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/neiConfig.cmake
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/nei
 )
 
 write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/neiConfigVersion.cmake
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
+  ${CMAKE_CURRENT_BINARY_DIR}/neiConfigVersion.cmake
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion
 )
 
-install(
-    FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/neiConfig.cmake
-        ${CMAKE_CURRENT_BINARY_DIR}/neiConfigVersion.cmake
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/nei
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/neiConfig.cmake
+              ${CMAKE_CURRENT_BINARY_DIR}/neiConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/nei
 )
