@@ -235,6 +235,10 @@ public:
     // differences between two TimeTicks values are meaningful).
     constexpr int64_t ToInternalValue() const { return ticks_; }
 
+    // Returns true if this TimeTicks carries no meaningful timestamp.
+    // By convention in this codebase, default-constructed TimeTicks is null.
+    constexpr bool is_null() const { return ticks_ == 0; }
+
     // Arithmetic with TimeDelta.
     constexpr TimeTicks operator+(TimeDelta delta) const {
         return TimeTicks(ticks_ + delta.InMicroseconds());

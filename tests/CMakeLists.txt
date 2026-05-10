@@ -30,6 +30,8 @@ add_executable(
   functional_test.cpp
     # ref_counted_compile_fail.cpp
     platform_thread_test.cpp
+    message_pump_test.cpp
+    message_pump_default_test.cpp
     split_string_test.cpp
     string_number_conversions_test.cpp
     string_util_test.cpp

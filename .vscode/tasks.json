@@ -1,0 +1,34 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "commit-all-changes",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"add",
+				"-A",
+				";",
+				"git",
+				"commit",
+				"-m",
+				"feat: integrate MessagePump into build and add tests",
+				";",
+				"git",
+				"log",
+				"--oneline",
+				"-1"
+			]
+		},
+		{
+			"label": "commit-all-changes-cmd",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"git add -A & git commit -m \"feat: integrate MessagePump into build and add tests\" & git log --oneline -1"
+			]
+		}
+	]
+}
