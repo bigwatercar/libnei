@@ -21,9 +21,11 @@ add_executable(
   checksum_hash_test.cpp
     check_macro_test.cpp
     cjk_width_test.cpp
+    condition_variable_test.cpp
     command_line_test.cpp
     core_test.cpp
     flake_id_test.cpp
+    lock_test.cpp
     log_test.cpp
   functional_test.cpp
     # ref_counted_compile_fail.cpp

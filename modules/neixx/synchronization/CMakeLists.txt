@@ -1,6 +1,8 @@
 target_sources(
     neixx
     PRIVATE
+    src/condition_variable.cpp
+    src/lock.cpp
         src/waitable_event.cpp
 )
 
