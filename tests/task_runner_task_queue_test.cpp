@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -69,6 +70,49 @@ TEST(TaskQueueTest, ReadyDelayedTasksPromoteToImmediate) {
   EXPECT_EQ(taken.sequence_num, 1);
   ASSERT_TRUE(queue.TakeImmediateTask(&taken));
   EXPECT_EQ(taken.sequence_num, 2);
+}
+
+TEST(TaskQueueTest, DelayedTasksSameDeadlinePreserveSequenceOrder) {
+  internal::TaskQueue queue;
+  const TimeTicks same_deadline = TimeTicks::Now() + TimeDelta::FromMilliseconds(10);
+
+  internal::Task first = MakeTask(1, []() {});
+  first.delayed_run_time = same_deadline;
+  internal::Task second = MakeTask(2, []() {});
+  second.delayed_run_time = same_deadline;
+  internal::Task third = MakeTask(3, []() {});
+  third.delayed_run_time = same_deadline;
+
+  ASSERT_TRUE(queue.PushDelayedTask(std::move(first)));
+  ASSERT_TRUE(queue.PushDelayedTask(std::move(second)));
+  ASSERT_TRUE(queue.PushDelayedTask(std::move(third)));
+
+  EXPECT_EQ(queue.PromoteReadyDelayedTasks(same_deadline), 3u);
+
+  internal::Task taken;
+  ASSERT_TRUE(queue.TakeImmediateTask(&taken));
+  EXPECT_EQ(taken.sequence_num, 1);
+  ASSERT_TRUE(queue.TakeImmediateTask(&taken));
+  EXPECT_EQ(taken.sequence_num, 2);
+  ASSERT_TRUE(queue.TakeImmediateTask(&taken));
+  EXPECT_EQ(taken.sequence_num, 3);
+}
+
+TEST(TaskQueueTest, PromoteReadyTasksAtExactDeadlineIsReadyNotFuture) {
+  internal::TaskQueue queue;
+  const TimeTicks now = TimeTicks::Now();
+
+  internal::Task task = MakeTask(42, []() {});
+  task.delayed_run_time = now;
+  ASSERT_TRUE(queue.PushDelayedTask(std::move(task)));
+
+  EXPECT_EQ(queue.PromoteReadyDelayedTasks(now), 1u);
+  EXPECT_TRUE(queue.HasImmediateWork());
+  EXPECT_FALSE(queue.HasDelayedWork());
+
+  internal::Task taken;
+  ASSERT_TRUE(queue.TakeImmediateTask(&taken));
+  EXPECT_EQ(taken.sequence_num, 42);
 }
 
 TEST(TaskQueueTest, ShutdownDrainKeepsExistingTasks) {
@@ -206,6 +250,59 @@ TEST(TaskRunnerTest, PostDelayedTaskEnqueuesDelayedTask) {
   EXPECT_FALSE(queue.HasImmediateWork());
   EXPECT_TRUE(queue.HasDelayedWork());
   EXPECT_FALSE(queue.PeekNextDelayedRunTime().is_null());
+}
+
+TEST(TaskRunnerTest, PostDelayedTaskZeroDelayExecutesImmediately) {
+  internal::TaskQueue queue;
+  auto runner = TaskRunner::Create(&queue);
+  ASSERT_TRUE(runner);
+
+  runner->PostDelayedTask(FROM_HERE, []() {}, TimeDelta());
+
+  EXPECT_TRUE(queue.HasImmediateWork());
+  EXPECT_FALSE(queue.HasDelayedWork());
+}
+
+TEST(TaskRunnerTest, PostDelayedTaskNegativeDelayExecutesImmediately) {
+  internal::TaskQueue queue;
+  auto runner = TaskRunner::Create(&queue);
+  ASSERT_TRUE(runner);
+
+  runner->PostDelayedTask(FROM_HERE, []() {}, TimeDelta::FromMilliseconds(-1));
+
+  EXPECT_TRUE(queue.HasImmediateWork());
+  EXPECT_FALSE(queue.HasDelayedWork());
+}
+
+TEST(TaskRunnerTest, PostDelayedTaskExtremeDelayFallsBackToImmediate) {
+  internal::TaskQueue queue;
+  auto runner = TaskRunner::Create(&queue);
+  ASSERT_TRUE(runner);
+
+  runner->PostDelayedTask(
+      FROM_HERE,
+      []() {},
+      TimeDelta::FromMicroseconds(std::numeric_limits<std::int64_t>::max()));
+
+  EXPECT_TRUE(queue.HasImmediateWork());
+  EXPECT_FALSE(queue.HasDelayedWork());
+}
+
+TEST(TaskRunnerTest, DelayedOverflowFallbackCounterIncrements) {
+  TaskRunner::ResetDelayedOverflowFallbackCountForTesting();
+
+  internal::TaskQueue queue;
+  auto runner = TaskRunner::Create(&queue);
+  ASSERT_TRUE(runner);
+
+  EXPECT_EQ(TaskRunner::GetDelayedOverflowFallbackCountForTesting(), 0);
+
+  runner->PostDelayedTask(
+      FROM_HERE,
+      []() {},
+      TimeDelta::FromMicroseconds(std::numeric_limits<std::int64_t>::max()));
+
+  EXPECT_EQ(TaskRunner::GetDelayedOverflowFallbackCountForTesting(), 1);
 }
 
 TEST(TaskRunnerTest, SequenceNumbersIncreaseMonotonically) {

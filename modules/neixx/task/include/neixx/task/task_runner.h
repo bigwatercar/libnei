@@ -24,6 +24,8 @@ class NEI_API TaskRunner : public RefCountedThreadSafe<TaskRunner> {
   virtual ~TaskRunner() = default;
 
   void PostTask(const Location& from_here, OnceClosure task);
+  // delay <= 0 is treated as immediate work and is posted without entering
+  // the delayed queue.
   void PostDelayedTask(const Location& from_here, OnceClosure task, TimeDelta delay);
 
   virtual void PostTaskWithTraits(const Location& from_here,
@@ -36,6 +38,11 @@ class NEI_API TaskRunner : public RefCountedThreadSafe<TaskRunner> {
 
   static scoped_refptr<TaskRunner> Create(internal::TaskQueue* task_queue,
                                           const TaskTraits& traits = TaskTraits());
+
+  // Observability helpers for delayed-overflow fallback path.
+  // Intended for tests and diagnostics.
+  static std::int64_t GetDelayedOverflowFallbackCountForTesting();
+  static void ResetDelayedOverflowFallbackCountForTesting();
 
  protected:
   explicit TaskRunner(const TaskTraits& traits = TaskTraits()) : traits_(traits) {}

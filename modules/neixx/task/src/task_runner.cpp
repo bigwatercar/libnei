@@ -1,6 +1,7 @@
 ﻿#include <neixx/task/task_runner.h>
 
 #include <atomic>
+#include <limits>
 #include <utility>
 
 #include <neixx/task/internal/task_queue.h>
@@ -9,6 +10,7 @@ namespace nei {
 namespace {
 
 std::atomic<std::int64_t> g_next_sequence_num{1};
+std::atomic<std::int64_t> g_delayed_overflow_fallback_count{0};
 
 std::int64_t NextSequenceNum() {
   return g_next_sequence_num.fetch_add(1, std::memory_order_relaxed);
@@ -51,7 +53,18 @@ class TaskRunnerImpl final : public TaskRunner {
     queued_task.sequence_token = queue->sequence_token();
     queued_task.traits = traits;
     if (delay.is_positive()) {
-      queued_task.delayed_run_time = TimeTicks::Now() + delay;
+      const TimeTicks now = TimeTicks::Now();
+      const std::int64_t now_us = now.ToInternalValue();
+      const std::int64_t delay_us = delay.InMicroseconds();
+
+      // Guard against overflow when computing delayed deadline.
+      if (now_us > std::numeric_limits<std::int64_t>::max() - delay_us) {
+        g_delayed_overflow_fallback_count.fetch_add(1, std::memory_order_relaxed);
+        queue->PushImmediateTask(std::move(queued_task));
+        return;
+      }
+
+      queued_task.delayed_run_time = now + delay;
       queue->PushDelayedTask(std::move(queued_task));
     } else {
       queue->PushImmediateTask(std::move(queued_task));
@@ -76,6 +89,14 @@ scoped_refptr<TaskRunner> TaskRunner::Create(internal::TaskQueue* task_queue,
   }
 
   return scoped_refptr<TaskRunner>(new TaskRunnerImpl(task_queue->GetWeakPtr(), traits));
+}
+
+std::int64_t TaskRunner::GetDelayedOverflowFallbackCountForTesting() {
+  return g_delayed_overflow_fallback_count.load(std::memory_order_relaxed);
+}
+
+void TaskRunner::ResetDelayedOverflowFallbackCountForTesting() {
+  g_delayed_overflow_fallback_count.store(0, std::memory_order_relaxed);
 }
 
 }  // namespace nei
