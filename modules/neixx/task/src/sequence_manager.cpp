@@ -10,6 +10,11 @@
 #include <neixx/task/message_loop/message_pump_default.h>
 
 namespace nei {
+namespace {
+
+constexpr std::size_t kMaxTasksPerDoWork = 8;
+
+}  // namespace
 
 class SequenceManager::Impl {
  public:
@@ -75,15 +80,20 @@ class SequenceManager::Impl {
   }
 
   bool DoWork() {
-    internal::Task task;
-    if (!TakeNextImmediateTask(&task)) {
-      return false;
+    // Keep the first version conservative; we can make this dynamic later.
+    bool ran_any = false;
+    for (std::size_t i = 0; i < kMaxTasksPerDoWork; ++i) {
+      internal::Task task;
+      if (!TakeNextImmediateTask(&task)) {
+        break;
+      }
+      if (!task.task) {
+        continue;
+      }
+      ran_any = true;
+      std::move(task.task).Run();
     }
-    if (!task.task) {
-      return false;
-    }
-    std::move(task.task).Run();
-    return true;
+    return ran_any;
   }
 
   bool DoDelayedWork(MessagePump::Delegate::NextWorkInfo* next_work_info) {
@@ -166,11 +176,7 @@ class SequenceManager::Impl {
       }
 
       AutoLock lock(lock_);
-      if (queues_view_ && !queues_view_->empty()) {
-        next_queue_index_ = (index + 1) % queues_view_->size();
-      } else {
-        next_queue_index_ = 0;
-      }
+      next_queue_index_ = (index + 1) % queue_count;
       return true;
     }
 

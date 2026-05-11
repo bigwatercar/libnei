@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <thread>
@@ -135,6 +136,55 @@ TEST(SequenceManagerTest, EarlierDelayedTaskSchedulesEarlierWakeup) {
   ASSERT_GE(delayed_calls.size(), 2u);
   EXPECT_LT(delayed_calls.back(), delayed_calls.front());
   EXPECT_GE(pump_raw->schedule_work_calls(), 1);
+}
+
+TEST(SequenceManagerTest, MultiQueueBurstDoesNotStarveAnyQueue) {
+  SequenceManager manager(std::make_unique<MessagePumpDefault>());
+  scoped_refptr<TaskRunner> runner_a = manager.CreateTaskRunner();
+  scoped_refptr<TaskRunner> runner_b = manager.CreateTaskRunner();
+  ASSERT_TRUE(runner_a);
+  ASSERT_TRUE(runner_b);
+
+  constexpr int kTasksPerQueue = 64;
+  constexpr std::size_t kWindow = 16;
+  std::atomic<int> remaining{kTasksPerQueue * 2};
+  std::mutex order_mutex;
+  std::vector<char> execution_order;
+  execution_order.reserve(kTasksPerQueue * 2);
+
+  std::thread run_thread([&manager]() {
+    manager.Run();
+  });
+
+  for (int i = 0; i < kTasksPerQueue; ++i) {
+    runner_a->PostTask(FROM_HERE, [&remaining, &manager, &order_mutex, &execution_order]() {
+      {
+        std::lock_guard<std::mutex> lock(order_mutex);
+        execution_order.push_back('A');
+      }
+      if (remaining.fetch_sub(1) == 1) {
+        manager.Quit();
+      }
+    });
+
+    runner_b->PostTask(FROM_HERE, [&remaining, &manager, &order_mutex, &execution_order]() {
+      {
+        std::lock_guard<std::mutex> lock(order_mutex);
+        execution_order.push_back('B');
+      }
+      if (remaining.fetch_sub(1) == 1) {
+        manager.Quit();
+      }
+    });
+  }
+
+  run_thread.join();
+
+  ASSERT_EQ(remaining.load(), 0);
+  ASSERT_GE(execution_order.size(), kWindow);
+  const auto window_end = execution_order.begin() + static_cast<std::ptrdiff_t>(kWindow);
+  EXPECT_NE(std::find(execution_order.begin(), window_end, 'A'), window_end);
+  EXPECT_NE(std::find(execution_order.begin(), window_end, 'B'), window_end);
 }
 
 }  // namespace
