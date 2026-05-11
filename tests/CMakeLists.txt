@@ -1,4 +1,4 @@
-include(FetchContent)
+﻿include(FetchContent)
 
 if(POLICY CMP0135)
   cmake_policy(SET CMP0135 NEW)
@@ -37,6 +37,7 @@ add_executable(
   message_pump_default_test.cpp
   task_sequence_token_test.cpp
   task_internal_task_test.cpp
+  task_runner_task_queue_test.cpp
   thread_local_storage_test.cpp
   split_string_test.cpp
   string_number_conversions_test.cpp
@@ -55,7 +56,7 @@ include(GoogleTest)
 # Avoid running the test executable during build time on Windows shared builds
 # (DLLs may not be staged yet). Discover tests at test time instead.
 #
-gtest_discover_tests(nei_tests DISCOVERY_MODE PRE_TEST)
+ gtest_discover_tests(nei_tests DISCOVERY_MODE PRE_TEST)
 
 # Optional compile-fail check for scoped_refptr constraints. This target is
 # excluded from default builds and is intended to be invoked manually to inspect
