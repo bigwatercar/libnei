@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <atomic>
+#include <future>
 #include <memory>
 #include <thread>
 #include <chrono>
@@ -191,31 +192,22 @@ TEST(MessagePumpDefaultTest, ScheduleDelayedWorkDeadline) {
   EXPECT_GE(elapsed.InMilliseconds(), 150);  // Deadline was 200ms, allow 50ms tolerance
 }
 
-// Test nested Run() - Quit should only exit innermost.
-TEST(MessagePumpDefaultTest, NestedRunQuitInnermost) {
+// Quit() from an inner nested Run() must only exit the innermost frame.
+TEST(MessagePumpDefaultTest, NestedRunQuitExitsOnlyInnermost) {
   auto pump = std::make_unique<MessagePumpDefault>();
-  std::atomic<int> run_depth(0);
-  std::atomic<bool> test_passed(false);
+  std::atomic<int> outer_work_calls{0};
+  std::atomic<int> inner_work_calls{0};
+  std::promise<void> outer_continued_promise;
+  auto outer_continued_future = outer_continued_promise.get_future();
 
-  class NestedDelegate : public MessagePump::Delegate {
+  class InnerDelegate : public MessagePump::Delegate {
    public:
-    explicit NestedDelegate(MessagePumpDefault* pump, std::atomic<int>* depth,
-                            std::atomic<bool>* passed)
-        : pump_(pump), depth_(depth), passed_(passed), iteration_(0) {}
+    InnerDelegate(MessagePumpDefault* pump, std::atomic<int>* inner_calls)
+        : pump_(pump), inner_calls_(inner_calls) {}
 
     bool DoWork() override {
-      iteration_++;
-
-      if (iteration_ == 1) {
-        // Enter nested Run on same thread
-        depth_->store(1);
-        TrackingDelegate inner_delegate;
-        // Note: This nested Run would normally be called from a different context.
-        // For this basic test, we're just verifying the pump structure exists.
-        // A full nested test would require more complex orchestration.
-        return false;
-      }
-
+      inner_calls_->fetch_add(1);
+      pump_->Quit();
       return false;
     }
 
@@ -229,21 +221,138 @@ TEST(MessagePumpDefaultTest, NestedRunQuitInnermost) {
 
    private:
     MessagePumpDefault* pump_;
-    std::atomic<int>* depth_;
-    std::atomic<bool>* passed_;
-    int iteration_;
-  } nested_delegate(pump.get(), &run_depth, &test_passed);
+    std::atomic<int>* inner_calls_;
+  };
 
-  std::thread pump_thread([&pump, &nested_delegate]() {
-    pump->Run(&nested_delegate);
+  class OuterDelegate : public MessagePump::Delegate {
+   public:
+    OuterDelegate(MessagePumpDefault* pump,
+                  std::atomic<int>* outer_calls,
+                  std::atomic<int>* inner_calls,
+                  std::promise<void>* continued_promise)
+        : pump_(pump),
+          outer_calls_(outer_calls),
+          inner_calls_(inner_calls),
+          continued_promise_(continued_promise) {}
+
+    bool DoWork() override {
+      const int current = outer_calls_->fetch_add(1) + 1;
+      if (current == 1) {
+        InnerDelegate inner(pump_, inner_calls_);
+        pump_->Run(&inner);
+        return true;
+      }
+      if (current == 2) {
+        continued_promise_->set_value();
+        pump_->Quit();
+      }
+      return false;
+    }
+
+    bool DoDelayedWork(NextWorkInfo* out) override {
+      out->next_run_time = NextWorkInfo::kNoScheduledRunTime;
+      out->recent_now = TimeTicks::Now();
+      return false;
+    }
+
+    bool DoIdleWork() override { return false; }
+
+   private:
+    MessagePumpDefault* pump_;
+    std::atomic<int>* outer_calls_;
+    std::atomic<int>* inner_calls_;
+    std::promise<void>* continued_promise_;
+  } outer_delegate(pump.get(), &outer_work_calls, &inner_work_calls,
+                   &outer_continued_promise);
+
+  std::thread pump_thread([&pump, &outer_delegate]() {
+    pump->Run(&outer_delegate);
   });
-
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  pump->Quit();
 
   pump_thread.join();
 
-  EXPECT_GE(run_depth.load(), 0);
+  EXPECT_EQ(outer_continued_future.wait_for(std::chrono::milliseconds(300)),
+            std::future_status::ready);
+  EXPECT_EQ(inner_work_calls.load(), 1);
+  EXPECT_GE(outer_work_calls.load(), 2);
+}
+
+// Outer delayed deadline must survive an inner Run() that reports
+// kNoScheduledRunTime from DoDelayedWork().
+TEST(MessagePumpDefaultTest, NestedRunOuterDeadlinePreserved) {
+  auto pump = std::make_unique<MessagePumpDefault>();
+  std::atomic<bool> outer_delayed_fired{false};
+
+  class InnerDelegate : public MessagePump::Delegate {
+   public:
+    explicit InnerDelegate(MessagePumpDefault* pump)
+        : pump_(pump), done_(false) {}
+
+    bool DoWork() override {
+      if (!done_) {
+        done_ = true;
+        pump_->Quit();
+      }
+      return false;
+    }
+
+    bool DoDelayedWork(NextWorkInfo* out) override {
+      out->next_run_time = NextWorkInfo::kNoScheduledRunTime;
+      out->recent_now = TimeTicks::Now();
+      return false;
+    }
+
+    bool DoIdleWork() override { return false; }
+
+   private:
+    MessagePumpDefault* pump_;
+    bool done_;
+  };
+
+  class OuterDelegate : public MessagePump::Delegate {
+   public:
+    OuterDelegate(MessagePumpDefault* pump, std::atomic<bool>* fired)
+        : pump_(pump), fired_(fired), iteration_(0) {}
+
+    bool DoWork() override {
+      ++iteration_;
+      if (iteration_ == 1) {
+        const TimeTicks deadline = TimeTicks::Now() + TimeDelta::FromMilliseconds(150);
+        pump_->ScheduleDelayedWork(deadline);
+        InnerDelegate inner(pump_);
+        pump_->Run(&inner);
+      }
+      return false;
+    }
+
+    bool DoDelayedWork(NextWorkInfo* out) override {
+      fired_->store(true);
+      out->next_run_time = NextWorkInfo::kNoScheduledRunTime;
+      out->recent_now = TimeTicks::Now();
+      pump_->Quit();
+      return false;
+    }
+
+    bool DoIdleWork() override { return false; }
+
+   private:
+    MessagePumpDefault* pump_;
+    std::atomic<bool>* fired_;
+    int iteration_;
+  } outer_delegate(pump.get(), &outer_delayed_fired);
+
+  std::thread pump_thread([&pump, &outer_delegate]() {
+    pump->Run(&outer_delegate);
+  });
+
+  // Safety timeout if delayed wake path regresses.
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  if (!outer_delayed_fired.load()) {
+    pump->Quit();
+  }
+  pump_thread.join();
+
+  EXPECT_TRUE(outer_delayed_fired.load());
 }
 
 // Test thread affinity: Run on one thread, quit on another should be safe.

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -92,6 +93,37 @@ TEST(SequenceManagerTest, RunsDelayedTaskAfterDeadline) {
 
   EXPECT_TRUE(executed.load());
   EXPECT_GE(elapsed_ms.load(), 40);
+}
+
+TEST(SequenceManagerTest, DelayedTaskFollowsRealPumpWakeupPath) {
+  SequenceManager manager(std::make_unique<MessagePumpDefault>());
+  scoped_refptr<TaskRunner> runner = manager.CreateTaskRunner();
+  ASSERT_TRUE(runner);
+
+  std::atomic<bool> executed{false};
+  std::atomic<long long> elapsed_ms{0};
+
+  std::thread run_thread([&manager]() {
+    manager.Run();
+  });
+
+  const TimeTicks start = TimeTicks::Now();
+  runner->PostDelayedTask(FROM_HERE,
+                          [&executed, &elapsed_ms, start, &manager]() {
+                            elapsed_ms.store((TimeTicks::Now() - start).InMilliseconds());
+                            executed.store(true);
+                            manager.Quit();
+                          },
+                          TimeDelta::FromMilliseconds(120));
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  EXPECT_FALSE(executed.load());
+
+  run_thread.join();
+
+  EXPECT_TRUE(executed.load());
+  EXPECT_GE(elapsed_ms.load(), 80);
+  EXPECT_LT(elapsed_ms.load(), 500);
 }
 
 TEST(SequenceManagerTest, RunsTasksFromMultipleQueues) {
