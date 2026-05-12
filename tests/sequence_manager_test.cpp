@@ -154,6 +154,66 @@ TEST(SequenceManagerTest, RunsTasksFromMultipleQueues) {
   EXPECT_EQ(executed_b.load(), 1);
 }
 
+TEST(SequenceManagerTest, CurrentThreadBindingIsClearedAfterRunReturns) {
+  SequenceManager manager(std::make_unique<MessagePumpDefault>());
+  scoped_refptr<TaskRunner> runner = manager.CreateTaskRunner();
+  ASSERT_TRUE(runner);
+
+  std::atomic<SequenceManager*> current_inside_run{nullptr};
+  std::atomic<SequenceManager*> current_after_run{reinterpret_cast<SequenceManager*>(1)};
+
+  std::thread run_thread([&manager, &current_after_run]() {
+    manager.Run();
+    current_after_run.store(SequenceManager::Current());
+  });
+
+  runner->PostTask(FROM_HERE, [&manager, &current_inside_run]() {
+    current_inside_run.store(SequenceManager::Current());
+    manager.Quit();
+  });
+
+  run_thread.join();
+
+  EXPECT_EQ(current_inside_run.load(), &manager);
+  EXPECT_EQ(current_after_run.load(), nullptr);
+}
+
+TEST(SequenceManagerTest, HighPriorityQueuesReceiveMoreSelectorSlotsThanLowPriorityQueues) {
+  TaskTraits high_traits;
+  high_traits.priority = TaskPriority::kHigh;
+
+  TaskTraits low_traits;
+  low_traits.priority = TaskPriority::kLow;
+
+  SequenceManager manager(std::make_unique<MessagePumpDefault>());
+  scoped_refptr<TaskRunner> high_runner = manager.CreateTaskRunner(high_traits);
+  scoped_refptr<TaskRunner> low_runner = manager.CreateTaskRunner(low_traits);
+  ASSERT_TRUE(high_runner);
+  ASSERT_TRUE(low_runner);
+
+  std::mutex order_mutex;
+  std::vector<char> execution_order;
+  execution_order.reserve(16);
+
+  for (int i = 0; i < 8; ++i) {
+    high_runner->PostTask(FROM_HERE, [&order_mutex, &execution_order]() {
+      std::lock_guard<std::mutex> lock(order_mutex);
+      execution_order.push_back('H');
+    });
+    low_runner->PostTask(FROM_HERE, [&order_mutex, &execution_order]() {
+      std::lock_guard<std::mutex> lock(order_mutex);
+      execution_order.push_back('L');
+    });
+  }
+
+  EXPECT_TRUE(manager.DoWork());
+  ASSERT_GE(execution_order.size(), 8u);
+
+  const auto first_five = execution_order.begin() + 5;
+  EXPECT_EQ(std::count(execution_order.begin(), first_five, 'H'), 4);
+  EXPECT_EQ(std::count(execution_order.begin(), first_five, 'L'), 1);
+}
+
 TEST(SequenceManagerTest, EarlierDelayedTaskSchedulesEarlierWakeup) {
   auto pump = std::make_unique<RecordingPump>();
   RecordingPump* pump_raw = pump.get();

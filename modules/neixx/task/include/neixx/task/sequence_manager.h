@@ -17,6 +17,8 @@ class NEI_API SequenceManager final : public MessagePump::Delegate {
   explicit SequenceManager(std::unique_ptr<MessagePump> pump = nullptr);
   ~SequenceManager() override;
 
+  static SequenceManager* Current();
+
   SequenceManager(const SequenceManager&) = delete;
   SequenceManager& operator=(const SequenceManager&) = delete;
   SequenceManager(SequenceManager&&) = delete;
