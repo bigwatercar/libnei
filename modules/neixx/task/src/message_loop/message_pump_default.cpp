@@ -82,14 +82,11 @@ class MessagePumpDefault::Impl {
   void UpdateDelayedWorkFromDelegate(const Delegate::NextWorkInfo& next_work_info) {
     AutoLock lock(state_lock_);
     if (next_work_info.next_run_time == Delegate::NextWorkInfo::kNoScheduledRunTime) {
-      // Do not clear existing deadline: an outer Run() may have a valid
-      // delayed deadline that must survive an inner Run() returning no work.
+      has_delayed_run_time_ = false;
       return;
     }
-    if (!has_delayed_run_time_ || next_work_info.next_run_time < delayed_run_time_) {
-      delayed_run_time_ = next_work_info.next_run_time;
-      has_delayed_run_time_ = true;
-    }
+    delayed_run_time_ = next_work_info.next_run_time;
+    has_delayed_run_time_ = true;
   }
 
   bool ConsumeWorkScheduled() {
