@@ -4,14 +4,18 @@
           include/neixx/task/internal/task_queue.h
           include/neixx/task/message_loop/message_pump.h
           include/neixx/task/message_loop/message_pump_default.h
+          include/neixx/task/run_loop.h
           include/neixx/task/sequence_manager.h
           include/neixx/task/task_runner.h
           include/neixx/task/task_traits.h
+          include/neixx/task/thread_task_runner_handle.h
           src/internal/task_queue.cpp
           src/message_loop/message_pump_default.cpp
+          src/run_loop.cpp
           src/sequence_manager.cpp
           src/sequence_token.cpp
           src/task_runner.cpp
+          src/thread_task_runner_handle.cpp
 )
 
 target_include_directories(
