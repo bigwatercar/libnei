@@ -17,39 +17,49 @@ TEST(RunLoopTest, QuitClosureStopsRun) {
   ASSERT_TRUE(runner);
 
   std::atomic<int> executed{0};
-  std::atomic<bool> test_done{false};
-  std::thread run_thread([&runner, &executed, &test_done]() {
+  std::atomic<bool> inner_loop_completed{false};
+  std::thread run_thread([&manager]() {
+    manager.Run();
+  });
+
+  runner->PostTask(FROM_HERE, [&runner, &executed, &inner_loop_completed, &manager]() {
+    // RunLoop must be created while the current thread is inside manager.Run().
     RunLoop loop;
     runner->PostTask(FROM_HERE, [&executed]() { executed.fetch_add(1); });
     runner->PostTask(FROM_HERE, loop.QuitClosure());
     loop.Run();
-    test_done.store(true);
+    inner_loop_completed.store(true);
+    manager.Quit();
   });
 
   run_thread.join();
   EXPECT_EQ(executed.load(), 1);
-  EXPECT_TRUE(test_done.load());
+  EXPECT_TRUE(inner_loop_completed.load());
 }
 
 TEST(ThreadTaskRunnerHandleTest, GetReturnsRunnerWhenSequenceManagerBound) {
   SequenceManager manager(std::make_unique<MessagePumpDefault>());
+  auto bootstrap_runner = manager.CreateTaskRunner();
+  ASSERT_TRUE(bootstrap_runner);
 
   std::atomic<int> executed{0};
-  std::atomic<bool> test_done{false};
-  std::thread run_thread([&executed, &test_done]() {
+  std::atomic<bool> got_runner{false};
+  std::thread run_thread([&manager]() {
+    manager.Run();
+  });
+
+  bootstrap_runner->PostTask(FROM_HERE, [&executed, &got_runner, &manager]() {
     auto runner = ThreadTaskRunnerHandle::Get();
     ASSERT_TRUE(runner);
+    got_runner.store(true);
 
-    RunLoop loop;
     runner->PostTask(FROM_HERE, [&executed]() { executed.fetch_add(1); });
-    runner->PostTask(FROM_HERE, loop.QuitClosure());
-    loop.Run();
-    test_done.store(true);
+    runner->PostTask(FROM_HERE, [&manager]() { manager.Quit(); });
   });
 
   run_thread.join();
   EXPECT_EQ(executed.load(), 1);
-  EXPECT_TRUE(test_done.load());
+  EXPECT_TRUE(got_runner.load());
 }
 
 TEST(ThreadTaskRunnerHandleTest, GetReturnsNullptrWhenNoSequenceManager) {
