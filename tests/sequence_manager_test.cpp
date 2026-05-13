@@ -178,6 +178,28 @@ TEST(SequenceManagerTest, CurrentThreadBindingIsClearedAfterRunReturns) {
   EXPECT_EQ(current_after_run.load(), nullptr);
 }
 
+TEST(SequenceManagerTest, ConstructorBindsCurrentThreadWhenTlsIsEmpty) {
+  EXPECT_EQ(SequenceManager::Current(), nullptr);
+
+  {
+    SequenceManager manager(std::make_unique<MessagePumpDefault>());
+    EXPECT_EQ(SequenceManager::Current(), &manager);
+  }
+
+  EXPECT_EQ(SequenceManager::Current(), nullptr);
+}
+
+TEST(SequenceManagerTest, DefaultTaskRunnerIsCached) {
+  SequenceManager manager(std::make_unique<MessagePumpDefault>());
+
+  scoped_refptr<TaskRunner> first = manager.GetDefaultTaskRunner();
+  scoped_refptr<TaskRunner> second = manager.GetDefaultTaskRunner();
+
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+  EXPECT_EQ(first.get(), second.get());
+}
+
 TEST(SequenceManagerTest, HighPriorityQueuesReceiveMoreSelectorSlotsThanLowPriorityQueues) {
   TaskTraits high_traits;
   high_traits.priority = TaskPriority::kHigh;

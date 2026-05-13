@@ -82,7 +82,35 @@ class SequenceManager::Impl {
     return state != nullptr ? state->manager : nullptr;
   }
 
+  void BindToCurrentThreadIfUnbound() {
+    SequenceManagerThreadState* state = GetSequenceManagerThreadState();
+    if (state != nullptr && state->manager != nullptr) {
+      return;
+    }
+    (void)BindToCurrentThread();
+  }
+
   scoped_refptr<TaskRunner> CreateTaskRunner(const TaskTraits& traits) {
+    AutoLock lock(lock_);
+    return CreateTaskRunnerLocked(traits);
+  }
+
+  scoped_refptr<TaskRunner> GetDefaultTaskRunner() {
+    AutoLock lock(lock_);
+    if (is_shutdown_) {
+      return nullptr;
+    }
+    if (!default_task_runner_) {
+      default_task_runner_ = CreateTaskRunnerLocked(TaskTraits());
+    }
+    return default_task_runner_;
+  }
+
+  scoped_refptr<TaskRunner> CreateTaskRunnerLocked(const TaskTraits& traits) {
+    if (is_shutdown_) {
+      return nullptr;
+    }
+
     std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(traits);
     internal::TaskQueue* raw_queue = queue.get();
     queue->SetOnTaskPostedCallback([this, raw_queue]() {
@@ -95,14 +123,8 @@ class SequenceManager::Impl {
       }
     });
 
-    {
-      AutoLock lock(lock_);
-      if (is_shutdown_) {
-        return nullptr;
-      }
-      queues_.push_back(std::move(queue));
-      RebuildQueueViewLocked();
-    }
+    queues_.push_back(std::move(queue));
+    RebuildQueueViewLocked();
 
     return TaskRunner::Create(raw_queue, traits);
   }
@@ -138,6 +160,7 @@ class SequenceManager::Impl {
         return;
       }
       is_shutdown_ = true;
+      default_task_runner_ = nullptr;
       next_priority_index_ = 0;
       queues_to_shutdown.swap(queues_);
       RebuildQueueViewLocked();
@@ -396,10 +419,13 @@ class SequenceManager::Impl {
   std::size_t low_priority_queue_index_ = 0;
   std::size_t next_priority_index_ = 0;
   bool is_shutdown_ = false;
+  scoped_refptr<TaskRunner> default_task_runner_;
 };
 
 SequenceManager::SequenceManager(std::unique_ptr<MessagePump> pump)
-    : impl_(std::make_unique<Impl>(this, std::move(pump))) {}
+    : impl_(std::make_unique<Impl>(this, std::move(pump))) {
+  impl_->BindToCurrentThreadIfUnbound();
+}
 
 SequenceManager::~SequenceManager() {
   Shutdown();
@@ -411,6 +437,10 @@ SequenceManager* SequenceManager::Current() {
 
 scoped_refptr<TaskRunner> SequenceManager::CreateTaskRunner(const TaskTraits& traits) {
   return impl_->CreateTaskRunner(traits);
+}
+
+scoped_refptr<TaskRunner> SequenceManager::GetDefaultTaskRunner() {
+  return impl_->GetDefaultTaskRunner();
 }
 
 void SequenceManager::Run() {

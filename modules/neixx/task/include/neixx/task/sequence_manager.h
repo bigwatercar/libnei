@@ -25,6 +25,7 @@ class NEI_API SequenceManager final : public MessagePump::Delegate {
   SequenceManager& operator=(SequenceManager&&) = delete;
 
   scoped_refptr<TaskRunner> CreateTaskRunner(const TaskTraits& traits = TaskTraits());
+  scoped_refptr<TaskRunner> GetDefaultTaskRunner();
 
   void Run();
   void Quit();
