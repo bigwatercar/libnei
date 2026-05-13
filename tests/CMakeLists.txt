@@ -41,6 +41,7 @@ add_executable(
   task_sequence_token_test.cpp
   task_internal_task_test.cpp
   task_runner_task_queue_test.cpp
+  thread_pool_test.cpp
   thread_local_storage_test.cpp
   split_string_test.cpp
   string_number_conversions_test.cpp
