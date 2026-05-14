@@ -3,6 +3,7 @@
 #include <atomic>
 #include <array>
 #include <chrono>
+#include <string>
 #include <vector>
 
 #include <neixx/common/location.h>
@@ -250,8 +251,123 @@ TEST(ThreadPoolTest, MultiRunnerMixedDelayedTasksAllComplete) {
   pool.Shutdown();
 }
 
+TEST(ThreadPoolTest, TracingCapturesQueueingDelayAndExecutionCounts) {
+  TaskRunner::ResetTracingStatsForTesting();
+
+  ThreadPool pool(1);
+  scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  runner->PostDelayedTask(FROM_HERE,
+                          [&done]() {
+                            done.Signal();
+                          },
+                          TimeDelta::FromMilliseconds(80));
+
+  ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(3000)));
+
+  const TaskRunnerTracingStats stats = TaskRunner::GetTracingStatsForTesting();
+  EXPECT_GE(stats.posted_tasks, 1);
+  EXPECT_GE(stats.started_tasks, 1);
+  EXPECT_GE(stats.completed_tasks, 1);
+  EXPECT_GT(stats.total_queue_delay_us, 0);
+  EXPECT_GT(stats.max_queue_delay_us, 0);
+
+  pool.Shutdown();
+}
+
+TEST(ThreadPoolTest, PostTaskReturnsTrueOnActiveQueue) {
+  ThreadPool pool(1);
+  scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  const bool posted = runner->PostTask(FROM_HERE, [&done]() { done.Signal(); });
+  EXPECT_TRUE(posted);
+  ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(3000)));
+
+  pool.Shutdown();
+}
+
+TEST(ThreadPoolTest, PostTaskReturnsFalseAfterQueueShutdown) {
+  ThreadPool pool(1);
+  scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  pool.Shutdown();
+
+  // After shutdown the underlying TaskQueue is destroyed; the WeakPtr has
+  // expired so PostTask must return false.
+  const bool posted = runner->PostTask(FROM_HERE, []() {});
+  EXPECT_FALSE(posted);
+}
+
+TEST(ThreadPoolTest, ShutdownWithTimeoutReturnsTrueOnNormalExit) {
+  ThreadPool pool(2);
+  scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  runner->PostTask(FROM_HERE, [&done]() { done.Signal(); });
+  ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(3000)));
+
+  // Workers should exit cleanly well within a 5-second budget.
+  const bool all_exited = pool.Shutdown(TimeDelta::FromSeconds(5));
+  EXPECT_TRUE(all_exited);
+}
+
 }  // namespace
 }  // namespace nei
+
+  TEST(ThreadPoolTest, TaskObserverReceivesCallbacksWithPostedFrom) {
+    struct TestObserver : nei::TaskObserver {
+      std::atomic<int> started{0};
+      std::atomic<int> completed{0};
+      std::atomic<bool> had_posted_from{false};
+
+      void OnTaskStarted(const nei::internal::Task& task, nei::TimeDelta) override {
+        started.fetch_add(1, std::memory_order_relaxed);
+        if (!task.posted_from.is_null()) {
+          had_posted_from.store(true, std::memory_order_relaxed);
+          const std::string loc = task.posted_from.ToString();
+          (void)loc;
+        }
+      }
+      void OnTaskCompleted(const nei::internal::Task&, nei::TimeDelta) override {
+        completed.fetch_add(1, std::memory_order_relaxed);
+      }
+    };
+
+    TestObserver observer;
+    nei::ThreadPool pool(1);
+    pool.SetTaskObserver(&observer);
+
+    nei::scoped_refptr<nei::TaskRunner> runner = pool.CreateSequencedTaskRunner();
+    ASSERT_TRUE(runner);
+
+    nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+    runner->PostTask(FROM_HERE, [&done]() { done.Signal(); });
+    ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(3000)));
+
+    pool.SetTaskObserver(nullptr);
+    pool.Shutdown();
+
+    EXPECT_GE(observer.started.load(), 1);
+    EXPECT_GE(observer.completed.load(), 1);
+    EXPECT_TRUE(observer.had_posted_from.load());
+  }
+
+  TEST(ThreadPoolTest, LocationToStringIsNonEmptyForFromHere) {
+    const nei::Location loc = FROM_HERE;
+    EXPECT_FALSE(loc.ToString().empty());
+    EXPECT_NE(loc.ToString(), "unknown");
+  }
+
+  TEST(ThreadPoolTest, LocationToStringIsUnknownForDefault) {
+    EXPECT_EQ(nei::Location{}.ToString(), "unknown");
+  }
 
 // ============================================================================
 // ThreadPoolInstance (global singleton) tests

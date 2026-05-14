@@ -9,6 +9,12 @@ target_link_libraries(string_append_bench PRIVATE nei::all)
 add_executable(flake_id_bench flake_id_bench.c)
 target_link_libraries(flake_id_bench PRIVATE nei::all)
 
+add_executable(task_thread_bench task_thread_bench.cpp)
+target_link_libraries(task_thread_bench PRIVATE nei::all)
+
+add_executable(task_priority_perf_demo task_priority_perf_demo.cpp)
+target_link_libraries(task_priority_perf_demo PRIVATE nei::all)
+
 option(NEI_BENCHMARK_SPDLOG
        "Build log_bench_compare (NEI vs spdlog, FetchContent spdlog)" ON
 )
@@ -57,6 +63,8 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_copy_runtime_dlls(log_bench)
   nei_copy_runtime_dlls(string_append_bench)
   nei_copy_runtime_dlls(flake_id_bench)
+  nei_copy_runtime_dlls(task_thread_bench)
+  nei_copy_runtime_dlls(task_priority_perf_demo)
 
   if(NEI_BENCHMARK_SPDLOG AND TARGET log_bench_compare)
     nei_copy_runtime_dlls(log_bench_compare)

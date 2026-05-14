@@ -31,7 +31,8 @@ class TaskQueue::Impl {
       return false;
     }
 
-    OnTaskPostedCallback callback_to_call;
+    OnTaskPostedCallback posted_callback_to_call;
+    OnTaskEnqueuedCallback enqueued_callback_to_call;
     {
       AutoLock lock(lock_);
       if (shut_down_) {
@@ -43,13 +44,19 @@ class TaskQueue::Impl {
 
       // Capture callback if queue was empty and callback is set
       if (was_empty && on_task_posted_callback_) {
-        callback_to_call = on_task_posted_callback_;
+        posted_callback_to_call = on_task_posted_callback_;
+      }
+      if (on_task_enqueued_callback_) {
+        enqueued_callback_to_call = on_task_enqueued_callback_;
       }
     }  // Release lock before calling callback
 
     // Call callback outside lock to avoid deadlock
-    if (callback_to_call) {
-      callback_to_call();
+    if (enqueued_callback_to_call) {
+      enqueued_callback_to_call();
+    }
+    if (posted_callback_to_call) {
+      posted_callback_to_call();
     }
 
     return true;
@@ -61,7 +68,8 @@ class TaskQueue::Impl {
     }
 
     const TimeTicks delayed_run_time = task.delayed_run_time;
-    OnTaskPostedCallback callback_to_call;
+    OnTaskPostedCallback posted_callback_to_call;
+    OnTaskEnqueuedCallback enqueued_callback_to_call;
     {
       AutoLock lock(lock_);
       if (shut_down_) {
@@ -76,12 +84,18 @@ class TaskQueue::Impl {
 
       const bool should_notify = !had_delayed_tasks || delayed_run_time < previous_head;
       if (should_notify && on_task_posted_callback_) {
-        callback_to_call = on_task_posted_callback_;
+        posted_callback_to_call = on_task_posted_callback_;
+      }
+      if (on_task_enqueued_callback_) {
+        enqueued_callback_to_call = on_task_enqueued_callback_;
       }
     }
 
-    if (callback_to_call) {
-      callback_to_call();
+    if (enqueued_callback_to_call) {
+      enqueued_callback_to_call();
+    }
+    if (posted_callback_to_call) {
+      posted_callback_to_call();
     }
 
     return true;
@@ -175,6 +189,11 @@ class TaskQueue::Impl {
     on_task_posted_callback_ = std::move(callback);
   }
 
+  void SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback) {
+    AutoLock lock(lock_);
+    on_task_enqueued_callback_ = std::move(callback);
+  }
+
  private:
   mutable Lock lock_;
   TaskTraits traits_;
@@ -183,6 +202,7 @@ class TaskQueue::Impl {
   TaskMinHeap immediate_incoming_queue_;
   TaskMinHeap delayed_incoming_queue_;
   OnTaskPostedCallback on_task_posted_callback_;
+  OnTaskEnqueuedCallback on_task_enqueued_callback_;
   WeakPtrFactory<TaskQueue> weak_factory_;
 };
 
@@ -241,6 +261,10 @@ const TaskTraits& TaskQueue::traits() const {
 
 void TaskQueue::SetOnTaskPostedCallback(OnTaskPostedCallback callback) {
   impl_->SetOnTaskPostedCallback(std::move(callback));
+}
+
+void TaskQueue::SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback) {
+  impl_->SetOnTaskEnqueuedCallback(std::move(callback));
 }
 
 WeakPtr<TaskQueue> TaskQueue::GetWeakPtr() {

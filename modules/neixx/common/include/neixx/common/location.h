@@ -4,6 +4,7 @@
 #define NEI_COMMON_LOCATION_H
 
 #include <cstdint>
+#include <string>
 
 #include <nei/macros/nei_export.h>
 
@@ -41,6 +42,16 @@ public:
 
   constexpr bool is_null() const noexcept {
     return file_name_ == nullptr;
+  }
+
+  // Returns a human-readable representation: "function@file:line".
+  // Returns "unknown" if the location was default-constructed.
+  std::string ToString() const {
+    if (is_null()) {
+      return "unknown";
+    }
+    return std::string(function_name_) + "@" +
+           std::string(file_name_) + ":" + std::to_string(line_);
   }
 
 private:

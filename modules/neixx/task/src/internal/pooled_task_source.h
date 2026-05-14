@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #ifndef NEIXX_TASK_INTERNAL_POOLED_TASK_SOURCE_H_
 #define NEIXX_TASK_INTERNAL_POOLED_TASK_SOURCE_H_
@@ -48,6 +48,19 @@ class PooledTaskSource final {
 
   void Shutdown();
 
+  // Called once per task posted to any registered queue (from the
+  // OnTaskPostedCallback). Increments the global pending-task counter.
+  void NotifyTaskPosted();
+
+  // Called once per task taken from a queue by a worker thread.
+  // Decrements the global pending-task counter.
+  void NotifyTaskConsumed();
+
+  // Returns the approximate number of tasks that have been posted but not yet
+  // started. Useful for backpressure detection. May briefly go slightly
+  // negative around shutdown.
+  std::int64_t GetTotalTaskCount() const;
+
  private:
   struct QueueState {
     bool queued = false;
@@ -80,6 +93,7 @@ class PooledTaskSource final {
   std::uint64_t enqueue_order_ = 0;
   std::priority_queue<QueueEntry, std::vector<QueueEntry>, QueueEntryLess> heap_;
   std::unordered_map<TaskQueue*, QueueState> states_;
+  std::atomic<std::int64_t> total_task_count_{0};
 };
 
 }  // namespace internal

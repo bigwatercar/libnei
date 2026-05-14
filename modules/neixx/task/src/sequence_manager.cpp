@@ -8,6 +8,7 @@
 #include <neixx/synchronization/lock.h>
 #include <neixx/task/internal/task.h>
 #include <neixx/task/internal/task_queue.h>
+#include <neixx/task/internal/task_tracing.h>
 #include <neixx/task/message_loop/message_pump_default.h>
 #include <neixx/threading/thread_local_storage.h>
 
@@ -187,7 +188,9 @@ class SequenceManager::Impl {
         continue;
       }
       ran_any = true;
+      internal::RecordTaskExecutionStarted(task);
       std::move(task.task).Run();
+      internal::RecordTaskExecutionCompleted();
     }
     return ran_any;
   }

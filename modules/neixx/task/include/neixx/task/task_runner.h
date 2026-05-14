@@ -3,6 +3,8 @@
 #ifndef NEIXX_TASK_TASK_RUNNER_H_
 #define NEIXX_TASK_TASK_RUNNER_H_
 
+#include <cstdint>
+
 #include <neixx/common/location.h>
 #include <neixx/common/time.h>
 #include <neixx/functional/callback.h>
@@ -19,19 +21,30 @@ namespace internal {
 class TaskQueue;
 }  // namespace internal
 
+struct NEI_API TaskRunnerTracingStats {
+  std::int64_t weak_ptr_expired_posts = 0;
+  std::int64_t posted_tasks = 0;
+  std::int64_t started_tasks = 0;
+  std::int64_t completed_tasks = 0;
+  std::int64_t cancelled_before_run_tasks = 0;
+  std::int64_t total_queue_delay_us = 0;
+  std::int64_t max_queue_delay_us = 0;
+};
+
 class NEI_API TaskRunner : public RefCountedThreadSafe<TaskRunner> {
  public:
   virtual ~TaskRunner() = default;
 
-  void PostTask(const Location& from_here, OnceClosure task);
+  // Returns true if the task was successfully enqueued.
+  bool PostTask(const Location& from_here, OnceClosure task);
   // delay <= 0 is treated as immediate work and is posted without entering
-  // the delayed queue.
-  void PostDelayedTask(const Location& from_here, OnceClosure task, TimeDelta delay);
+  // the delayed queue. Returns true if successfully enqueued.
+  bool PostDelayedTask(const Location& from_here, OnceClosure task, TimeDelta delay);
 
-  virtual void PostTaskWithTraits(const Location& from_here,
+  virtual bool PostTaskWithTraits(const Location& from_here,
                                   const TaskTraits& traits,
                                   OnceClosure task) = 0;
-  virtual void PostDelayedTaskWithTraits(const Location& from_here,
+  virtual bool PostDelayedTaskWithTraits(const Location& from_here,
                                          const TaskTraits& traits,
                                          OnceClosure task,
                                          TimeDelta delay) = 0;
@@ -43,6 +56,10 @@ class NEI_API TaskRunner : public RefCountedThreadSafe<TaskRunner> {
   // Intended for tests and diagnostics.
   static std::int64_t GetDelayedOverflowFallbackCountForTesting();
   static void ResetDelayedOverflowFallbackCountForTesting();
+
+  // Tracing snapshot helpers for tests/diagnostics.
+  static TaskRunnerTracingStats GetTracingStatsForTesting();
+  static void ResetTracingStatsForTesting();
 
  protected:
   explicit TaskRunner(const TaskTraits& traits = TaskTraits()) : traits_(traits) {}

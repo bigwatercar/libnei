@@ -18,6 +18,7 @@ namespace nei {
 namespace internal {
 
 using OnTaskPostedCallback = std::function<void()>;
+using OnTaskEnqueuedCallback = std::function<void()>;
 
 class NEI_API TaskQueue final {
  public:
@@ -48,6 +49,7 @@ class NEI_API TaskQueue final {
 
   WeakPtr<TaskQueue> GetWeakPtr();
   void SetOnTaskPostedCallback(OnTaskPostedCallback callback);
+  void SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback);
 
  private:
   std::unique_ptr<Impl> impl_;

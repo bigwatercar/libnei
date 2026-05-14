@@ -339,12 +339,17 @@ TEST(TaskRunnerTest, PostTaskAfterQueueShutdownIsIgnored) {
 }
 
 TEST(TaskRunnerTest, PostTaskAfterQueueDestroyedDoesNotCrash) {
+  TaskRunner::ResetTracingStatsForTesting();
+
   auto queue = std::make_unique<internal::TaskQueue>();
   auto runner = TaskRunner::Create(queue.get());
   ASSERT_TRUE(runner);
 
   queue.reset();
   runner->PostTask(FROM_HERE, []() {});
+
+  const TaskRunnerTracingStats stats = TaskRunner::GetTracingStatsForTesting();
+  EXPECT_EQ(stats.weak_ptr_expired_posts, 1);
   SUCCEED();
 }
 

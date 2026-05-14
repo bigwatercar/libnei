@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <string>
@@ -10,10 +12,14 @@
 
 #include "internal/delayed_task_manager.h"
 #include "internal/pooled_task_source.h"
+#include <nei/log/log.h>
 #include <neixx/task/scoped_blocking_call.h>
 #include <neixx/task/internal/task.h>
+#include <neixx/task/internal/task_tracing.h>
 #include <neixx/task/internal/task_queue.h>
+#include <neixx/task/task_observer.h>
 #include <neixx/threading/platform_thread.h>
+#include <neixx/synchronization/waitable_event.h>
 
 namespace nei {
 namespace {
@@ -22,6 +28,8 @@ constexpr std::size_t kDefaultWorkerCount = 4;
 // Compensation workers can grow the pool up to this multiple of the base count.
 constexpr std::size_t kMaxBlockingMultiplier = 2;
 constexpr std::size_t kMaxTasksPerQueueTurn = 8;
+// Warn when this many tasks are pending in the pool (backpressure hint).
+constexpr std::int64_t kBackpressureWarningThreshold = 10'000;
 
 class WorkerThread final : public PlatformThread::Delegate {
  public:
@@ -29,12 +37,14 @@ class WorkerThread final : public PlatformThread::Delegate {
 
   WorkerThread(internal::PooledTaskSource* source,
                internal::DelayedTaskManager* delayed_task_manager,
-               BlockingCb on_blocking_begin,
+                std::atomic<TaskObserver*>* task_observer,
+                BlockingCb on_blocking_begin,
                BlockingCb on_blocking_end,
                const std::string& name)
       : source_(source),
         delayed_task_manager_(delayed_task_manager),
-        on_blocking_begin_(std::move(on_blocking_begin)),
+              task_observer_(task_observer),
+              on_blocking_begin_(std::move(on_blocking_begin)),
         on_blocking_end_(std::move(on_blocking_end)),
         name_(name) {}
 
@@ -46,6 +56,21 @@ class WorkerThread final : public PlatformThread::Delegate {
 
   void Join() {
     (void)PlatformThread::Join(&handle_);
+  }
+
+  // Returns true if the thread exited within |timeout|.
+  // A zero/negative timeout means wait indefinitely (same as Join()).
+  bool TryJoin(TimeDelta timeout) {
+    if (!timeout.is_positive()) {
+      Join();
+      return true;
+    }
+    const auto ms = std::chrono::milliseconds(timeout.InMilliseconds());
+    if (!exit_event_.TimedWait(ms)) {
+      return false;  // timed out; thread may still be running
+    }
+    Join();  // thread has already exited; returns immediately
+    return true;
   }
 
  private:
@@ -66,8 +91,9 @@ class WorkerThread final : public PlatformThread::Delegate {
     for (;;) {
       internal::TaskQueue* queue = source_->GetNextTaskQueue();
       if (queue == nullptr) {
-        // Pool is shutting down; clear the hook before exiting.
+        // Pool is shutting down; clear the hook and signal exit before returning.
         internal::SetCurrentBlockingCallback(nullptr);
+        exit_event_.Signal();
         return;
       }
 
@@ -77,23 +103,48 @@ class WorkerThread final : public PlatformThread::Delegate {
         if (!queue->TakeImmediateTask(&task)) {
           break;
         }
-        if (!task.task) {
-          continue;
-        }
+          // Decrement backpressure counter regardless of whether task has a closure.
+          source_->NotifyTaskConsumed();
+          if (!task.task) {
+            continue;
+          }
 
-        // If the task is declared as potentially blocking, notify the pool so
-        // it can spawn a compensation worker before we enter the blocking call.
-        const bool may_block = task.traits.may_block;
-        if (may_block && on_blocking_begin_) {
-          on_blocking_begin_();
-        }
+          // Compute queue wait time for the observer.
+            const TimeDelta queue_delay =
+              task.enqueue_time.is_null()
+                ? TimeDelta()
+                : TimeTicks::Now() - task.enqueue_time;
 
-        std::move(task.task).Run();
+          // If the task is declared as potentially blocking, notify the pool so
+          // it can spawn a compensation worker before we enter the blocking call.
+          const bool may_block = task.traits.may_block;
+          if (may_block && on_blocking_begin_) {
+            on_blocking_begin_();
+          }
 
-        if (may_block && on_blocking_end_) {
-          on_blocking_end_();
+          internal::RecordTaskExecutionStarted(task);
+
+          TaskObserver* observer =
+              task_observer_ ? task_observer_->load(std::memory_order_acquire)
+                             : nullptr;
+          if (observer) {
+            observer->OnTaskStarted(task, queue_delay);
+          }
+
+          const TimeTicks run_start = TimeTicks::Now();
+          std::move(task.task).Run();
+          const TimeDelta run_duration = TimeTicks::Now() - run_start;
+
+          internal::RecordTaskExecutionCompleted();
+
+          if (observer) {
+            observer->OnTaskCompleted(task, run_duration);
+          }
+
+          if (may_block && on_blocking_end_) {
+            on_blocking_end_();
+          }
         }
-      }
 
       source_->OnTaskQueueProcessed(queue);
       if (delayed_task_manager_ != nullptr) {
@@ -104,10 +155,12 @@ class WorkerThread final : public PlatformThread::Delegate {
 
   internal::PooledTaskSource* source_ = nullptr;
   internal::DelayedTaskManager* delayed_task_manager_ = nullptr;
+    std::atomic<TaskObserver*>* task_observer_ = nullptr;
   BlockingCb on_blocking_begin_;
   BlockingCb on_blocking_end_;
   std::string name_;
   PlatformThread::Handle handle_;
+  WaitableEvent exit_event_{WaitableEvent::ResetPolicy::kManual, false};
 };
 
 }  // namespace
@@ -127,6 +180,10 @@ class ThreadPool::Impl {
     Shutdown();
   }
 
+    void SetTaskObserver(TaskObserver* observer) {
+        task_observer_.store(observer, std::memory_order_release);
+    }
+
   scoped_refptr<TaskRunner> CreateSequencedTaskRunner(const TaskTraits& traits) {
     AutoLock lock(lock_);
     if (is_shutdown_) {
@@ -139,6 +196,24 @@ class ThreadPool::Impl {
     task_source_.RegisterTaskQueue(raw_queue);
     delayed_task_manager_.AddQueue(raw_queue);
 
+    raw_queue->SetOnTaskEnqueuedCallback([this]() {
+      task_source_.NotifyTaskPosted();
+      const std::int64_t count = task_source_.GetTotalTaskCount();
+      if (count >= kBackpressureWarningThreshold
+          && !backpressure_warning_emitted_.exchange(true, std::memory_order_relaxed)) {
+        std::fprintf(stderr,
+                     "[ThreadPool] Backpressure: %lld pending tasks (threshold=%lld). Producer may be outpacing consumers.\n",
+                     static_cast<long long>(count),
+                     static_cast<long long>(kBackpressureWarningThreshold));
+        std::fflush(stderr);
+        NEI_LOG_WARN(
+            "[ThreadPool] Backpressure: %lld pending tasks "
+            "(threshold=%lld). Producer may be outpacing consumers.",
+            static_cast<long long>(count),
+            static_cast<long long>(kBackpressureWarningThreshold));
+      }
+    });
+
     raw_queue->SetOnTaskPostedCallback([this, raw_queue]() {
       task_source_.ReEnqueueTaskQueue(raw_queue);
       delayed_task_manager_.OnQueueUpdated(raw_queue);
@@ -148,14 +223,14 @@ class ThreadPool::Impl {
     return TaskRunner::Create(raw_queue, traits);
   }
 
-  void Shutdown() {
+  bool Shutdown(TimeDelta timeout = TimeDelta()) {
     std::vector<std::unique_ptr<internal::TaskQueue>> queues_to_shutdown;
     std::vector<std::unique_ptr<WorkerThread>> workers_to_join;
 
     {
       AutoLock lock(lock_);
       if (is_shutdown_) {
-        return;
+        return true;
       }
       is_shutdown_ = true;
 
@@ -173,9 +248,24 @@ class ThreadPool::Impl {
 
     task_source_.Shutdown();
 
-    for (auto& worker : workers_to_join) {
-      worker->Join();
+    if (!timeout.is_positive()) {
+      // Wait indefinitely for all workers.
+      for (auto& worker : workers_to_join) {
+        worker->Join();
+      }
+      return true;
     }
+
+    // Deadline-based timed join: distribute the remaining budget per worker.
+    const TimeTicks deadline = TimeTicks::Now() + timeout;
+    bool all_exited = true;
+    for (auto& worker : workers_to_join) {
+      const TimeDelta remaining = deadline - TimeTicks::Now();
+      if (!remaining.is_positive() || !worker->TryJoin(remaining)) {
+        all_exited = false;
+      }
+    }
+    return all_exited;
   }
 
   std::size_t worker_count() const {
@@ -248,7 +338,8 @@ class ThreadPool::Impl {
         is_compensation ? "nei-pool-comp-" : "nei-thread-pool-";
     return std::make_unique<WorkerThread>(
         &task_source_, &delayed_task_manager_,
-        [this]() { OnWorkerBeganBlocking(); },
+                          &task_observer_,
+                          [this]() { OnWorkerBeganBlocking(); },
         [this]() { OnWorkerEndedBlocking(); },
         prefix + std::to_string(idx));
   }
@@ -259,8 +350,10 @@ class ThreadPool::Impl {
   std::size_t worker_count_ = 0;
   std::size_t max_worker_count_ = 0;
   std::atomic<std::size_t> blocking_worker_count_{0};
+  std::atomic<bool> backpressure_warning_emitted_{false};
   bool is_shutdown_ = false;
-  std::vector<std::unique_ptr<internal::TaskQueue>> queues_;
+                        std::atomic<TaskObserver*> task_observer_{nullptr};
+                        std::vector<std::unique_ptr<internal::TaskQueue>> queues_;
   std::vector<std::unique_ptr<WorkerThread>> workers_;
 };
 
@@ -273,12 +366,16 @@ scoped_refptr<TaskRunner> ThreadPool::CreateSequencedTaskRunner(const TaskTraits
   return impl_->CreateSequencedTaskRunner(traits);
 }
 
-void ThreadPool::Shutdown() {
-  impl_->Shutdown();
+bool ThreadPool::Shutdown(TimeDelta timeout) {
+  return impl_->Shutdown(timeout);
 }
 
 std::size_t ThreadPool::worker_count() const {
   return impl_->worker_count();
 }
+
+  void ThreadPool::SetTaskObserver(TaskObserver* observer) {
+    impl_->SetTaskObserver(observer);
+  }
 
 }  // namespace nei

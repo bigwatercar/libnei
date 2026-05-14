@@ -201,5 +201,17 @@ bool PooledTaskSource::EnqueueLocked(TaskQueue* queue) {
   return true;
 }
 
+  void PooledTaskSource::NotifyTaskPosted() {
+    total_task_count_.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  void PooledTaskSource::NotifyTaskConsumed() {
+    total_task_count_.fetch_sub(1, std::memory_order_relaxed);
+  }
+
+  std::int64_t PooledTaskSource::GetTotalTaskCount() const {
+    return total_task_count_.load(std::memory_order_relaxed);
+  }
+
 }  // namespace internal
 }  // namespace nei

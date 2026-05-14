@@ -14,6 +14,7 @@ Task MakeTask(const TimeTicks& delayed_run_time,
   return Task{
       OnceCallback(),
       Location{"task_internal_task_test.cpp", 1, "MakeTask"},
+      TimeTicks(),
       delayed_run_time,
       sequence_num,
       sequence_token,

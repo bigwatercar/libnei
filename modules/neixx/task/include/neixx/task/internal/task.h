@@ -17,6 +17,7 @@ namespace internal {
 struct Task {
   OnceCallback task;
   Location posted_from{"", 0, ""};
+  TimeTicks enqueue_time;
   TimeTicks delayed_run_time;
   std::int64_t sequence_num = 0;
   SequenceToken sequence_token;
