@@ -1,6 +1,8 @@
 ﻿target_sources(
   neixx
   PRIVATE include/neixx/task/internal/task.h
+          include/neixx/task/scoped_blocking_call.h
+          include/neixx/task/thread_pool_instance.h
           src/internal/delayed_task_manager.h
           src/internal/pooled_task_source.h
           include/neixx/task/internal/task_queue.h
@@ -12,6 +14,7 @@
           include/neixx/task/task_traits.h
           include/neixx/task/thread_pool.h
           include/neixx/task/thread_task_runner_handle.h
+          src/scoped_blocking_call.cpp
           src/internal/delayed_task_manager.cpp
           src/internal/pooled_task_source.cpp
           src/internal/task_queue.cpp
@@ -21,6 +24,7 @@
           src/sequence_token.cpp
           src/task_runner.cpp
           src/thread_pool.cpp
+          src/thread_pool_instance.cpp
           src/thread_task_runner_handle.cpp
 )
 

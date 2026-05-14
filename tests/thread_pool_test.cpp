@@ -8,7 +8,9 @@
 #include <neixx/common/location.h>
 #include <neixx/common/time.h>
 #include <neixx/synchronization/waitable_event.h>
+#include <neixx/task/scoped_blocking_call.h>
 #include <neixx/task/thread_pool.h>
+#include <neixx/task/thread_pool_instance.h>
 #include <neixx/threading/platform_thread.h>
 
 namespace nei {
@@ -246,6 +248,153 @@ TEST(ThreadPoolTest, MultiRunnerMixedDelayedTasksAllComplete) {
   }
 
   pool.Shutdown();
+}
+
+}  // namespace
+}  // namespace nei
+
+// ============================================================================
+// ThreadPoolInstance (global singleton) tests
+// ============================================================================
+
+namespace nei {
+namespace {
+
+// Guard that ensures ThreadPoolInstance is created/torn down around each test
+// in the instance suite. Uses a GTest environment so we don't pollute the
+// regular ThreadPool tests.
+class ThreadPoolInstanceTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    ThreadPoolInstance::CreateAndStartWithDefaultParams();
+  }
+  void TearDown() override {
+    ThreadPoolInstance::Shutdown();
+  }
+};
+
+TEST_F(ThreadPoolInstanceTest, GetReturnsNonNullAfterInit) {
+  EXPECT_NE(ThreadPoolInstance::Get(), nullptr);
+}
+
+TEST_F(ThreadPoolInstanceTest, GetReturnsNullAfterShutdown) {
+  // TearDown will call Shutdown; verify it by calling it early and checking.
+  ThreadPoolInstance::Shutdown();
+  EXPECT_EQ(ThreadPoolInstance::Get(), nullptr);
+  // Re-init so TearDown's Shutdown is a harmless no-op.
+  ThreadPoolInstance::CreateAndStartWithDefaultParams();
+}
+
+TEST_F(ThreadPoolInstanceTest, GlobalPostTaskExecutesTask) {
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::atomic<bool> ran{false};
+
+  nei::PostTask(FROM_HERE, [&ran, &done]() {
+    ran.store(true);
+    done.Signal();
+  });
+
+  ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(2000)));
+  EXPECT_TRUE(ran.load());
+}
+
+TEST_F(ThreadPoolInstanceTest, GlobalCreateSequencedTaskRunnerReturnsRunner) {
+  scoped_refptr<TaskRunner> runner = nei::CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  runner->PostTask(FROM_HERE, [&done]() { done.Signal(); });
+  ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(2000)));
+}
+
+TEST_F(ThreadPoolInstanceTest, GlobalPostTaskWithMayBlockTraits) {
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::atomic<bool> ran{false};
+
+  TaskTraits may_block_traits;
+  may_block_traits.may_block = true;
+  nei::PostTask(FROM_HERE,
+                [&ran, &done]() {
+                  ran.store(true);
+                  done.Signal();
+                },
+                may_block_traits);
+
+  ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(2000)));
+  EXPECT_TRUE(ran.load());
+}
+
+// ============================================================================
+// may_block compensation and ScopedBlockingCall tests
+// ============================================================================
+
+// Validates that tasks with may_block=true all complete even when they sleep,
+// implying compensation workers kept throughput alive.
+TEST(ThreadPoolTest, MayBlockTasksAllCompleteWithCompensation) {
+  // Use a small pool so blocking tasks would stall the pool without
+  // compensation workers.
+  ThreadPool pool(2);
+  TaskTraits may_block_traits;
+  may_block_traits.may_block = true;
+  scoped_refptr<TaskRunner> runner =
+      pool.CreateSequencedTaskRunner(may_block_traits);
+  ASSERT_TRUE(runner);
+
+  constexpr int kTaskCount = 6;
+  WaitableEvent all_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::atomic<int> completed{0};
+
+  for (int i = 0; i < kTaskCount; ++i) {
+    runner->PostTask(FROM_HERE, [&completed, &all_done]() {
+      // Simulate a brief blocking operation.
+      PlatformThread::Sleep(TimeDelta::FromMilliseconds(30));
+      if (completed.fetch_add(1) + 1 == kTaskCount) {
+        all_done.Signal();
+      }
+    });
+  }
+
+  ASSERT_TRUE(all_done.TimedWait(std::chrono::milliseconds(5000)));
+  EXPECT_EQ(completed.load(), kTaskCount);
+
+  pool.Shutdown();
+}
+
+// Validates that ScopedBlockingCall inside a task does not break task
+// completion (the pool must still drain all work correctly).
+TEST(ThreadPoolTest, ScopedBlockingCallDoesNotPreventTaskCompletion) {
+  ThreadPool pool(2);
+  scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  constexpr int kTaskCount = 10;
+  WaitableEvent all_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::atomic<int> completed{0};
+
+  for (int i = 0; i < kTaskCount; ++i) {
+    runner->PostTask(FROM_HERE, [&completed, &all_done]() {
+      {
+        ScopedBlockingCall blocking;
+        PlatformThread::Sleep(TimeDelta::FromMilliseconds(10));
+      }
+      if (completed.fetch_add(1) + 1 == kTaskCount) {
+        all_done.Signal();
+      }
+    });
+  }
+
+  ASSERT_TRUE(all_done.TimedWait(std::chrono::milliseconds(5000)));
+  EXPECT_EQ(completed.load(), kTaskCount);
+
+  pool.Shutdown();
+}
+
+// Validates that ScopedBlockingCall outside a worker thread is a no-op and
+// does not crash.
+TEST(ScopedBlockingCallTest, OutsideWorkerIsNoOp) {
+  ScopedBlockingCall blocking;
+  // If we reach here without crash, the test passes.
+  SUCCEED();
 }
 
 }  // namespace

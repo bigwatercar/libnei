@@ -19,6 +19,10 @@ enum class TaskShutdownBehavior {
 struct TaskTraits {
   TaskPriority priority = TaskPriority::kNormal;
   TaskShutdownBehavior shutdown_behavior = TaskShutdownBehavior::kDrain;
+  // Indicates the task may call blocking APIs (file I/O, mutexes, etc.).
+  // The thread pool will attempt to spawn a compensation worker to keep
+  // throughput high while this task blocks.
+  bool may_block = false;
 };
 
 }  // namespace nei
