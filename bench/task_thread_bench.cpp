@@ -18,6 +18,7 @@ namespace {
 
 constexpr std::uint32_t kDefaultTaskCount = 50000;
 std::atomic<std::uint64_t> g_sum_sink{0};
+std::atomic<std::uint64_t> g_executed_task_count{0};
 
 std::uint32_t ParseTaskCount(int argc, char* argv[]) {
   if (argc < 2) {
@@ -42,11 +43,16 @@ struct BenchmarkResult {
   std::chrono::duration<double, std::milli> total_elapsed{};
   std::uint32_t posted_ok = 0;
   std::uint32_t failed = 0;
+  bool sentinel_failed = false;
+  std::uint64_t executed_tasks = 0;
+  std::uint64_t expected_sum = 0;
   std::uint64_t sum = 0;
+  bool verification_ok = false;
 };
 
 void AddTaskBodyNoArgs() {
   // Keep payload minimal: one simple two-number addition.
+  g_executed_task_count.fetch_add(1, std::memory_order_relaxed);
   g_sum_sink.fetch_add(1 + 2, std::memory_order_relaxed);
 }
 
@@ -57,7 +63,8 @@ void SignalDone(nei::WaitableEvent* done_event) {
 }
 
 BenchmarkResult RunAddBenchmark(nei::TaskRunner& runner, std::uint32_t task_count) {
-  std::atomic<std::uint32_t> failed_posts(0);
+  std::atomic<std::uint32_t> failed_task_posts(0);
+  bool sentinel_failed = false;
   nei::WaitableEvent all_done(nei::WaitableEvent::ResetPolicy::kManual, false);
 
   const auto total_started_at = std::chrono::steady_clock::now();
@@ -69,7 +76,7 @@ BenchmarkResult RunAddBenchmark(nei::TaskRunner& runner, std::uint32_t task_coun
         FROM_HERE,
       nei::BindOnce(&AddTaskBodyNoArgs));
     if (!ok) {
-      failed_posts.fetch_add(1, std::memory_order_relaxed);
+      failed_task_posts.fetch_add(1, std::memory_order_relaxed);
     }
   }
 
@@ -79,7 +86,7 @@ BenchmarkResult RunAddBenchmark(nei::TaskRunner& runner, std::uint32_t task_coun
       FROM_HERE,
       nei::BindOnce(&SignalDone, &all_done));
   if (!sentinel_ok) {
-    failed_posts.fetch_add(1, std::memory_order_relaxed);
+    sentinel_failed = true;
     all_done.Signal();
   }
 
@@ -90,9 +97,14 @@ BenchmarkResult RunAddBenchmark(nei::TaskRunner& runner, std::uint32_t task_coun
   BenchmarkResult result;
   result.post_elapsed = post_finished_at - post_started_at;
   result.total_elapsed = total_finished_at - total_started_at;
-  result.failed = failed_posts.load(std::memory_order_relaxed);
+  result.failed = failed_task_posts.load(std::memory_order_relaxed);
+  result.sentinel_failed = sentinel_failed;
   result.posted_ok = task_count - result.failed;
+  result.executed_tasks = g_executed_task_count.load(std::memory_order_relaxed);
+  result.expected_sum = static_cast<std::uint64_t>(result.posted_ok) * 3;
   result.sum = g_sum_sink.load(std::memory_order_relaxed);
+  result.verification_ok =
+      (result.executed_tasks == result.posted_ok) && (result.sum == result.expected_sum);
   return result;
 }
 
@@ -118,9 +130,10 @@ int main(int argc, char* argv[]) {
   }
 
   const bool previous_tracing_enabled = nei::internal::IsTaskTracingEnabled();
-  nei::internal::SetTaskTracingEnabled(false);
+  nei::internal::SetTaskTracingEnabled(true);
 
   g_sum_sink.store(0, std::memory_order_relaxed);
+  g_executed_task_count.store(0, std::memory_order_relaxed);
   const BenchmarkResult result = RunAddBenchmark(*runner, task_count);
   nei::internal::SetTaskTracingEnabled(previous_tracing_enabled);
   thread.Stop();
@@ -138,8 +151,13 @@ int main(int argc, char* argv[]) {
   std::cout << std::fixed << std::setprecision(3);
   std::cout << "Thread::TaskRunner benchmark (minimal BindOnce args)" << '\n';
   std::cout << "tasks=" << task_count << ", posted_ok=" << result.posted_ok
-            << ", failed=" << result.failed << ", payload=add_two_numbers" << '\n';
+            << ", failed=" << result.failed
+            << ", sentinel_failed=" << (result.sentinel_failed ? 1 : 0)
+            << ", payload=add_two_numbers" << '\n';
   std::cout << "sum_sink=" << result.sum << '\n';
+  std::cout << "executed_tasks=" << result.executed_tasks
+            << ", expected_sum=" << result.expected_sum
+            << ", verify_ok=" << (result.verification_ok ? 1 : 0) << '\n';
   std::cout << "post_elapsed_ms=" << result.post_elapsed.count()
             << ", total_elapsed_ms=" << result.total_elapsed.count() << '\n';
   std::cout << "post_throughput=" << post_throughput << " tasks/sec"
@@ -148,5 +166,5 @@ int main(int argc, char* argv[]) {
             << ", avg_drain_ns_per_task=" << drain_ns_per_task
             << ", avg_total_ns_per_task=" << total_ns_per_task << '\n';
 
-  return result.failed == 0 ? 0 : 1;
+  return (result.failed == 0 && !result.sentinel_failed && result.verification_ok) ? 0 : 1;
 }
