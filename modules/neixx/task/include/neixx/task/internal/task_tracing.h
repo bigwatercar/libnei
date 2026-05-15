@@ -27,6 +27,10 @@ NEI_API void RecordTaskExecutionStarted(const Task& task);
 NEI_API void RecordTaskExecutionCompleted();
 NEI_API void RecordTaskCancelledBeforeRun();
 
+// Runtime toggle for task tracing overhead. Enabled by default.
+NEI_API bool IsTaskTracingEnabled();
+NEI_API void SetTaskTracingEnabled(bool enabled);
+
 NEI_API TaskTracingStats GetTaskTracingStatsForTesting();
 NEI_API void ResetTaskTracingStatsForTesting();
 

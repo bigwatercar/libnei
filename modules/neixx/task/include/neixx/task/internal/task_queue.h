@@ -35,6 +35,7 @@ class NEI_API TaskQueue final {
   bool PushImmediateTask(Task task);
   bool PushDelayedTask(Task task);
   bool TakeImmediateTask(Task* task);
+  std::size_t TakeImmediateTasks(Task* tasks, std::size_t max_tasks);
   bool TakeReadyDelayedTask(const TimeTicks& now, Task* task);
   std::size_t PromoteReadyDelayedTasks(const TimeTicks& now);
 

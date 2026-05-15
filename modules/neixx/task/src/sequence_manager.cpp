@@ -15,7 +15,11 @@
 namespace nei {
 namespace {
 
-constexpr std::size_t kMaxTasksPerDoWork = 8;
+// Larger batch reduces message-pump round trips and improves throughput for
+// task-heavy single-thread runners while preserving bounded fairness.
+constexpr std::size_t kMaxTasksPerDoWork = 64;
+constexpr std::size_t kSingleQueueTakeBatchSize = 256;
+constexpr std::size_t kSingleQueueMaxTasksPerDoWork = 4096;
 
 enum class PriorityBucket : std::size_t {
   kHigh = 0,
@@ -179,6 +183,48 @@ class SequenceManager::Impl {
   bool DoWork() {
     // Keep the first version conservative; we can make this dynamic later.
     bool ran_any = false;
+    const bool tracing_enabled = internal::IsTaskTracingEnabled();
+
+    internal::TaskQueue* single_queue_fast_path = nullptr;
+    {
+      AutoLock lock(lock_);
+      if (high_priority_queues_.empty() && low_priority_queues_.empty()
+          && normal_priority_queues_.size() == 1) {
+        single_queue_fast_path = normal_priority_queues_[0];
+      }
+    }
+
+    if (single_queue_fast_path != nullptr) {
+      internal::Task tasks[kSingleQueueTakeBatchSize];
+      std::size_t processed = 0;
+      while (processed < kSingleQueueMaxTasksPerDoWork) {
+        const std::size_t take_count = std::min(kSingleQueueTakeBatchSize,
+                                                kSingleQueueMaxTasksPerDoWork - processed);
+        const std::size_t count =
+            single_queue_fast_path->TakeImmediateTasks(tasks, take_count);
+        if (count == 0) {
+          break;
+        }
+
+        processed += count;
+        for (std::size_t i = 0; i < count; ++i) {
+          internal::Task& task = tasks[i];
+          if (!task.task) {
+            continue;
+          }
+          ran_any = true;
+          if (tracing_enabled) {
+            internal::RecordTaskExecutionStarted(task);
+          }
+          std::move(task.task).Run();
+          if (tracing_enabled) {
+            internal::RecordTaskExecutionCompleted();
+          }
+        }
+      }
+      return ran_any;
+    }
+
     for (std::size_t i = 0; i < kMaxTasksPerDoWork; ++i) {
       internal::Task task;
       if (!TakeNextImmediateTask(&task)) {
@@ -188,9 +234,13 @@ class SequenceManager::Impl {
         continue;
       }
       ran_any = true;
-      internal::RecordTaskExecutionStarted(task);
+      if (tracing_enabled) {
+        internal::RecordTaskExecutionStarted(task);
+      }
       std::move(task.task).Run();
-      internal::RecordTaskExecutionCompleted();
+      if (tracing_enabled) {
+        internal::RecordTaskExecutionCompleted();
+      }
     }
     return ran_any;
   }
@@ -327,55 +377,31 @@ class SequenceManager::Impl {
       return false;
     }
 
-    const std::shared_ptr<const std::vector<internal::TaskQueue*>> queues_view = GetQueuesView();
-    if (!queues_view || queues_view->empty()) {
+    AutoLock lock(lock_);
+    if (priority_schedule_.empty()) {
       return false;
     }
 
-    std::vector<internal::TaskQueue*> high_priority_queues;
-    std::vector<internal::TaskQueue*> normal_priority_queues;
-    std::vector<internal::TaskQueue*> low_priority_queues;
-    std::vector<PriorityBucket> priority_schedule;
-    std::size_t high_priority_queue_index = 0;
-    std::size_t normal_priority_queue_index = 0;
-    std::size_t low_priority_queue_index = 0;
-    std::size_t next_priority_index = 0;
-    {
-      AutoLock lock(lock_);
-      high_priority_queues = high_priority_queues_;
-      normal_priority_queues = normal_priority_queues_;
-      low_priority_queues = low_priority_queues_;
-      priority_schedule = priority_schedule_;
-      high_priority_queue_index = high_priority_queue_index_;
-      normal_priority_queue_index = normal_priority_queue_index_;
-      low_priority_queue_index = low_priority_queue_index_;
-      next_priority_index = next_priority_index_;
-    }
-
-    if (priority_schedule.empty()) {
-      return false;
-    }
-
-    const std::size_t schedule_size = priority_schedule.size();
+    const std::size_t schedule_size = priority_schedule_.size();
     for (std::size_t offset = 0; offset < schedule_size; ++offset) {
-      const std::size_t schedule_index = (next_priority_index + offset) % schedule_size;
-      const PriorityBucket bucket = priority_schedule[schedule_index];
+      const std::size_t schedule_index = (next_priority_index_ + offset) % schedule_size;
+      const PriorityBucket bucket = priority_schedule_[schedule_index];
+
       std::vector<internal::TaskQueue*>* queues = nullptr;
       std::size_t* queue_index = nullptr;
-
       switch (bucket) {
         case PriorityBucket::kHigh:
-          queues = &high_priority_queues;
-          queue_index = &high_priority_queue_index;
+          queues = &high_priority_queues_;
+          queue_index = &high_priority_queue_index_;
           break;
         case PriorityBucket::kLow:
-          queues = &low_priority_queues;
-          queue_index = &low_priority_queue_index;
+          queues = &low_priority_queues_;
+          queue_index = &low_priority_queue_index_;
           break;
         case PriorityBucket::kNormal:
         default:
-          queues = &normal_priority_queues;
-          queue_index = &normal_priority_queue_index;
+          queues = &normal_priority_queues_;
+          queue_index = &normal_priority_queue_index_;
           break;
       }
 
@@ -391,14 +417,7 @@ class SequenceManager::Impl {
           continue;
         }
 
-        AutoLock lock(lock_);
-        if (bucket == PriorityBucket::kHigh) {
-          high_priority_queue_index_ = (queue_index_to_try + 1) % queue_count;
-        } else if (bucket == PriorityBucket::kNormal) {
-          normal_priority_queue_index_ = (queue_index_to_try + 1) % queue_count;
-        } else {
-          low_priority_queue_index_ = (queue_index_to_try + 1) % queue_count;
-        }
+        *queue_index = (queue_index_to_try + 1) % queue_count;
         next_priority_index_ = (schedule_index + 1) % schedule_size;
         return true;
       }

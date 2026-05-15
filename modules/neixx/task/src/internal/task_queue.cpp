@@ -1,5 +1,7 @@
 ﻿#include <neixx/task/internal/task_queue.h>
 
+#include <algorithm>
+#include <deque>
 #include <functional>
 #include <queue>
 #include <utility>
@@ -26,6 +28,10 @@ class TaskQueue::Impl {
   explicit Impl(TaskQueue* owner, const TaskTraits& traits)
       : traits_(traits), weak_factory_(owner) {}
 
+  bool HasImmediateTasksLocked() const {
+    return !immediate_fifo_queue_.empty();
+  }
+
   bool PushImmediateTask(Task task) {
     if (!task.task) {
       return false;
@@ -39,8 +45,27 @@ class TaskQueue::Impl {
         return false;
       }
 
-      bool was_empty = immediate_incoming_queue_.empty();
-      immediate_incoming_queue_.push(std::move(task));
+      if (task.sequence_num == 0) {
+        task.sequence_num = ++immediate_sequence_num_;
+      } else if (task.sequence_num > immediate_sequence_num_) {
+        immediate_sequence_num_ = task.sequence_num;
+      }
+
+      const bool was_empty = !HasImmediateTasksLocked();
+
+      if (immediate_fifo_queue_.empty() ||
+          task.sequence_num >= immediate_fifo_queue_.back().sequence_num) {
+        immediate_fifo_queue_.push_back(std::move(task));
+      } else {
+        const auto insert_it = std::upper_bound(
+            immediate_fifo_queue_.begin(),
+            immediate_fifo_queue_.end(),
+            task.sequence_num,
+            [](std::int64_t sequence_num, const Task& queued_task) {
+              return sequence_num < queued_task.sequence_num;
+            });
+        immediate_fifo_queue_.insert(insert_it, std::move(task));
+      }
 
       // Capture callback if queue was empty and callback is set
       if (was_empty && on_task_posted_callback_) {
@@ -76,6 +101,10 @@ class TaskQueue::Impl {
         return false;
       }
 
+      if (task.sequence_num == 0) {
+        task.sequence_num = ++delayed_sequence_num_;
+      }
+
       const bool had_delayed_tasks = !delayed_incoming_queue_.empty();
       const TimeTicks previous_head = had_delayed_tasks ? delayed_incoming_queue_.top().delayed_run_time
                                                         : TimeTicks();
@@ -107,12 +136,28 @@ class TaskQueue::Impl {
     }
 
     AutoLock lock(lock_);
-    if (immediate_incoming_queue_.empty()) {
+    if (immediate_fifo_queue_.empty()) {
       return false;
     }
 
-    *task = PopTop(&immediate_incoming_queue_);
+    *task = std::move(immediate_fifo_queue_.front());
+    immediate_fifo_queue_.pop_front();
     return true;
+  }
+
+  std::size_t TakeImmediateTasks(Task* tasks, std::size_t max_tasks) {
+    if (tasks == nullptr || max_tasks == 0) {
+      return 0;
+    }
+
+    AutoLock lock(lock_);
+    std::size_t count = 0;
+    while (count < max_tasks && !immediate_fifo_queue_.empty()) {
+      tasks[count] = std::move(immediate_fifo_queue_.front());
+      immediate_fifo_queue_.pop_front();
+      ++count;
+    }
+    return count;
   }
 
   bool TakeReadyDelayedTask(const TimeTicks& now, Task* task) {
@@ -128,7 +173,7 @@ class TaskQueue::Impl {
       if (next_task.delayed_run_time > now) {
         break;
       }
-      immediate_incoming_queue_.push(PopTop(&delayed_incoming_queue_));
+      immediate_fifo_queue_.push_back(PopTop(&delayed_incoming_queue_));
       ++promoted;
     }
     return promoted;
@@ -136,7 +181,7 @@ class TaskQueue::Impl {
 
   bool HasImmediateWork() const {
     AutoLock lock(lock_);
-    return !immediate_incoming_queue_.empty();
+    return HasImmediateTasksLocked();
   }
 
   bool HasDelayedWork() const {
@@ -162,7 +207,8 @@ class TaskQueue::Impl {
     weak_factory_.InvalidateWeakPtrs();
 
     if (traits_.shutdown_behavior == TaskShutdownBehavior::kDrop) {
-      immediate_incoming_queue_ = TaskMinHeap();
+      immediate_fifo_queue_.clear();
+      delayed_sequence_num_ = 0;
       delayed_incoming_queue_ = TaskMinHeap();
     }
   }
@@ -199,7 +245,9 @@ class TaskQueue::Impl {
   TaskTraits traits_;
   SequenceToken sequence_token_ = SequenceToken::Create();
   bool shut_down_ = false;
-  TaskMinHeap immediate_incoming_queue_;
+  std::deque<Task> immediate_fifo_queue_;
+  std::int64_t immediate_sequence_num_ = 0;
+  std::int64_t delayed_sequence_num_ = 0;
   TaskMinHeap delayed_incoming_queue_;
   OnTaskPostedCallback on_task_posted_callback_;
   OnTaskEnqueuedCallback on_task_enqueued_callback_;
@@ -221,6 +269,10 @@ bool TaskQueue::PushDelayedTask(Task task) {
 
 bool TaskQueue::TakeImmediateTask(Task* task) {
   return impl_->TakeImmediateTask(task);
+}
+
+std::size_t TaskQueue::TakeImmediateTasks(Task* tasks, std::size_t max_tasks) {
+  return impl_->TakeImmediateTasks(tasks, max_tasks);
 }
 
 bool TaskQueue::TakeReadyDelayedTask(const TimeTicks& now, Task* task) {

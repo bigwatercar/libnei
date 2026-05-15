@@ -10,12 +10,7 @@
 namespace nei {
 namespace {
 
-std::atomic<std::int64_t> g_next_sequence_num{1};
 std::atomic<std::int64_t> g_delayed_overflow_fallback_count{0};
-
-std::int64_t NextSequenceNum() {
-  return g_next_sequence_num.fetch_add(1, std::memory_order_relaxed);
-}
 
 }  // namespace
 
@@ -49,11 +44,13 @@ class TaskRunnerImpl final : public TaskRunner {
     }
 
     internal::Task queued_task;
-    const TimeTicks enqueue_time = TimeTicks::Now();
+    const bool tracing_enabled = internal::IsTaskTracingEnabled();
+    const bool need_enqueue_time = delay.is_positive() || tracing_enabled;
+    const TimeTicks enqueue_time = need_enqueue_time ? TimeTicks::Now() : TimeTicks();
     queued_task.task = std::move(task);
     queued_task.posted_from = from_here;
     queued_task.enqueue_time = enqueue_time;
-    queued_task.sequence_num = NextSequenceNum();
+    queued_task.sequence_num = 0;
     queued_task.sequence_token = queue->sequence_token();
     queued_task.traits = traits;
     if (delay.is_positive()) {
@@ -64,7 +61,7 @@ class TaskRunnerImpl final : public TaskRunner {
       if (now_us > std::numeric_limits<std::int64_t>::max() - delay_us) {
         g_delayed_overflow_fallback_count.fetch_add(1, std::memory_order_relaxed);
         const bool pushed = queue->PushImmediateTask(std::move(queued_task));
-        if (pushed) {
+        if (pushed && tracing_enabled) {
           internal::RecordTaskPosted();
         }
         return pushed;
@@ -72,13 +69,13 @@ class TaskRunnerImpl final : public TaskRunner {
 
       queued_task.delayed_run_time = enqueue_time + delay;
       const bool pushed = queue->PushDelayedTask(std::move(queued_task));
-      if (pushed) {
+      if (pushed && tracing_enabled) {
         internal::RecordTaskPosted();
       }
       return pushed;
     } else {
       const bool pushed = queue->PushImmediateTask(std::move(queued_task));
-      if (pushed) {
+      if (pushed && tracing_enabled) {
         internal::RecordTaskPosted();
       }
       return pushed;

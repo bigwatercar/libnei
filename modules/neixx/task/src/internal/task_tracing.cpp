@@ -14,18 +14,36 @@ std::atomic<std::int64_t> g_completed_tasks{0};
 std::atomic<std::int64_t> g_cancelled_before_run_tasks{0};
 std::atomic<std::int64_t> g_total_queue_delay_us{0};
 std::atomic<std::int64_t> g_max_queue_delay_us{0};
+std::atomic<bool> g_task_tracing_enabled{true};
 
 }  // namespace
 
+bool IsTaskTracingEnabled() {
+  return g_task_tracing_enabled.load(std::memory_order_relaxed);
+}
+
+void SetTaskTracingEnabled(bool enabled) {
+  g_task_tracing_enabled.store(enabled, std::memory_order_relaxed);
+}
+
 void RecordWeakPtrExpiredPost() {
+  if (!IsTaskTracingEnabled()) {
+    return;
+  }
   g_weak_ptr_expired_posts.fetch_add(1, std::memory_order_relaxed);
 }
 
 void RecordTaskPosted() {
+  if (!IsTaskTracingEnabled()) {
+    return;
+  }
   g_posted_tasks.fetch_add(1, std::memory_order_relaxed);
 }
 
 void RecordTaskExecutionStarted(const Task& task) {
+  if (!IsTaskTracingEnabled()) {
+    return;
+  }
   g_started_tasks.fetch_add(1, std::memory_order_relaxed);
 
   std::int64_t queue_delay_us = 0;
@@ -44,10 +62,16 @@ void RecordTaskExecutionStarted(const Task& task) {
 }
 
 void RecordTaskExecutionCompleted() {
+  if (!IsTaskTracingEnabled()) {
+    return;
+  }
   g_completed_tasks.fetch_add(1, std::memory_order_relaxed);
 }
 
 void RecordTaskCancelledBeforeRun() {
+  if (!IsTaskTracingEnabled()) {
+    return;
+  }
   g_cancelled_before_run_tasks.fetch_add(1, std::memory_order_relaxed);
 }
 

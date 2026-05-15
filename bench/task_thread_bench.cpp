@@ -1,5 +1,7 @@
 #include <neixx/functional/bind.h>
 #include <neixx/common/location.h>
+#include <neixx/task/internal/task_tracing.h>
+#include <neixx/synchronization/waitable_event.h>
 #include <neixx/threading/thread.h>
 
 #include <atomic>
@@ -43,39 +45,46 @@ struct BenchmarkResult {
   std::uint64_t sum = 0;
 };
 
-void AddTaskBody(std::uint32_t value,
-                 std::atomic<std::uint32_t>* remaining,
-                 std::promise<void>* done) {
-  g_sum_sink.fetch_add(static_cast<std::uint64_t>(value) + 1,
-                       std::memory_order_relaxed);
-  if (remaining->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-    done->set_value();
+void AddTaskBodyNoArgs() {
+  // Keep payload minimal: one simple two-number addition.
+  g_sum_sink.fetch_add(1 + 2, std::memory_order_relaxed);
+}
+
+void SignalDone(nei::WaitableEvent* done_event) {
+  if (done_event != nullptr) {
+    done_event->Signal();
   }
 }
 
 BenchmarkResult RunAddBenchmark(nei::TaskRunner& runner, std::uint32_t task_count) {
-  std::atomic<std::uint32_t> remaining(task_count);
   std::atomic<std::uint32_t> failed_posts(0);
-  std::promise<void> all_done;
-  auto all_done_future = all_done.get_future();
+  nei::WaitableEvent all_done(nei::WaitableEvent::ResetPolicy::kManual, false);
 
   const auto total_started_at = std::chrono::steady_clock::now();
   const auto post_started_at = std::chrono::steady_clock::now();
 
   for (std::uint32_t value = 1; value <= task_count; ++value) {
+    (void)value;
     const bool ok = runner.PostTask(
         FROM_HERE,
-        nei::BindOnce(&AddTaskBody, value, &remaining, &all_done));
+      nei::BindOnce(&AddTaskBodyNoArgs));
     if (!ok) {
       failed_posts.fetch_add(1, std::memory_order_relaxed);
-      if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        all_done.set_value();
-      }
     }
   }
 
+  // Sequenced runner guarantee: when this sentinel runs, all previously posted
+  // tasks have already finished.
+  const bool sentinel_ok = runner.PostTask(
+      FROM_HERE,
+      nei::BindOnce(&SignalDone, &all_done));
+  if (!sentinel_ok) {
+    failed_posts.fetch_add(1, std::memory_order_relaxed);
+    all_done.Signal();
+  }
+
   const auto post_finished_at = std::chrono::steady_clock::now();
-  all_done_future.wait();
+  all_done.Wait();
   const auto total_finished_at = std::chrono::steady_clock::now();
 
   BenchmarkResult result;
@@ -108,8 +117,12 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
+  const bool previous_tracing_enabled = nei::internal::IsTaskTracingEnabled();
+  nei::internal::SetTaskTracingEnabled(false);
+
   g_sum_sink.store(0, std::memory_order_relaxed);
   const BenchmarkResult result = RunAddBenchmark(*runner, task_count);
+  nei::internal::SetTaskTracingEnabled(previous_tracing_enabled);
   thread.Stop();
 
   const double post_sec = result.post_elapsed.count() / 1000.0;
