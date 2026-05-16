@@ -165,7 +165,7 @@ class SequenceManager::Impl {
   }
 
   void Shutdown() {
-    std::vector<std::unique_ptr<internal::TaskQueue>> queues_to_shutdown;
+    std::vector<internal::TaskQueue*> queues_to_shutdown;
     {
       AutoLock lock(lock_);
       if (is_shutdown_ || in_shutdown_processing_) {
@@ -175,15 +175,26 @@ class SequenceManager::Impl {
       is_shutdown_ = true;
       default_task_runner_ = nullptr;
       next_priority_index_ = 0;
-      queues_to_shutdown.swap(queues_);
+
+      // Keep queue objects alive after shutdown to avoid a use-after-free race:
+      // concurrent PostTask callers may have already observed a raw queue
+      // pointer from WeakPtr::get() before invalidation completes.
+      shutdown_queues_.swap(queues_);
+      queues_to_shutdown.reserve(shutdown_queues_.size());
+      for (const auto& queue : shutdown_queues_) {
+        queues_to_shutdown.push_back(queue.get());
+      }
+
       RebuildQueueViewLocked();
     }
 
-    for (auto& queue : queues_to_shutdown) {
+    for (internal::TaskQueue* queue : queues_to_shutdown) {
+      if (queue == nullptr) {
+        continue;
+      }
       queue->SetOnTaskPostedCallback(nullptr);
       queue->Shutdown();
     }
-    queues_to_shutdown.clear();
 
     {
       AutoLock lock(lock_);
@@ -494,6 +505,7 @@ class SequenceManager::Impl {
   mutable Lock lock_;
   std::unique_ptr<MessagePump> pump_;
   std::vector<std::unique_ptr<internal::TaskQueue>> queues_;
+  std::vector<std::unique_ptr<internal::TaskQueue>> shutdown_queues_;
   std::shared_ptr<const std::vector<internal::TaskQueue*>> queues_view_ =
       std::make_shared<std::vector<internal::TaskQueue*>>();
   std::vector<internal::TaskQueue*> user_blocking_priority_queues_;
