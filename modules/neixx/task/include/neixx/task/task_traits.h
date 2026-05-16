@@ -33,9 +33,15 @@ constexpr MayBlockTag MayBlock() {
 class TaskTraits {
  public:
   constexpr TaskTraits() = default;
+  constexpr TaskTraits(const TaskTraits&) = default;
+  constexpr TaskTraits(TaskTraits&&) = default;
+  constexpr TaskTraits& operator=(const TaskTraits&) = default;
+  constexpr TaskTraits& operator=(TaskTraits&&) = default;
 
   template <typename... Args,
-            typename = std::enable_if_t<(sizeof...(Args) > 0)>>
+            typename = std::enable_if_t<(sizeof...(Args) > 0) &&
+                                        (!std::disjunction_v<
+                                            std::is_same<std::decay_t<Args>, TaskTraits>...>)>>
   explicit constexpr TaskTraits(Args&&... args) {
     (Apply(std::forward<Args>(args)), ...);
   }

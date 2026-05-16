@@ -39,6 +39,7 @@ add_executable(
   sequence_manager_test.cpp
   run_loop_test.cpp
   task_sequence_token_test.cpp
+  task_traits_test.cpp
   task_internal_task_test.cpp
   task_runner_task_queue_test.cpp
   thread_pool_test.cpp
