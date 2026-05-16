@@ -187,17 +187,19 @@ class SequenceManager::Impl {
     bool ran_any = false;
     const bool tracing_enabled = internal::IsTaskTracingEnabled();
 
-    internal::TaskQueue* single_queue_fast_path = nullptr;
+    auto single_queue_fast_path_eligible_locked = [this]() -> bool {
+      return g_single_queue_fast_path_enabled.load(std::memory_order_relaxed)
+             && user_blocking_priority_queues_.empty() && best_effort_priority_queues_.empty()
+             && user_visible_priority_queues_.size() == 1;
+    };
+
+    bool single_queue_fast_path_enabled = false;
     {
       AutoLock lock(lock_);
-      if (g_single_queue_fast_path_enabled.load(std::memory_order_relaxed)
-          && user_blocking_priority_queues_.empty() && best_effort_priority_queues_.empty()
-          && user_visible_priority_queues_.size() == 1) {
-        single_queue_fast_path = user_visible_priority_queues_[0];
-      }
+      single_queue_fast_path_enabled = single_queue_fast_path_eligible_locked();
     }
 
-    if (single_queue_fast_path != nullptr) {
+    if (single_queue_fast_path_enabled) {
       internal::Task tasks[kSingleQueueTakeBatchSize];
       std::size_t processed = 0;
       // Capture current time once for the whole DoWork batch. Passed to
@@ -206,8 +208,16 @@ class SequenceManager::Impl {
       while (processed < kSingleQueueMaxTasksPerDoWork) {
         const std::size_t take_count = std::min(kSingleQueueTakeBatchSize,
                                                 kSingleQueueMaxTasksPerDoWork - processed);
-        const std::size_t count =
-            single_queue_fast_path->TakeImmediateTasks(tasks, take_count);
+        std::size_t count = 0;
+        {
+          // Hold lock_ while taking tasks so queue lifetime is protected against
+          // concurrent Shutdown() that swaps/destroys queues_.
+          AutoLock lock(lock_);
+          if (!single_queue_fast_path_eligible_locked()) {
+            break;
+          }
+          count = user_visible_priority_queues_[0]->TakeImmediateTasks(tasks, take_count);
+        }
         if (count == 0) {
           break;
         }
@@ -228,7 +238,9 @@ class SequenceManager::Impl {
           }
         }
       }
-      return ran_any;
+      if (ran_any) {
+        return true;
+      }
     }
 
     for (std::size_t i = 0; i < kMaxTasksPerDoWork; ++i) {

@@ -334,5 +334,46 @@ TEST(SequenceManagerTest, MultiQueueBurstDoesNotStarveAnyQueue) {
   EXPECT_NE(std::find(execution_order.begin(), window_end, 'B'), window_end);
 }
 
+TEST(SequenceManagerTest, ShutdownDuringConcurrentPostingDoesNotDeadlockOrCrash) {
+  constexpr int kIterations = 10;
+  for (int i = 0; i < kIterations; ++i) {
+    SequenceManager manager(std::make_unique<MessagePumpDefault>());
+    scoped_refptr<TaskRunner> runner = manager.CreateTaskRunner();
+    ASSERT_TRUE(runner);
+
+    std::atomic<bool> keep_posting{true};
+    std::atomic<int> post_attempts{0};
+    std::atomic<int> post_success{0};
+    std::atomic<int> executed{0};
+
+    std::thread run_thread([&manager]() {
+      manager.Run();
+    });
+
+    std::thread poster([&]() {
+      while (keep_posting.load(std::memory_order_relaxed)) {
+        post_attempts.fetch_add(1, std::memory_order_relaxed);
+        const bool ok = runner->PostTask(FROM_HERE, [&executed]() {
+          executed.fetch_add(1, std::memory_order_relaxed);
+        });
+        if (ok) {
+          post_success.fetch_add(1, std::memory_order_relaxed);
+        }
+      }
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    manager.Shutdown();
+
+    keep_posting.store(false, std::memory_order_relaxed);
+    poster.join();
+    run_thread.join();
+
+    EXPECT_GE(post_attempts.load(std::memory_order_relaxed), 1);
+    EXPECT_LE(executed.load(std::memory_order_relaxed),
+              post_success.load(std::memory_order_relaxed));
+  }
+}
+
 }  // namespace
 }  // namespace nei
