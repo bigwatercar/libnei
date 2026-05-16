@@ -49,6 +49,21 @@ class RecordingPump final : public MessagePump {
   std::vector<TimeTicks> delayed_run_times_;
 };
 
+class ScopedSingleQueueFastPathToggle final {
+ public:
+  explicit ScopedSingleQueueFastPathToggle(bool enabled)
+      : previous_(SequenceManager::IsSingleQueueFastPathEnabledForTesting()) {
+    SequenceManager::SetSingleQueueFastPathEnabledForTesting(enabled);
+  }
+
+  ~ScopedSingleQueueFastPathToggle() {
+    SequenceManager::SetSingleQueueFastPathEnabledForTesting(previous_);
+  }
+
+ private:
+  bool previous_;
+};
+
 TEST(SequenceManagerTest, RunsImmediateTask) {
   SequenceManager manager(std::make_unique<MessagePumpDefault>());
   scoped_refptr<TaskRunner> runner = manager.CreateTaskRunner();
@@ -152,6 +167,27 @@ TEST(SequenceManagerTest, RunsTasksFromMultipleQueues) {
 
   EXPECT_EQ(executed_a.load(), 1);
   EXPECT_EQ(executed_b.load(), 1);
+}
+
+TEST(SequenceManagerTest, RunsImmediateTaskWhenSingleQueueFastPathDisabled) {
+  ScopedSingleQueueFastPathToggle disable_fast_path(false);
+
+  SequenceManager manager(std::make_unique<MessagePumpDefault>());
+  scoped_refptr<TaskRunner> runner = manager.CreateTaskRunner();
+  ASSERT_TRUE(runner);
+
+  std::atomic<int> executed{0};
+  std::thread run_thread([&manager]() {
+    manager.Run();
+  });
+
+  runner->PostTask(FROM_HERE, [&executed, &manager]() {
+    executed.fetch_add(1);
+    manager.Quit();
+  });
+
+  run_thread.join();
+  EXPECT_EQ(executed.load(), 1);
 }
 
 TEST(SequenceManagerTest, CurrentThreadBindingIsClearedAfterRunReturns) {

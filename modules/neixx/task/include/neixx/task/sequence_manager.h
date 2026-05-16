@@ -35,6 +35,10 @@ class NEI_API SequenceManager final : public MessagePump::Delegate {
   bool DoDelayedWork(NextWorkInfo* next_work_info) override;
   bool DoIdleWork() override;
 
+  // Testing-only knobs to force coverage of both DoWork paths.
+  static void SetSingleQueueFastPathEnabledForTesting(bool enabled);
+  static bool IsSingleQueueFastPathEnabledForTesting();
+
  private:
   class Impl;
   std::unique_ptr<Impl> impl_;

@@ -1,6 +1,7 @@
 #include <neixx/task/sequence_manager.h>
 
 #include <memory>
+#include <atomic>
 #include <utility>
 #include <vector>
 
@@ -20,6 +21,7 @@ namespace {
 constexpr std::size_t kMaxTasksPerDoWork = 64;
 constexpr std::size_t kSingleQueueTakeBatchSize = 256;
 constexpr std::size_t kSingleQueueMaxTasksPerDoWork = 4096;
+std::atomic<bool> g_single_queue_fast_path_enabled{true};
 
 enum class PriorityBucket : std::size_t {
   kUserBlocking = 0,
@@ -188,7 +190,8 @@ class SequenceManager::Impl {
     internal::TaskQueue* single_queue_fast_path = nullptr;
     {
       AutoLock lock(lock_);
-      if (user_blocking_priority_queues_.empty() && best_effort_priority_queues_.empty()
+      if (g_single_queue_fast_path_enabled.load(std::memory_order_relaxed)
+          && user_blocking_priority_queues_.empty() && best_effort_priority_queues_.empty()
           && user_visible_priority_queues_.size() == 1) {
         single_queue_fast_path = user_visible_priority_queues_[0];
       }
@@ -491,6 +494,14 @@ bool SequenceManager::DoDelayedWork(NextWorkInfo* next_work_info) {
 
 bool SequenceManager::DoIdleWork() {
   return impl_->DoIdleWork();
+}
+
+void SequenceManager::SetSingleQueueFastPathEnabledForTesting(bool enabled) {
+  g_single_queue_fast_path_enabled.store(enabled, std::memory_order_relaxed);
+}
+
+bool SequenceManager::IsSingleQueueFastPathEnabledForTesting() {
+  return g_single_queue_fast_path_enabled.load(std::memory_order_relaxed);
 }
 
 }  // namespace nei
