@@ -80,6 +80,22 @@ void AddTaskBodyNoArgs() {
   g_sum_sink.fetch_add(1 + 2, std::memory_order_relaxed);
 }
 
+void AddTaskBodyAndSignalLast(std::atomic<std::uint32_t>* pending_task_count,
+                              std::atomic<bool>* posting_done,
+                              nei::WaitableEvent* done_event) {
+  AddTaskBodyNoArgs();
+
+  if (pending_task_count == nullptr || posting_done == nullptr || done_event == nullptr) {
+    return;
+  }
+
+  const std::uint32_t remaining =
+      pending_task_count->fetch_sub(1, std::memory_order_relaxed) - 1;
+  if (remaining == 0 && posting_done->load(std::memory_order_acquire)) {
+    done_event->Signal();
+  }
+}
+
 void SignalDone(nei::WaitableEvent* done_event) {
   if (done_event != nullptr) {
     done_event->Signal();
@@ -135,7 +151,8 @@ BenchmarkResult RunAddBenchmark(nei::TaskRunner& runner, std::uint32_t task_coun
 // Benchmark for delayed tasks (non-fast-path): tests PostDelayedTask instead of PostTask
 BenchmarkResult RunDelayedBenchmark(nei::TaskRunner& runner, std::uint32_t task_count) {
   std::atomic<std::uint32_t> failed_task_posts(0);
-  bool sentinel_failed = false;
+  std::atomic<std::uint32_t> pending_task_count(0);
+  std::atomic<bool> posting_done(false);
   nei::WaitableEvent all_done(nei::WaitableEvent::ResetPolicy::kManual, false);
 
   const auto total_started_at = std::chrono::steady_clock::now();
@@ -145,25 +162,19 @@ BenchmarkResult RunDelayedBenchmark(nei::TaskRunner& runner, std::uint32_t task_
   const auto small_delay = nei::TimeDelta::FromMilliseconds(1);
   for (std::uint32_t value = 1; value <= task_count; ++value) {
     (void)value;
+    pending_task_count.fetch_add(1, std::memory_order_relaxed);
     const bool ok = runner.PostDelayedTask(
         FROM_HERE,
-        nei::BindOnce(&AddTaskBodyNoArgs),
+        nei::BindOnce(&AddTaskBodyAndSignalLast, &pending_task_count, &posting_done, &all_done),
         small_delay);
     if (!ok) {
       failed_task_posts.fetch_add(1, std::memory_order_relaxed);
+      pending_task_count.fetch_sub(1, std::memory_order_relaxed);
     }
   }
 
-  // Sentinel task (also delayed to ensure ordering)
-  const auto sentinel_delay = task_count > 50000 ?
-      nei::TimeDelta::FromMilliseconds(50) :
-      nei::TimeDelta::FromMilliseconds(10);
-  const bool sentinel_ok = runner.PostDelayedTask(
-      FROM_HERE,
-      nei::BindOnce(&SignalDone, &all_done),
-      sentinel_delay);
-  if (!sentinel_ok) {
-    sentinel_failed = true;
+  posting_done.store(true, std::memory_order_release);
+  if (pending_task_count.load(std::memory_order_acquire) == 0) {
     all_done.Signal();
   }
 
@@ -175,7 +186,7 @@ BenchmarkResult RunDelayedBenchmark(nei::TaskRunner& runner, std::uint32_t task_
   result.post_elapsed = post_finished_at - post_started_at;
   result.total_elapsed = total_finished_at - total_started_at;
   result.failed = failed_task_posts.load(std::memory_order_relaxed);
-  result.sentinel_failed = sentinel_failed;
+  result.sentinel_failed = false;
   result.posted_ok = task_count - result.failed;
   result.executed_tasks = g_executed_task_count.load(std::memory_order_relaxed);
   result.expected_sum = static_cast<std::uint64_t>(result.posted_ok) * 3;
