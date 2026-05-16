@@ -7,26 +7,26 @@ namespace {
 
 TEST(TaskTraitsTest, CopyAndMoveDoNotUseVariadicApply) {
   TaskTraits original(MayBlock(), TaskPriority::USER_BLOCKING,
-                      TaskShutdownBehavior::kDrop);
+                      TaskShutdownBehavior::SKIP_ON_SHUTDOWN);
 
   TaskTraits copied(original);
   EXPECT_TRUE(copied.may_block());
   EXPECT_EQ(copied.priority(), TaskPriority::USER_BLOCKING);
-  EXPECT_EQ(copied.shutdown_behavior(), TaskShutdownBehavior::kDrop);
+  EXPECT_EQ(copied.shutdown_behavior(), TaskShutdownBehavior::SKIP_ON_SHUTDOWN);
 
   TaskTraits moved(std::move(original));
   EXPECT_TRUE(moved.may_block());
   EXPECT_EQ(moved.priority(), TaskPriority::USER_BLOCKING);
-  EXPECT_EQ(moved.shutdown_behavior(), TaskShutdownBehavior::kDrop);
+  EXPECT_EQ(moved.shutdown_behavior(), TaskShutdownBehavior::SKIP_ON_SHUTDOWN);
 }
 
 TEST(TaskTraitsTest, VariadicCtorStillAcceptsDeclarativeArgs) {
   TaskTraits traits(MayBlock(), TaskPriority::BEST_EFFORT,
-                    TaskShutdownBehavior::kDrop);
+                    TaskShutdownBehavior::SKIP_ON_SHUTDOWN);
 
   EXPECT_TRUE(traits.may_block());
   EXPECT_EQ(traits.priority(), TaskPriority::BEST_EFFORT);
-  EXPECT_EQ(traits.shutdown_behavior(), TaskShutdownBehavior::kDrop);
+  EXPECT_EQ(traits.shutdown_behavior(), TaskShutdownBehavior::SKIP_ON_SHUTDOWN);
 }
 
 }  // namespace

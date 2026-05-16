@@ -115,26 +115,9 @@ TEST(TaskQueueTest, PromoteReadyTasksAtExactDeadlineIsReadyNotFuture) {
   EXPECT_EQ(taken.sequence_num, 42);
 }
 
-TEST(TaskQueueTest, ShutdownDrainKeepsExistingTasks) {
+TEST(TaskQueueTest, ShutdownContinueClearsExistingTasks) {
   TaskTraits traits;
-  traits.set_shutdown_behavior(TaskShutdownBehavior::kDrain);
-  internal::TaskQueue queue(traits);
-
-  ASSERT_TRUE(queue.PushImmediateTask(MakeTask(1, []() {})));
-  queue.Shutdown();
-
-  EXPECT_TRUE(queue.is_shutdown());
-  EXPECT_TRUE(queue.HasImmediateWork());
-
-  internal::Task taken;
-  ASSERT_TRUE(queue.TakeImmediateTask(&taken));
-  EXPECT_EQ(taken.sequence_num, 1);
-  EXPECT_FALSE(queue.PushImmediateTask(MakeTask(2, []() {})));
-}
-
-TEST(TaskQueueTest, ShutdownDropClearsExistingTasks) {
-  TaskTraits traits;
-  traits.set_shutdown_behavior(TaskShutdownBehavior::kDrop);
+  traits.set_shutdown_behavior(TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN);
   internal::TaskQueue queue(traits);
 
   ASSERT_TRUE(queue.PushImmediateTask(MakeTask(1, []() {})));
@@ -146,6 +129,43 @@ TEST(TaskQueueTest, ShutdownDropClearsExistingTasks) {
   internal::Task taken;
   EXPECT_FALSE(queue.TakeImmediateTask(&taken));
   EXPECT_FALSE(queue.PushImmediateTask(MakeTask(2, []() {})));
+}
+
+TEST(TaskQueueTest, ShutdownSkipClearsExistingTasks) {
+  TaskTraits traits;
+  traits.set_shutdown_behavior(TaskShutdownBehavior::SKIP_ON_SHUTDOWN);
+  internal::TaskQueue queue(traits);
+
+  ASSERT_TRUE(queue.PushImmediateTask(MakeTask(1, []() {})));
+  queue.Shutdown();
+
+  EXPECT_TRUE(queue.is_shutdown());
+  EXPECT_FALSE(queue.HasImmediateWork());
+
+  internal::Task taken;
+  EXPECT_FALSE(queue.TakeImmediateTask(&taken));
+  EXPECT_FALSE(queue.PushImmediateTask(MakeTask(2, []() {})));
+}
+
+TEST(TaskQueueTest, ShutdownBlockKeepsBlockingTasksOnly) {
+  TaskTraits traits;
+  traits.set_shutdown_behavior(TaskShutdownBehavior::BLOCK_SHUTDOWN);
+  internal::TaskQueue queue(traits);
+
+  internal::Task blocking = MakeTask(1, []() {});
+  blocking.traits.set_shutdown_behavior(TaskShutdownBehavior::BLOCK_SHUTDOWN);
+  ASSERT_TRUE(queue.PushImmediateTask(std::move(blocking)));
+
+  internal::Task continuable = MakeTask(2, []() {});
+  continuable.traits.set_shutdown_behavior(TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN);
+  ASSERT_TRUE(queue.PushImmediateTask(std::move(continuable)));
+
+  queue.CancelNonShutdownBlockingTasksLocked();
+
+  internal::Task taken;
+  ASSERT_TRUE(queue.TakeImmediateTask(&taken));
+  EXPECT_EQ(taken.sequence_num, 1);
+  EXPECT_FALSE(queue.TakeImmediateTask(&taken));
 }
 
 TEST(TaskQueueTest, ConcurrentPostTaskFromMultipleThreads) {

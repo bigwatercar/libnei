@@ -18,7 +18,7 @@ namespace nei {
 namespace internal {
 
 using OnTaskPostedCallback = std::function<void()>;
-using OnTaskEnqueuedCallback = std::function<void()>;
+using OnTaskEnqueuedCallback = std::function<void(TaskShutdownBehavior)>;
 
 class NEI_API TaskQueue final {
  public:
@@ -44,6 +44,7 @@ class NEI_API TaskQueue final {
   TimeTicks PeekNextDelayedRunTime() const;
 
   void Shutdown();
+  void CancelNonShutdownBlockingTasksLocked();
   bool is_shutdown() const;
   const SequenceToken& sequence_token() const;
   const TaskTraits& traits() const;

@@ -1,4 +1,4 @@
-﻿#include <neixx/task/internal/task_queue.h>
+#include <neixx/task/internal/task_queue.h>
 
 #include <algorithm>
 #include <deque>
@@ -21,6 +21,10 @@ Task PopTop(TaskMinHeap* queue) {
   return task;
 }
 
+bool IsShutdownBlockingTask(const Task& task) {
+  return task.traits.shutdown_behavior() == TaskShutdownBehavior::BLOCK_SHUTDOWN;
+}
+
 }  // namespace
 
 class TaskQueue::Impl {
@@ -39,9 +43,10 @@ class TaskQueue::Impl {
 
     OnTaskPostedCallback posted_callback_to_call;
     OnTaskEnqueuedCallback enqueued_callback_to_call;
+    TaskShutdownBehavior task_shutdown_behavior = task.traits.shutdown_behavior();
     {
       AutoLock lock(lock_);
-      if (shut_down_) {
+      if (shut_down_ || reject_new_tasks_) {
         return false;
       }
 
@@ -67,18 +72,16 @@ class TaskQueue::Impl {
         immediate_fifo_queue_.insert(insert_it, std::move(task));
       }
 
-      // Capture callback if queue was empty and callback is set
       if (was_empty && on_task_posted_callback_) {
         posted_callback_to_call = on_task_posted_callback_;
       }
       if (on_task_enqueued_callback_) {
         enqueued_callback_to_call = on_task_enqueued_callback_;
       }
-    }  // Release lock before calling callback
+    }
 
-    // Call callback outside lock to avoid deadlock
     if (enqueued_callback_to_call) {
-      enqueued_callback_to_call();
+      enqueued_callback_to_call(task_shutdown_behavior);
     }
     if (posted_callback_to_call) {
       posted_callback_to_call();
@@ -95,9 +98,10 @@ class TaskQueue::Impl {
     const TimeTicks delayed_run_time = task.delayed_run_time;
     OnTaskPostedCallback posted_callback_to_call;
     OnTaskEnqueuedCallback enqueued_callback_to_call;
+    TaskShutdownBehavior task_shutdown_behavior = task.traits.shutdown_behavior();
     {
       AutoLock lock(lock_);
-      if (shut_down_) {
+      if (shut_down_ || reject_new_tasks_) {
         return false;
       }
 
@@ -121,7 +125,7 @@ class TaskQueue::Impl {
     }
 
     if (enqueued_callback_to_call) {
-      enqueued_callback_to_call();
+      enqueued_callback_to_call(task_shutdown_behavior);
     }
     if (posted_callback_to_call) {
       posted_callback_to_call();
@@ -198,18 +202,26 @@ class TaskQueue::Impl {
   }
 
   void Shutdown() {
-    AutoLock lock(lock_);
-    if (shut_down_) {
-      return;
+    std::vector<Task> dropped_tasks;
+    {
+      AutoLock lock(lock_);
+      if (shut_down_) {
+        return;
+      }
+
+      shut_down_ = true;
+      reject_new_tasks_ = true;
+      weak_factory_.InvalidateWeakPtrs();
+      CancelNonShutdownBlockingTasksLockedImpl(&dropped_tasks);
     }
+  }
 
-    shut_down_ = true;
-    weak_factory_.InvalidateWeakPtrs();
-
-    if (traits_.shutdown_behavior() == TaskShutdownBehavior::kDrop) {
-      immediate_fifo_queue_.clear();
-      delayed_sequence_num_ = 0;
-      delayed_incoming_queue_ = TaskMinHeap();
+  void CancelNonShutdownBlockingTasksLocked() {
+    std::vector<Task> dropped_tasks;
+    {
+      AutoLock lock(lock_);
+      reject_new_tasks_ = true;
+      CancelNonShutdownBlockingTasksLockedImpl(&dropped_tasks);
     }
   }
 
@@ -241,10 +253,40 @@ class TaskQueue::Impl {
   }
 
  private:
+  void CancelNonShutdownBlockingTasksLockedImpl(std::vector<Task>* dropped_tasks) {
+    if (dropped_tasks == nullptr) {
+      return;
+    }
+
+    std::deque<Task> kept_immediate;
+    while (!immediate_fifo_queue_.empty()) {
+      Task task = std::move(immediate_fifo_queue_.front());
+      immediate_fifo_queue_.pop_front();
+      if (IsShutdownBlockingTask(task)) {
+        kept_immediate.push_back(std::move(task));
+      } else {
+        dropped_tasks->push_back(std::move(task));
+      }
+    }
+    immediate_fifo_queue_.swap(kept_immediate);
+
+    TaskMinHeap kept_delayed;
+    while (!delayed_incoming_queue_.empty()) {
+      Task task = PopTop(&delayed_incoming_queue_);
+      if (IsShutdownBlockingTask(task)) {
+        kept_delayed.push(std::move(task));
+      } else {
+        dropped_tasks->push_back(std::move(task));
+      }
+    }
+    delayed_incoming_queue_ = std::move(kept_delayed);
+  }
+
   mutable Lock lock_;
   TaskTraits traits_;
   SequenceToken sequence_token_ = SequenceToken::Create();
   bool shut_down_ = false;
+  bool reject_new_tasks_ = false;
   std::deque<Task> immediate_fifo_queue_;
   std::int64_t immediate_sequence_num_ = 0;
   std::int64_t delayed_sequence_num_ = 0;
@@ -297,6 +339,10 @@ TimeTicks TaskQueue::PeekNextDelayedRunTime() const {
 
 void TaskQueue::Shutdown() {
   impl_->Shutdown();
+}
+
+void TaskQueue::CancelNonShutdownBlockingTasksLocked() {
+  impl_->CancelNonShutdownBlockingTasksLocked();
 }
 
 bool TaskQueue::is_shutdown() const {

@@ -20,9 +20,26 @@ enum class TaskPriority : int {
 };
 
 enum class TaskShutdownBehavior {
-  kDrain,
-  kDrop,
+  CONTINUE_ON_SHUTDOWN,
+  SKIP_ON_SHUTDOWN,
+  BLOCK_SHUTDOWN,
 };
+
+struct TaskShutdownBehaviorTag final {
+  TaskShutdownBehavior behavior;
+};
+
+constexpr TaskShutdownBehaviorTag CulverContinuable() {
+  return TaskShutdownBehaviorTag{TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN};
+}
+
+constexpr TaskShutdownBehaviorTag CulverSkippable() {
+  return TaskShutdownBehaviorTag{TaskShutdownBehavior::SKIP_ON_SHUTDOWN};
+}
+
+constexpr TaskShutdownBehaviorTag CulverBlocking() {
+  return TaskShutdownBehaviorTag{TaskShutdownBehavior::BLOCK_SHUTDOWN};
+}
 
 struct MayBlockTag final {};
 
@@ -82,6 +99,10 @@ class TaskTraits {
     shutdown_behavior_ = shutdown_behavior;
   }
 
+  constexpr void Apply(TaskShutdownBehaviorTag shutdown_behavior_tag) {
+    shutdown_behavior_ = shutdown_behavior_tag.behavior;
+  }
+
   constexpr void Apply(MayBlockTag) {
     may_block_ = true;
   }
@@ -93,7 +114,7 @@ class TaskTraits {
   }
 
   TaskPriority priority_ = TaskPriority::USER_VISIBLE;
-  TaskShutdownBehavior shutdown_behavior_ = TaskShutdownBehavior::kDrain;
+  TaskShutdownBehavior shutdown_behavior_ = TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN;
   bool may_block_ = false;
 };
 

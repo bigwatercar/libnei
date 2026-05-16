@@ -318,6 +318,107 @@ TEST(ThreadPoolTest, ShutdownWithTimeoutReturnsTrueOnNormalExit) {
   EXPECT_TRUE(all_exited);
 }
 
+TEST(ThreadPoolTest, BlockShutdownTaskPhysicallyBlocksShutdownUntilFinished) {
+  ThreadPool pool(1);
+  scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  TaskTraits block_shutdown_traits;
+  block_shutdown_traits.set_shutdown_behavior(TaskShutdownBehavior::BLOCK_SHUTDOWN);
+
+  WaitableEvent task_started(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent task_can_finish(WaitableEvent::ResetPolicy::kManual, false);
+  WaitableEvent shutdown_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  std::atomic<bool> task_finished{false};
+  std::atomic<bool> shutdown_returned{false};
+
+  ASSERT_TRUE(runner->PostTaskWithTraits(
+      FROM_HERE,
+      block_shutdown_traits,
+      [&task_started, &task_can_finish, &task_finished]() {
+        task_started.Signal();
+        task_can_finish.Wait();
+        task_finished.store(true, std::memory_order_relaxed);
+      }));
+
+  std::thread shutdown_thread([&pool, &shutdown_returned, &shutdown_done]() {
+    (void)pool.Shutdown();
+    shutdown_returned.store(true, std::memory_order_release);
+    shutdown_done.Signal();
+  });
+
+  ASSERT_TRUE(task_started.TimedWait(std::chrono::milliseconds(3000)));
+
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(120));
+  EXPECT_FALSE(shutdown_returned.load(std::memory_order_acquire));
+
+  task_can_finish.Signal();
+
+  ASSERT_TRUE(shutdown_done.TimedWait(std::chrono::milliseconds(3000)));
+  shutdown_thread.join();
+
+  EXPECT_TRUE(task_finished.load(std::memory_order_relaxed));
+  EXPECT_TRUE(shutdown_returned.load(std::memory_order_acquire));
+}
+
+TEST(ThreadPoolTest, ShutdownDropsQueuedNonBlockingTasksButKeepsBlockShutdownTask) {
+  ThreadPool pool(1);
+  scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  TaskTraits block_shutdown_traits;
+  block_shutdown_traits.set_shutdown_behavior(TaskShutdownBehavior::BLOCK_SHUTDOWN);
+
+  TaskTraits continue_traits;
+  continue_traits.set_shutdown_behavior(TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN);
+
+  WaitableEvent block_task_started(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent block_task_can_finish(WaitableEvent::ResetPolicy::kManual, false);
+  WaitableEvent shutdown_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  std::atomic<int> block_executed{0};
+  std::atomic<int> continue_executed{0};
+
+  ASSERT_TRUE(runner->PostTaskWithTraits(
+      FROM_HERE,
+      block_shutdown_traits,
+      [&block_task_started, &block_task_can_finish, &block_executed]() {
+        block_executed.fetch_add(1, std::memory_order_relaxed);
+        block_task_started.Signal();
+        block_task_can_finish.Wait();
+      }));
+
+  constexpr int kQueuedContinuableTasks = 6;
+  for (int i = 0; i < kQueuedContinuableTasks; ++i) {
+    ASSERT_TRUE(runner->PostTaskWithTraits(
+        FROM_HERE,
+        continue_traits,
+        [&continue_executed]() {
+          continue_executed.fetch_add(1, std::memory_order_relaxed);
+        }));
+  }
+
+  std::atomic<bool> shutdown_returned{false};
+  std::thread shutdown_thread([&pool, &shutdown_returned, &shutdown_done]() {
+    (void)pool.Shutdown();
+    shutdown_returned.store(true, std::memory_order_release);
+    shutdown_done.Signal();
+  });
+
+  ASSERT_TRUE(block_task_started.TimedWait(std::chrono::milliseconds(3000)));
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(120));
+  EXPECT_FALSE(shutdown_returned.load(std::memory_order_acquire));
+
+  block_task_can_finish.Signal();
+
+  ASSERT_TRUE(shutdown_done.TimedWait(std::chrono::milliseconds(3000)));
+  shutdown_thread.join();
+
+  EXPECT_EQ(block_executed.load(std::memory_order_relaxed), 1);
+  EXPECT_EQ(continue_executed.load(std::memory_order_relaxed), 0);
+}
+
 }  // namespace
 }  // namespace nei
 
