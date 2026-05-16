@@ -43,7 +43,7 @@ class TaskQueue::Impl {
 
     OnTaskPostedCallback posted_callback_to_call;
     OnTaskEnqueuedCallback enqueued_callback_to_call;
-    TaskShutdownBehavior task_shutdown_behavior = task.traits.shutdown_behavior();
+    TaskShutdownBehavior task_shutdown_behavior = TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN;
     {
       AutoLock lock(lock_);
       if (shut_down_ || reject_new_tasks_) {
@@ -76,6 +76,7 @@ class TaskQueue::Impl {
         posted_callback_to_call = on_task_posted_callback_;
       }
       if (on_task_enqueued_callback_) {
+        task_shutdown_behavior = task.traits.shutdown_behavior();
         enqueued_callback_to_call = on_task_enqueued_callback_;
       }
     }
@@ -98,7 +99,7 @@ class TaskQueue::Impl {
     const TimeTicks delayed_run_time = task.delayed_run_time;
     OnTaskPostedCallback posted_callback_to_call;
     OnTaskEnqueuedCallback enqueued_callback_to_call;
-    TaskShutdownBehavior task_shutdown_behavior = task.traits.shutdown_behavior();
+    TaskShutdownBehavior task_shutdown_behavior = TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN;
     {
       AutoLock lock(lock_);
       if (shut_down_ || reject_new_tasks_) {
@@ -120,6 +121,7 @@ class TaskQueue::Impl {
         posted_callback_to_call = on_task_posted_callback_;
       }
       if (on_task_enqueued_callback_) {
+        task_shutdown_behavior = task.traits.shutdown_behavior();
         enqueued_callback_to_call = on_task_enqueued_callback_;
       }
     }

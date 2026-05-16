@@ -51,12 +51,11 @@ class TaskRunnerImpl final : public TaskRunner {
     // the task scheduler still correctly handles all tasks.
     // Delayed tasks always capture exact time for deadline computation.
     static constexpr int kImmediateTracingSampleRate = 16;
-    const bool need_enqueue_time = [&]() -> bool {
-      if (is_delayed) return true;
-      if (!tracing_enabled) return false;
+    bool need_enqueue_time = is_delayed;
+    if (!need_enqueue_time && tracing_enabled) {
       thread_local int tl_sample_counter = 0;
-      return (++tl_sample_counter % kImmediateTracingSampleRate == 0);
-    }();
+      need_enqueue_time = (++tl_sample_counter % kImmediateTracingSampleRate == 0);
+    }
     const TimeTicks enqueue_time = need_enqueue_time ? TimeTicks::Now() : TimeTicks();
     queued_task.task = std::move(task);
     queued_task.posted_from = from_here;
@@ -64,7 +63,7 @@ class TaskRunnerImpl final : public TaskRunner {
     queued_task.sequence_num = 0;
     queued_task.sequence_token = queue->sequence_token();
     queued_task.traits = traits;
-    if (delay.is_positive()) {
+    if (is_delayed) {
       const std::int64_t now_us = enqueue_time.ToInternalValue();
       const std::int64_t delay_us = delay.InMicroseconds();
 
