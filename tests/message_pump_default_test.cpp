@@ -480,7 +480,7 @@ TEST(MessagePumpDefaultTest, SubMillisecondDelayDoeNotBusyLoop) {
   // The delayed work should have been executed (deadline reached).
   EXPECT_TRUE(delayed_work_executed.load())
       << "Sub-millisecond deadline was not reached; possible busy-loop regression";
-  
+
   // DoDelayedWork should have been called (not looping forever at 100% CPU).
   EXPECT_GT(do_delayed_work_count.load(), 0)
       << "DoDelayedWork was never called; possible infinite busy-loop";

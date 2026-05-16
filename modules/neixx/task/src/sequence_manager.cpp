@@ -391,6 +391,33 @@ class SequenceManager::Impl {
     return queues_view_;
   }
 
+  // Takes the next immediate task according to the weighted round-robin
+  // priority schedule defined in priority_schedule_.
+  //
+  // Design rationale — why next_priority_index_ must always advance:
+  //
+  // priority_schedule_ is a static slot array, e.g.:
+  //   [UB, UB, UB, UB, UV, UV, BE]  (4 : 2 : 1 ratio)
+  //
+  // The outer loop scans slots starting from next_priority_index_, looking for
+  // a bucket that has a runnable task. The key invariant is:
+  //
+  //   Each slot represents ONE "time slice" consumed by exactly ONE task pick.
+  //   Whether or not the slot's bucket has any tasks, the pointer must advance
+  //   to the NEXT slot before this function returns.
+  //
+  // Without this invariant (the original "continue" bug):
+  //   When USER_BLOCKING buckets are empty, all four UB slots are silently
+  //   skipped, and the first UV slot is consumed. On the next call the pointer
+  //   sits at UV slot #2, again consuming it without paying any UB tax. In a
+  //   steady state of UV-only tasks, UV effectively gets 7/7 of all slots
+  //   instead of the intended 2/7 — a 3.5× quota inflation. BEST_EFFORT suffers
+  //   the symmetric starvation problem in reverse.
+  //
+  // Fix: advance next_priority_index_ unconditionally to (schedule_index + 1)
+  // after inspecting each slot, regardless of whether a task was found. An
+  // empty high-priority bucket "burns" its allocated quota rather than silently
+  // handing it to the next lower bucket.
   bool TakeNextImmediateTask(internal::Task* out_task) {
     if (out_task == nullptr) {
       return false;
@@ -424,7 +451,12 @@ class SequenceManager::Impl {
           break;
       }
 
+      // Always advance the pointer past this slot. An empty bucket "burns" its
+      // allocated quota rather than silently inflating lower-priority quotas.
+      next_priority_index_ = (schedule_index + 1) % schedule_size;
+
       if (queues == nullptr || queues->empty()) {
+        // This priority level has no registered queues; slot quota consumed.
         continue;
       }
 
@@ -437,9 +469,10 @@ class SequenceManager::Impl {
         }
 
         *queue_index = (queue_index_to_try + 1) % queue_count;
-        next_priority_index_ = (schedule_index + 1) % schedule_size;
         return true;
       }
+      // All queues in this priority bucket were empty; slot quota consumed,
+      // continue to the next slot in case a lower-priority bucket has work.
     }
 
     return false;

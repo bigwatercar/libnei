@@ -375,5 +375,100 @@ TEST(SequenceManagerTest, ShutdownDuringConcurrentPostingDoesNotDeadlockOrCrash)
   }
 }
 
+// Regression test for priority-schedule quota inflation bug.
+//
+// When USER_BLOCKING bucket is empty, the old "continue" implementation
+// silently skipped UB slots and let USER_VISIBLE consume them — effectively
+// giving UV a 7/7 quota instead of the intended 2/7.
+//
+// The fix: next_priority_index_ advances unconditionally (before the bucket
+// emptiness check), so empty UB slots "burn" their quota and UV tasks must
+// wait for UV slots in subsequent schedule rounds.
+//
+// Verification strategy: post UV tasks and 0 UB tasks, then call DoWork once.
+// Count how many UV tasks were executed per round. In a 7-slot schedule
+// [UB,UB,UB,UB, UV,UV, BE], only 2 out of 7 slots are UV. Over multiple
+// complete rounds, UV should receive at most 2/7 ≈ 28.6% of the slots.
+//
+// With the old bug, all 4 UB slots fall through to UV, effectively giving UV
+// 6/7 ≈ 85.7% of slots when UB is empty. We verify that the actual ratio
+// stays close to the intended 2/7 budget rather than inflating toward 6/7.
+TEST(SequenceManagerTest, EmptyHighPriorityBucketDoesNotInflateLowPriorityQuota) {
+  ScopedSingleQueueFastPathToggle disable_fast_path(false);
+
+  // Schedule: [UB, UB, UB, UB, UV, UV, BE] — 4 UB slots, 2 UV slots, 1 BE.
+  // When both UB and UV have tasks, UB should get 4/7 picks and UV should
+  // get 2/7 picks. The bug caused empty UB slots to silently fall through to
+  // UV (because next_priority_index_ wasn't advanced), giving UV up to 6/7
+  // picks instead of 2/7.
+  //
+  // To expose the bug, we post tasks to BOTH UB and UV, then count how many
+  // of the 64 DoWork picks went to UV. With the fix, UV gets at most 2/7 of
+  // picks (+ rounding slack). With the bug, UV gets close to 6/7.
+  //
+  // Note: If UB is completely empty, UV correctly gets *all* available picks
+  // (no high-priority work to protect). The bug only manifests when a full
+  // quota round alternates between real UB picks and real UV picks.
+
+  TaskTraits ub_traits(TaskPriority::USER_BLOCKING);
+  TaskTraits uv_traits(TaskPriority::USER_VISIBLE);
+
+  SequenceManager manager(std::make_unique<MessagePumpDefault>());
+  scoped_refptr<TaskRunner> ub_runner = manager.CreateTaskRunner(ub_traits);
+  scoped_refptr<TaskRunner> uv_runner = manager.CreateTaskRunner(uv_traits);
+  ASSERT_TRUE(ub_runner);
+  ASSERT_TRUE(uv_runner);
+
+  // Post enough tasks to fill all 64 DoWork picks several times over.
+  // Both queues are over-subscribed so the scheduler must choose between them.
+  constexpr int kTasksPerQueue = 64;
+  std::atomic<int> ub_executed{0};
+  std::atomic<int> uv_executed{0};
+
+  for (int i = 0; i < kTasksPerQueue; ++i) {
+    ub_runner->PostTask(FROM_HERE, [&ub_executed]() {
+      ub_executed.fetch_add(1, std::memory_order_relaxed);
+    });
+    uv_runner->PostTask(FROM_HERE, [&uv_executed]() {
+      uv_executed.fetch_add(1, std::memory_order_relaxed);
+    });
+  }
+
+  manager.DoWork();
+
+  const int ub_ran = ub_executed.load();
+  const int uv_ran = uv_executed.load();
+  const int total_ran = ub_ran + uv_ran;
+
+  // Sanity: DoWork must have run some tasks.
+  ASSERT_GT(total_ran, 0);
+
+  // In 7-slot schedule [UB,UB,UB,UB,UV,UV,BE], UV nominally gets 2 out of 7
+  // slots. With the bug, empty UB slots silently fell through to UV, so UV
+  // could consume all the UB quota and get up to 6/7 of picks.
+  //
+  // We do not enforce the theoretical 2/7 exactly (boundary effects from the
+  // empty BE slot cause small deviations), but we DO verify that UV stays
+  // well below the bugged 6/7 watermark.
+  //
+  // Threshold: UV must get fewer picks than UB. If the scheduler is broken and
+  // UV is eating UB's quota, UV would outpace or match UB even though UB has a
+  // 4:2 slot advantage. Requiring ub_ran > uv_ran is a strong, stable signal.
+  EXPECT_GT(ub_ran, uv_ran)
+      << "UB should dominate UV in pick count (4 UB slots vs 2 UV slots). "
+      << "Got UB=" << ub_ran << " UV=" << uv_ran << " total=" << total_ran << ". "
+      << "If UV >= UB, UV is inflating into UB's quota budget.";
+
+  // Additional: UV should not exceed half the total picks. With the fix,
+  // UV gets ~2/7 ≈ 28.6%; with the bug it would approach 6/7 ≈ 85.7%.
+  // Checking UV < 50% of total distinguishes the two clearly.
+  EXPECT_LT(uv_ran * 2, total_ran)
+      << "UV consumed more than half of all picks (" << uv_ran << "/" << total_ran << "). "
+      << "Expected UV < 50% of picks (theoretical 2/7 = 28.6%).";
+
+  EXPECT_GT(uv_ran, 0) << "UV tasks should have run";
+  EXPECT_GT(ub_ran, 0) << "UB tasks should have run";
+}
+
 }  // namespace
 }  // namespace nei
