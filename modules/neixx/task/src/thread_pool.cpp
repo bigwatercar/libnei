@@ -74,12 +74,7 @@ class WorkerThread final : public PlatformThread::Delegate {
   }
 
  private:
-  void ThreadMain() override {
-    if (!name_.empty()) {
-      PlatformThread::SetCurrentThreadName(name_);
-    }
-
-    // Install the per-thread blocking hook so ScopedBlockingCall works.
+  void InstallBlockingCallback() {
     internal::SetCurrentBlockingCallback([this](bool began) {
       if (began && on_blocking_begin_) {
         on_blocking_begin_();
@@ -87,6 +82,15 @@ class WorkerThread final : public PlatformThread::Delegate {
         on_blocking_end_();
       }
     });
+  }
+
+  void ThreadMain() override {
+    if (!name_.empty()) {
+      PlatformThread::SetCurrentThreadName(name_);
+    }
+
+    // Install the per-thread blocking hook so ScopedBlockingCall works.
+    InstallBlockingCallback();
 
     for (;;) {
       internal::TaskQueue* queue = source_->GetNextTaskQueue();
@@ -117,8 +121,9 @@ class WorkerThread final : public PlatformThread::Delegate {
 
           // If the task is declared as potentially blocking, notify the pool so
           // it can spawn a compensation worker before we enter the blocking call.
-          const bool may_block = task.traits.may_block;
+          const bool may_block = task.traits.may_block();
           if (may_block && on_blocking_begin_) {
+            InstallBlockingCallback();
             on_blocking_begin_();
           }
 

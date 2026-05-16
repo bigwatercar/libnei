@@ -70,7 +70,7 @@ class PooledTaskSource final {
 
   struct QueueEntry {
     TaskQueue* queue = nullptr;
-    TaskPriority priority = TaskPriority::kNormal;
+    TaskPriority priority = TaskPriority::USER_VISIBLE;
     std::uint64_t order = 0;
   };
 

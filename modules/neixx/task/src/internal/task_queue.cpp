@@ -206,7 +206,7 @@ class TaskQueue::Impl {
     shut_down_ = true;
     weak_factory_.InvalidateWeakPtrs();
 
-    if (traits_.shutdown_behavior == TaskShutdownBehavior::kDrop) {
+    if (traits_.shutdown_behavior() == TaskShutdownBehavior::kDrop) {
       immediate_fifo_queue_.clear();
       delayed_sequence_num_ = 0;
       delayed_incoming_queue_ = TaskMinHeap();

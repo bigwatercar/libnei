@@ -20,7 +20,7 @@ namespace nei {
 //
 //   // Anywhere afterwards:
 //   nei::PostTask(FROM_HERE, []() { DoWork(); });
-//   auto runner = nei::CreateSequencedTaskRunner({.may_block = true});
+//   auto runner = nei::CreateSequencedTaskRunner(nei::TaskTraits(nei::MayBlock()));
 //
 //   // At program shutdown:
 //   nei::ThreadPoolInstance::Shutdown();

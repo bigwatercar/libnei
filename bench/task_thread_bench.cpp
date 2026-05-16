@@ -16,7 +16,7 @@
 
 namespace {
 
-constexpr std::uint32_t kDefaultTaskCount = 50000;
+constexpr std::uint32_t kDefaultTaskCount = 100000;
 std::atomic<std::uint64_t> g_sum_sink{0};
 std::atomic<std::uint64_t> g_executed_task_count{0};
 
@@ -49,6 +49,29 @@ struct BenchmarkResult {
   std::uint64_t sum = 0;
   bool verification_ok = false;
 };
+
+bool ParseTracingEnabled(int argc, char* argv[], bool* ok) {
+  if (ok != nullptr) {
+    *ok = true;
+  }
+
+  if (argc < 3) {
+    return true;
+  }
+
+  const std::string mode = argv[2];
+  if (mode == "on" || mode == "true" || mode == "1") {
+    return true;
+  }
+  if (mode == "off" || mode == "false" || mode == "0") {
+    return false;
+  }
+
+  if (ok != nullptr) {
+    *ok = false;
+  }
+  return true;
+}
 
 void AddTaskBodyNoArgs() {
   // Keep payload minimal: one simple two-number addition.
@@ -116,6 +139,14 @@ int main(int argc, char* argv[]) {
     return 2;
   }
 
+  bool tracing_arg_ok = true;
+  const bool tracing_enabled_for_run = ParseTracingEnabled(argc, argv, &tracing_arg_ok);
+  if (!tracing_arg_ok) {
+    std::cerr << "Invalid tracing_mode: " << argv[2]
+              << "\nUsage: task_thread_bench.exe [task_count] [tracing_mode:on|off]\n";
+    return 2;
+  }
+
   nei::Thread thread("task-thread-bench");
   if (!thread.Start()) {
     std::cerr << "Failed to start benchmark thread." << '\n';
@@ -130,7 +161,7 @@ int main(int argc, char* argv[]) {
   }
 
   const bool previous_tracing_enabled = nei::internal::IsTaskTracingEnabled();
-  nei::internal::SetTaskTracingEnabled(true);
+  nei::internal::SetTaskTracingEnabled(tracing_enabled_for_run);
 
   g_sum_sink.store(0, std::memory_order_relaxed);
   g_executed_task_count.store(0, std::memory_order_relaxed);
@@ -150,6 +181,7 @@ int main(int argc, char* argv[]) {
 
   std::cout << std::fixed << std::setprecision(3);
   std::cout << "Thread::TaskRunner benchmark (minimal BindOnce args)" << '\n';
+  std::cout << "tracing_enabled_for_run=" << (tracing_enabled_for_run ? 1 : 0) << '\n';
   std::cout << "tasks=" << task_count << ", posted_ok=" << result.posted_ok
             << ", failed=" << result.failed
             << ", sentinel_failed=" << (result.sentinel_failed ? 1 : 0)

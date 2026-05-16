@@ -117,7 +117,7 @@ TEST(TaskQueueTest, PromoteReadyTasksAtExactDeadlineIsReadyNotFuture) {
 
 TEST(TaskQueueTest, ShutdownDrainKeepsExistingTasks) {
   TaskTraits traits;
-  traits.shutdown_behavior = TaskShutdownBehavior::kDrain;
+  traits.set_shutdown_behavior(TaskShutdownBehavior::kDrain);
   internal::TaskQueue queue(traits);
 
   ASSERT_TRUE(queue.PushImmediateTask(MakeTask(1, []() {})));
@@ -134,7 +134,7 @@ TEST(TaskQueueTest, ShutdownDrainKeepsExistingTasks) {
 
 TEST(TaskQueueTest, ShutdownDropClearsExistingTasks) {
   TaskTraits traits;
-  traits.shutdown_behavior = TaskShutdownBehavior::kDrop;
+  traits.set_shutdown_behavior(TaskShutdownBehavior::kDrop);
   internal::TaskQueue queue(traits);
 
   ASSERT_TRUE(queue.PushImmediateTask(MakeTask(1, []() {})));

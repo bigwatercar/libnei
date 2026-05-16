@@ -22,9 +22,9 @@ constexpr std::size_t kSingleQueueTakeBatchSize = 256;
 constexpr std::size_t kSingleQueueMaxTasksPerDoWork = 4096;
 
 enum class PriorityBucket : std::size_t {
-  kHigh = 0,
-  kNormal = 1,
-  kLow = 2,
+  kUserBlocking = 0,
+  kUserVisible = 1,
+  kBestEffort = 2,
   kCount = 3,
 };
 
@@ -61,13 +61,13 @@ SequenceManagerThreadState* EnsureSequenceManagerThreadState() {
 
 PriorityBucket GetPriorityBucket(TaskPriority priority) {
   switch (priority) {
-    case TaskPriority::kHigh:
-      return PriorityBucket::kHigh;
-    case TaskPriority::kLow:
-      return PriorityBucket::kLow;
-    case TaskPriority::kNormal:
+    case TaskPriority::USER_BLOCKING:
+      return PriorityBucket::kUserBlocking;
+    case TaskPriority::BEST_EFFORT:
+      return PriorityBucket::kBestEffort;
+    case TaskPriority::USER_VISIBLE:
     default:
-      return PriorityBucket::kNormal;
+      return PriorityBucket::kUserVisible;
   }
 }
 
@@ -188,9 +188,9 @@ class SequenceManager::Impl {
     internal::TaskQueue* single_queue_fast_path = nullptr;
     {
       AutoLock lock(lock_);
-      if (high_priority_queues_.empty() && low_priority_queues_.empty()
-          && normal_priority_queues_.size() == 1) {
-        single_queue_fast_path = normal_priority_queues_[0];
+      if (user_blocking_priority_queues_.empty() && best_effort_priority_queues_.empty()
+          && user_visible_priority_queues_.size() == 1) {
+        single_queue_fast_path = user_visible_priority_queues_[0];
       }
     }
 
@@ -320,35 +320,36 @@ class SequenceManager::Impl {
   void RebuildQueueViewLocked() {
     auto new_view = std::make_shared<std::vector<internal::TaskQueue*>>();
     new_view->reserve(queues_.size());
-    std::vector<internal::TaskQueue*> high_priority_queues;
-    std::vector<internal::TaskQueue*> normal_priority_queues;
-    std::vector<internal::TaskQueue*> low_priority_queues;
+    std::vector<internal::TaskQueue*> user_blocking_priority_queues;
+    std::vector<internal::TaskQueue*> user_visible_priority_queues;
+    std::vector<internal::TaskQueue*> best_effort_priority_queues;
 
     for (const auto& queue : queues_) {
       internal::TaskQueue* raw_queue = queue.get();
       new_view->push_back(raw_queue);
 
-      switch (GetPriorityBucket(raw_queue->traits().priority)) {
-        case PriorityBucket::kHigh:
-          high_priority_queues.push_back(raw_queue);
+      switch (GetPriorityBucket(raw_queue->traits().priority())) {
+        case PriorityBucket::kUserBlocking:
+          user_blocking_priority_queues.push_back(raw_queue);
           break;
-        case PriorityBucket::kLow:
-          low_priority_queues.push_back(raw_queue);
+        case PriorityBucket::kBestEffort:
+          best_effort_priority_queues.push_back(raw_queue);
           break;
-        case PriorityBucket::kNormal:
+        case PriorityBucket::kUserVisible:
         default:
-          normal_priority_queues.push_back(raw_queue);
+          user_visible_priority_queues.push_back(raw_queue);
           break;
       }
     }
 
     queues_view_ = new_view;
-    high_priority_queues_ = std::move(high_priority_queues);
-    normal_priority_queues_ = std::move(normal_priority_queues);
-    low_priority_queues_ = std::move(low_priority_queues);
-    priority_schedule_ = {PriorityBucket::kHigh, PriorityBucket::kHigh, PriorityBucket::kHigh,
-                          PriorityBucket::kHigh, PriorityBucket::kNormal, PriorityBucket::kNormal,
-                          PriorityBucket::kLow};
+    user_blocking_priority_queues_ = std::move(user_blocking_priority_queues);
+    user_visible_priority_queues_ = std::move(user_visible_priority_queues);
+    best_effort_priority_queues_ = std::move(best_effort_priority_queues);
+    priority_schedule_ = {PriorityBucket::kUserBlocking, PriorityBucket::kUserBlocking,
+                          PriorityBucket::kUserBlocking, PriorityBucket::kUserBlocking,
+                          PriorityBucket::kUserVisible, PriorityBucket::kUserVisible,
+                          PriorityBucket::kBestEffort};
 
     if (priority_schedule_.empty()) {
       next_priority_index_ = 0;
@@ -356,14 +357,14 @@ class SequenceManager::Impl {
       next_priority_index_ %= priority_schedule_.size();
     }
 
-    if (high_priority_queue_index_ >= high_priority_queues_.size()) {
-      high_priority_queue_index_ = 0;
+    if (user_blocking_priority_queue_index_ >= user_blocking_priority_queues_.size()) {
+      user_blocking_priority_queue_index_ = 0;
     }
-    if (normal_priority_queue_index_ >= normal_priority_queues_.size()) {
-      normal_priority_queue_index_ = 0;
+    if (user_visible_priority_queue_index_ >= user_visible_priority_queues_.size()) {
+      user_visible_priority_queue_index_ = 0;
     }
-    if (low_priority_queue_index_ >= low_priority_queues_.size()) {
-      low_priority_queue_index_ = 0;
+    if (best_effort_priority_queue_index_ >= best_effort_priority_queues_.size()) {
+      best_effort_priority_queue_index_ = 0;
     }
   }
 
@@ -390,18 +391,18 @@ class SequenceManager::Impl {
       std::vector<internal::TaskQueue*>* queues = nullptr;
       std::size_t* queue_index = nullptr;
       switch (bucket) {
-        case PriorityBucket::kHigh:
-          queues = &high_priority_queues_;
-          queue_index = &high_priority_queue_index_;
+        case PriorityBucket::kUserBlocking:
+          queues = &user_blocking_priority_queues_;
+          queue_index = &user_blocking_priority_queue_index_;
           break;
-        case PriorityBucket::kLow:
-          queues = &low_priority_queues_;
-          queue_index = &low_priority_queue_index_;
+        case PriorityBucket::kBestEffort:
+          queues = &best_effort_priority_queues_;
+          queue_index = &best_effort_priority_queue_index_;
           break;
-        case PriorityBucket::kNormal:
+        case PriorityBucket::kUserVisible:
         default:
-          queues = &normal_priority_queues_;
-          queue_index = &normal_priority_queue_index_;
+          queues = &user_visible_priority_queues_;
+          queue_index = &user_visible_priority_queue_index_;
           break;
       }
 
@@ -432,13 +433,13 @@ class SequenceManager::Impl {
   std::vector<std::unique_ptr<internal::TaskQueue>> queues_;
   std::shared_ptr<const std::vector<internal::TaskQueue*>> queues_view_ =
       std::make_shared<std::vector<internal::TaskQueue*>>();
-  std::vector<internal::TaskQueue*> high_priority_queues_;
-  std::vector<internal::TaskQueue*> normal_priority_queues_;
-  std::vector<internal::TaskQueue*> low_priority_queues_;
+  std::vector<internal::TaskQueue*> user_blocking_priority_queues_;
+  std::vector<internal::TaskQueue*> user_visible_priority_queues_;
+  std::vector<internal::TaskQueue*> best_effort_priority_queues_;
   std::vector<PriorityBucket> priority_schedule_;
-  std::size_t high_priority_queue_index_ = 0;
-  std::size_t normal_priority_queue_index_ = 0;
-  std::size_t low_priority_queue_index_ = 0;
+  std::size_t user_blocking_priority_queue_index_ = 0;
+  std::size_t user_visible_priority_queue_index_ = 0;
+  std::size_t best_effort_priority_queue_index_ = 0;
   std::size_t next_priority_index_ = 0;
   bool is_shutdown_ = false;
   scoped_refptr<TaskRunner> default_task_runner_;

@@ -193,7 +193,7 @@ bool PooledTaskSource::EnqueueLocked(TaskQueue* queue) {
 
   QueueEntry entry;
   entry.queue = queue;
-  entry.priority = queue->traits().priority;
+  entry.priority = queue->traits().priority();
   entry.order = enqueue_order_++;
   heap_.push(std::move(entry));
   state.queued = true;

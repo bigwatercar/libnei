@@ -427,8 +427,7 @@ TEST_F(ThreadPoolInstanceTest, GlobalPostTaskWithMayBlockTraits) {
   WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> ran{false};
 
-  TaskTraits may_block_traits;
-  may_block_traits.may_block = true;
+  const TaskTraits may_block_traits(MayBlock());
   nei::PostTask(FROM_HERE,
                 [&ran, &done]() {
                   ran.store(true);
@@ -450,8 +449,7 @@ TEST(ThreadPoolTest, MayBlockTasksAllCompleteWithCompensation) {
   // Use a small pool so blocking tasks would stall the pool without
   // compensation workers.
   ThreadPool pool(2);
-  TaskTraits may_block_traits;
-  may_block_traits.may_block = true;
+  const TaskTraits may_block_traits(MayBlock());
   scoped_refptr<TaskRunner> runner =
       pool.CreateSequencedTaskRunner(may_block_traits);
   ASSERT_TRUE(runner);

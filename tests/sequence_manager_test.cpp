@@ -201,11 +201,8 @@ TEST(SequenceManagerTest, DefaultTaskRunnerIsCached) {
 }
 
 TEST(SequenceManagerTest, HighPriorityQueuesReceiveMoreSelectorSlotsThanLowPriorityQueues) {
-  TaskTraits high_traits;
-  high_traits.priority = TaskPriority::kHigh;
-
-  TaskTraits low_traits;
-  low_traits.priority = TaskPriority::kLow;
+  TaskTraits high_traits(TaskPriority::USER_BLOCKING);
+  TaskTraits low_traits(TaskPriority::BEST_EFFORT);
 
   SequenceManager manager(std::make_unique<MessagePumpDefault>());
   scoped_refptr<TaskRunner> high_runner = manager.CreateTaskRunner(high_traits);
