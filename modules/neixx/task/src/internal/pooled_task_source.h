@@ -84,15 +84,25 @@ class PooledTaskSource final {
     }
   };
 
-  bool EnqueueLocked(TaskQueue* queue);
+  bool EnqueueLocked(TaskQueue* queue, std::size_t shard_index);
+  std::size_t GetShardIndex(TaskQueue* queue) const;
 
-  Lock lock_;
-  ConditionVariable cv_;
+  static constexpr std::size_t kShardCount = 4;
+
+  struct Shard {
+    Lock lock;
+    std::priority_queue<QueueEntry, std::vector<QueueEntry>, QueueEntryLess> heap;
+    std::unordered_map<TaskQueue*, QueueState> states;
+  };
+
+  Shard shards_[kShardCount];
+  
+  // Global wait mechanism for GetNextTaskQueue
+  Lock wait_lock_;
+  ConditionVariable wait_cv_{&wait_lock_};
   bool is_shutdown_ = false;
   std::atomic<bool> shutdown_fast_path_{false};
-  std::uint64_t enqueue_order_ = 0;
-  std::priority_queue<QueueEntry, std::vector<QueueEntry>, QueueEntryLess> heap_;
-  std::unordered_map<TaskQueue*, QueueState> states_;
+  std::atomic<std::uint64_t> enqueue_order_{0};
   std::atomic<std::int64_t> total_task_count_{0};
 };
 

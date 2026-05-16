@@ -155,8 +155,8 @@ BenchmarkResult RunDelayedBenchmark(nei::TaskRunner& runner, std::uint32_t task_
   }
 
   // Sentinel task (also delayed to ensure ordering)
-  const auto sentinel_delay = task_count > 50000 ? 
-      nei::TimeDelta::FromMilliseconds(50) : 
+  const auto sentinel_delay = task_count > 50000 ?
+      nei::TimeDelta::FromMilliseconds(50) :
       nei::TimeDelta::FromMilliseconds(10);
   const bool sentinel_ok = runner.PostDelayedTask(
       FROM_HERE,
