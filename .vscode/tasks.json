@@ -29,6 +29,25 @@
 				"/c",
 				"git add -A & git commit -m \"feat: integrate MessagePump into build and add tests\" & git log --oneline -1"
 			]
+		},
+		{
+			"label": "run-task-thread-bench-10r",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\bench\\run_task_thread_bench.ps1",
+				"-Rounds",
+				"10",
+				"-TaskCount",
+				"100000",
+				"-OutputDir",
+				".\\bench\\output\\task_thread_latest"
+			],
+			"isBackground": false
 		}
 	]
 }
