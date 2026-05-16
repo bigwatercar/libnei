@@ -163,9 +163,10 @@ class SequenceManager::Impl {
     std::vector<std::unique_ptr<internal::TaskQueue>> queues_to_shutdown;
     {
       AutoLock lock(lock_);
-      if (is_shutdown_) {
+      if (is_shutdown_ || in_shutdown_processing_) {
         return;
       }
+      in_shutdown_processing_ = true;
       is_shutdown_ = true;
       default_task_runner_ = nullptr;
       next_priority_index_ = 0;
@@ -176,6 +177,12 @@ class SequenceManager::Impl {
     for (auto& queue : queues_to_shutdown) {
       queue->SetOnTaskPostedCallback(nullptr);
       queue->Shutdown();
+    }
+    queues_to_shutdown.clear();
+
+    {
+      AutoLock lock(lock_);
+      in_shutdown_processing_ = false;
     }
 
     UnbindFromCurrentThread();
@@ -493,6 +500,7 @@ class SequenceManager::Impl {
   std::size_t best_effort_priority_queue_index_ = 0;
   std::size_t next_priority_index_ = 0;
   bool is_shutdown_ = false;
+  bool in_shutdown_processing_ = false;
   scoped_refptr<TaskRunner> default_task_runner_;
 };
 

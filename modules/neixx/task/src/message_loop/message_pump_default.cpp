@@ -124,6 +124,13 @@ class MessagePumpDefault::Impl {
     return wake_up_event_.TimedWait(timeout);
   }
 
+  void DrainPendingWakeups() {
+    while (wake_up_event_.TimedWait(std::chrono::milliseconds(0))) {
+      // Drain stale auto-reset wakeups so outer nested loops don't inherit
+      // spurious immediate returns from inner-loop quit/wake races.
+    }
+  }
+
  private:
   mutable Lock state_lock_;
 
@@ -184,6 +191,13 @@ void MessagePumpDefault::Run(Delegate* delegate) {
       continue;
     }
 
+    // Before going to sleep, drain any stale wake-up signals that can be left
+    // behind by nested run-loop transitions.
+    impl_->DrainPendingWakeups();
+    if (impl_->ConsumeWorkScheduled()) {
+      continue;
+    }
+
     TimeTicks delayed_run_time;
     if (!impl_->GetDelayedRunTime(&delayed_run_time)) {
       // No delayed deadline exists. Sleep until explicit ScheduleWork/Quit.
@@ -205,6 +219,13 @@ void MessagePumpDefault::Run(Delegate* delegate) {
     int64_t wait_ms = (wait_delta.InMicroseconds() + 999) / 1000;
     if (wait_ms < 0) {
       wait_ms = 0;
+    }
+
+    // Run another non-blocking drain before timed wait to reduce stale signal
+    // carry-over into this wait interval.
+    impl_->DrainPendingWakeups();
+    if (impl_->ConsumeWorkScheduled()) {
+      continue;
     }
 
     // Wait until either:
