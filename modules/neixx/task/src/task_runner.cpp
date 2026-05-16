@@ -45,7 +45,18 @@ class TaskRunnerImpl final : public TaskRunner {
 
     internal::Task queued_task;
     const bool tracing_enabled = internal::IsTaskTracingEnabled();
-    const bool need_enqueue_time = delay.is_positive() || tracing_enabled;
+    const bool is_delayed = delay.is_positive();
+    // For immediate tasks, sample enqueue_time at 1/16 rate to reduce
+    // TimeTicks::Now() overhead. Queue delay stats become approximate but
+    // the task scheduler still correctly handles all tasks.
+    // Delayed tasks always capture exact time for deadline computation.
+    static constexpr int kImmediateTracingSampleRate = 16;
+    const bool need_enqueue_time = [&]() -> bool {
+      if (is_delayed) return true;
+      if (!tracing_enabled) return false;
+      thread_local int tl_sample_counter = 0;
+      return (++tl_sample_counter % kImmediateTracingSampleRate == 0);
+    }();
     const TimeTicks enqueue_time = need_enqueue_time ? TimeTicks::Now() : TimeTicks();
     queued_task.task = std::move(task);
     queued_task.posted_from = from_here;

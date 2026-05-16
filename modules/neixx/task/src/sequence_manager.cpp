@@ -197,6 +197,9 @@ class SequenceManager::Impl {
     if (single_queue_fast_path != nullptr) {
       internal::Task tasks[kSingleQueueTakeBatchSize];
       std::size_t processed = 0;
+      // Capture current time once for the whole DoWork batch. Passed to
+      // RecordTaskExecutionStarted to avoid a TimeTicks::Now() call per task.
+      const TimeTicks batch_now = tracing_enabled ? TimeTicks::Now() : TimeTicks();
       while (processed < kSingleQueueMaxTasksPerDoWork) {
         const std::size_t take_count = std::min(kSingleQueueTakeBatchSize,
                                                 kSingleQueueMaxTasksPerDoWork - processed);
@@ -214,7 +217,7 @@ class SequenceManager::Impl {
           }
           ran_any = true;
           if (tracing_enabled) {
-            internal::RecordTaskExecutionStarted(task);
+            internal::RecordTaskExecutionStarted(task, batch_now);
           }
           std::move(task.task).Run();
           if (tracing_enabled) {

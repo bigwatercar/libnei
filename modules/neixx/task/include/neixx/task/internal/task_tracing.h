@@ -24,6 +24,9 @@ struct TaskTracingStats {
 NEI_API void RecordWeakPtrExpiredPost();
 NEI_API void RecordTaskPosted();
 NEI_API void RecordTaskExecutionStarted(const Task& task);
+// Batch variant: caller supplies the current time captured once per DoWork
+// batch to avoid a TimeTicks::Now() call per task.
+NEI_API void RecordTaskExecutionStarted(const Task& task, TimeTicks batch_now);
 NEI_API void RecordTaskExecutionCompleted();
 NEI_API void RecordTaskCancelledBeforeRun();
 
