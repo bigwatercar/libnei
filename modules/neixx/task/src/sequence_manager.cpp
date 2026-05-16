@@ -120,11 +120,16 @@ class SequenceManager::Impl {
 
     std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(traits);
     internal::TaskQueue* raw_queue = queue.get();
-    queue->SetOnTaskPostedCallback([this, raw_queue]() {
+    WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
+    queue->SetOnTaskPostedCallback([this, weak_queue]() {
       pump_->ScheduleWork();
 
       // If delayed head moved earlier, wake pump's delayed wait path too.
-      const TimeTicks next_delayed = raw_queue->PeekNextDelayedRunTime();
+      internal::TaskQueue* queue = weak_queue.get();
+      if (queue == nullptr) {
+        return;
+      }
+      const TimeTicks next_delayed = queue->PeekNextDelayedRunTime();
       if (!next_delayed.is_null()) {
         pump_->ScheduleDelayedWork(next_delayed);
       }

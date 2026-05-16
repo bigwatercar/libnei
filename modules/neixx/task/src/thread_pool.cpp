@@ -198,6 +198,7 @@ class ThreadPool::Impl {
 
     std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(traits);
     internal::TaskQueue* raw_queue = queue.get();
+    WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
 
     task_source_.RegisterTaskQueue(raw_queue);
     delayed_task_manager_.AddQueue(raw_queue);
@@ -226,9 +227,13 @@ class ThreadPool::Impl {
       }
     });
 
-    raw_queue->SetOnTaskPostedCallback([this, raw_queue]() {
-      task_source_.ReEnqueueTaskQueue(raw_queue);
-      delayed_task_manager_.OnQueueUpdated(raw_queue);
+    raw_queue->SetOnTaskPostedCallback([this, weak_queue]() {
+      internal::TaskQueue* queue = weak_queue.get();
+      if (queue == nullptr) {
+        return;
+      }
+      task_source_.ReEnqueueTaskQueue(queue);
+      delayed_task_manager_.OnQueueUpdated(queue);
     });
 
     queues_.push_back(std::move(queue));
