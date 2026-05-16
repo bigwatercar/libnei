@@ -1,5 +1,7 @@
+#include <neixx/common/location.h>
 #include <neixx/functional/bind.h>
-#include <neixx/task/location.h>
+#include <neixx/synchronization/waitable_event.h>
+#include <neixx/task/internal/task_tracing.h>
 #include <neixx/task/thread_pool.h>
 
 #include <algorithm>
@@ -12,210 +14,15 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
-#include <thread>
+#include <vector>
 
 namespace {
 
-constexpr std::uint32_t kDefaultTaskCount = 10000;
+constexpr std::uint32_t kDefaultTaskCount = 100000;
+std::atomic<std::uint64_t> g_sum_sink{0};
+std::atomic<std::uint64_t> g_executed_task_count{0};
 
-std::uint64_t BuildContiguousCpuMask(std::size_t cpu_count) {
-  if (cpu_count == 0) {
-    return 0;
-  }
-  const std::size_t bit_count = std::min<std::size_t>(cpu_count, 64);
-  if (bit_count >= 64) {
-    return std::numeric_limits<std::uint64_t>::max();
-  }
-  return (static_cast<std::uint64_t>(1) << bit_count) - 1;
-}
-
-void ConfigureAffinityOptions(nei::ThreadPoolOptions &options, std::size_t requested_worker_count, bool use_affinity) {
-  if (!use_affinity) {
-    return;
-  }
-  const std::size_t hw = std::max<std::size_t>(1, std::thread::hardware_concurrency());
-  const std::size_t target_cpus = requested_worker_count > 0 ? std::min<std::size_t>(requested_worker_count, hw) : hw;
-  options.enable_cpu_affinity = true;
-  options.worker_cpu_affinity_mask = BuildContiguousCpuMask(target_cpus);
-  options.best_effort_cpu_affinity_mask = 0;
-  options.apply_affinity_to_compensation_workers = true;
-}
-
-std::uint64_t ExpectedSum(std::uint32_t task_count) {
-  return (static_cast<std::uint64_t>(task_count) * (task_count + 1)) / 2;
-}
-
-struct BenchmarkResult {
-  std::string label;
-  std::size_t worker_count = 0;
-  std::chrono::duration<double, std::milli> post_elapsed{};
-  std::chrono::duration<double, std::milli> total_elapsed{};
-  std::uint64_t sum = 0;
-  std::uint64_t expected_sum = 0;
-};
-
-BenchmarkResult RunBenchmark(const std::string &label,
-                             std::size_t requested_worker_count,
-                             std::uint32_t task_count,
-                             bool disable_compensation = false,
-                             bool use_affinity = false) {
-  nei::ThreadPoolOptions options;
-  options.worker_count = requested_worker_count;
-  ConfigureAffinityOptions(options, requested_worker_count, use_affinity);
-  if (disable_compensation) {
-    options.enable_compensation = false;
-    options.enable_best_effort_compensation = false;
-    options.max_compensation_workers = 0;
-    options.best_effort_max_compensation_workers = 0;
-  }
-  nei::ThreadPool thread_pool(options);
-  const std::size_t worker_count = thread_pool.WorkerCount();
-
-  std::atomic<std::uint64_t> sum{0};
-  std::atomic<std::uint32_t> remaining{task_count};
-  std::promise<void> all_done;
-  auto all_done_future = all_done.get_future();
-
-  const auto total_started_at = std::chrono::steady_clock::now();
-  const auto post_started_at = std::chrono::steady_clock::now();
-  for (std::uint32_t value = 1; value <= task_count; ++value) {
-    thread_pool.PostTask(FROM_HERE,
-                         nei::BindOnce(
-                             [](std::uint32_t task_value,
-                                std::atomic<std::uint64_t> &shared_sum,
-                                std::atomic<std::uint32_t> &shared_remaining,
-                                std::promise<void> &done) {
-                               shared_sum.fetch_add(task_value, std::memory_order_relaxed);
-                               if (shared_remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                                 done.set_value();
-                               }
-                             },
-                             value,
-                             std::ref(sum),
-                             std::ref(remaining),
-                             std::ref(all_done)));
-  }
-  const auto post_finished_at = std::chrono::steady_clock::now();
-
-  all_done_future.wait();
-  const auto total_finished_at = std::chrono::steady_clock::now();
-  thread_pool.Shutdown();
-
-  BenchmarkResult result;
-  result.label = label;
-  result.worker_count = worker_count;
-  result.post_elapsed = post_finished_at - post_started_at;
-  result.total_elapsed = total_finished_at - total_started_at;
-  result.sum = sum.load(std::memory_order_relaxed);
-  result.expected_sum = ExpectedSum(task_count);
-  return result;
-}
-
-BenchmarkResult RunNoopBenchmark(const std::string &label,
-                                 std::size_t requested_worker_count,
-                                 std::uint32_t task_count,
-                                 bool disable_compensation = false,
-                                 bool use_affinity = false) {
-  nei::ThreadPoolOptions options;
-  options.worker_count = requested_worker_count;
-  ConfigureAffinityOptions(options, requested_worker_count, use_affinity);
-  if (disable_compensation) {
-    options.enable_compensation = false;
-    options.enable_best_effort_compensation = false;
-    options.max_compensation_workers = 0;
-    options.best_effort_max_compensation_workers = 0;
-  }
-  nei::ThreadPool thread_pool(options);
-  const std::size_t worker_count = thread_pool.WorkerCount();
-
-  std::atomic<std::uint32_t> remaining{task_count};
-  std::promise<void> all_done;
-  auto all_done_future = all_done.get_future();
-
-  const auto total_started_at = std::chrono::steady_clock::now();
-  const auto post_started_at = std::chrono::steady_clock::now();
-  for (std::uint32_t i = 0; i < task_count; ++i) {
-    thread_pool.PostTask(FROM_HERE,
-                         nei::BindOnce(
-                             [](std::atomic<std::uint32_t> &shared_remaining, std::promise<void> &done) {
-                               if (shared_remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                                 done.set_value();
-                               }
-                             },
-                             std::ref(remaining),
-                             std::ref(all_done)));
-  }
-  const auto post_finished_at = std::chrono::steady_clock::now();
-
-  all_done_future.wait();
-  const auto total_finished_at = std::chrono::steady_clock::now();
-  thread_pool.Shutdown();
-
-  BenchmarkResult result;
-  result.label = label;
-  result.worker_count = worker_count;
-  result.post_elapsed = post_finished_at - post_started_at;
-  result.total_elapsed = total_finished_at - total_started_at;
-  result.sum = 0;
-  result.expected_sum = 0;
-  return result;
-}
-
-BenchmarkResult RunDelayedNoopBenchmark(const std::string &label,
-                                        std::size_t requested_worker_count,
-                                        std::uint32_t task_count,
-                                        bool disable_compensation = false,
-                                        bool use_affinity = false,
-                                        int fixed_delay_ms = 0) {
-  nei::ThreadPoolOptions options;
-  options.worker_count = requested_worker_count;
-  ConfigureAffinityOptions(options, requested_worker_count, use_affinity);
-  if (disable_compensation) {
-    options.enable_compensation = false;
-    options.enable_best_effort_compensation = false;
-    options.max_compensation_workers = 0;
-    options.best_effort_max_compensation_workers = 0;
-  }
-  nei::ThreadPool thread_pool(options);
-  const std::size_t worker_count = thread_pool.WorkerCount();
-
-  std::atomic<std::uint32_t> remaining{task_count};
-  std::promise<void> all_done;
-  auto all_done_future = all_done.get_future();
-
-  const auto total_started_at = std::chrono::steady_clock::now();
-  const auto post_started_at = std::chrono::steady_clock::now();
-  for (std::uint32_t i = 0; i < task_count; ++i) {
-    const std::chrono::milliseconds delay =
-        fixed_delay_ms > 0 ? std::chrono::milliseconds(fixed_delay_ms) : std::chrono::milliseconds(1 + (i % 4));
-    thread_pool.PostDelayedTask(FROM_HERE,
-                                nei::BindOnce(
-                                    [](std::atomic<std::uint32_t> &shared_remaining, std::promise<void> &done) {
-                                      if (shared_remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                                        done.set_value();
-                                      }
-                                    },
-                                    std::ref(remaining),
-                                    std::ref(all_done)),
-                                delay);
-  }
-  const auto post_finished_at = std::chrono::steady_clock::now();
-
-  all_done_future.wait();
-  const auto total_finished_at = std::chrono::steady_clock::now();
-  thread_pool.Shutdown();
-
-  BenchmarkResult result;
-  result.label = label;
-  result.worker_count = worker_count;
-  result.post_elapsed = post_finished_at - post_started_at;
-  result.total_elapsed = total_finished_at - total_started_at;
-  result.sum = 0;
-  result.expected_sum = 0;
-  return result;
-}
-
-std::uint32_t ParseTaskCount(int argc, char *argv[]) {
+std::uint32_t ParseTaskCount(int argc, char* argv[]) {
   if (argc < 2) {
     return kDefaultTaskCount;
   }
@@ -226,91 +33,308 @@ std::uint32_t ParseTaskCount(int argc, char *argv[]) {
       throw std::out_of_range("task count out of range");
     }
     return static_cast<std::uint32_t>(parsed);
-  } catch (const std::exception &) {
+  } catch (const std::exception&) {
     std::cerr << "Invalid task_count: " << argv[1]
-              << "\nUsage: task_threadpool_bench.exe [task_count] [affinity]\n";
+              << "\nUsage: task_threadpool_bench.exe [task_count] [tracing_mode:on|off]\n";
     return 0;
   }
 }
 
-bool ParseUseAffinity(int argc, char *argv[]) {
+bool ParseTracingEnabled(int argc, char* argv[], bool* ok) {
+  if (ok != nullptr) {
+    *ok = true;
+  }
+
   if (argc < 3) {
+    return true;
+  }
+
+  const std::string mode = argv[2];
+  if (mode == "on" || mode == "true" || mode == "1") {
+    return true;
+  }
+  if (mode == "off" || mode == "false" || mode == "0") {
     return false;
   }
-  const std::string value = argv[2];
-  return value == "affinity" || value == "on" || value == "1" || value == "true";
+
+  if (ok != nullptr) {
+    *ok = false;
+  }
+  return true;
 }
 
-} // namespace
+struct BenchmarkResult {
+  std::chrono::duration<double, std::milli> post_elapsed{};
+  std::chrono::duration<double, std::milli> total_elapsed{};
+  std::uint32_t posted_ok = 0;
+  std::uint32_t failed = 0;
+  bool sentinel_failed = false;
+  std::uint64_t executed_tasks = 0;
+  std::uint64_t expected_sum = 0;
+  std::uint64_t sum = 0;
+  bool verification_ok = false;
+};
 
-int main(int argc, char *argv[]) {
+void AddTaskBodyNoArgs() {
+  g_executed_task_count.fetch_add(1, std::memory_order_relaxed);
+  g_sum_sink.fetch_add(1 + 2, std::memory_order_relaxed);
+}
+
+void AddTaskBodyAndSignalLast(std::atomic<std::uint32_t>* pending_task_count,
+                              std::atomic<bool>* posting_done,
+                              nei::WaitableEvent* done_event) {
+  AddTaskBodyNoArgs();
+
+  if (pending_task_count == nullptr || posting_done == nullptr || done_event == nullptr) {
+    return;
+  }
+
+  const std::uint32_t remaining =
+      pending_task_count->fetch_sub(1, std::memory_order_relaxed) - 1;
+  if (remaining == 0 && posting_done->load(std::memory_order_acquire)) {
+    done_event->Signal();
+  }
+}
+
+void SignalDone(nei::WaitableEvent* done_event) {
+  if (done_event != nullptr) {
+    done_event->Signal();
+  }
+}
+
+BenchmarkResult RunAddBenchmark(nei::TaskRunner& runner, std::uint32_t task_count) {
+  std::atomic<std::uint32_t> failed_task_posts(0);
+  bool sentinel_failed = false;
+  nei::WaitableEvent all_done(nei::WaitableEvent::ResetPolicy::kManual, false);
+
+  const auto total_started_at = std::chrono::steady_clock::now();
+  const auto post_started_at = std::chrono::steady_clock::now();
+
+  for (std::uint32_t value = 1; value <= task_count; ++value) {
+    (void)value;
+    const bool ok = runner.PostTask(FROM_HERE, nei::BindOnce(&AddTaskBodyNoArgs));
+    if (!ok) {
+      failed_task_posts.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+
+  const bool sentinel_ok = runner.PostTask(FROM_HERE, nei::BindOnce(&SignalDone, &all_done));
+  if (!sentinel_ok) {
+    sentinel_failed = true;
+    all_done.Signal();
+  }
+
+  const auto post_finished_at = std::chrono::steady_clock::now();
+  all_done.Wait();
+  const auto total_finished_at = std::chrono::steady_clock::now();
+
+  BenchmarkResult result;
+  result.post_elapsed = post_finished_at - post_started_at;
+  result.total_elapsed = total_finished_at - total_started_at;
+  result.failed = failed_task_posts.load(std::memory_order_relaxed);
+  result.sentinel_failed = sentinel_failed;
+  result.posted_ok = task_count - result.failed;
+  result.executed_tasks = g_executed_task_count.load(std::memory_order_relaxed);
+  result.expected_sum = static_cast<std::uint64_t>(result.posted_ok) * 3;
+  result.sum = g_sum_sink.load(std::memory_order_relaxed);
+  result.verification_ok =
+      (result.executed_tasks == result.posted_ok) && (result.sum == result.expected_sum);
+  return result;
+}
+
+BenchmarkResult RunDelayedBenchmark(nei::TaskRunner& runner, std::uint32_t task_count) {
+  std::atomic<std::uint32_t> failed_task_posts(0);
+  std::atomic<std::uint32_t> pending_task_count(0);
+  std::atomic<bool> posting_done(false);
+  nei::WaitableEvent all_done(nei::WaitableEvent::ResetPolicy::kManual, false);
+
+  const auto total_started_at = std::chrono::steady_clock::now();
+  const auto post_started_at = std::chrono::steady_clock::now();
+
+  const auto small_delay = nei::TimeDelta::FromMilliseconds(1);
+  for (std::uint32_t value = 1; value <= task_count; ++value) {
+    (void)value;
+    pending_task_count.fetch_add(1, std::memory_order_relaxed);
+    const bool ok = runner.PostDelayedTask(
+        FROM_HERE,
+        nei::BindOnce(&AddTaskBodyAndSignalLast, &pending_task_count, &posting_done, &all_done),
+        small_delay);
+    if (!ok) {
+      failed_task_posts.fetch_add(1, std::memory_order_relaxed);
+      pending_task_count.fetch_sub(1, std::memory_order_relaxed);
+    }
+  }
+
+  posting_done.store(true, std::memory_order_release);
+  if (pending_task_count.load(std::memory_order_acquire) == 0) {
+    all_done.Signal();
+  }
+
+  const auto post_finished_at = std::chrono::steady_clock::now();
+  all_done.Wait();
+  const auto total_finished_at = std::chrono::steady_clock::now();
+
+  BenchmarkResult result;
+  result.post_elapsed = post_finished_at - post_started_at;
+  result.total_elapsed = total_finished_at - total_started_at;
+  result.failed = failed_task_posts.load(std::memory_order_relaxed);
+  result.sentinel_failed = false;
+  result.posted_ok = task_count - result.failed;
+  result.executed_tasks = g_executed_task_count.load(std::memory_order_relaxed);
+  result.expected_sum = static_cast<std::uint64_t>(result.posted_ok) * 3;
+  result.sum = g_sum_sink.load(std::memory_order_relaxed);
+  result.verification_ok =
+      (result.executed_tasks == result.posted_ok) && (result.sum == result.expected_sum);
+  return result;
+}
+
+BenchmarkResult RunMultiThreadPostBenchmark(nei::TaskRunner& runner, std::uint32_t task_count) {
+  std::atomic<std::uint32_t> failed_task_posts(0);
+  bool sentinel_failed = false;
+  nei::WaitableEvent all_done(nei::WaitableEvent::ResetPolicy::kManual, false);
+
+  constexpr std::uint32_t kNumPostThreads = 4;
+  const std::uint32_t tasks_per_thread = task_count / kNumPostThreads;
+  std::vector<std::future<void>> post_futures;
+
+  const auto total_started_at = std::chrono::steady_clock::now();
+
+  for (std::uint32_t t = 0; t < kNumPostThreads; ++t) {
+    (void)t;
+    post_futures.push_back(std::async(std::launch::async, [&runner, &failed_task_posts, tasks_per_thread]() {
+      for (std::uint32_t i = 0; i < tasks_per_thread; ++i) {
+        const bool ok = runner.PostTask(FROM_HERE, nei::BindOnce(&AddTaskBodyNoArgs));
+        if (!ok) {
+          failed_task_posts.fetch_add(1, std::memory_order_relaxed);
+        }
+      }
+    }));
+  }
+
+  const auto post_started_at = std::chrono::steady_clock::now();
+  for (auto& future : post_futures) {
+    future.wait();
+  }
+  const auto post_finished_at = std::chrono::steady_clock::now();
+
+  const bool sentinel_ok = runner.PostTask(FROM_HERE, nei::BindOnce(&SignalDone, &all_done));
+  if (!sentinel_ok) {
+    sentinel_failed = true;
+    all_done.Signal();
+  }
+
+  all_done.Wait();
+  const auto total_finished_at = std::chrono::steady_clock::now();
+
+  BenchmarkResult result;
+  result.post_elapsed = post_finished_at - post_started_at;
+  result.total_elapsed = total_finished_at - total_started_at;
+  result.failed = failed_task_posts.load(std::memory_order_relaxed);
+  result.sentinel_failed = sentinel_failed;
+  result.posted_ok = task_count - result.failed;
+  result.executed_tasks = g_executed_task_count.load(std::memory_order_relaxed);
+  result.expected_sum = static_cast<std::uint64_t>(result.posted_ok) * 3;
+  result.sum = g_sum_sink.load(std::memory_order_relaxed);
+  result.verification_ok =
+      (result.executed_tasks == result.posted_ok) && (result.sum == result.expected_sum);
+  return result;
+}
+
+}  // namespace
+
+int main(int argc, char* argv[]) {
   const std::uint32_t task_count = ParseTaskCount(argc, argv);
   if (task_count == 0) {
     return 2;
   }
-  const bool use_affinity = ParseUseAffinity(argc, argv);
 
-  std::cout << "Callback layout: OnceCallback sizeof=" << sizeof(nei::OnceCallback)
-            << ", alignof=" << alignof(nei::OnceCallback)
-            << "; RepeatingCallback sizeof=" << sizeof(nei::RepeatingCallback)
-            << ", alignof=" << alignof(nei::RepeatingCallback) << '\n';
-
-  const std::uint64_t expected_sum = ExpectedSum(task_count);
-
-  const BenchmarkResult one_thread = RunBenchmark("1 thread", 1, task_count, false, use_affinity);
-  const BenchmarkResult two_threads = RunBenchmark("2 threads", 2, task_count, false, use_affinity);
-  const BenchmarkResult four_threads = RunBenchmark("4 threads", 4, task_count, false, use_affinity);
-  const BenchmarkResult default_threads = RunBenchmark("default", 0, task_count, false, use_affinity);
-  const BenchmarkResult default_no_compensation = RunBenchmark("default_no_comp", 0, task_count, true, use_affinity);
-  const BenchmarkResult one_thread_noop = RunNoopBenchmark("1 thread_noop", 1, task_count, false, use_affinity);
-  const BenchmarkResult two_threads_noop = RunNoopBenchmark("2 threads_noop", 2, task_count, false, use_affinity);
-  const BenchmarkResult four_threads_noop = RunNoopBenchmark("4 threads_noop", 4, task_count, false, use_affinity);
-  const BenchmarkResult default_threads_noop = RunNoopBenchmark("default_noop", 0, task_count, false, use_affinity);
-  const BenchmarkResult default_no_compensation_noop =
-      RunNoopBenchmark("default_no_comp_noop", 0, task_count, true, use_affinity);
-  const BenchmarkResult default_delayed_mix =
-      RunDelayedNoopBenchmark("default_delayed_mix", 0, task_count, false, use_affinity);
-  const BenchmarkResult default_no_comp_delayed_mix =
-      RunDelayedNoopBenchmark("default_no_comp_delayed_mix", 0, task_count, true, use_affinity);
-  const BenchmarkResult default_delayed_fixed =
-      RunDelayedNoopBenchmark("default_delayed_fixed", 0, task_count, false, use_affinity, 4);
-  const BenchmarkResult default_no_comp_delayed_fixed =
-      RunDelayedNoopBenchmark("default_no_comp_delayed_fixed", 0, task_count, true, use_affinity, 4);
-
-  const BenchmarkResult results[] = {one_thread,
-                                     two_threads,
-                                     four_threads,
-                                     default_threads,
-                                     default_no_compensation,
-                                     one_thread_noop,
-                                     two_threads_noop,
-                                     four_threads_noop,
-                                     default_threads_noop,
-                                     default_no_compensation_noop,
-                                     default_delayed_mix,
-                                     default_no_comp_delayed_mix,
-                                     default_delayed_fixed,
-                                     default_no_comp_delayed_fixed};
-
-  std::cout << "ThreadPool PostTask benchmark: " << task_count << " tiny sum tasks (expected sum = " << expected_sum
-            << ")\n";
-  std::cout << "CPU affinity: " << (use_affinity ? "ON" : "OFF") << '\n';
-  std::cout << std::fixed << std::setprecision(2);
-
-  bool pass = true;
-  for (const BenchmarkResult &result : results) {
-    const bool sum_ok = result.sum == result.expected_sum;
-    pass = pass && sum_ok;
-    const auto drain_elapsed = result.total_elapsed - result.post_elapsed;
-    const double enqueue_ns_per_task = (result.post_elapsed.count() * 1000000.0) / static_cast<double>(task_count);
-    const double drain_ns_per_task = (drain_elapsed.count() * 1000000.0) / static_cast<double>(task_count);
-    const double total_ns_per_task = (result.total_elapsed.count() * 1000000.0) / static_cast<double>(task_count);
-    std::cout << result.label << " | workers=" << result.worker_count
-              << " | enqueue_only_ms=" << result.post_elapsed.count() << " | drain_wait_ms=" << drain_elapsed.count()
-              << " | total_ms=" << result.total_elapsed.count() << " | enqueue_only_ns_per_task=" << enqueue_ns_per_task
-              << " | drain_wait_ns_per_task=" << drain_ns_per_task << " | total_ns_per_task=" << total_ns_per_task
-              << " | sum=" << result.sum << " | status=" << (sum_ok ? "PASS" : "FAIL") << '\n';
+  bool tracing_arg_ok = true;
+  const bool tracing_enabled_for_run = ParseTracingEnabled(argc, argv, &tracing_arg_ok);
+  if (!tracing_arg_ok) {
+    std::cerr << "Invalid tracing_mode: " << argv[2]
+              << "\nUsage: task_threadpool_bench.exe [task_count] [tracing_mode:on|off]\n";
+    return 2;
   }
 
-  return pass ? 0 : 1;
+  nei::ThreadPool pool;
+  nei::scoped_refptr<nei::TaskRunner> runner = pool.CreateSequencedTaskRunner();
+  if (!runner) {
+    std::cerr << "CreateSequencedTaskRunner returned null." << '\n';
+    return 1;
+  }
+
+  const bool previous_tracing_enabled = nei::internal::IsTaskTracingEnabled();
+  nei::internal::SetTaskTracingEnabled(tracing_enabled_for_run);
+
+  struct ScenarioResult {
+    std::string name;
+    BenchmarkResult result;
+  };
+  std::vector<ScenarioResult> all_results;
+
+  g_sum_sink.store(0, std::memory_order_relaxed);
+  g_executed_task_count.store(0, std::memory_order_relaxed);
+  BenchmarkResult result_standard = RunAddBenchmark(*runner, task_count);
+  all_results.push_back({"Standard PostTask (fast-path)", result_standard});
+
+  g_sum_sink.store(0, std::memory_order_relaxed);
+  g_executed_task_count.store(0, std::memory_order_relaxed);
+  BenchmarkResult result_delayed = RunDelayedBenchmark(*runner, task_count);
+  all_results.push_back({"Delayed PostTask (non-fast-path)", result_delayed});
+
+  g_sum_sink.store(0, std::memory_order_relaxed);
+  g_executed_task_count.store(0, std::memory_order_relaxed);
+  BenchmarkResult result_multithread = RunMultiThreadPostBenchmark(*runner, task_count);
+  all_results.push_back({"Multi-threaded PostTask (4 threads)", result_multithread});
+
+  nei::internal::SetTaskTracingEnabled(previous_tracing_enabled);
+  (void)pool.Shutdown();
+
+  std::cout << std::fixed << std::setprecision(3);
+  std::cout << "=== Task ThreadPool Benchmark Results ===" << '\n';
+  std::cout << "Task count: " << task_count << '\n';
+  std::cout << "Tracing enabled: " << (tracing_enabled_for_run ? "yes" : "no") << '\n';
+  std::cout << '\n';
+
+  bool all_passed = true;
+  for (const auto& scenario : all_results) {
+    const auto& res = scenario.result;
+    const double post_sec = res.post_elapsed.count() / 1000.0;
+    const double total_sec = res.total_elapsed.count() / 1000.0;
+    const double post_throughput =
+        post_sec > 0.0 ? static_cast<double>(res.posted_ok) / post_sec : 0.0;
+    const double total_throughput =
+        total_sec > 0.0 ? static_cast<double>(res.posted_ok) / total_sec : 0.0;
+    const double post_ns_per_task =
+        res.posted_ok > 0 ? (res.post_elapsed.count() * 1000000.0) / res.posted_ok : 0.0;
+    const double total_ns_per_task =
+        res.posted_ok > 0 ? (res.total_elapsed.count() * 1000000.0) / res.posted_ok : 0.0;
+    const double drain_ns_per_task = std::max(0.0, total_ns_per_task - post_ns_per_task);
+
+    std::cout << "--- " << scenario.name << " ---" << '\n';
+    std::cout << "Posted: " << res.posted_ok << ", Failed: " << res.failed;
+    if (res.sentinel_failed) {
+      std::cout << ", Sentinel FAILED";
+    }
+    std::cout << '\n';
+    std::cout << "Post elapsed: " << res.post_elapsed.count() << " ms" << '\n';
+    std::cout << "Total elapsed: " << res.total_elapsed.count() << " ms" << '\n';
+    std::cout << "Post throughput: " << post_throughput << " tasks/sec" << '\n';
+    std::cout << "Total throughput: " << total_throughput << " tasks/sec" << '\n';
+    std::cout << "Avg post ns/task: " << post_ns_per_task << '\n';
+    std::cout << "Avg drain ns/task: " << drain_ns_per_task << '\n';
+    std::cout << "Avg total ns/task: " << total_ns_per_task << '\n';
+    std::cout << "Verification: " << (res.verification_ok ? "PASS" : "FAIL");
+    if (!res.verification_ok) {
+      std::cout << " (executed=" << res.executed_tasks << " vs expected=" << res.posted_ok
+                << ", sum=" << res.sum << " vs expected=" << res.expected_sum << ")";
+    }
+    std::cout << '\n' << '\n';
+
+    if (res.failed != 0 || res.sentinel_failed || !res.verification_ok) {
+      all_passed = false;
+    }
+  }
+
+  return all_passed ? 0 : 1;
 }

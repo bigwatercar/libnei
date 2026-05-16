@@ -48,6 +48,370 @@
 				".\\bench\\output\\task_thread_latest"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "run-task-thread-bench-100k-off",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\bench\\Release\\task_thread_bench.exe",
+			"args": [
+				"100000",
+				"off"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-task-thread-bench-100k-off",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\bench\\Release\\task_thread_bench.exe",
+			"args": [
+				"100000",
+				"off"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-task-thread-bench-100k-off",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\bench\\Release\\task_thread_bench.exe",
+			"args": [
+				"100000",
+				"off"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-task-thread-bench-100k-off",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\bench\\Release\\task_thread_bench.exe",
+			"args": [
+				"100000",
+				"off"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-task-thread-bench-100k-off",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\bench\\Release\\task_thread_bench.exe",
+			"args": [
+				"100000",
+				"off"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-nei-tests-taskqueue-seq-runner",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe",
+			"args": [
+				"--gtest_filter=*TaskQueue*:*SequenceManager*:*TaskRunner*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-single-seq-shutdown-concurrent-posting",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe",
+			"args": [
+				"--gtest_filter=SequenceManagerTest.ShutdownDuringConcurrentPostingDoesNotDeadlockOrCrash"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-single-seq-shutdown-concurrent-posting",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe",
+			"args": [
+				"--gtest_filter=SequenceManagerTest.ShutdownDuringConcurrentPostingDoesNotDeadlockOrCrash"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-single-seq-shutdown-concurrent-posting",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe",
+			"args": [
+				"--gtest_filter=SequenceManagerTest.ShutdownDuringConcurrentPostingDoesNotDeadlockOrCrash"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-single-seq-shutdown-concurrent-posting",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe",
+			"args": [
+				"--gtest_filter=SequenceManagerTest.ShutdownDuringConcurrentPostingDoesNotDeadlockOrCrash"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-nei-tests-taskqueue-seq-runner",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe",
+			"args": [
+				"--gtest_filter=*TaskQueue*:*SequenceManager*:*TaskRunner*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-seq-shutdown-crash-fix",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"add",
+				"modules/neixx/task/src/sequence_manager.cpp",
+				";",
+				"git",
+				"commit",
+				"-m",
+				"fix(task): prevent SequenceManager shutdown concurrent-post UAF crash",
+				";",
+				"git",
+				"log",
+				"--oneline",
+				"-1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-seq-shutdown-crash-fix-cmd",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"git add modules/neixx/task/src/sequence_manager.cpp & git commit -m \"fix(task): prevent SequenceManager shutdown concurrent-post UAF crash\" & git log --oneline -1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-task-thread-bench-cmd",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"git add bench/task_thread_bench.cpp & git commit -m \"bench(task): refine delayed benchmark completion signaling\" & git log --oneline -1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "pre-regression-task-suite",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe",
+			"args": [
+				"--gtest_filter=*TaskQueue*:*SequenceManager*:*TaskRunner*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "post-regression-task-suite",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe",
+			"args": [
+				"--gtest_filter=*TaskQueue*:*SequenceManager*:*TaskRunner*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "post-revert-regression-task-suite",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe",
+			"args": [
+				"--gtest_filter=*TaskQueue*:*SequenceManager*:*TaskRunner*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "post-opt-regression-task-suite",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe",
+			"args": [
+				"--gtest_filter=*TaskQueue*:*SequenceManager*:*TaskRunner*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "bench-after-safe-opt",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\bench\\Release\\task_thread_bench.exe",
+			"args": [
+				"100000",
+				"off"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "post-opt2-regression-task-suite",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe",
+			"args": [
+				"--gtest_filter=*TaskQueue*:*SequenceManager*:*TaskRunner*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "bench-after-opt2",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\bench\\Release\\task_thread_bench.exe",
+			"args": [
+				"100000",
+				"off"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-two-micro-opts",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"git add modules/neixx/task/src/internal/task_queue.cpp modules/neixx/task/src/task_runner.cpp & git commit -m \"perf(task): apply semantics-preserving micro-optimizations in queue and runner\" & git log --oneline -1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-task-threadpool-bench-script-smoke",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"bench\\run_task_threadpool_bench.ps1",
+				"-Rounds",
+				"1",
+				"-TaskCount",
+				"20000",
+				"-TracingMode",
+				"off"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-task-threadpool-bench-script-smoke2",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"bench\\run_task_threadpool_bench.ps1",
+				"-Rounds",
+				"1",
+				"-TaskCount",
+				"20000",
+				"-TracingMode",
+				"off"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "probe-threadpool-bench-exit",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"\"build\\windows-vs2022-release-shared\\bench\\Release\\task_threadpool_bench.exe\" 20000 off & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "probe-threadpool-bench-small",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"\"build\\windows-vs2022-release-shared\\bench\\Release\\task_threadpool_bench.exe\" 100 off"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "probe-threadpool-bench-powershell",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"& '.\\build\\windows-vs2022-release-shared\\bench\\Release\\task_threadpool_bench.exe' 100 off; Write-Host \"ExitCode=$LASTEXITCODE\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-threadpool-bench-skipparse",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"bench\\run_task_threadpool_bench.ps1",
+				"-Rounds",
+				"1",
+				"-TaskCount",
+				"20000",
+				"-TracingMode",
+				"off",
+				"-SkipParse"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "revert-pooled-task-source",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"git restore modules/neixx/task/src/internal/pooled_task_source.h modules/neixx/task/src/internal/pooled_task_source.cpp & git status --short"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "threadpool-focused-test",
+			"type": "shell",
+			"command": "c:\\Personal\\Projects\\LibNei\\libnei-src\\build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe",
+			"args": [
+				"--gtest_filter=ThreadPoolTest.SequencedTaskRunnerSerializesExecution"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-pooled-task-source-deadlock-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"git add modules/neixx/task/src/internal/pooled_task_source.h modules/neixx/task/src/internal/pooled_task_source.cpp & git commit -m \"fix(threadpool): resolve pooled task source shutdown wait deadlock\" & git log --oneline -1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-threadpool-bench-10rounds",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"bench\\run_task_threadpool_bench.ps1",
+				"-Rounds",
+				"10",
+				"-TaskCount",
+				"100000",
+				"-TracingMode",
+				"off",
+				"-SkipBuild"
+			],
+			"isBackground": false
 		}
 	]
 }
