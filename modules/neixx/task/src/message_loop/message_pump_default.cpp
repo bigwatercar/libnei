@@ -200,7 +200,9 @@ void MessagePumpDefault::Run(Delegate* delegate) {
     }
 
     TimeDelta wait_delta = delayed_run_time - now;
-    int64_t wait_ms = wait_delta.InMilliseconds();
+    // Ceiling division to avoid busy-loop when wait_delta < 1ms.
+    // E.g., 500µs should wait 1ms, not 0ms.
+    int64_t wait_ms = (wait_delta.InMicroseconds() + 999) / 1000;
     if (wait_ms < 0) {
       wait_ms = 0;
     }

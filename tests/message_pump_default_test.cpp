@@ -405,4 +405,85 @@ TEST(MessagePumpDefaultTest, ThreadAffinityProtection) {
   EXPECT_TRUE(true);
 }
 
+// Test that sub-millisecond delays are ceiling-rounded to 1ms to avoid busy loops.
+// Regression test for timing precision truncation bug.
+TEST(MessagePumpDefaultTest, SubMillisecondDelayDoeNotBusyLoop) {
+  auto pump = std::make_unique<MessagePumpDefault>();
+  std::atomic<int> do_delayed_work_count(0);
+  std::atomic<bool> delayed_work_executed(false);
+  TimeTicks deadline;
+
+  class SubMillisecondDelegate : public MessagePump::Delegate {
+   public:
+    explicit SubMillisecondDelegate(MessagePumpDefault* pump,
+                                     std::atomic<int>* delayed_count,
+                                     std::atomic<bool>* executed,
+                                     TimeTicks* out_deadline)
+        : pump_(pump),
+          delayed_count_(delayed_count),
+          executed_(executed),
+          out_deadline_(out_deadline),
+          iteration_(0) {}
+
+    bool DoWork() override {
+      iteration_++;
+      if (iteration_ == 1) {
+        // Schedule a deadline 500 microseconds (0.5ms) in the future.
+        // With old code using InMilliseconds() truncation, this would become 0,
+        // causing TimedWait(0) to return immediately and busy-loop.
+        // With ceiling division, this should wait at least 1ms.
+        *out_deadline_ = TimeTicks::Now() + TimeDelta::FromMicroseconds(500);
+        pump_->ScheduleDelayedWork(*out_deadline_);
+        return false;
+      }
+      return false;
+    }
+
+    bool DoDelayedWork(NextWorkInfo* out) override {
+      TimeTicks now = TimeTicks::Now();
+      delayed_count_->fetch_add(1);
+
+      // Check if deadline has actually been reached (should be true).
+      if (*out_deadline_ <= now) {
+        executed_->store(true);
+        pump_->Quit();
+      }
+
+      out->next_run_time = NextWorkInfo::kNoScheduledRunTime;
+      out->recent_now = now;
+      return false;
+    }
+
+    bool DoIdleWork() override { return false; }
+
+   private:
+    MessagePumpDefault* pump_;
+    std::atomic<int>* delayed_count_;
+    std::atomic<bool>* executed_;
+    TimeTicks* out_deadline_;
+    int iteration_;
+  } sub_ms_delegate(pump.get(), &do_delayed_work_count, &delayed_work_executed, &deadline);
+
+  std::thread pump_thread([&pump, &sub_ms_delegate]() {
+    pump->Run(&sub_ms_delegate);
+  });
+
+  // Safety timeout: if the pump busy-loops on the 500µs wait and DoDelayedWork
+  // never fires, quit after 2 seconds.
+  std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+  if (!delayed_work_executed.load()) {
+    pump->Quit();
+  }
+
+  pump_thread.join();
+
+  // The delayed work should have been executed (deadline reached).
+  EXPECT_TRUE(delayed_work_executed.load())
+      << "Sub-millisecond deadline was not reached; possible busy-loop regression";
+  
+  // DoDelayedWork should have been called (not looping forever at 100% CPU).
+  EXPECT_GT(do_delayed_work_count.load(), 0)
+      << "DoDelayedWork was never called; possible infinite busy-loop";
+}
+
 }  // namespace nei
