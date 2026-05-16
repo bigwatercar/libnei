@@ -24,9 +24,9 @@ void PooledTaskSource::RegisterTaskQueue(TaskQueue* queue) {
 
   std::size_t shard_index = GetShardIndex(queue);
   Shard& shard = shards_[shard_index];
-  
+
   AutoLock lock(shard.lock);
-  if (is_shutdown_ || queue->is_shutdown()) {
+  if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
     return;
   }
 
@@ -35,74 +35,56 @@ void PooledTaskSource::RegisterTaskQueue(TaskQueue* queue) {
 }
 
 TaskQueue* PooledTaskSource::GetNextTaskQueue() {
-  // Try each shard without holding any global lock to minimize contention
-  for (std::size_t i = 0; i < kShardCount; ++i) {
-    Shard& shard = shards_[i];
-    AutoLock lock(shard.lock);
-    
-    if (is_shutdown_) {
-      return nullptr;
-    }
-
-    while (!shard.heap.empty()) {
-      QueueEntry entry = shard.heap.top();
-      shard.heap.pop();
-      if (entry.queue == nullptr) {
-        continue;
-      }
-
-      auto it = shard.states.find(entry.queue);
-      if (it == shard.states.end()) {
-        continue;
-      }
-
-      QueueState& state = it->second;
-      if (!state.queued) {
-        continue;
-      }
-
-      state.queued = false;
-      if (entry.queue->is_shutdown()) {
-        state.in_flight = false;
-        state.reenqueue_requested = false;
-        continue;
-      }
-
-      state.in_flight = true;
-      return entry.queue;
-    }
-  }
-
-  // No work available, wait on dedicated wait_lock 
-  AutoLock wait_lock(wait_lock_);
   for (;;) {
-    if (is_shutdown_) {
-      return nullptr;
-    }
+    const std::uint64_t observed_generation = wake_generation_.load(std::memory_order_acquire);
 
-    // Double-check all shards one more time before waiting
+    // Try each shard without holding wait_lock_ to avoid wait<->shard lock inversion.
     for (std::size_t i = 0; i < kShardCount; ++i) {
       Shard& shard = shards_[i];
-      AutoLock shard_lock(shard.lock);
-      
-      if (!shard.heap.empty()) {
+      AutoLock lock(shard.lock);
+
+      if (is_shutdown_.load(std::memory_order_acquire)) {
+        return nullptr;
+      }
+
+      while (!shard.heap.empty()) {
         QueueEntry entry = shard.heap.top();
         shard.heap.pop();
-        if (entry.queue != nullptr) {
-          auto it = shard.states.find(entry.queue);
-          if (it != shard.states.end()) {
-            QueueState& state = it->second;
-            if (state.queued && !entry.queue->is_shutdown()) {
-              state.queued = false;
-              state.in_flight = true;
-              return entry.queue;
-            }
-          }
+        if (entry.queue == nullptr) {
+          continue;
         }
+
+        auto it = shard.states.find(entry.queue);
+        if (it == shard.states.end()) {
+          continue;
+        }
+
+        QueueState& state = it->second;
+        if (!state.queued) {
+          continue;
+        }
+
+        state.queued = false;
+        if (entry.queue->is_shutdown()) {
+          state.in_flight = false;
+          state.reenqueue_requested = false;
+          continue;
+        }
+
+        state.in_flight = true;
+        return entry.queue;
       }
     }
 
-    wait_cv_.Wait();
+    AutoLock wait_lock(wait_lock_);
+    if (is_shutdown_.load(std::memory_order_acquire)) {
+      return nullptr;
+    }
+
+    while (!is_shutdown_.load(std::memory_order_acquire)
+           && wake_generation_.load(std::memory_order_acquire) == observed_generation) {
+      wait_cv_.Wait();
+    }
   }
 }
 
@@ -117,9 +99,9 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue* queue) {
 
   std::size_t shard_index = GetShardIndex(queue);
   Shard& shard = shards_[shard_index];
-  
+
   AutoLock lock(shard.lock);
-  if (is_shutdown_ || queue->is_shutdown()) {
+  if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
     return false;
   }
 
@@ -156,9 +138,9 @@ bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(TaskQueue* queue, const Time
 
   std::size_t shard_index = GetShardIndex(queue);
   Shard& shard = shards_[shard_index];
-  
+
   AutoLock lock(shard.lock);
-  if (is_shutdown_ || queue->is_shutdown()) {
+  if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
     return false;
   }
 
@@ -192,7 +174,7 @@ void PooledTaskSource::OnTaskQueueProcessed(TaskQueue* queue) {
 
   std::size_t shard_index = GetShardIndex(queue);
   Shard& shard = shards_[shard_index];
-  
+
   AutoLock lock(shard.lock);
   auto it = shard.states.find(queue);
   if (it == shard.states.end()) {
@@ -202,7 +184,7 @@ void PooledTaskSource::OnTaskQueueProcessed(TaskQueue* queue) {
   QueueState& state = it->second;
   state.in_flight = false;
 
-  if (is_shutdown_ || queue->is_shutdown()) {
+  if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
     state.queued = false;
     state.reenqueue_requested = false;
     shard.states.erase(it);
@@ -219,14 +201,13 @@ void PooledTaskSource::OnTaskQueueProcessed(TaskQueue* queue) {
 }
 
 void PooledTaskSource::Shutdown() {
-  AutoLock wait_lock(wait_lock_);
-  if (is_shutdown_) {
+  const bool already_shutdown = is_shutdown_.exchange(true, std::memory_order_acq_rel);
+  if (already_shutdown) {
     return;
   }
 
-  is_shutdown_ = true;
   shutdown_fast_path_.store(true, std::memory_order_release);
-  
+
   for (std::size_t i = 0; i < kShardCount; ++i) {
     AutoLock shard_lock(shards_[i].lock);
     while (!shards_[i].heap.empty()) {
@@ -234,20 +215,22 @@ void PooledTaskSource::Shutdown() {
     }
     shards_[i].states.clear();
   }
-  
+
+  AutoLock wait_lock(wait_lock_);
+  wake_generation_.fetch_add(1, std::memory_order_release);
   wait_cv_.Broadcast();
 }
 
 bool PooledTaskSource::EnqueueLocked(TaskQueue* queue, std::size_t shard_index) {
   Shard& shard = shards_[shard_index];
-  
+
   auto it = shard.states.find(queue);
   if (it == shard.states.end()) {
     return false;
   }
 
   QueueState& state = it->second;
-  if (state.queued || state.in_flight || is_shutdown_) {
+  if (state.queued || state.in_flight || is_shutdown_.load(std::memory_order_acquire)) {
     return false;
   }
 
@@ -257,9 +240,10 @@ bool PooledTaskSource::EnqueueLocked(TaskQueue* queue, std::size_t shard_index) 
   entry.order = enqueue_order_.fetch_add(1, std::memory_order_relaxed);
   shard.heap.push(std::move(entry));
   state.queued = true;
-  
+
   // Signal the wait CV to wake up GetNextTaskQueue
   AutoLock wait_lock(wait_lock_);
+  wake_generation_.fetch_add(1, std::memory_order_release);
   wait_cv_.Signal();
   return true;
 }

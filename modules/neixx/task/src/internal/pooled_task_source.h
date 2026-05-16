@@ -96,11 +96,12 @@ class PooledTaskSource final {
   };
 
   Shard shards_[kShardCount];
-  
+
   // Global wait mechanism for GetNextTaskQueue
   Lock wait_lock_;
   ConditionVariable wait_cv_{&wait_lock_};
-  bool is_shutdown_ = false;
+  std::atomic<bool> is_shutdown_{false};
+  std::atomic<std::uint64_t> wake_generation_{0};
   std::atomic<bool> shutdown_fast_path_{false};
   std::atomic<std::uint64_t> enqueue_order_{0};
   std::atomic<std::int64_t> total_task_count_{0};
