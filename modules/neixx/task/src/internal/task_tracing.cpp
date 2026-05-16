@@ -54,12 +54,10 @@ void RecordTaskExecutionStarted(const Task& task) {
 
   g_total_queue_delay_us.fetch_add(queue_delay_us, std::memory_order_relaxed);
 
-  // Single no-retry CAS: accept approximate max to avoid spinning.
   std::int64_t current_max = g_max_queue_delay_us.load(std::memory_order_relaxed);
-  if (queue_delay_us > current_max) {
-    g_max_queue_delay_us.compare_exchange_strong(
-        current_max, queue_delay_us,
-        std::memory_order_relaxed, std::memory_order_relaxed);
+  while (queue_delay_us > current_max
+         && !g_max_queue_delay_us.compare_exchange_weak(
+             current_max, queue_delay_us, std::memory_order_relaxed)) {
   }
 }
 
@@ -77,12 +75,10 @@ void RecordTaskExecutionStarted(const Task& task, TimeTicks batch_now) {
 
   g_total_queue_delay_us.fetch_add(queue_delay_us, std::memory_order_relaxed);
 
-  // Single no-retry CAS: accept approximate max to avoid spinning.
   std::int64_t current_max = g_max_queue_delay_us.load(std::memory_order_relaxed);
-  if (queue_delay_us > current_max) {
-    g_max_queue_delay_us.compare_exchange_strong(
-        current_max, queue_delay_us,
-        std::memory_order_relaxed, std::memory_order_relaxed);
+  while (queue_delay_us > current_max
+         && !g_max_queue_delay_us.compare_exchange_weak(
+             current_max, queue_delay_us, std::memory_order_relaxed)) {
   }
 }
 
