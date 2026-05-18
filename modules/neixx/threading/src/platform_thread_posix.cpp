@@ -2,6 +2,10 @@
 
 #include <pthread.h>
 #include <sys/resource.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
 
 #include <chrono>
 #include <cstring>
@@ -128,8 +132,17 @@ bool PlatformThread::SetCurrentThreadType(ThreadType thread_type) {
       nice_value = -2;
       break;
   }
-  // PRIO_PROCESS with tid=0 targets the calling thread (Linux thread group).
-  return setpriority(PRIO_PROCESS, 0, nice_value) == 0;
+#if defined(__linux__)
+  // On Linux, setpriority(PRIO_PROCESS, id, ...) can target a specific LWP
+  // (kernel thread) when |id| is the current thread TID.
+  const id_t tid = static_cast<id_t>(::syscall(SYS_gettid));
+  return setpriority(PRIO_PROCESS, tid, nice_value) == 0;
+#else
+  // Avoid process-wide nice changes on non-Linux POSIX where we do not have
+  // a portable per-thread target id for setpriority().
+  (void)nice_value;
+  return false;
+#endif
 }
 
 } // namespace nei
