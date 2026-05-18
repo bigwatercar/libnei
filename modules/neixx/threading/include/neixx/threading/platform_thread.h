@@ -13,14 +13,24 @@
 
 namespace nei {
 
+/// Physical OS-level scheduling priority for a thread.
+///
+/// Maps to platform-specific mechanisms:
+///   BACKGROUND    → Linux nice +10 / Windows THREAD_PRIORITY_BELOW_NORMAL
+///   DEFAULT       → Linux nice   0 / Windows THREAD_PRIORITY_NORMAL
+///   REALTIME_AUDIO→ Linux nice  -2 / Windows THREAD_PRIORITY_HIGHEST
+///
+/// Used by PlatformThread::SetCurrentThreadType() and by Thread::Options /
+/// ThreadPool::InitParams to declare the initial OS weight of a thread.
+enum class ThreadType {
+  BACKGROUND,        ///< Low-priority background work; yields to UI/foreground.
+  DEFAULT,           ///< Normal OS scheduling; no special priority.
+  REALTIME_AUDIO,    ///< Elevated real-time priority for latency-sensitive work.
+};
+
 class NEI_API PlatformThread final {
 public:
   using PlatformThreadId = std::uintptr_t;
-
-  enum class ThreadType {
-    kDefault,
-    kBackground,
-  };
 
   class NEI_API Delegate {
   public:
@@ -61,6 +71,10 @@ public:
   static bool Detach(Handle *handle);
 
   static void SetCurrentThreadName(const std::string &name);
+
+  /// Sets the OS-level scheduling priority of the *calling* thread.
+  /// Safe to call without holding any application-level lock.
+  /// Returns true on success, false if the OS call failed.
   static bool SetCurrentThreadType(ThreadType thread_type);
 };
 

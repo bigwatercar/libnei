@@ -14,8 +14,8 @@ ThreadPoolInstance* g_instance = nullptr;
 // ThreadPoolInstance
 // ---------------------------------------------------------------------------
 
-ThreadPoolInstance::ThreadPoolInstance()
-    : pool_(0) {}  // 0 → uses kDefaultWorkerCount inside ThreadPool::Impl
+ThreadPoolInstance::ThreadPoolInstance(const InitParams& params)
+    : pool_(params) {}
 
 ThreadPoolInstance::~ThreadPoolInstance() = default;
 
@@ -25,10 +25,15 @@ ThreadPoolInstance* ThreadPoolInstance::Get() {
 }
 
 // static
-void ThreadPoolInstance::CreateAndStartWithDefaultParams() {
+void ThreadPoolInstance::CreateAndStart(const InitParams& params) {
   assert(g_instance == nullptr &&
-         "ThreadPoolInstance::CreateAndStartWithDefaultParams() called twice.");
-  g_instance = new ThreadPoolInstance();
+         "ThreadPoolInstance::CreateAndStart() called twice.");
+  g_instance = new ThreadPoolInstance(params);
+}
+
+// static
+void ThreadPoolInstance::CreateAndStartWithDefaultParams() {
+  CreateAndStart(InitParams{});
 }
 
 // static
@@ -57,7 +62,8 @@ void PostTask(const Location& from_here, OnceClosure task) {
 void PostTask(const Location& from_here, OnceClosure task,
               const TaskTraits& traits) {
   ThreadPoolInstance* instance = ThreadPoolInstance::Get();
-  assert(instance && "PostTask() called before ThreadPoolInstance is initialized.");
+  assert(instance &&
+         "PostTask() called before ThreadPoolInstance is initialized.");
   if (instance == nullptr) {
     return;
   }
@@ -69,7 +75,9 @@ void PostTask(const Location& from_here, OnceClosure task,
 
 scoped_refptr<TaskRunner> CreateSequencedTaskRunner(const TaskTraits& traits) {
   ThreadPoolInstance* instance = ThreadPoolInstance::Get();
-  assert(instance && "CreateSequencedTaskRunner() called before ThreadPoolInstance is initialized.");
+  assert(instance &&
+         "CreateSequencedTaskRunner() called before ThreadPoolInstance is "
+         "initialized.");
   return instance ? instance->CreateSequencedTaskRunner(traits) : nullptr;
 }
 

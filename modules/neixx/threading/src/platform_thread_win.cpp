@@ -32,6 +32,7 @@ SetThreadDescriptionFn ResolveSetThreadDescription() {
 
 unsigned __stdcall ThreadEntry(void *param) {
   std::unique_ptr<nei::StartState> start(static_cast<nei::StartState *>(param));
+  (void)nei::PlatformThread::SetCurrentThreadType(start->thread_type);
   start->delegate->ThreadMain();
   return 0;
 }
@@ -139,8 +140,18 @@ void PlatformThread::SetCurrentThreadName(const std::string &name) {
 }
 
 bool PlatformThread::SetCurrentThreadType(ThreadType thread_type) {
-  const int priority = thread_type == ThreadType::kBackground ? THREAD_PRIORITY_BELOW_NORMAL
-                                                              : THREAD_PRIORITY_NORMAL;
+  int priority = THREAD_PRIORITY_NORMAL;
+  switch (thread_type) {
+    case ThreadType::BACKGROUND:
+      priority = THREAD_PRIORITY_BELOW_NORMAL;
+      break;
+    case ThreadType::DEFAULT:
+      priority = THREAD_PRIORITY_NORMAL;
+      break;
+    case ThreadType::REALTIME_AUDIO:
+      priority = THREAD_PRIORITY_HIGHEST;
+      break;
+  }
   return ::SetThreadPriority(::GetCurrentThread(), priority) != 0;
 }
 

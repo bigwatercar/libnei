@@ -1,6 +1,7 @@
 #if !defined(_WIN32)
 
 #include <pthread.h>
+#include <sys/resource.h>
 
 #include <chrono>
 #include <cstring>
@@ -24,6 +25,7 @@ std::string TruncateThreadName(const std::string &name) {
 
 void *ThreadEntry(void *param) {
   std::unique_ptr<nei::StartState> start(static_cast<nei::StartState *>(param));
+  (void)nei::PlatformThread::SetCurrentThreadType(start->thread_type);
   start->delegate->ThreadMain();
   return nullptr;
 }
@@ -114,8 +116,20 @@ void PlatformThread::SetCurrentThreadName(const std::string &name) {
 }
 
 bool PlatformThread::SetCurrentThreadType(ThreadType thread_type) {
-  (void)thread_type;
-  return true;
+  int nice_value = 0;
+  switch (thread_type) {
+    case ThreadType::BACKGROUND:
+      nice_value = 10;
+      break;
+    case ThreadType::DEFAULT:
+      nice_value = 0;
+      break;
+    case ThreadType::REALTIME_AUDIO:
+      nice_value = -2;
+      break;
+  }
+  // PRIO_PROCESS with tid=0 targets the calling thread (Linux thread group).
+  return setpriority(PRIO_PROCESS, 0, nice_value) == 0;
 }
 
 } // namespace nei

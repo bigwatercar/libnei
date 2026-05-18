@@ -1,12 +1,28 @@
 #include <neixx/threading/thread.h>
 
+#include <memory>
 #include <utility>
 
 #include <neixx/common/location.h>
+#include <neixx/task/message_loop/message_pump_default.h>
+#include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/run_loop.h>
 #include <neixx/task/sequence_manager.h>
 
 namespace nei {
+
+namespace {
+
+/// Factory: creates the correct MessagePump for the requested type.
+/// Falls back to MessagePumpDefault for unimplemented pump types (IO/UI).
+std::unique_ptr<MessagePump> CreateMessagePumpForType(MessagePumpType type) {
+  // IO and UI pumps are not yet implemented; all variants use the default
+  // WaitableEvent-backed pump.  Future pump types are added here.
+  (void)type;
+  return std::make_unique<MessagePumpDefault>();
+}
+
+}  // namespace
 
 Thread::Thread(const std::string& name) : name_(name) {}
 
@@ -15,11 +31,16 @@ Thread::~Thread() {
 }
 
 bool Thread::Start() {
+  return StartWithOptions(Options{});
+}
+
+bool Thread::StartWithOptions(const Options& options) {
   {
     AutoLock lock(lock_);
     if (started_) {
       return false;
     }
+    options_ = options;
     start_event_ =
         std::make_unique<WaitableEvent>(WaitableEvent::ResetPolicy::kManual, false);
     started_ = true;
@@ -27,7 +48,8 @@ bool Thread::Start() {
     running_ = false;
   }
 
-  if (!PlatformThread::Create(0, this, &handle_)) {
+  if (!PlatformThread::CreateWithType(options.stack_size, this, &handle_,
+                                      options.thread_type)) {
     AutoLock lock(lock_);
     start_event_.reset();
     started_ = false;
@@ -59,8 +81,6 @@ void Thread::Stop() {
     if (!started_) {
       return;
     }
-    // Mark as no longer started under the lock so concurrent Stop() calls
-    // return early instead of reaching Join() with the same handle.
     started_ = false;
     runner = task_runner_;
   }
@@ -98,7 +118,16 @@ void Thread::ThreadMain() {
     PlatformThread::SetCurrentThreadName(name_);
   }
 
-  SequenceManager sequence_manager;
+  // Apply the requested OS-level scheduling weight before entering the loop.
+  // Reads options_ which was written (with happens-before via OS thread
+  // creation) before this thread started.
+  PlatformThread::SetCurrentThreadType(options_.thread_type);
+
+  // Build the pump for this thread's event loop.
+  std::unique_ptr<MessagePump> pump =
+      CreateMessagePumpForType(options_.message_pump_type);
+
+  SequenceManager sequence_manager(std::move(pump));
   scoped_refptr<TaskRunner> default_task_runner = sequence_manager.GetDefaultTaskRunner();
 
   WaitableEvent* start_event = nullptr;

@@ -7,6 +7,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -19,6 +20,7 @@
 #include <neixx/task/internal/task_queue.h>
 #include <neixx/task/internal/task_tracing.h>
 #include <neixx/task/scoped_blocking_call.h>
+#include <neixx/task/sequence_manager.h>
 #include <neixx/task/task_observer.h>
 #include <neixx/threading/platform_thread.h>
 
@@ -29,6 +31,19 @@ constexpr std::size_t kDefaultWorkerCount = 4;
 constexpr std::size_t kMaxBlockingMultiplier = 2;
 constexpr std::size_t kMaxTasksPerQueueTurn = 8;
 constexpr std::int64_t kBackpressureWarningThreshold = 10'000;
+
+/// Maps a task's scheduling class to the OS thread priority that should be
+/// applied while running it.  This is the core of priority backgrounding:
+/// a single physical thread temporarily lowers (or raises) its OS priority
+/// to match the work it is executing, then restores the pool baseline.
+ThreadType ThreadTypeFromTaskPriority(TaskPriority priority) {
+  switch (priority) {
+    case TaskPriority::BEST_EFFORT:   return ThreadType::BACKGROUND;
+    case TaskPriority::USER_VISIBLE:  return ThreadType::DEFAULT;
+    case TaskPriority::USER_BLOCKING: return ThreadType::REALTIME_AUDIO;
+  }
+  return ThreadType::DEFAULT;
+}
 
 class WorkerThread final : public PlatformThread::Delegate {
  public:
@@ -41,6 +56,8 @@ class WorkerThread final : public PlatformThread::Delegate {
                BlockingCb on_blocking_begin,
                BlockingCb on_blocking_end,
                TaskFinalizedCb on_task_finalized,
+               ThreadType baseline_thread_type,
+               TimeDelta reclaim_time,
                const std::string& name)
       : source_(source),
         delayed_task_manager_(delayed_task_manager),
@@ -48,12 +65,18 @@ class WorkerThread final : public PlatformThread::Delegate {
         on_blocking_begin_(std::move(on_blocking_begin)),
         on_blocking_end_(std::move(on_blocking_end)),
         on_task_finalized_(std::move(on_task_finalized)),
+        baseline_thread_type_(baseline_thread_type),
+        reclaim_time_(reclaim_time),
+        current_thread_type_(baseline_thread_type),
         name_(name) {}
 
   ~WorkerThread() override = default;
 
   bool Start() {
-    return PlatformThread::Create(0, this, &handle_);
+    // Spawn the OS thread already at the configured baseline priority so that
+    // even the idle-wait period runs at the correct scheduling weight.
+    return PlatformThread::CreateWithType(0, this, &handle_,
+                                         baseline_thread_type_);
   }
 
   void Join() {
@@ -84,16 +107,57 @@ class WorkerThread final : public PlatformThread::Delegate {
     });
   }
 
+  /// Applies the OS thread priority that matches |priority|.
+  /// MUST be called WITHOUT holding any pool lock to avoid syscall-under-lock
+  /// latency spikes and potential priority-inversion dead-ends.
+  void ApplyTaskPriority(TaskPriority priority) {
+    const ThreadType desired = ThreadTypeFromTaskPriority(priority);
+    if (desired != current_thread_type_) {
+      PlatformThread::SetCurrentThreadType(desired);
+      current_thread_type_ = desired;
+    }
+  }
+
+  /// Restores the thread's OS priority to the pool-configured baseline.
+  /// Called after every task execution and before idle-wait, ensuring no
+  /// low-priority task leaves a "nice value pollution" on the thread.
+  /// MUST be called WITHOUT holding any pool lock.
+  void RestoreBaseline() {
+    if (current_thread_type_ != baseline_thread_type_) {
+      PlatformThread::SetCurrentThreadType(baseline_thread_type_);
+      current_thread_type_ = baseline_thread_type_;
+    }
+  }
+
   void ThreadMain() override {
     if (!name_.empty()) {
       PlatformThread::SetCurrentThreadName(name_);
     }
 
+    // Adopt the configured baseline OS priority. CreateWithType() already
+    // requested it at thread creation time; this call keeps current_thread_type_
+    // in sync with reality in case the OS did not honour it at creation.
+    PlatformThread::SetCurrentThreadType(baseline_thread_type_);
+    current_thread_type_ = baseline_thread_type_;
+
     InstallBlockingCallback();
 
     for (;;) {
-      internal::TaskQueue* queue = source_->GetNextTaskQueue();
+      // Fetch the next ready task queue.  If a reclaim timeout is configured,
+      // use the timed variant so idle workers eventually self-terminate.
+      // The timed wait does NOT hold any pool lock — it only waits on the
+      // PooledTaskSource's internal condvar, keeping the pool lock free.
+      bool timed_out = false;
+      internal::TaskQueue* queue =
+          reclaim_time_.is_positive()
+              ? source_->GetNextTaskQueueTimed(reclaim_time_, timed_out)
+              : source_->GetNextTaskQueue();
+
       if (queue == nullptr) {
+        // Either Shutdown() was called or the idle reclaim timeout elapsed.
+        // Restore to baseline before exiting so that OS resources are
+        // released in a clean state.
+        RestoreBaseline();
         internal::SetCurrentBlockingCallback(nullptr);
         exit_event_.Signal();
         return;
@@ -106,7 +170,8 @@ class WorkerThread final : public PlatformThread::Delegate {
         }
 
         source_->NotifyTaskConsumed();
-        const TaskShutdownBehavior shutdown_behavior = task.traits.shutdown_behavior();
+        const TaskShutdownBehavior shutdown_behavior =
+            task.traits.shutdown_behavior();
 
         if (!task.task) {
           if (on_task_finalized_) {
@@ -116,7 +181,9 @@ class WorkerThread final : public PlatformThread::Delegate {
         }
 
         const TimeDelta queue_delay =
-            task.enqueue_time.is_null() ? TimeDelta() : TimeTicks::Now() - task.enqueue_time;
+            task.enqueue_time.is_null()
+                ? TimeDelta()
+                : TimeTicks::Now() - task.enqueue_time;
 
         const bool may_block = task.traits.may_block();
         if (may_block && on_blocking_begin_) {
@@ -124,10 +191,18 @@ class WorkerThread final : public PlatformThread::Delegate {
           on_blocking_begin_();
         }
 
+        // ── Priority Backgrounding ──────────────────────────────────────────
+        // Dynamically set the OS thread priority to match this task's class.
+        // Crucially, this syscall is issued OUTSIDE any pool lock, satisfying
+        // the "no syscall under lock_" constraint stated in the design brief.
+        ApplyTaskPriority(task.traits.priority());
+        // ───────────────────────────────────────────────────────────────────
+
         internal::RecordTaskExecutionStarted(task);
 
         TaskObserver* observer =
-            task_observer_ ? task_observer_->load(std::memory_order_acquire) : nullptr;
+            task_observer_ ? task_observer_->load(std::memory_order_acquire)
+                           : nullptr;
         if (observer) {
           observer->OnTaskStarted(task, queue_delay);
         }
@@ -141,6 +216,14 @@ class WorkerThread final : public PlatformThread::Delegate {
         if (observer) {
           observer->OnTaskCompleted(task, run_duration);
         }
+
+        // ── Restore Baseline Priority ───────────────────────────────────────
+        // Restore before the next dequeue attempt so that:
+        //  • The next task's ApplyTaskPriority() starts from a known state.
+        //  • The idle-wait (if no more tasks arrive) runs at baseline weight.
+        // Again: no lock is held during this syscall.
+        RestoreBaseline();
+        // ───────────────────────────────────────────────────────────────────
 
         if (may_block && on_blocking_end_) {
           on_blocking_end_();
@@ -164,6 +247,15 @@ class WorkerThread final : public PlatformThread::Delegate {
   BlockingCb on_blocking_begin_;
   BlockingCb on_blocking_end_;
   TaskFinalizedCb on_task_finalized_;
+
+  /// Pool-configured OS scheduling baseline restored after each task.
+  const ThreadType baseline_thread_type_;
+  /// 0 = never reclaim; positive = self-terminate after this idle duration.
+  const TimeDelta reclaim_time_;
+  /// Current OS priority of this thread, updated by Apply/Restore.
+  /// Only accessed from this thread's ThreadMain() — no synchronisation needed.
+  ThreadType current_thread_type_;
+
   std::string name_;
   PlatformThread::Handle handle_;
   WaitableEvent exit_event_{WaitableEvent::ResetPolicy::kManual, false};
@@ -173,13 +265,28 @@ class WorkerThread final : public PlatformThread::Delegate {
 
 class ThreadPool::Impl {
  public:
-  explicit Impl(std::size_t worker_count)
-      : shutdown_cv_(&lock_), delayed_task_manager_(&task_source_), worker_count_(worker_count) {
-    if (worker_count_ == 0) {
-      worker_count_ = kDefaultWorkerCount;
+  explicit Impl(const InitParams& params)
+      : shutdown_cv_(&lock_), delayed_task_manager_(&task_source_) {
+    // Derive initial worker count from hardware if not specified.
+    std::size_t initial_workers = params.max_num_workers;
+    if (initial_workers == 0) {
+      const unsigned hw = std::thread::hardware_concurrency();
+      initial_workers =
+          hw > 0 ? static_cast<std::size_t>(hw) : kDefaultWorkerCount;
     }
-    max_worker_count_ = worker_count_ * kMaxBlockingMultiplier;
-    StartWorkers(worker_count_);
+    params_ = params;
+    params_.max_num_workers = initial_workers;
+
+    // Absolute ceiling: initial slots × blocking multiplier.  Compensation
+    // workers spawned by ScopedBlockingCall are capped here.
+    max_worker_count_ = initial_workers * kMaxBlockingMultiplier;
+
+    // Propagate the testing knob before any workers are alive, so that every
+    // SequenceManager created thereafter respects the setting.
+    SequenceManager::SetSingleQueueFastPathEnabledForTesting(
+        params_.enable_single_queue_fast_path);
+
+    StartWorkers(initial_workers);
   }
 
   ~Impl() {
@@ -383,7 +490,8 @@ class ThreadPool::Impl {
 
   std::unique_ptr<WorkerThread> MakeWorker(std::size_t idx,
                                            bool is_compensation = false) {
-    const std::string prefix = is_compensation ? "nei-pool-comp-" : "nei-thread-pool-";
+    const std::string prefix =
+        is_compensation ? "nei-pool-comp-" : "nei-thread-pool-";
     return std::make_unique<WorkerThread>(
         &task_source_,
         &delayed_task_manager_,
@@ -391,6 +499,8 @@ class ThreadPool::Impl {
         [this]() { OnWorkerBeganBlocking(); },
         [this]() { OnWorkerEndedBlocking(); },
         [this](TaskShutdownBehavior behavior) { OnTaskFinalized(behavior); },
+        params_.worker_thread_type,
+        params_.suggested_reclaim_time,
         prefix + std::to_string(idx));
   }
 
@@ -398,6 +508,7 @@ class ThreadPool::Impl {
   ConditionVariable shutdown_cv_;
   internal::PooledTaskSource task_source_;
   internal::DelayedTaskManager delayed_task_manager_;
+  InitParams params_;                                     ///< Frozen at construction.
   std::size_t worker_count_ = 0;
   std::size_t max_worker_count_ = 0;
   std::atomic<std::size_t> blocking_worker_count_{0};
@@ -409,8 +520,8 @@ class ThreadPool::Impl {
   std::vector<std::unique_ptr<WorkerThread>> workers_;
 };
 
-ThreadPool::ThreadPool(std::size_t worker_count)
-    : impl_(std::make_unique<Impl>(worker_count)) {}
+ThreadPool::ThreadPool(const InitParams& params)
+    : impl_(std::make_unique<Impl>(params)) {}
 
 ThreadPool::~ThreadPool() = default;
 

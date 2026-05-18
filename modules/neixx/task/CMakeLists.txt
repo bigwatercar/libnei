@@ -10,6 +10,7 @@
           include/neixx/task/internal/task_queue.h
           include/neixx/task/message_loop/message_pump.h
           include/neixx/task/message_loop/message_pump_default.h
+          include/neixx/task/message_loop/message_pump_type.h
           include/neixx/task/run_loop.h
           include/neixx/task/sequence_manager.h
           include/neixx/task/task_runner.h

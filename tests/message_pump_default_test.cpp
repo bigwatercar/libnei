@@ -14,24 +14,28 @@ namespace nei {
 // Test delegate that tracks callback invocations.
 class TrackingDelegate : public MessagePump::Delegate {
  public:
-  TrackingDelegate()
+  explicit TrackingDelegate(std::promise<void>* callbacks_observed = nullptr)
       : do_work_calls_(0),
         do_delayed_work_calls_(0),
         do_idle_work_calls_(0),
-        should_quit_(false) {}
+        should_quit_(false),
+        callbacks_observed_(callbacks_observed) {}
 
   bool DoWork() override {
     do_work_calls_++;
-    // If we should quit, tell the pump we're done.
-    if (should_quit_) {
+    saw_do_work_.store(true, std::memory_order_relaxed);
+    MaybeSignalCallbacksObserved();
+    // should_quit_ is atomic: safe to read from any thread.
+    if (should_quit_.load(std::memory_order_relaxed)) {
       return false;
     }
-    // Let pump wait for delayed work.
     return false;
   }
 
   bool DoDelayedWork(NextWorkInfo* out) override {
     do_delayed_work_calls_++;
+    saw_do_delayed_work_.store(true, std::memory_order_relaxed);
+    MaybeSignalCallbacksObserved();
     out->next_run_time = NextWorkInfo::kNoScheduledRunTime;
     out->recent_now = TimeTicks::Now();
     return false;
@@ -42,17 +46,37 @@ class TrackingDelegate : public MessagePump::Delegate {
     return false;
   }
 
-  void set_should_quit(bool quit) { should_quit_ = quit; }
+  // Use release semantics so the pump thread observes the store promptly.
+  void set_should_quit(bool quit) {
+    should_quit_.store(quit, std::memory_order_release);
+  }
 
   int do_work_calls() const { return do_work_calls_; }
   int do_delayed_work_calls() const { return do_delayed_work_calls_; }
   int do_idle_work_calls() const { return do_idle_work_calls_; }
 
  private:
+  void MaybeSignalCallbacksObserved() {
+    if (callbacks_observed_ == nullptr) {
+      return;
+    }
+    if (saw_do_work_.load(std::memory_order_relaxed)
+        && saw_do_delayed_work_.load(std::memory_order_relaxed)
+        && !callbacks_reported_.exchange(true, std::memory_order_relaxed)) {
+      callbacks_observed_->set_value();
+    }
+  }
+
   std::atomic<int> do_work_calls_;
   std::atomic<int> do_delayed_work_calls_;
   std::atomic<int> do_idle_work_calls_;
-  bool should_quit_;
+  // Written from the main (test) thread and read from the pump thread.
+  // Must be atomic to avoid UB data races.
+  std::atomic<bool> should_quit_;
+  std::atomic<bool> saw_do_work_{false};
+  std::atomic<bool> saw_do_delayed_work_{false};
+  std::atomic<bool> callbacks_reported_{false};
+  std::promise<void>* callbacks_observed_;
 };
 
 // Basic test: create and destroy the pump.
@@ -64,18 +88,18 @@ TEST(MessagePumpDefaultTest, CreateAndDestroy) {
 
 // Test that Run() calls delegate callbacks.
 TEST(MessagePumpDefaultTest, RunCallsDelegateCallbacks) {
-  TrackingDelegate delegate;
+  std::promise<void> callbacks_observed;
+  std::future<void> callbacks_observed_future = callbacks_observed.get_future();
+  TrackingDelegate delegate(&callbacks_observed);
   auto pump = std::make_unique<MessagePumpDefault>();
 
-  // Start pump in a thread and let it run briefly.
   std::thread pump_thread([&pump, &delegate]() {
     pump->Run(&delegate);
   });
 
-  // Give the pump time to start and make some calls.
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  EXPECT_EQ(callbacks_observed_future.wait_for(std::chrono::seconds(1)),
+            std::future_status::ready);
 
-  // Request quit.
   delegate.set_should_quit(true);
   pump->Quit();
 

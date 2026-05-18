@@ -18,7 +18,7 @@ namespace nei {
 namespace {
 
 TEST(ThreadPoolTest, SequencedTaskRunnerSerializesExecution) {
-  ThreadPool pool(2);
+  ThreadPool pool({2});
   scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
   ASSERT_TRUE(runner);
 
@@ -52,7 +52,7 @@ TEST(ThreadPoolTest, SequencedTaskRunnerSerializesExecution) {
 }
 
 TEST(ThreadPoolTest, PostTaskWakesSleepingWorker) {
-  ThreadPool pool(1);
+  ThreadPool pool({1});
   scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
   ASSERT_TRUE(runner);
 
@@ -66,7 +66,7 @@ TEST(ThreadPoolTest, PostTaskWakesSleepingWorker) {
 }
 
 TEST(ThreadPoolTest, PostingFromRunningTaskStillExecutesFollowupTask) {
-  ThreadPool pool(1);
+  ThreadPool pool({1});
   scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
   ASSERT_TRUE(runner);
 
@@ -88,7 +88,7 @@ TEST(ThreadPoolTest, PostingFromRunningTaskStillExecutesFollowupTask) {
 }
 
 TEST(ThreadPoolTest, DelayedTaskRunsWithoutImmediateKick) {
-  ThreadPool pool(1);
+  ThreadPool pool({1});
   scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
   ASSERT_TRUE(runner);
 
@@ -115,7 +115,7 @@ TEST(ThreadPoolTest, DelayedTaskRunsWithoutImmediateKick) {
 }
 
 TEST(ThreadPoolTest, EarlierDelayedTaskPreemptsTimerWait) {
-  ThreadPool pool(1);
+  ThreadPool pool({1});
   scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
   ASSERT_TRUE(runner);
 
@@ -148,7 +148,7 @@ TEST(ThreadPoolTest, EarlierDelayedTaskPreemptsTimerWait) {
 }
 
 TEST(ThreadPoolTest, DelayedPromotionRaceWithWorkerReenqueueDoesNotLoseTasks) {
-  ThreadPool pool(1);
+  ThreadPool pool({1});
   scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
   ASSERT_TRUE(runner);
 
@@ -189,7 +189,7 @@ TEST(ThreadPoolTest, DelayedPromotionRaceWithWorkerReenqueueDoesNotLoseTasks) {
 }
 
 TEST(ThreadPoolTest, MultiRunnerMixedDelayedTasksAllComplete) {
-  ThreadPool pool(4);
+  ThreadPool pool({4});
 
   constexpr int kRunnerCount = 4;
   constexpr int kRoundsPerRunner = 120;
@@ -254,7 +254,7 @@ TEST(ThreadPoolTest, MultiRunnerMixedDelayedTasksAllComplete) {
 TEST(ThreadPoolTest, TracingCapturesQueueingDelayAndExecutionCounts) {
   TaskRunner::ResetTracingStatsForTesting();
 
-  ThreadPool pool(1);
+  ThreadPool pool({1});
   scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
   ASSERT_TRUE(runner);
 
@@ -279,7 +279,7 @@ TEST(ThreadPoolTest, TracingCapturesQueueingDelayAndExecutionCounts) {
 }
 
 TEST(ThreadPoolTest, PostTaskReturnsTrueOnActiveQueue) {
-  ThreadPool pool(1);
+  ThreadPool pool({1});
   scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
   ASSERT_TRUE(runner);
 
@@ -292,7 +292,7 @@ TEST(ThreadPoolTest, PostTaskReturnsTrueOnActiveQueue) {
 }
 
 TEST(ThreadPoolTest, PostTaskReturnsFalseAfterQueueShutdown) {
-  ThreadPool pool(1);
+  ThreadPool pool({1});
   scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
   ASSERT_TRUE(runner);
 
@@ -305,7 +305,7 @@ TEST(ThreadPoolTest, PostTaskReturnsFalseAfterQueueShutdown) {
 }
 
 TEST(ThreadPoolTest, ShutdownWithTimeoutReturnsTrueOnNormalExit) {
-  ThreadPool pool(2);
+  ThreadPool pool({2});
   scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
   ASSERT_TRUE(runner);
 
@@ -319,7 +319,7 @@ TEST(ThreadPoolTest, ShutdownWithTimeoutReturnsTrueOnNormalExit) {
 }
 
 TEST(ThreadPoolTest, BlockShutdownTaskPhysicallyBlocksShutdownUntilFinished) {
-  ThreadPool pool(1);
+  ThreadPool pool({1});
   scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
   ASSERT_TRUE(runner);
 
@@ -363,7 +363,7 @@ TEST(ThreadPoolTest, BlockShutdownTaskPhysicallyBlocksShutdownUntilFinished) {
 }
 
 TEST(ThreadPoolTest, ShutdownDropsQueuedNonBlockingTasksButKeepsBlockShutdownTask) {
-  ThreadPool pool(1);
+  ThreadPool pool({1});
   scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
   ASSERT_TRUE(runner);
 
@@ -442,7 +442,7 @@ TEST(ThreadPoolTest, ShutdownDropsQueuedNonBlockingTasksButKeepsBlockShutdownTas
     };
 
     TestObserver observer;
-    nei::ThreadPool pool(1);
+    nei::ThreadPool pool({1});
     pool.SetTaskObserver(&observer);
 
     nei::scoped_refptr<nei::TaskRunner> runner = pool.CreateSequencedTaskRunner();
@@ -549,7 +549,7 @@ TEST_F(ThreadPoolInstanceTest, GlobalPostTaskWithMayBlockTraits) {
 TEST(ThreadPoolTest, MayBlockTasksAllCompleteWithCompensation) {
   // Use a small pool so blocking tasks would stall the pool without
   // compensation workers.
-  ThreadPool pool(2);
+  ThreadPool pool({2});
   const TaskTraits may_block_traits(MayBlock());
   scoped_refptr<TaskRunner> runner =
       pool.CreateSequencedTaskRunner(may_block_traits);
@@ -578,7 +578,7 @@ TEST(ThreadPoolTest, MayBlockTasksAllCompleteWithCompensation) {
 // Validates that ScopedBlockingCall inside a task does not break task
 // completion (the pool must still drain all work correctly).
 TEST(ThreadPoolTest, ScopedBlockingCallDoesNotPreventTaskCompletion) {
-  ThreadPool pool(2);
+  ThreadPool pool({2});
   scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
   ASSERT_TRUE(runner);
 

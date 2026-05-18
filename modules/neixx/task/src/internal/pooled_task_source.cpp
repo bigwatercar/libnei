@@ -1,5 +1,6 @@
 #include "pooled_task_source.h"
 
+#include <chrono>
 #include <utility>
 
 namespace nei {
@@ -35,10 +36,24 @@ void PooledTaskSource::RegisterTaskQueue(TaskQueue* queue) {
 }
 
 TaskQueue* PooledTaskSource::GetNextTaskQueue() {
-  for (;;) {
-    const std::uint64_t observed_generation = wake_generation_.load(std::memory_order_acquire);
+  bool timed_out = false;
+  return GetNextTaskQueueTimed(TimeDelta{}, timed_out);
+}
 
-    // Try each shard without holding wait_lock_ to avoid wait<->shard lock inversion.
+TaskQueue* PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout,
+                                                   bool& timed_out) {
+  timed_out = false;
+  const bool has_timeout = timeout.is_positive();
+  // Compute the absolute deadline once, outside the retry loop, so that
+  // cumulative scan time is counted against the budget.
+  const TimeTicks deadline = has_timeout ? TimeTicks::Now() + timeout : TimeTicks();
+
+  for (;;) {
+    const std::uint64_t observed_generation =
+        wake_generation_.load(std::memory_order_acquire);
+
+    // Scan all shards without holding wait_lock_ to avoid lock-order inversion
+    // between the shard locks and the wait condvar lock.
     for (std::size_t i = 0; i < kShardCount; ++i) {
       Shard& shard = shards_[i];
       AutoLock lock(shard.lock);
@@ -76,14 +91,28 @@ TaskQueue* PooledTaskSource::GetNextTaskQueue() {
       }
     }
 
+    // No ready queue found. Block on the condvar until work arrives,
+    // shutdown is signalled, or (if has_timeout) the deadline expires.
     AutoLock wait_lock(wait_lock_);
     if (is_shutdown_.load(std::memory_order_acquire)) {
       return nullptr;
     }
 
-    while (!is_shutdown_.load(std::memory_order_acquire)
-           && wake_generation_.load(std::memory_order_acquire) == observed_generation) {
-      wait_cv_.Wait();
+    while (!is_shutdown_.load(std::memory_order_acquire) &&
+           wake_generation_.load(std::memory_order_acquire) == observed_generation) {
+      if (has_timeout) {
+        const TimeDelta remaining = deadline - TimeTicks::Now();
+        if (!remaining.is_positive()) {
+          timed_out = true;
+          return nullptr;
+        }
+        // Clamp to at least 1 ms to avoid busy-spinning on sub-ms remainders.
+        const auto wait_ms =
+            std::max<std::int64_t>(1, remaining.InMilliseconds());
+        wait_cv_.TimedWait(std::chrono::milliseconds(wait_ms));
+      } else {
+        wait_cv_.Wait();
+      }
     }
   }
 }

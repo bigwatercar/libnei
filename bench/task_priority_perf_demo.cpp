@@ -304,7 +304,7 @@ int main(int argc, char* argv[]) {
   }
 
   const std::uint64_t total_tasks = static_cast<std::uint64_t>(config.tasks_per_priority) * 3;
-  nei::ThreadPool pool(config.worker_count);
+  nei::ThreadPool pool(nei::ThreadPool::InitParams{config.worker_count});
   PerformanceObserver observer(total_tasks);
   pool.SetTaskObserver(&observer);
 

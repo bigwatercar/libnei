@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <neixx/common/time.h>
 #include <neixx/synchronization/condition_variable.h>
 #include <neixx/synchronization/lock.h>
 #include <neixx/task/internal/task_queue.h>
@@ -28,8 +29,13 @@ class PooledTaskSource final {
   PooledTaskSource(PooledTaskSource&&) = delete;
   PooledTaskSource& operator=(PooledTaskSource&&) = delete;
 
-  // Blocks until a queue is available or Shutdown() is called.
+  /// Blocks until a queue is available or Shutdown() is called.
   TaskQueue* GetNextTaskQueue();
+
+  /// Blocks until a queue is available, Shutdown() is called, or |timeout|
+  /// elapses.  On timeout, sets |timed_out| = true and returns nullptr.
+  /// |timeout| <= 0 behaves identically to GetNextTaskQueue() (no timeout).
+  TaskQueue* GetNextTaskQueueTimed(TimeDelta timeout, bool& timed_out);
 
   // Registers a queue into internal state table.
   void RegisterTaskQueue(TaskQueue* queue);

@@ -98,7 +98,7 @@ TEST(PlatformThreadTest, CreateWithTypeBackgroundPath) {
     }
 
     void ThreadMain() override {
-      (void)nei::PlatformThread::SetCurrentThreadType(nei::PlatformThread::ThreadType::kDefault);
+      (void)nei::PlatformThread::SetCurrentThreadType(nei::ThreadType::DEFAULT);
       ran_->store(true, std::memory_order_release);
     }
 
@@ -109,7 +109,7 @@ TEST(PlatformThreadTest, CreateWithTypeBackgroundPath) {
   ASSERT_TRUE(nei::PlatformThread::CreateWithType(0,
                                                    &delegate,
                                                    &handle,
-                                                   nei::PlatformThread::ThreadType::kBackground));
+                                                   nei::ThreadType::BACKGROUND));
   ASSERT_TRUE(nei::PlatformThread::Join(&handle));
   EXPECT_TRUE(ran.load(std::memory_order_acquire));
 }
@@ -129,13 +129,25 @@ TEST(PlatformThreadTest, JoinTwiceFails) {
 
 TEST(PlatformThreadTest, JoinAfterDetachFails) {
   nei::PlatformThread::Handle handle;
+  std::promise<void> finished_promise;
+  std::future<void> finished_future = finished_promise.get_future();
 
   class NoopDelegate final : public nei::PlatformThread::Delegate {
-  public:
-    void ThreadMain() override {}
-  } delegate;
+   public:
+    explicit NoopDelegate(std::promise<void>* finished)
+        : finished_(finished) {}
+
+    void ThreadMain() override {
+      finished_->set_value();
+    }
+
+   private:
+    std::promise<void>* finished_;
+  } delegate(&finished_promise);
 
   ASSERT_TRUE(nei::PlatformThread::Create(0, &delegate, &handle));
   ASSERT_TRUE(nei::PlatformThread::Detach(&handle));
   EXPECT_FALSE(nei::PlatformThread::Join(&handle));
+  EXPECT_EQ(finished_future.wait_for(std::chrono::seconds(1)),
+            std::future_status::ready);
 }

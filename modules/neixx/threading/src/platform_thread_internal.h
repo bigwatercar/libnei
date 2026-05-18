@@ -20,12 +20,12 @@ public:
   pthread_t native_handle{};
 #endif
   bool joinable = false;
-  ThreadType thread_type = ThreadType::kDefault;
+  ThreadType thread_type = ThreadType::DEFAULT;
 };
 
 struct StartState final {
   PlatformThread::Delegate *delegate = nullptr;
-  PlatformThread::ThreadType thread_type = PlatformThread::ThreadType::kDefault;
+  ThreadType thread_type = ThreadType::DEFAULT;
 };
 
 } // namespace nei
