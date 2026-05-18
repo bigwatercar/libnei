@@ -77,46 +77,77 @@ $GateOffMean = 6600000
 function Parse-BenchOutput([string[]]$lines) {
     $r = @{
         tracing_enabled = -1
-        tasks           = 0
-        posted_ok       = 0
-        failed          = 0
-        sentinel_failed = 0
-        verify_ok       = 0
-        post_elapsed_ms = 0.0
-        total_elapsed_ms= 0.0
-        post_throughput = 0.0
-        total_throughput= 0.0
-        avg_post_ns     = 0.0
-        avg_drain_ns    = 0.0
-        avg_total_ns    = 0.0
+        scenarios       = @{
+            Standard       = @{}
+            Delayed        = @{}
+            "Multi-threaded" = @{}
+        }
     }
+
+    $currentScenario = ""
     foreach ($line in $lines) {
-        if ($line -match "tracing_enabled_for_run=(\d+)") {
-            $r.tracing_enabled = [int]$Matches[1]
+        if ($line -match "Tracing enabled:\s*(yes|no)") {
+            $r.tracing_enabled = if ($Matches[1] -eq "yes") { 1 } else { 0 }
+            continue
         }
-        if ($line -match "tasks=(\d+),\s*posted_ok=(\d+),\s*failed=(\d+),\s*sentinel_failed=(\d+)") {
-            $r.tasks           = [int]$Matches[1]
-            $r.posted_ok       = [int]$Matches[2]
-            $r.failed          = [int]$Matches[3]
-            $r.sentinel_failed = [int]$Matches[4]
+
+        if ($line -match "---\s+Standard PostTask") {
+            $currentScenario = "Standard"
+            continue
         }
-        if ($line -match "verify_ok=(\d+)") {
-            $r.verify_ok = [int]$Matches[1]
+        if ($line -match "---\s+Delayed PostTask") {
+            $currentScenario = "Delayed"
+            continue
         }
-        if ($line -match "post_elapsed_ms=([\d.]+),\s*total_elapsed_ms=([\d.]+)") {
-            $r.post_elapsed_ms  = [double]$Matches[1]
-            $r.total_elapsed_ms = [double]$Matches[2]
+        if ($line -match "---\s+Multi-threaded PostTask") {
+            $currentScenario = "Multi-threaded"
+            continue
         }
-        if ($line -match "post_throughput=([\d.]+).*total_throughput=([\d.]+)") {
-            $r.post_throughput  = [double]$Matches[1]
-            $r.total_throughput = [double]$Matches[2]
+
+        if ($currentScenario -eq "") {
+            continue
         }
-        if ($line -match "avg_post_ns_per_task=([\d.]+),\s*avg_drain_ns_per_task=([\d.]+),\s*avg_total_ns_per_task=([\d.]+)") {
-            $r.avg_post_ns  = [double]$Matches[1]
-            $r.avg_drain_ns = [double]$Matches[2]
-            $r.avg_total_ns = [double]$Matches[3]
+
+        $s = $r.scenarios[$currentScenario]
+        if ($line -match "Posted:\s*(\d+),\s*Failed:\s*(\d+)") {
+            $s.posted = [int]$Matches[1]
+            $s.failed = [int]$Matches[2]
+            continue
+        }
+        if ($line -match "Post elapsed:\s*([\d.]+)\s*ms") {
+            $s.post_elapsed_ms = [double]$Matches[1]
+            continue
+        }
+        if ($line -match "Total elapsed:\s*([\d.]+)\s*ms") {
+            $s.total_elapsed_ms = [double]$Matches[1]
+            continue
+        }
+        if ($line -match "Post throughput:\s*([\d.]+)\s*tasks/sec") {
+            $s.post_throughput = [double]$Matches[1]
+            continue
+        }
+        if ($line -match "Total throughput:\s*([\d.]+)\s*tasks/sec") {
+            $s.total_throughput = [double]$Matches[1]
+            continue
+        }
+        if ($line -match "Avg post ns/task:\s*([\d.]+)") {
+            $s.avg_post_ns = [double]$Matches[1]
+            continue
+        }
+        if ($line -match "Avg drain ns/task:\s*([\d.]+)") {
+            $s.avg_drain_ns = [double]$Matches[1]
+            continue
+        }
+        if ($line -match "Avg total ns/task:\s*([\d.]+)") {
+            $s.avg_total_ns = [double]$Matches[1]
+            continue
+        }
+        if ($line -match "Verification:\s*(PASS|FAIL)") {
+            $s.verify = $Matches[1]
+            continue
         }
     }
+
     return $r
 }
 
@@ -138,26 +169,38 @@ function Get-Stats([double[]]$values) {
 # Run one mode
 # ---------------------------------------------------------------------------
 function Run-Mode([string]$mode, [int]$rounds, [int]$taskCount) {
-    $results   = @()
-    $nsResults = @()
+    $scenarios = @("Standard", "Delayed", "Multi-threaded")
+    $results   = @{}
+    $nsResults = @{}
+    foreach ($sc in $scenarios) {
+        $results[$sc] = @()
+        $nsResults[$sc] = @()
+    }
     $rowData   = @()
 
     for ($i = 1; $i -le $rounds; $i++) {
         $output = & $BenchExe $taskCount $mode 2>&1
         $parsed = Parse-BenchOutput -lines $output
 
-        $results   += $parsed.total_throughput
-        $nsResults += $parsed.avg_total_ns
-        $rowData   += [pscustomobject]@{
-            Round           = $i
-            Mode            = $mode.ToUpper()
-            TotalThroughput = [int]$parsed.total_throughput
-            AvgPostNs       = [math]::Round($parsed.avg_post_ns,  1)
-            AvgDrainNs      = [math]::Round($parsed.avg_drain_ns, 1)
-            AvgTotalNs      = [math]::Round($parsed.avg_total_ns, 1)
-            VerifyOk        = $parsed.verify_ok
-            Failed          = $parsed.failed
-            SentinelFailed  = $parsed.sentinel_failed
+        foreach ($sc in $scenarios) {
+            $s = $parsed.scenarios[$sc]
+            if ($null -eq $s.total_throughput) {
+                continue
+            }
+
+            $results[$sc] += [double]$s.total_throughput
+            $nsResults[$sc] += [double]$s.avg_total_ns
+            $rowData += [pscustomobject]@{
+                Round           = $i
+                Mode            = $mode.ToUpper()
+                Scenario        = $sc
+                TotalThroughput = [int]$s.total_throughput
+                AvgPostNs       = [math]::Round([double]$s.avg_post_ns,  3)
+                AvgDrainNs      = [math]::Round([double]$s.avg_drain_ns, 3)
+                AvgTotalNs      = [math]::Round([double]$s.avg_total_ns, 3)
+                Verify          = if ($null -eq $s.verify) { "N/A" } else { $s.verify }
+                Failed          = if ($null -eq $s.failed) { 0 } else { [int]$s.failed }
+            }
         }
 
         # Append raw output to log file
@@ -195,9 +238,9 @@ $offResult = Run-Mode -mode "off" -rounds $Rounds -taskCount $TaskCount
 # ---------------------------------------------------------------------------
 $allRows = $onResult.Rows + $offResult.Rows
 
-$sep  = "+" + ("-" * 7) + "+" + ("-" * 6) + "+" + ("-" * 16) + "+" + ("-" * 11) + "+" + ("-" * 12) + "+" + ("-" * 12) + "+" + ("-" * 10) + "+" + ("-" * 8) + "+"
-$hdr  = "| {0,-5} | {1,-4} | {2,14} | {3,9} | {4,10} | {5,10} | {6,8} | {7,6} |" -f `
-    "Round","Mode","total_tp(t/s)","post_ns","drain_ns","total_ns","verify_ok","failed"
+$sep  = "+" + ("-" * 7) + "+" + ("-" * 6) + "+" + ("-" * 17) + "+" + ("-" * 16) + "+" + ("-" * 11) + "+" + ("-" * 12) + "+" + ("-" * 12) + "+" + ("-" * 8) + "+" + ("-" * 8) + "+"
+$hdr  = "| {0,-5} | {1,-4} | {2,-15} | {3,14} | {4,9} | {5,10} | {6,10} | {7,6} | {8,6} |" -f `
+    "Round","Mode","Scenario","total_tp(t/s)","post_ns","drain_ns","total_ns","verify","failed"
 
 Write-Host ""
 Write-Host "=== Per-Round Results ===" -ForegroundColor Cyan
@@ -205,8 +248,8 @@ Write-Host $sep
 Write-Host $hdr
 Write-Host $sep
 foreach ($row in $allRows) {
-    $line = "| {0,-5} | {1,-4} | {2,14} | {3,9} | {4,10} | {5,10} | {6,8} | {7,6} |" -f `
-        $row.Round, $row.Mode, $row.TotalThroughput, $row.AvgPostNs, $row.AvgDrainNs, $row.AvgTotalNs, $row.VerifyOk, $row.Failed
+    $line = "| {0,-5} | {1,-4} | {2,-15} | {3,14} | {4,9} | {5,10} | {6,10} | {7,6} | {8,6} |" -f `
+        $row.Round, $row.Mode, $row.Scenario, $row.TotalThroughput, $row.AvgPostNs, $row.AvgDrainNs, $row.AvgTotalNs, $row.Verify, $row.Failed
     Write-Host $line
 }
 Write-Host $sep
@@ -218,8 +261,8 @@ Add-Content -Path $LogFile -Value $sep
 Add-Content -Path $LogFile -Value $hdr
 Add-Content -Path $LogFile -Value $sep
 foreach ($row in $allRows) {
-    $line = "| {0,-5} | {1,-4} | {2,14} | {3,9} | {4,10} | {5,10} | {6,8} | {7,6} |" -f `
-        $row.Round, $row.Mode, $row.TotalThroughput, $row.AvgPostNs, $row.AvgDrainNs, $row.AvgTotalNs, $row.VerifyOk, $row.Failed
+    $line = "| {0,-5} | {1,-4} | {2,-15} | {3,14} | {4,9} | {5,10} | {6,10} | {7,6} | {8,6} |" -f `
+        $row.Round, $row.Mode, $row.Scenario, $row.TotalThroughput, $row.AvgPostNs, $row.AvgDrainNs, $row.AvgTotalNs, $row.Verify, $row.Failed
     Add-Content -Path $LogFile -Value $line
 }
 Add-Content -Path $LogFile -Value $sep
@@ -227,11 +270,6 @@ Add-Content -Path $LogFile -Value $sep
 # ---------------------------------------------------------------------------
 # Summary stats + baseline comparison
 # ---------------------------------------------------------------------------
-$onStats    = Get-Stats -values ($onResult.Stats    | ForEach-Object { [double]$_ })
-$offStats   = Get-Stats -values ($offResult.Stats   | ForEach-Object { [double]$_ })
-$onNsStats  = Get-Stats -values ($onResult.NsStats  | ForEach-Object { [double]$_ })
-$offNsStats = Get-Stats -values ($offResult.NsStats | ForEach-Object { [double]$_ })
-
 function Pct-Delta([double]$val, [double]$base) {
     if ($base -le 0) { return "N/A" }
     $pct = ($val - $base) / $base * 100
@@ -241,14 +279,54 @@ function Gate-Status([double]$mean, [double]$gate) {
     if ($mean -ge $gate) { return "PASS" } else { return "FAIL" }
 }
 
-$onDelta    = Pct-Delta  -val $onStats.Mean  -base $BaselineOn
-$offDelta   = Pct-Delta  -val $offStats.Mean -base $BaselineOff
-$onGate     = Gate-Status -mean $onStats.Mean  -gate $GateOnMean
-$offGate    = Gate-Status -mean $offStats.Mean -gate $GateOffMean
+$scenarios = @("Standard", "Delayed", "Multi-threaded")
+$summaryRows = @()
+foreach ($sc in $scenarios) {
+    $onStats    = Get-Stats -values ($onResult.Stats[$sc]    | ForEach-Object { [double]$_ })
+    $offStats   = Get-Stats -values ($offResult.Stats[$sc]   | ForEach-Object { [double]$_ })
+    $onNsStats  = Get-Stats -values ($onResult.NsStats[$sc]  | ForEach-Object { [double]$_ })
+    $offNsStats = Get-Stats -values ($offResult.NsStats[$sc] | ForEach-Object { [double]$_ })
 
-$sumSep = "+" + ("-" * 8) + "+" + ("-" * 14) + "+" + ("-" * 14) + "+" + ("-" * 14) + "+" + ("-" * 14) + "+" + ("-" * 8) + "+" + ("-" * 12) + "+" + ("-" * 8) + "+"
-$sumHdr = "| {0,-6} | {1,12} | {2,12} | {3,12} | {4,12} | {5,6} | {6,10} | {7,6} |" -f `
-    "Mode","Mean(t/s)","Min(t/s)","Max(t/s)","StdDev","CV%","vs Baseline","Gate"
+    $onDelta = "N/A"
+    $offDelta = "N/A"
+    $onGate = "N/A"
+    $offGate = "N/A"
+    if ($sc -eq "Standard") {
+        $onDelta  = Pct-Delta  -val $onStats.Mean  -base $BaselineOn
+        $offDelta = Pct-Delta  -val $offStats.Mean -base $BaselineOff
+        $onGate   = Gate-Status -mean $onStats.Mean  -gate $GateOnMean
+        $offGate  = Gate-Status -mean $offStats.Mean -gate $GateOffMean
+    }
+
+    $summaryRows += [pscustomobject]@{
+        Mode      = "ON"
+        Scenario  = $sc
+        MeanTp    = [int]$onStats.Mean
+        MinTp     = [int]$onStats.Min
+        MaxTp     = [int]$onStats.Max
+        StdDevTp  = [int]$onStats.StdDev
+        CV        = $onStats.CV.ToString("F2")
+        MeanNs    = $onNsStats.Mean.ToString("F1")
+        VsBase    = $onDelta
+        Gate      = $onGate
+    }
+    $summaryRows += [pscustomobject]@{
+        Mode      = "OFF"
+        Scenario  = $sc
+        MeanTp    = [int]$offStats.Mean
+        MinTp     = [int]$offStats.Min
+        MaxTp     = [int]$offStats.Max
+        StdDevTp  = [int]$offStats.StdDev
+        CV        = $offStats.CV.ToString("F2")
+        MeanNs    = $offNsStats.Mean.ToString("F1")
+        VsBase    = $offDelta
+        Gate      = $offGate
+    }
+}
+
+$sumSep = "+" + ("-" * 8) + "+" + ("-" * 17) + "+" + ("-" * 14) + "+" + ("-" * 14) + "+" + ("-" * 14) + "+" + ("-" * 14) + "+" + ("-" * 8) + "+" + ("-" * 10) + "+" + ("-" * 12) + "+" + ("-" * 8) + "+"
+$sumHdr = "| {0,-6} | {1,-15} | {2,12} | {3,12} | {4,12} | {5,12} | {6,6} | {7,8} | {8,10} | {9,6} |" -f `
+    "Mode","Scenario","Mean(t/s)","Min(t/s)","Max(t/s)","StdDev","CV%","Mean_ns","vsBase","Gate"
 
 Write-Host ""
 Write-Host "=== Summary & Baseline Comparison ===" -ForegroundColor Cyan
@@ -256,51 +334,20 @@ Write-Host $sumSep
 Write-Host $sumHdr
 Write-Host $sumSep
 
-$onCv   = $onStats.CV.ToString("F2")
-$offCv  = $offStats.CV.ToString("F2")
-$onRow  = "| {0,-6} | {1,12} | {2,12} | {3,12} | {4,12} | {5,6} | {6,10} | {7,6} |" -f `
-    "ON", [int]$onStats.Mean, [int]$onStats.Min, [int]$onStats.Max, [int]$onStats.StdDev, $onCv, $onDelta, $onGate
-$offRow = "| {0,-6} | {1,12} | {2,12} | {3,12} | {4,12} | {5,6} | {6,10} | {7,6} |" -f `
-    "OFF", [int]$offStats.Mean, [int]$offStats.Min, [int]$offStats.Max, [int]$offStats.StdDev, $offCv, $offDelta, $offGate
-
-Write-Host $onRow
-Write-Host $offRow
+foreach ($row in $summaryRows) {
+    $sumLine = "| {0,-6} | {1,-15} | {2,12} | {3,12} | {4,12} | {5,12} | {6,6} | {7,8} | {8,10} | {9,6} |" -f `
+        $row.Mode, $row.Scenario, $row.MeanTp, $row.MinTp, $row.MaxTp, $row.StdDevTp, $row.CV, $row.MeanNs, $row.VsBase, $row.Gate
+    Write-Host $sumLine
+}
 Write-Host $sumSep
 
-# ns/task summary table
-$nsSep = "+" + ("-" * 8) + "+" + ("-" * 12) + "+" + ("-" * 12) + "+" + ("-" * 12) + "+" + ("-" * 12) + "+" + ("-" * 8) + "+"
-$nsHdr = "| {0,-6} | {1,10} | {2,10} | {3,10} | {4,10} | {5,6} |" -f `
-    "Mode","Mean_ns","Min_ns","Max_ns","StdDev_ns","CV%"
-$onNsCv  = $onNsStats.CV.ToString("F2")
-$offNsCv = $offNsStats.CV.ToString("F2")
-$onNsRow  = "| {0,-6} | {1,10} | {2,10} | {3,10} | {4,10} | {5,6} |" -f `
-    "ON",  $onNsStats.Mean.ToString("F1"),  $onNsStats.Min.ToString("F1"),  $onNsStats.Max.ToString("F1"),  $onNsStats.StdDev.ToString("F1"),  $onNsCv
-$offNsRow = "| {0,-6} | {1,10} | {2,10} | {3,10} | {4,10} | {5,6} |" -f `
-    "OFF", $offNsStats.Mean.ToString("F1"), $offNsStats.Min.ToString("F1"), $offNsStats.Max.ToString("F1"), $offNsStats.StdDev.ToString("F1"), $offNsCv
-
-Write-Host ""
-Write-Host "=== ns/task Summary ===" -ForegroundColor Cyan
-Write-Host $nsSep
-Write-Host $nsHdr
-Write-Host $nsSep
-Write-Host $onNsRow
-Write-Host $offNsRow
-Write-Host $nsSep
-
-Add-Content -Path $LogFile -Value ""
-Add-Content -Path $LogFile -Value "=== ns/task Summary ==="
-Add-Content -Path $LogFile -Value $nsSep
-Add-Content -Path $LogFile -Value $nsHdr
-Add-Content -Path $LogFile -Value $nsSep
-Add-Content -Path $LogFile -Value $onNsRow
-Add-Content -Path $LogFile -Value $offNsRow
-Add-Content -Path $LogFile -Value $nsSep
-
 # Speedup ratio OFF vs ON
-$speedup = if ($onStats.Mean -gt 0) { $offStats.Mean / $onStats.Mean } else { 0 }
+$onStandardMean = ($summaryRows | Where-Object { $_.Mode -eq "ON" -and $_.Scenario -eq "Standard" } | Select-Object -First 1).MeanTp
+$offStandardMean = ($summaryRows | Where-Object { $_.Mode -eq "OFF" -and $_.Scenario -eq "Standard" } | Select-Object -First 1).MeanTp
+$speedup = if ($onStandardMean -gt 0) { $offStandardMean / $onStandardMean } else { 0 }
 Write-Host ""
 $speedupPct = (($speedup - 1) * 100).ToString("+0.0;-0.0") + "%"
-Write-Host ("Tracing OFF speedup vs ON : {0:F2}x  ({1})" -f $speedup, $speedupPct) -ForegroundColor Green
+Write-Host ("Standard scenario OFF speedup vs ON : {0:F2}x  ({1})" -f $speedup, $speedupPct) -ForegroundColor Green
 Write-Host ""
 Write-Host ("Baselines used  ->  ON: {0:N0} t/s  |  OFF: {1:N0} t/s" -f $BaselineOn, $BaselineOff) -ForegroundColor DarkGray
 Write-Host ("Gate thresholds ->  ON: {0:N0} t/s  |  OFF: {1:N0} t/s" -f $GateOnMean, $GateOffMean) -ForegroundColor DarkGray
@@ -311,15 +358,20 @@ Add-Content -Path $LogFile -Value "=== Summary & Baseline Comparison ==="
 Add-Content -Path $LogFile -Value $sumSep
 Add-Content -Path $LogFile -Value $sumHdr
 Add-Content -Path $LogFile -Value $sumSep
-Add-Content -Path $LogFile -Value $onRow
-Add-Content -Path $LogFile -Value $offRow
+foreach ($row in $summaryRows) {
+    $sumLine = "| {0,-6} | {1,-15} | {2,12} | {3,12} | {4,12} | {5,12} | {6,6} | {7,8} | {8,10} | {9,6} |" -f `
+        $row.Mode, $row.Scenario, $row.MeanTp, $row.MinTp, $row.MaxTp, $row.StdDevTp, $row.CV, $row.MeanNs, $row.VsBase, $row.Gate
+    Add-Content -Path $LogFile -Value $sumLine
+}
 Add-Content -Path $LogFile -Value $sumSep
-Add-Content -Path $LogFile -Value ("Tracing OFF speedup vs ON : {0:F2}x" -f $speedup)
+Add-Content -Path $LogFile -Value ("Standard scenario OFF speedup vs ON : {0:F2}x" -f $speedup)
 Add-Content -Path $LogFile -Value ("Baselines: ON={0}  OFF={1}" -f $BaselineOn, $BaselineOff)
 
 # ---------------------------------------------------------------------------
 # Exit code: FAIL if either gate fails
 # ---------------------------------------------------------------------------
+$onGate = ($summaryRows | Where-Object { $_.Mode -eq "ON" -and $_.Scenario -eq "Standard" } | Select-Object -First 1).Gate
+$offGate = ($summaryRows | Where-Object { $_.Mode -eq "OFF" -and $_.Scenario -eq "Standard" } | Select-Object -First 1).Gate
 if ($onGate -eq "FAIL" -or $offGate -eq "FAIL") {
     Write-Host ""
     Write-Host "GATE FAILED - see table above." -ForegroundColor Red
