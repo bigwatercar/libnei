@@ -1,6 +1,7 @@
 #include <neixx/task/thread_pool.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -29,7 +30,9 @@ namespace {
 
 constexpr std::size_t kDefaultWorkerCount = 4;
 constexpr std::size_t kMaxBlockingMultiplier = 2;
-constexpr std::size_t kMaxTasksPerQueueTurn = 8;
+// Larger turn budget amortizes queue handoff/reenqueue overhead and reduces
+// post->drain gap for bursty single-queue workloads (e.g. benchmark drains).
+constexpr std::size_t kMaxTasksPerQueueTurn = 64;
 constexpr std::int64_t kBackpressureWarningThreshold = 10'000;
 
 /// Maps a task's scheduling class to the OS thread priority that should be
@@ -163,11 +166,11 @@ class WorkerThread final : public PlatformThread::Delegate {
         return;
       }
 
-      for (std::size_t i = 0; i < kMaxTasksPerQueueTurn; ++i) {
-        internal::Task task;
-        if (!queue->TakeImmediateTask(&task)) {
-          break;
-        }
+      std::array<internal::Task, kMaxTasksPerQueueTurn> batch;
+      const std::size_t task_count =
+          queue->TakeImmediateTasks(batch.data(), batch.size());
+      for (std::size_t i = 0; i < task_count; ++i) {
+        internal::Task& task = batch[i];
 
         source_->NotifyTaskConsumed();
         const TaskShutdownBehavior shutdown_behavior =
