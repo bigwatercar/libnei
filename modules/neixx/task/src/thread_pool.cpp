@@ -30,9 +30,12 @@ namespace {
 
 constexpr std::size_t kDefaultWorkerCount = 4;
 constexpr std::size_t kMaxBlockingMultiplier = 2;
-// Larger turn budget amortizes queue handoff/reenqueue overhead and reduces
-// post->drain gap for bursty single-queue workloads (e.g. benchmark drains).
-constexpr std::size_t kMaxTasksPerQueueTurn = 64;
+// Per-fetch batch size. Keep modest to avoid giant stack buffers while still
+// amortizing queue-lock and dequeue overhead.
+constexpr std::size_t kTaskBatchSize = 64;
+// Adaptive per-queue processing budget bounds (tasks per queue handoff).
+constexpr std::size_t kMinTasksPerQueueTurn = 32;
+constexpr std::size_t kMaxTasksPerQueueTurn = 256;
 constexpr std::int64_t kBackpressureWarningThreshold = 10'000;
 
 /// Maps a task's scheduling class to the OS thread priority that should be
@@ -132,6 +135,24 @@ class WorkerThread final : public PlatformThread::Delegate {
     }
   }
 
+  // Adapts the per-queue turn budget based on dequeue saturation:
+  // - Full batch => queue is likely still hot, grow budget.
+  // - Very sparse batch => queue likely cooling down, shrink budget.
+  void AdaptTurnBudget(std::size_t taken, std::size_t requested) {
+    if (requested == 0) {
+      return;
+    }
+    if (taken == requested) {
+      dynamic_turn_budget_ =
+          std::min(kMaxTasksPerQueueTurn, dynamic_turn_budget_ * 2);
+      return;
+    }
+    if (taken * 4 <= requested) {
+      dynamic_turn_budget_ =
+          std::max(kMinTasksPerQueueTurn, dynamic_turn_budget_ / 2);
+    }
+  }
+
   void ThreadMain() override {
     if (!name_.empty()) {
       PlatformThread::SetCurrentThreadName(name_);
@@ -166,74 +187,89 @@ class WorkerThread final : public PlatformThread::Delegate {
         return;
       }
 
-      std::array<internal::Task, kMaxTasksPerQueueTurn> batch;
-      const std::size_t task_count =
-          queue->TakeImmediateTasks(batch.data(), batch.size());
-      for (std::size_t i = 0; i < task_count; ++i) {
-        internal::Task& task = batch[i];
+      std::size_t remaining_budget = dynamic_turn_budget_;
+      while (remaining_budget > 0) {
+        const std::size_t request_count =
+            std::min(kTaskBatchSize, remaining_budget);
+        std::array<internal::Task, kTaskBatchSize> batch;
+        const std::size_t task_count =
+            queue->TakeImmediateTasks(batch.data(), request_count);
+        AdaptTurnBudget(task_count, request_count);
+        if (task_count == 0) {
+          break;
+        }
 
-        source_->NotifyTaskConsumed();
-        const TaskShutdownBehavior shutdown_behavior =
-            task.traits.shutdown_behavior();
+        for (std::size_t i = 0; i < task_count; ++i) {
+          internal::Task& task = batch[i];
 
-        if (!task.task) {
+          source_->NotifyTaskConsumed();
+          const TaskShutdownBehavior shutdown_behavior =
+              task.traits.shutdown_behavior();
+
+          if (!task.task) {
+            if (on_task_finalized_) {
+              on_task_finalized_(shutdown_behavior);
+            }
+            continue;
+          }
+
+          const TimeDelta queue_delay =
+              task.enqueue_time.is_null()
+                  ? TimeDelta()
+                  : TimeTicks::Now() - task.enqueue_time;
+
+          const bool may_block = task.traits.may_block();
+          if (may_block && on_blocking_begin_) {
+            InstallBlockingCallback();
+            on_blocking_begin_();
+          }
+
+          // ── Priority Backgrounding ────────────────────────────────────────
+          // Dynamically set the OS thread priority to match this task's class.
+          // Crucially, this syscall is issued OUTSIDE any pool lock, satisfying
+          // the "no syscall under lock_" constraint stated in the design brief.
+          ApplyTaskPriority(task.traits.priority());
+          // ─────────────────────────────────────────────────────────────────
+
+          internal::RecordTaskExecutionStarted(task);
+
+          TaskObserver* observer =
+              task_observer_ ? task_observer_->load(std::memory_order_acquire)
+                             : nullptr;
+          if (observer) {
+            observer->OnTaskStarted(task, queue_delay);
+          }
+
+          const TimeTicks run_start = TimeTicks::Now();
+          std::move(task.task).Run();
+          const TimeDelta run_duration = TimeTicks::Now() - run_start;
+
+          internal::RecordTaskExecutionCompleted();
+
+          if (observer) {
+            observer->OnTaskCompleted(task, run_duration);
+          }
+
+          // ── Restore Baseline Priority ─────────────────────────────────────
+          // Restore before the next dequeue attempt so that:
+          //  • The next task's ApplyTaskPriority() starts from a known state.
+          //  • The idle-wait (if no more tasks arrive) runs at baseline weight.
+          // Again: no lock is held during this syscall.
+          RestoreBaseline();
+          // ─────────────────────────────────────────────────────────────────
+
+          if (may_block && on_blocking_end_) {
+            on_blocking_end_();
+          }
+
           if (on_task_finalized_) {
             on_task_finalized_(shutdown_behavior);
           }
-          continue;
         }
 
-        const TimeDelta queue_delay =
-            task.enqueue_time.is_null()
-                ? TimeDelta()
-                : TimeTicks::Now() - task.enqueue_time;
-
-        const bool may_block = task.traits.may_block();
-        if (may_block && on_blocking_begin_) {
-          InstallBlockingCallback();
-          on_blocking_begin_();
-        }
-
-        // ── Priority Backgrounding ──────────────────────────────────────────
-        // Dynamically set the OS thread priority to match this task's class.
-        // Crucially, this syscall is issued OUTSIDE any pool lock, satisfying
-        // the "no syscall under lock_" constraint stated in the design brief.
-        ApplyTaskPriority(task.traits.priority());
-        // ───────────────────────────────────────────────────────────────────
-
-        internal::RecordTaskExecutionStarted(task);
-
-        TaskObserver* observer =
-            task_observer_ ? task_observer_->load(std::memory_order_acquire)
-                           : nullptr;
-        if (observer) {
-          observer->OnTaskStarted(task, queue_delay);
-        }
-
-        const TimeTicks run_start = TimeTicks::Now();
-        std::move(task.task).Run();
-        const TimeDelta run_duration = TimeTicks::Now() - run_start;
-
-        internal::RecordTaskExecutionCompleted();
-
-        if (observer) {
-          observer->OnTaskCompleted(task, run_duration);
-        }
-
-        // ── Restore Baseline Priority ───────────────────────────────────────
-        // Restore before the next dequeue attempt so that:
-        //  • The next task's ApplyTaskPriority() starts from a known state.
-        //  • The idle-wait (if no more tasks arrive) runs at baseline weight.
-        // Again: no lock is held during this syscall.
-        RestoreBaseline();
-        // ───────────────────────────────────────────────────────────────────
-
-        if (may_block && on_blocking_end_) {
-          on_blocking_end_();
-        }
-
-        if (on_task_finalized_) {
-          on_task_finalized_(shutdown_behavior);
+        remaining_budget -= task_count;
+        if (task_count < request_count) {
+          break;
         }
       }
 
@@ -258,6 +294,8 @@ class WorkerThread final : public PlatformThread::Delegate {
   /// Current OS priority of this thread, updated by Apply/Restore.
   /// Only accessed from this thread's ThreadMain() — no synchronisation needed.
   ThreadType current_thread_type_;
+  /// Adaptive per-queue processing budget for this worker thread.
+  std::size_t dynamic_turn_budget_ = kTaskBatchSize;
 
   std::string name_;
   PlatformThread::Handle handle_;
