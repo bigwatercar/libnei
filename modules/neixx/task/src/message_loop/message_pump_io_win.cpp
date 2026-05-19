@@ -148,10 +148,9 @@ class MessagePumpForIOState {
   }
 
   void DrainPendingWakeups(MessagePump::Delegate* delegate) {
-    while (DispatchOneBatch(delegate, 0)) {
-      // Keep draining stale completion packets so nested loops do not inherit
-      // spurious wakeups from prior ScheduleWork/Quit activity.
-    }
+    // 传入 should_run_task=false：仅排干 IOCP 中残留的唤醒包，不触发
+    // delegate->DoWork()，防止 DoWork 内部 PostTask 再次不断进入死循环。
+    while (DispatchOneBatch(delegate, 0, /*should_run_task=*/false)) {}
   }
 
   bool WaitAndDispatch(MessagePump::Delegate* delegate, int timeout_ms) {
@@ -193,7 +192,8 @@ class MessagePumpForIOState {
     (void)::PostQueuedCompletionStatus(iocp_, 0, kScheduleWorkCompletionKey, nullptr);
   }
 
-  bool DispatchOneBatch(MessagePump::Delegate* delegate, int timeout_ms) {
+  bool DispatchOneBatch(MessagePump::Delegate* delegate, int timeout_ms,
+                        bool should_run_task = true) {
     if (iocp_ == nullptr) {
       return false;
     }
@@ -222,7 +222,9 @@ class MessagePumpForIOState {
       if (completion_key == kScheduleWorkCompletionKey) {
         ran_work_wakeup = true;
         any_event = true;
-        continue;
+        // 立即中断批量消费，优先将执行权交还给 DoWork，避免高吞吐 I/O
+        // 场景下 Task 调度饥饿（Starvation）。
+        break;
       }
 
       WatchRecord record;
@@ -252,7 +254,7 @@ class MessagePumpForIOState {
       any_event = true;
     }
 
-    if (ran_work_wakeup && delegate != nullptr) {
+    if (ran_work_wakeup && delegate != nullptr && should_run_task) {
       (void)delegate->DoWork();
     }
     return any_event;

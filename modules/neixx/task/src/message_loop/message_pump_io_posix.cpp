@@ -175,10 +175,9 @@ class MessagePumpForIOState {
   }
 
   void DrainPendingWakeups(MessagePump::Delegate* delegate) {
-    while (DispatchOneBatch(delegate, 0)) {
-      // Keep draining stale eventfd wakeups or immediate IOCP-equivalent
-      // completions until the pump is quiescent at this nesting boundary.
-    }
+    // 传入 should_run_task=false：仅排干 OS 层的 eventfd 信号，不触发
+    // delegate->DoWork()，防止 DoWork 内部 PostTask 再次写 eventfd 导致死循环。
+    while (DispatchOneBatch(delegate, 0, /*should_run_task=*/false)) {}
   }
 
   bool WaitAndDispatch(MessagePump::Delegate* delegate, int timeout_ms) {
@@ -228,11 +227,10 @@ class MessagePumpForIOState {
       return;
     }
 
-    {
-      AutoLock lock(state_lock_);
-      watches_.erase(watch_id);
-    }
-
+    AutoLock lock(state_lock_);
+    watches_.erase(watch_id);
+    // epoll_ctl 必须在同一把锁的保护下执行，防止 fd 被复用后新 watch 的内核
+    // 监听被此处的 EPOLL_CTL_DEL 误杀（Linux fd 重用天坑）。
     if (epoll_fd_ >= 0) {
       (void)epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, static_cast<int>(handle), nullptr);
     }
@@ -269,7 +267,8 @@ class MessagePumpForIOState {
     return drained;
   }
 
-  bool DispatchOneBatch(MessagePump::Delegate* delegate, int timeout_ms) {
+  bool DispatchOneBatch(MessagePump::Delegate* delegate, int timeout_ms,
+                        bool should_run_task = true) {
     if (epoll_fd_ < 0) {
       return false;
     }
@@ -319,7 +318,7 @@ class MessagePumpForIOState {
       any_event = true;
     }
 
-    if (ran_work_wakeup && delegate != nullptr) {
+    if (ran_work_wakeup && delegate != nullptr && should_run_task) {
       (void)delegate->DoWork();
     }
     return any_event;
