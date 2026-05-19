@@ -35,7 +35,8 @@ constexpr std::size_t kMaxBlockingMultiplier = 2;
 constexpr std::size_t kTaskBatchSize = 64;
 // Adaptive per-queue processing budget bounds (tasks per queue handoff).
 constexpr std::size_t kMinTasksPerQueueTurn = 32;
-constexpr std::size_t kMaxTasksPerQueueTurn = 256;
+constexpr std::size_t kMaxTasksPerQueueTurn = 128;
+constexpr std::size_t kSaturatedBatchesToGrow = 2;
 constexpr std::int64_t kBackpressureWarningThreshold = 10'000;
 
 /// Maps a task's scheduling class to the OS thread priority that should be
@@ -142,12 +143,21 @@ class WorkerThread final : public PlatformThread::Delegate {
     if (requested == 0) {
       return;
     }
+
     if (taken == requested) {
-      dynamic_turn_budget_ =
-          std::min(kMaxTasksPerQueueTurn, dynamic_turn_budget_ * 2);
+      ++consecutive_saturated_batches_;
+      if (consecutive_saturated_batches_ >= kSaturatedBatchesToGrow) {
+        dynamic_turn_budget_ =
+            std::min(kMaxTasksPerQueueTurn, dynamic_turn_budget_ * 2);
+        consecutive_saturated_batches_ = 0;
+      }
       return;
     }
-    if (taken * 4 <= requested) {
+
+    consecutive_saturated_batches_ = 0;
+    // Drain aggressively cools down once dequeue becomes sparse, improving
+    // fairness when multiple producers compete.
+    if (taken * 2 <= requested) {
       dynamic_turn_budget_ =
           std::max(kMinTasksPerQueueTurn, dynamic_turn_budget_ / 2);
     }
@@ -296,6 +306,7 @@ class WorkerThread final : public PlatformThread::Delegate {
   ThreadType current_thread_type_;
   /// Adaptive per-queue processing budget for this worker thread.
   std::size_t dynamic_turn_budget_ = kTaskBatchSize;
+  std::size_t consecutive_saturated_batches_ = 0;
 
   std::string name_;
   PlatformThread::Handle handle_;
