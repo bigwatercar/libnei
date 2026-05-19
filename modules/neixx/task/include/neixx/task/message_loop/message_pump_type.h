@@ -17,7 +17,6 @@ enum class MessagePumpType {
   /// I/O pump that integrates with the platform's async I/O multiplexer
   /// (epoll on Linux, IOCP on Windows). Required for threads that own
   /// socket/file I/O completions.
-  /// NOTE: Not yet implemented; falls back to DEFAULT.
   IO,
 
   /// Platform UI message pump (Win32 GetMessage loop, CFRunLoop on macOS).

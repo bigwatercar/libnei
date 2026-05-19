@@ -5,6 +5,7 @@
 
 #include <neixx/common/location.h>
 #include <neixx/task/message_loop/message_pump_default.h>
+#include <neixx/task/message_loop/message_pump_io.h>
 #include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/run_loop.h>
 #include <neixx/task/sequence_manager.h>
@@ -14,11 +15,15 @@ namespace nei {
 namespace {
 
 /// Factory: creates the correct MessagePump for the requested type.
-/// Falls back to MessagePumpDefault for unimplemented pump types (IO/UI).
 std::unique_ptr<MessagePump> CreateMessagePumpForType(MessagePumpType type) {
-  // IO and UI pumps are not yet implemented; all variants use the default
-  // WaitableEvent-backed pump.  Future pump types are added here.
-  (void)type;
+  switch (type) {
+    case MessagePumpType::IO:
+      return std::make_unique<MessagePumpForIO>();
+    case MessagePumpType::DEFAULT:
+      return std::make_unique<MessagePumpDefault>();
+    case MessagePumpType::UI:
+      return std::make_unique<MessagePumpDefault>();
+  }
   return std::make_unique<MessagePumpDefault>();
 }
 
