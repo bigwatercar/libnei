@@ -13,6 +13,12 @@ target_link_libraries(command_line_demo PRIVATE nei::all)
 add_executable(flake_id_demo flake_id_demo.c)
 target_link_libraries(flake_id_demo PRIVATE nei::all)
 
+add_executable(message_pump_io_demo message_pump_io_demo.cpp)
+target_link_libraries(message_pump_io_demo PRIVATE nei::all)
+if(WIN32)
+  target_link_libraries(message_pump_io_demo PRIVATE ws2_32)
+endif()
+
 if(WIN32 AND BUILD_SHARED_LIBS)
   function(nei_copy_runtime_dlls target_name)
     add_custom_command(
@@ -30,4 +36,5 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_copy_runtime_dlls(string_util_demo)
   nei_copy_runtime_dlls(command_line_demo)
   nei_copy_runtime_dlls(flake_id_demo)
+  nei_copy_runtime_dlls(message_pump_io_demo)
 endif()
