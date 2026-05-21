@@ -1,13 +1,14 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include <neixx/command_line/command_line.h>
-#include <neixx/io/async_line_reader.h>
 #include <neixx/process/child_process.h>
+#include <neixx/process/process_service.h>
 #include <neixx/synchronization/waitable_event.h>
 
 namespace nei {
@@ -69,15 +70,23 @@ class CapturingProcessListener final : public ChildProcessListener {
 
 struct LaunchTestState {
   std::unique_ptr<ChildProcess> process;
-  std::unique_ptr<AsyncLineReader> line_reader;
   std::unique_ptr<CapturingProcessListener> listener;
   std::atomic<bool> post_completed{false};
   std::atomic<bool> saw_line{false};
   std::atomic<bool> launch_returned{false};
   std::atomic<bool> write_callback_called{false};
   std::atomic<bool> write_success{false};
+  std::vector<std::uint8_t> captured_bytes;
   std::string captured_line;
 };
+
+std::string NormalizePipeText(std::vector<std::uint8_t> bytes) {
+  std::string text(bytes.begin(), bytes.end());
+  while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) {
+    text.pop_back();
+  }
+  return text;
+}
 
 TEST(ChildProcessTest, LaunchWorksWithoutCurrentIoPump) {
   WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -110,11 +119,74 @@ TEST(ChildProcessTest, LaunchWorksWithoutCurrentIoPump) {
   EXPECT_EQ(listener.exit_code.load(std::memory_order_acquire), 0);
 }
 
+TEST(ChildProcessTest, LaunchMultipleProcessesWithSharedProcessService) {
+  const scoped_refptr<ProcessService> service = ProcessService::Create();
+  ASSERT_TRUE(service);
+  EXPECT_FALSE(service->IsRunning());
+
+  WaitableEvent first_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  CapturingProcessListener first_listener(&first_done);
+  ChildProcess first_process(service);
+  first_process.SetListener(&first_listener);
+
+#if defined(_WIN32)
+  const char* first_argv[] = {"cmd", "/d", "/c", "exit /b 0"};
+#else
+  const char* first_argv[] = {"/bin/sh", "-c", "exit 0"};
+#endif
+  CommandLine first_command_line(
+      static_cast<int>(sizeof(first_argv) / sizeof(first_argv[0])),
+      first_argv);
+
+  ProcessLaunchOptions first_options;
+  first_options.stdin_config.type = StdIOType::NULL_IO;
+  first_options.stdout_config.type = StdIOType::NULL_IO;
+  first_options.stderr_config.type = StdIOType::NULL_IO;
+
+  ASSERT_TRUE(first_process.Launch(first_command_line, first_options));
+  ASSERT_TRUE(first_done.TimedWait(std::chrono::seconds(5)));
+  EXPECT_TRUE(first_listener.launch_succeeded.load(std::memory_order_acquire));
+  EXPECT_TRUE(first_listener.terminated.load(std::memory_order_acquire));
+  EXPECT_EQ(first_listener.exit_state.load(std::memory_order_acquire),
+            ProcessState::kExited);
+  EXPECT_EQ(first_listener.exit_code.load(std::memory_order_acquire), 0);
+  EXPECT_TRUE(service->IsRunning());
+
+  WaitableEvent second_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  CapturingProcessListener second_listener(&second_done);
+  ChildProcess second_process(service);
+  second_process.SetListener(&second_listener);
+
+#if defined(_WIN32)
+  const char* second_argv[] = {"cmd", "/d", "/c", "exit /b 0"};
+#else
+  const char* second_argv[] = {"/bin/sh", "-c", "exit 0"};
+#endif
+  CommandLine second_command_line(
+      static_cast<int>(sizeof(second_argv) / sizeof(second_argv[0])),
+      second_argv);
+
+  ProcessLaunchOptions second_options;
+  second_options.stdin_config.type = StdIOType::NULL_IO;
+  second_options.stdout_config.type = StdIOType::NULL_IO;
+  second_options.stderr_config.type = StdIOType::NULL_IO;
+  ASSERT_TRUE(second_process.Launch(second_command_line, second_options));
+
+  ASSERT_TRUE(second_done.TimedWait(std::chrono::seconds(5)));
+  EXPECT_TRUE(second_listener.launch_succeeded.load(std::memory_order_acquire));
+  EXPECT_FALSE(second_listener.launch_failed.load(std::memory_order_acquire));
+  EXPECT_TRUE(second_listener.terminated.load(std::memory_order_acquire));
+  EXPECT_EQ(second_listener.exit_state.load(std::memory_order_acquire),
+            ProcessState::kExited);
+  EXPECT_EQ(second_listener.exit_code.load(std::memory_order_acquire), 0);
+}
+
 TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
-  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent line_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent terminated_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   auto state = std::make_shared<LaunchTestState>();
   state->process = std::make_unique<ChildProcess>();
-  state->listener = std::make_unique<CapturingProcessListener>(&done);
+  state->listener = std::make_unique<CapturingProcessListener>(&terminated_done);
 
 #if defined(_WIN32)
   const char* argv[] = {"cmd", "/d", "/c", "echo child-out"};
@@ -131,24 +203,29 @@ TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
   state->launch_returned.store(ok, std::memory_order_release);
 
   if (!ok) {
-    done.Signal();
+    terminated_done.Signal();
   } else {
     AsyncInputStream* stdout_stream = state->process->GetStdoutStream();
     if (stdout_stream == nullptr) {
-      done.Signal();
+      terminated_done.Signal();
     } else {
-      state->line_reader = std::make_unique<AsyncLineReader>(stdout_stream);
-      state->line_reader->StartReadingLines([state, &done](std::string&& line) {
-        state->captured_line = std::move(line);
+      stdout_stream->ReadAsync([state, &line_done](std::vector<std::uint8_t>&& data) {
+        if (data.empty()) {
+          return;
+        }
+        state->captured_bytes = data;
+        state->captured_line = NormalizePipeText(std::move(data));
         state->saw_line.store(true, std::memory_order_release);
-        done.Signal();
+        line_done.Signal();
       });
 
       state->post_completed.store(true, std::memory_order_release);
     }
   }
 
-  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  ASSERT_TRUE(line_done.TimedWait(std::chrono::seconds(5)));
+  ASSERT_TRUE(terminated_done.TimedWait(std::chrono::seconds(5)));
+  state->process.reset();
 
   EXPECT_TRUE(state->post_completed.load(std::memory_order_acquire) ||
               state->launch_returned.load(std::memory_order_acquire) == false);
@@ -165,10 +242,11 @@ TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
 }
 
 TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
-  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent line_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent terminated_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   auto state = std::make_shared<LaunchTestState>();
   state->process = std::make_unique<ChildProcess>();
-  state->listener = std::make_unique<CapturingProcessListener>(&done);
+  state->listener = std::make_unique<CapturingProcessListener>(&terminated_done);
 
 #if defined(_WIN32)
   const char* argv[] = {"cmd", "/d", "/v:on", "/c",
@@ -187,18 +265,21 @@ TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
   const bool ok = state->process->Launch(command_line, launch_options);
   state->launch_returned.store(ok, std::memory_order_release);
   if (!ok) {
-    done.Signal();
+    terminated_done.Signal();
   } else {
     AsyncInputStream* stdout_stream = state->process->GetStdoutStream();
     AsyncOutputStream* stdin_stream = state->process->GetStdinStream();
     if (stdout_stream == nullptr || stdin_stream == nullptr) {
-      done.Signal();
+      terminated_done.Signal();
     } else {
-      state->line_reader = std::make_unique<AsyncLineReader>(stdout_stream);
-      state->line_reader->StartReadingLines([state, &done](std::string&& line) {
-        state->captured_line = std::move(line);
+      stdout_stream->ReadAsync([state, &line_done](std::vector<std::uint8_t>&& data) {
+        if (data.empty()) {
+          return;
+        }
+        state->captured_bytes = data;
+        state->captured_line = NormalizePipeText(std::move(data));
         state->saw_line.store(true, std::memory_order_release);
-        done.Signal();
+        line_done.Signal();
       });
 
       const std::string payload = "echo-through-stdin\n";
@@ -212,7 +293,9 @@ TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
     }
   }
 
-  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  ASSERT_TRUE(line_done.TimedWait(std::chrono::seconds(5)));
+  ASSERT_TRUE(terminated_done.TimedWait(std::chrono::seconds(5)));
+  state->process.reset();
 
   EXPECT_TRUE(state->post_completed.load(std::memory_order_acquire) ||
               state->launch_returned.load(std::memory_order_acquire) == false);

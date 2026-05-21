@@ -6,12 +6,14 @@
 #include <memory>
 
 #include <nei/macros/nei_export.h>
+#include <neixx/memory/ref_counted.h>
 #include <neixx/io/async_stream.h>
 #include <neixx/task/message_loop/message_pump_io.h>
 
 namespace nei {
 
 class CommandLine;
+class ProcessService;
 
 enum class StdIOType {
   INHERIT,
@@ -56,6 +58,7 @@ class NEI_API ChildProcessListener {
 class NEI_API ChildProcess : public MessagePumpForIO::Watcher {
  public:
   ChildProcess();
+  explicit ChildProcess(scoped_refptr<ProcessService> process_service);
   ~ChildProcess() override;
 
   bool Launch(const CommandLine& command_line,

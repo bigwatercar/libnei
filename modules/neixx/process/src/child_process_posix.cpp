@@ -1,6 +1,7 @@
 #if !defined(_WIN32)
 
 #include <neixx/process/child_process.h>
+#include <neixx/process/process_service.h>
 
 #include <cerrno>
 #include <csignal>
@@ -23,7 +24,7 @@
 #include "child_process_stream_proxy.h"
 #include <neixx/strings/utf_string_conversions.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/threading/thread.h>
+#include <neixx/task/task_runner.h>
 
 namespace nei {
 namespace {
@@ -360,8 +361,8 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 
 class ChildProcess::Impl final : public ChildProcessListener {
  public:
-  Impl()
-      : io_thread_("child-process-io"),
+  explicit Impl(scoped_refptr<ProcessService> process_service)
+      : process_service_(std::move(process_service)),
         stdout_proxy_(std::make_unique<internal::AsyncInputStreamProxy>()),
         stderr_proxy_(std::make_unique<internal::AsyncInputStreamProxy>()),
         stdin_proxy_(std::make_unique<internal::AsyncOutputStreamProxy>()) {}
@@ -372,14 +373,23 @@ class ChildProcess::Impl final : public ChildProcessListener {
               const ProcessLaunchOptions& options,
               ChildProcessListener* listener) {
     SetExternalListener(listener);
-    if (!EnsureThreadStarted()) {
+    if (process_service_.get() == nullptr) {
+      process_service_ = ProcessService::GetDefault();
+    }
+    if (process_service_.get() == nullptr || !process_service_->Start()) {
+      NotifyLaunchFailedOnCallerThread();
+      return false;
+    }
+
+    const scoped_refptr<TaskRunner> io_runner = process_service_->GetTaskRunner();
+    if (io_runner.get() == nullptr) {
       NotifyLaunchFailedOnCallerThread();
       return false;
     }
 
     WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
     bool ok = false;
-    io_runner_->PostTask(FROM_HERE, [this, &command_line, options, &done, &ok]() {
+    io_runner->PostTask(FROM_HERE, [this, io_runner, &command_line, options, &done, &ok]() {
       stdout_proxy_->ResetBinding();
       stderr_proxy_->ResetBinding();
       stdin_proxy_->ResetBinding();
@@ -388,9 +398,9 @@ class ChildProcess::Impl final : public ChildProcessListener {
       core_ = std::make_unique<PosixChildProcessCore>(this);
       ok = core_->Launch(command_line, options);
       if (ok) {
-        stdout_proxy_->Bind(core_->stdout_stream(), io_runner_);
-        stderr_proxy_->Bind(core_->stderr_stream(), io_runner_);
-        stdin_proxy_->Bind(core_->stdin_stream(), io_runner_);
+        stdout_proxy_->Bind(core_->stdout_stream(), io_runner);
+        stderr_proxy_->Bind(core_->stderr_stream(), io_runner);
+        stdin_proxy_->Bind(core_->stdin_stream(), io_runner);
       }
       done.Signal();
     });
@@ -429,24 +439,15 @@ class ChildProcess::Impl final : public ChildProcessListener {
   }
 
  private:
-  bool EnsureThreadStarted() {
-    if (io_runner_.get() != nullptr) {
-      return true;
-    }
-
-    Thread::Options options;
-    options.message_pump_type = MessagePumpType::IO;
-    if (!io_thread_.StartWithOptions(options)) {
-      return false;
-    }
-    io_runner_ = io_thread_.GetTaskRunner();
-    return io_runner_.get() != nullptr;
-  }
-
   void Shutdown() {
-    if (io_runner_.get() != nullptr) {
+    if (process_service_.get() != nullptr) {
+      const scoped_refptr<TaskRunner> io_runner = process_service_->GetTaskRunner();
+      if (io_runner.get() == nullptr) {
+        return;
+      }
+
       WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-      io_runner_->PostTask(FROM_HERE, [this, &done]() {
+      io_runner->PostTask(FROM_HERE, [this, &done]() {
         stdout_proxy_->ResetBinding();
         stderr_proxy_->ResetBinding();
         stdin_proxy_->ResetBinding();
@@ -454,8 +455,6 @@ class ChildProcess::Impl final : public ChildProcessListener {
         done.Signal();
       });
       done.Wait();
-      io_thread_.Stop();
-      io_runner_.reset();
     }
   }
 
@@ -471,8 +470,7 @@ class ChildProcess::Impl final : public ChildProcessListener {
     return external_listener_;
   }
 
-  Thread io_thread_;
-  scoped_refptr<TaskRunner> io_runner_;
+  scoped_refptr<ProcessService> process_service_;
   std::unique_ptr<PosixChildProcessCore> core_;
   std::unique_ptr<internal::AsyncInputStreamProxy> stdout_proxy_;
   std::unique_ptr<internal::AsyncInputStreamProxy> stderr_proxy_;
@@ -481,7 +479,12 @@ class ChildProcess::Impl final : public ChildProcessListener {
   ChildProcessListener* external_listener_ = nullptr;
 };
 
-ChildProcess::ChildProcess() : impl_(std::make_unique<Impl>()) {}
+ChildProcess::ChildProcess()
+  : impl_(std::make_unique<Impl>(ProcessService::GetDefault())) {}
+
+ChildProcess::ChildProcess(scoped_refptr<ProcessService> process_service)
+  : impl_(std::make_unique<Impl>(process_service ? process_service
+                           : ProcessService::GetDefault())) {}
 
 ChildProcess::~ChildProcess() = default;
 

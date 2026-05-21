@@ -1,15 +1,18 @@
 set(NEIXX_PROCESS_SOURCES
   include/neixx/process/child_process.h
+  include/neixx/process/process_service.h
   include/neixx/process/process_util.h
 )
 
 if(WIN32)
   list(APPEND NEIXX_PROCESS_SOURCES
+    src/process_service.cpp
     src/child_process_win.cpp
     src/process_util_win.cpp
   )
 else()
   list(APPEND NEIXX_PROCESS_SOURCES
+    src/process_service.cpp
     src/child_process_posix.cpp
     src/process_util_posix.cpp
   )

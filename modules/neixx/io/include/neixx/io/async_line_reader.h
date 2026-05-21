@@ -4,6 +4,7 @@
 #define NEIXX_IO_ASYNC_LINE_READER_H_
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -21,12 +22,13 @@ class NEI_API AsyncLineReader {
   void StartReadingLines(LineCallback callback);
 
  private:
-  void OnRawDataReceived(std::vector<std::uint8_t>&& data);
+    struct State;
+
+    static void OnRawDataReceived(const std::shared_ptr<State>& state,
+                                  std::vector<std::uint8_t>&& data);
 
   AsyncInputStream* stream_ = nullptr;
-  LineCallback line_callback_;
-  std::string text_buffer_;
-  bool started_ = false;
+    std::shared_ptr<State> state_;
 };
 
 }  // namespace nei
