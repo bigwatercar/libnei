@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <utility>
 
@@ -20,9 +21,19 @@
 #include <nei/debug/check.h>
 #include <neixx/synchronization/lock.h>
 #include <neixx/threading/platform_thread.h>
+#include <neixx/threading/thread_local_storage.h>
 
 namespace nei {
 namespace {
+
+ThreadLocalStorage::Slot& GetCurrentPumpSlot() {
+  static ThreadLocalStorage::Slot slot;
+  static std::once_flag once;
+  std::call_once(once, []() {
+    (void)slot.Initialize();
+  });
+  return slot;
+}
 
 constexpr std::uint64_t kWakeEventId = 1;
 constexpr std::size_t kMaxEpollEvents = 16;
@@ -406,10 +417,17 @@ MessagePumpForIO::~MessagePumpForIO() {
   Quit();
 }
 
+MessagePumpForIO* MessagePumpForIO::Current() {
+  return reinterpret_cast<MessagePumpForIO*>(GetCurrentPumpSlot().Get());
+}
+
 void MessagePumpForIO::Run(Delegate* delegate) {
   if (delegate == nullptr || impl_ == nullptr) {
     return;
   }
+
+  MessagePumpForIO* previous = Current();
+  GetCurrentPumpSlot().Set(this);
 
   const PlatformThread::PlatformThreadId current_thread_id = PlatformThread::CurrentId();
   DCHECK(impl_->IsCurrentRunThread(current_thread_id));
@@ -461,6 +479,7 @@ void MessagePumpForIO::Run(Delegate* delegate) {
   }
 
   impl_->ExitRunLoop(run_depth);
+  GetCurrentPumpSlot().Set(previous);
 }
 
 void MessagePumpForIO::Quit() {

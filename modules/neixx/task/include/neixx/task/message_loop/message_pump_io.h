@@ -76,6 +76,10 @@ class NEI_API MessagePumpForIO final : public MessagePump {
   MessagePumpForIO(const MessagePumpForIO&) = delete;
   MessagePumpForIO& operator=(const MessagePumpForIO&) = delete;
 
+  // Returns the currently running MessagePumpForIO on this thread, or nullptr
+  // when the current thread is not inside MessagePumpForIO::Run().
+  static MessagePumpForIO* Current();
+
   void Run(Delegate* delegate) override;
   void Quit() override;
   void ScheduleWork() override;

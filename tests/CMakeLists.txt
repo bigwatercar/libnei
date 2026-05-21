@@ -20,9 +20,11 @@ enable_testing()
 
 add_executable(
   nei_tests
+  async_line_reader_test.cpp
   base64_test.cpp
   checksum_hash_test.cpp
   check_macro_test.cpp
+  child_process_test.cpp
   cjk_width_test.cpp
   condition_variable_test.cpp
   command_line_test.cpp
@@ -35,6 +37,7 @@ add_executable(
   platform_thread_test.cpp
   thread_test.cpp
   message_pump_test.cpp
+  message_pump_io_current_test.cpp
   message_pump_default_test.cpp
   sequence_manager_test.cpp
   run_loop_test.cpp
