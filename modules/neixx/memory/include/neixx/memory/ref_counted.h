@@ -37,18 +37,18 @@ concept RefCountedLike = IsRefCountedLike<T>::value;
 
 } // namespace detail
 
-// Non-template exported base that holds the reference counter.
+// Non-template exported base that holds the thread-safe reference counter.
 // By exporting this concrete class (NEI_API), the DLL provides the reference-
-// count storage for all RefCountedThreadSafe<T> subclasses.  The member type
-// is a platform primitive (volatile long on MSVC, std::atomic<int> elsewhere)
-// so MSVC warning C4251 is not triggered on Windows.
-class NEI_API RefCountBase {
+// count storage for all RefCountedThreadSafe<T> subclasses. The member type is
+// a platform primitive (volatile long on MSVC, std::atomic<int> elsewhere) so
+// MSVC warning C4251 is not triggered on Windows.
+class NEI_API RefCountedThreadSafeBase {
   template <typename T>
   friend class RefCountedThreadSafe;
 
 protected:
-  RefCountBase() noexcept = default;
-  ~RefCountBase() = default;
+  RefCountedThreadSafeBase() noexcept = default;
+  ~RefCountedThreadSafeBase() = default;
 
 #if defined(_MSC_VER)
   void AddRefImpl() const noexcept { _InterlockedIncrement(&ref_count_); }
@@ -63,6 +63,26 @@ private:
 #endif
 };
 
+// Lightweight non-thread-safe ref-count storage for same-sequence ownership.
+//
+// This variant avoids atomics and must only be touched from one logical
+// sequence/thread at a time. Using it concurrently from multiple threads is
+// undefined behavior.
+class NEI_API RefCountedBase {
+  template <typename T>
+  friend class RefCounted;
+
+protected:
+  RefCountedBase() noexcept = default;
+  ~RefCountedBase() = default;
+
+  void AddRefImpl() const noexcept { ++ref_count_; }
+  bool ReleaseImpl() const noexcept { return --ref_count_ == 0; }
+
+private:
+  mutable int ref_count_ = 0;
+};
+
 // Intrusive, thread-safe reference counting base class.
 //
 // Usage:
@@ -73,7 +93,7 @@ private:
 // pointer will call `AddRef()`. When the last reference releases, `T` is
 // deleted on the releasing thread.
 template <typename T>
-class RefCountedThreadSafe : private RefCountBase {
+class RefCountedThreadSafe : private RefCountedThreadSafeBase {
 public:
   // Increments the reference count.
   // Relaxed ordering is sufficient because this operation only updates the
@@ -96,7 +116,33 @@ protected:
   ~RefCountedThreadSafe() = default;
 };
 
-// A lightweight intrusive smart pointer for `RefCountedThreadSafe` objects.
+// Intrusive ref-counting base for objects confined to one sequence/thread.
+//
+// Usage:
+// 1) Derive `T` from `RefCounted<T>`.
+// 2) Manage lifetime through `scoped_refptr<T>`.
+//
+// This is lighter than RefCountedThreadSafe<T> because it uses a plain integer
+// counter instead of atomics. Callers must guarantee single-sequence access.
+template <typename T>
+class RefCounted : private RefCountedBase {
+public:
+  void AddRef() const noexcept {
+    AddRefImpl();
+  }
+
+  void Release() const noexcept {
+    if (ReleaseImpl()) {
+      delete static_cast<const T *>(this);
+    }
+  }
+
+protected:
+  RefCounted() noexcept = default;
+  ~RefCounted() = default;
+};
+
+// A lightweight intrusive smart pointer for objects exposing AddRef/Release.
 //
 // `scoped_refptr` owns one reference while holding a non-null pointer and
 // automatically balances `AddRef()` / `Release()` across copy/move/reset.
