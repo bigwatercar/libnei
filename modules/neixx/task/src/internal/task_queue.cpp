@@ -162,6 +162,13 @@ class TaskQueue::Impl {
       tasks[count] = std::move(immediate_fifo_queue_.front());
       immediate_fifo_queue_.pop_front();
       ++count;
+
+      // Keep shutdown semantics predictable: once a BLOCK_SHUTDOWN task is
+      // handed to a worker, leave following tasks in the queue so shutdown can
+      // still drop or retain them according to policy.
+      if (IsShutdownBlockingTask(tasks[count - 1])) {
+        break;
+      }
     }
     return count;
   }
