@@ -18,6 +18,7 @@ enable_testing()
 add_executable(
     nei_tests
     base64_test.cpp
+  checksum_hash_test.cpp
     core_test.cpp
     file_handle_test.cpp
     flake_id_test.cpp
