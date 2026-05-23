@@ -63,6 +63,32 @@ struct ProcessLaunchOptions {
   /// Resource/sandbox constraints applied during launch.
   ResourceLimits resource_limits;
 
+  /// Crash & heartbeat guard (platform-internal dedicated control pipe).
+  ///
+  /// Technical summary:
+  /// - Guard traffic does not use stdout/stderr; runtime uses an internal
+  ///   control channel to avoid business output interference.
+  /// - If heartbeat times out, runtime force-terminates child and reports
+  ///   ProcessState::kTimedOutHung as the first-cause terminal state.
+  /// - If process exits without timeout, runtime reports kExited/kCrashed
+  ///   based on platform diagnostics.
+  ///
+  /// Client usage checklist:
+  /// 1) Set heartbeat_timeout to a finite positive value (for example,
+  ///    TimeDelta::FromSeconds(10)).
+  /// 2) Start process with Launch and keep listener subscribed.
+  /// 3) In child program, get control channel from environment and periodically
+  ///    write heartbeat bytes (for example, "BEAT"):
+  ///    - Windows: read NEI_CONTROL_PIPE_HANDLE, parse to uintptr_t, cast to
+  ///      HANDLE, then WriteFile(handle, ...).
+  ///    - POSIX: read NEI_CONTROL_PIPE_FD, parse to int, then write(fd, ...).
+  ///    - If variable is missing/invalid, child can skip heartbeat output and
+  ///      continue with business logic.
+  /// 4) In OnProcessTerminated, handle kTimedOutHung as "hung/heartbeat lost"
+  ///    and handle kCrashed as crash path.
+  ///
+  /// Disable policy:
+  /// - Max() or <= 0 milliseconds disables heartbeat guard.
   /// Heartbeat timeout for dedicated control pipe monitoring.
   /// Max() or <= 0 milliseconds disables heartbeat guard.
   TimeDelta heartbeat_timeout = TimeDelta::Max();
@@ -73,6 +99,7 @@ enum class ProcessState {
   kRunning,
   kExited,
   kCrashed,
+  /// Child was force-terminated by runtime after heartbeat timeout.
   kTimedOutHung,
   kFailedToStart,
 };
