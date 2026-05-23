@@ -7,11 +7,13 @@
 #include <csignal>
 #include <cstdint>
 #include <cstring>
+#include <cstdio>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
+#include <array>
 
 #include <fcntl.h>
 #include <sys/resource.h>
@@ -27,6 +29,7 @@
 #include <neixx/strings/utf_string_conversions.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/task_runner.h>
+#include <neixx/task/thread_task_runner_handle.h>
 
 namespace nei {
 namespace {
@@ -51,6 +54,11 @@ struct PipeEnds {
   int child_end = -1;
 };
 
+struct ControlPipeEnds {
+  int parent_read_end = -1;
+  int child_write_end = -1;
+};
+
 bool CreatePipeEnds(bool child_reads, PipeEnds* out) {
   int fds[2] = {-1, -1};
   if (pipe2(fds, O_NONBLOCK | O_CLOEXEC) != 0) {
@@ -64,6 +72,23 @@ bool CreatePipeEnds(bool child_reads, PipeEnds* out) {
     out->parent_end = fds[0];
     out->child_end = fds[1];
   }
+  return true;
+}
+
+bool CreateControlPipeEnds(ControlPipeEnds* out) {
+  int fds[2] = {-1, -1};
+  if (pipe2(fds, O_NONBLOCK | O_CLOEXEC) != 0) {
+    return false;
+  }
+  // Child write end must survive execvp.
+  const int flags = fcntl(fds[1], F_GETFD);
+  if (flags < 0 || fcntl(fds[1], F_SETFD, flags & ~FD_CLOEXEC) != 0) {
+    (void)close(fds[0]);
+    (void)close(fds[1]);
+    return false;
+  }
+  out->parent_read_end = fds[0];
+  out->child_write_end = fds[1];
   return true;
 }
 
@@ -98,6 +123,22 @@ rlim_t ToRlimOrMax(int64_t value) {
   return static_cast<rlim_t>(value);
 }
 
+bool IsCrashSignal(int sig) {
+  return sig == SIGSEGV || sig == SIGFPE || sig == SIGBUS ||
+         sig == SIGILL || sig == SIGABRT;
+}
+
+ProcessState ClassifySignaledTermination(int sig, int requested_signal) {
+  if (IsCrashSignal(sig)) {
+    return ProcessState::kCrashed;
+  }
+  // Graceful terminate path: caller requested SIGTERM and child exited by SIGTERM.
+  if (sig == SIGTERM && requested_signal == SIGTERM) {
+    return ProcessState::kExited;
+  }
+  return ProcessState::kCrashed;
+}
+
 class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
  public:
   explicit PosixChildProcessCore(ChildProcessListener* listener)
@@ -113,6 +154,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       std::lock_guard<std::mutex> lock(state_lock_);
       if (state_ == ProcessState::kExited ||
           state_ == ProcessState::kCrashed ||
+          state_ == ProcessState::kTimedOutHung ||
           state_ == ProcessState::kFailedToStart) {
         return false;
       }
@@ -127,6 +169,8 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 #if defined(SYS_pidfd_send_signal)
     if (pidfd >= 0) {
       if (syscall(SYS_pidfd_send_signal, pidfd, signal_value, nullptr, 0) == 0) {
+        std::lock_guard<std::mutex> lock(state_lock_);
+        last_requested_signal_ = signal_value;
         return true;
       }
       if (errno == ESRCH) {
@@ -136,6 +180,8 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 #endif
 
     if (kill(static_cast<pid_t>(pid), signal_value) == 0) {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      last_requested_signal_ = signal_value;
       return true;
     }
     return false;
@@ -151,6 +197,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       state_ = ProcessState::kNotStarted;
       terminated_notified_ = false;
       options_ = options;
+      last_requested_signal_ = 0;
     }
 
     IgnoreSigPipeGlobalOnce();
@@ -164,6 +211,9 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     PipeEnds stdin_pipe;
     PipeEnds stdout_pipe;
     PipeEnds stderr_pipe;
+    ControlPipeEnds control_pipe;
+    const bool enable_control_guard = !options.heartbeat_timeout.is_max() &&
+                      options.heartbeat_timeout.InMilliseconds() > 0;
 
     if (options.stdin_config.type == StdIOType::PIPE &&
         !CreatePipeEnds(/*child_reads=*/true, &stdin_pipe)) {
@@ -183,6 +233,16 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       CloseFd(&stdin_pipe.child_end);
       CloseFd(&stdout_pipe.parent_end);
       CloseFd(&stdout_pipe.child_end);
+      NotifyLaunchFailed();
+      return false;
+    }
+    if (enable_control_guard && !CreateControlPipeEnds(&control_pipe)) {
+      CloseFd(&stdin_pipe.parent_end);
+      CloseFd(&stdin_pipe.child_end);
+      CloseFd(&stdout_pipe.parent_end);
+      CloseFd(&stdout_pipe.child_end);
+      CloseFd(&stderr_pipe.parent_end);
+      CloseFd(&stderr_pipe.child_end);
       NotifyLaunchFailed();
       return false;
     }
@@ -222,6 +282,13 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 
     if (child_pid == 0) {
       const ResourceLimits& limits = options.resource_limits;
+
+      if (enable_control_guard) {
+        char control_fd_buf[64] = {0};
+        std::snprintf(control_fd_buf, sizeof(control_fd_buf), "%d",
+                      control_pipe.child_write_end);
+        (void)setenv("NEI_CONTROL_PIPE_FD", control_fd_buf, 1);
+      }
 
       if (limits.kill_on_parent_death) {
         if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0) {
@@ -296,6 +363,10 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       CloseFd(&stdout_pipe.child_end);
       CloseFd(&stderr_pipe.parent_end);
       CloseFd(&stderr_pipe.child_end);
+      if (enable_control_guard) {
+        CloseFd(&control_pipe.parent_read_end);
+        CloseFd(&control_pipe.child_write_end);
+      }
       CloseFd(&devnull_in);
       CloseFd(&devnull_out);
 
@@ -315,6 +386,9 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     CloseFd(&stdin_pipe.child_end);
     CloseFd(&stdout_pipe.child_end);
     CloseFd(&stderr_pipe.child_end);
+    if (enable_control_guard) {
+      CloseFd(&control_pipe.child_write_end);
+    }
 
     if (options.stdin_config.type == StdIOType::PIPE) {
       stdin_stream_ = CreatePipeOutputStream(pump, stdin_pipe.parent_end);
@@ -332,6 +406,11 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       stderr_stream_ = CreatePipeInputStream(pump, stderr_pipe.parent_end);
     } else {
       CloseFd(&stderr_pipe.parent_end);
+    }
+
+    if (enable_control_guard) {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      control_fd_ = control_pipe.parent_read_end;
     }
 
 #if defined(SYS_pidfd_open)
@@ -368,9 +447,36 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       return false;
     }
 
+    if (enable_control_guard) {
+      int control_fd_snapshot = -1;
+      {
+        std::lock_guard<std::mutex> lock(state_lock_);
+        control_fd_snapshot = control_fd_;
+      }
+      if (control_fd_snapshot < 0 ||
+          !control_controller_.StartWatching(
+              pump, control_fd_snapshot,
+              MessagePumpForIO::FdWatchController::Mode::READ,
+              this)) {
+        NotifyLaunchFailed();
+        Cleanup();
+        return false;
+      }
+    }
+
     {
       std::lock_guard<std::mutex> lock(state_lock_);
       state_ = ProcessState::kRunning;
+      heartbeat_timeout_ = options.heartbeat_timeout;
+      heartbeat_enabled_ = enable_control_guard;
+      if (heartbeat_enabled_) {
+        last_heartbeat_time_ = TimeTicks::Now();
+        ++heartbeat_generation_;
+      }
+    }
+    origin_runner_ = ThreadTaskRunnerHandle::Get();
+    if (heartbeat_enabled_) {
+      ScheduleHeartbeatCheck(heartbeat_generation_);
     }
     if (listener_ != nullptr) {
       int pid_snapshot = -1;
@@ -394,6 +500,15 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       pidfd_snapshot = pidfd_;
     }
     if (static_cast<int>(handle) != pidfd_snapshot) {
+      int control_fd_snapshot = -1;
+      {
+        std::lock_guard<std::mutex> lock(state_lock_);
+        control_fd_snapshot = control_fd_;
+      }
+      if (static_cast<int>(handle) != control_fd_snapshot) {
+        return;
+      }
+      HandleControlReadable();
       return;
     }
     HandlePidReadable();
@@ -444,6 +559,15 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     if (si.si_code == CLD_EXITED) {
       info.state = ProcessState::kExited;
       info.exit_code = si.si_status;
+    } else if (si.si_code == CLD_KILLED || si.si_code == CLD_DUMPED) {
+      const int sig = si.si_status;
+      int requested_signal = 0;
+      {
+        std::lock_guard<std::mutex> lock(state_lock_);
+        requested_signal = last_requested_signal_;
+      }
+      info.state = ClassifySignaledTermination(sig, requested_signal);
+      info.exit_code = sig;
     } else {
       info.state = ProcessState::kCrashed;
       info.exit_code = si.si_status;
@@ -458,6 +582,15 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     if (WIFEXITED(status)) {
       info.state = ProcessState::kExited;
       info.exit_code = WEXITSTATUS(status);
+    } else if (WIFSIGNALED(status)) {
+      const int sig = WTERMSIG(status);
+      int requested_signal = 0;
+      {
+        std::lock_guard<std::mutex> lock(state_lock_);
+        requested_signal = last_requested_signal_;
+      }
+      info.exit_code = sig;
+      info.state = ClassifySignaledTermination(sig, requested_signal);
     } else {
       info.state = ProcessState::kCrashed;
       info.exit_code = WTERMSIG(status);
@@ -472,6 +605,9 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
         return;
       }
       terminated_notified_ = true;
+      if (state_ == ProcessState::kTimedOutHung) {
+        info.state = ProcessState::kTimedOutHung;
+      }
       state_ = info.state;
       pidfd_to_close = pidfd_;
       pidfd_ = -1;
@@ -487,6 +623,127 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     }
   }
 
+  void HandleControlReadable() {
+    std::array<std::uint8_t, 64> buffer{};
+    while (true) {
+      int fd_snapshot = -1;
+      {
+        std::lock_guard<std::mutex> lock(state_lock_);
+        fd_snapshot = control_fd_;
+      }
+      if (fd_snapshot < 0) {
+        return;
+      }
+
+      const ssize_t rv = read(fd_snapshot, buffer.data(), buffer.size());
+      if (rv > 0) {
+        for (ssize_t i = 0; i < rv; ++i) {
+          heartbeat_shift_reg_ = (heartbeat_shift_reg_ << 8) | buffer[i];
+          if (heartbeat_shift_reg_ == 0x42454154u) {
+            last_heartbeat_time_ = TimeTicks::Now();
+          }
+        }
+        continue;
+      }
+      if (rv == 0) {
+        HandleControlPipeEof();
+      }
+      return;
+    }
+  }
+
+  void HandleControlPipeEof() {
+    int pid_snapshot = -1;
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      if (terminated_notified_) {
+        return;
+      }
+      pid_snapshot = pid_;
+    }
+
+    if (pid_snapshot <= 0) {
+      return;
+    }
+
+    int status = 0;
+    pid_t waited = waitpid(static_cast<pid_t>(pid_snapshot), &status, WNOHANG);
+    if (waited <= 0) {
+      return;
+    }
+
+    ProcessExitInfo info;
+    if (WIFEXITED(status)) {
+      info.state = ProcessState::kExited;
+      info.exit_code = WEXITSTATUS(status);
+    } else if (WIFSIGNALED(status)) {
+      const int sig = WTERMSIG(status);
+      int requested_signal = 0;
+      {
+        std::lock_guard<std::mutex> lock(state_lock_);
+        requested_signal = last_requested_signal_;
+      }
+      info.state = ClassifySignaledTermination(sig, requested_signal);
+      info.exit_code = sig;
+    } else {
+      info.state = ProcessState::kCrashed;
+      info.exit_code = status;
+    }
+
+    ChildProcessListener* listener = nullptr;
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      if (terminated_notified_) {
+        return;
+      }
+      terminated_notified_ = true;
+      if (state_ == ProcessState::kTimedOutHung) {
+        info.state = ProcessState::kTimedOutHung;
+      }
+      state_ = info.state;
+      listener = listener_;
+      pid_controller_.StopWatching();
+      control_controller_.StopWatching();
+      CloseFd(&pidfd_);
+      CloseFd(&control_fd_);
+    }
+
+    if (listener != nullptr) {
+      listener->OnProcessTerminated(info);
+    }
+  }
+
+  void ScheduleHeartbeatCheck(std::uint64_t generation) {
+    if (!heartbeat_enabled_ || origin_runner_.get() == nullptr) {
+      return;
+    }
+    origin_runner_->PostDelayedTask(FROM_HERE, [this, generation]() {
+      if (generation != heartbeat_generation_) {
+        return;
+      }
+
+      bool should_kill = false;
+      {
+        std::lock_guard<std::mutex> lock(state_lock_);
+        if (state_ != ProcessState::kRunning) {
+          return;
+        }
+        const TimeTicks now = TimeTicks::Now();
+        if ((now - last_heartbeat_time_).InMilliseconds() >=
+            heartbeat_timeout_.InMilliseconds()) {
+          state_ = ProcessState::kTimedOutHung;
+          should_kill = true;
+        }
+      }
+
+      if (should_kill) {
+        (void)Terminate(0xDEAD, true);
+        return;
+      }
+      ScheduleHeartbeatCheck(generation);
+    }, heartbeat_timeout_);
+  }
+
   void Cleanup() {
     bool should_kill = false;
     {
@@ -499,16 +756,25 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     }
 
     int pidfd_to_close = -1;
+    int control_fd_to_close = -1;
     {
       std::lock_guard<std::mutex> lock(state_lock_);
       pidfd_to_close = pidfd_;
       pidfd_ = -1;
+      control_fd_to_close = control_fd_;
+      control_fd_ = -1;
       listener_ = nullptr;
+      ++heartbeat_generation_;
+      last_requested_signal_ = 0;
     }
 
     pid_controller_.StopWatching();
+    control_controller_.StopWatching();
     if (pidfd_to_close >= 0) {
       (void)close(pidfd_to_close);
+    }
+    if (control_fd_to_close >= 0) {
+      (void)close(control_fd_to_close);
     }
     stdin_stream_.reset();
     stdout_stream_.reset();
@@ -522,7 +788,16 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
   ProcessLaunchOptions options_;
   int pid_ = -1;
   int pidfd_ = -1;
+  int control_fd_ = -1;
   MessagePumpForIO::FdWatchController pid_controller_;
+  MessagePumpForIO::FdWatchController control_controller_;
+  scoped_refptr<TaskRunner> origin_runner_;
+  TimeDelta heartbeat_timeout_ = TimeDelta::Max();
+  bool heartbeat_enabled_ = false;
+  std::uint64_t heartbeat_generation_ = 0;
+  std::uint64_t heartbeat_shift_reg_ = 0;
+  TimeTicks last_heartbeat_time_;
+  int last_requested_signal_ = 0;
   std::unique_ptr<AsyncInputStream> stdout_stream_;
   std::unique_ptr<AsyncInputStream> stderr_stream_;
   std::unique_ptr<AsyncOutputStream> stdin_stream_;
@@ -705,10 +980,6 @@ AsyncInputStream* ChildProcess::GetStderrStream() const {
 AsyncOutputStream* ChildProcess::GetStdinStream() const {
   return impl_->GetStdinStream();
 }
-
-void ChildProcess::OnFileCanReadWithoutBlocking(NativeIOHandle /*handle*/) {}
-
-void ChildProcess::OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) {}
 
 }  // namespace nei
 

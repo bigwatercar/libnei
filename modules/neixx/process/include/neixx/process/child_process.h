@@ -7,6 +7,7 @@
 #include <memory>
 
 #include <nei/macros/nei_export.h>
+#include <neixx/common/time.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/io/async_stream.h>
 #include <neixx/task/message_loop/message_pump_io.h>
@@ -61,6 +62,10 @@ struct ProcessLaunchOptions {
 
   /// Resource/sandbox constraints applied during launch.
   ResourceLimits resource_limits;
+
+  /// Heartbeat timeout for dedicated control pipe monitoring.
+  /// Max() or <= 0 milliseconds disables heartbeat guard.
+  TimeDelta heartbeat_timeout = TimeDelta::Max();
 };
 
 enum class ProcessState {
@@ -68,6 +73,7 @@ enum class ProcessState {
   kRunning,
   kExited,
   kCrashed,
+  kTimedOutHung,
   kFailedToStart,
 };
 
@@ -92,13 +98,13 @@ class NEI_API ChildProcessListener {
 };
 
 /// High-level async child process wrapper.
-class NEI_API ChildProcess : public MessagePumpForIO::Watcher {
+class NEI_API ChildProcess {
  public:
   /// Uses the default ProcessService.
   ChildProcess();
   /// Uses an explicit ProcessService instance.
   explicit ChildProcess(scoped_refptr<ProcessService> process_service);
-  ~ChildProcess() override;
+  ~ChildProcess();
 
   /// Launches a child process.
   /// @param command_line Child executable and arguments.
@@ -123,9 +129,6 @@ class NEI_API ChildProcess : public MessagePumpForIO::Watcher {
   AsyncInputStream* GetStderrStream() const;
   /// Returns non-owning async stdin stream, or nullptr if not piped.
   AsyncOutputStream* GetStdinStream() const;
-
-  void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override;
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) override;
 
  private:
   class Impl;

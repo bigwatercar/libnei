@@ -7,7 +7,9 @@
 #include <neixx/process/process_service.h>
 
 #include <atomic>
+#include <array>
 #include <cstdint>
+#include <cwchar>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -36,6 +38,59 @@ void CloseHandleSafe(HANDLE* h) {
     (void)CloseHandle(*h);
     *h = INVALID_HANDLE_VALUE;
   }
+}
+
+bool IsCrashExitCode(DWORD exit_code) {
+  constexpr DWORD kStatusAccessViolation = 0xC0000005u;
+  constexpr DWORD kStatusDataTypeMisalignment = 0xC0000002u;
+  constexpr DWORD kStatusIllegalInstruction = 0xC000001Du;
+  constexpr DWORD kStatusStackOverflow = 0xC00000FDu;
+  return exit_code == kStatusAccessViolation ||
+         exit_code == kStatusDataTypeMisalignment ||
+         exit_code == kStatusIllegalInstruction ||
+         exit_code == kStatusStackOverflow;
+}
+
+std::vector<wchar_t> BuildEnvironmentBlockWithControlHandle(HANDLE handle) {
+  std::vector<wchar_t> env_block;
+  LPWCH env_strings = GetEnvironmentStringsW();
+  if (env_strings != nullptr) {
+    const wchar_t* p = env_strings;
+    while (*p != L'\0') {
+      const wchar_t* start = p;
+      while (*p != L'\0') {
+        ++p;
+      }
+      env_block.insert(env_block.end(), start, p + 1);
+      ++p;
+    }
+    FreeEnvironmentStringsW(env_strings);
+  }
+
+  const std::wstring key_prefix = L"NEI_CONTROL_PIPE_HANDLE=";
+  std::wstring entry = key_prefix +
+                       std::to_wstring(static_cast<unsigned long long>(
+                           reinterpret_cast<uintptr_t>(handle)));
+
+  // Remove any previous value to avoid duplicate keys in environment block.
+  std::vector<wchar_t> filtered;
+  size_t i = 0;
+  while (i < env_block.size()) {
+    const wchar_t* item = &env_block[i];
+    const size_t len = wcslen(item);
+    if (len > 0) {
+      const std::wstring current(item, len);
+      if (current.rfind(key_prefix, 0) != 0) {
+        filtered.insert(filtered.end(), item, item + len + 1);
+      }
+    }
+    i += len + 1;
+  }
+
+  filtered.insert(filtered.end(), entry.begin(), entry.end());
+  filtered.push_back(L'\0');
+  filtered.push_back(L'\0');
+  return filtered;
 }
 
 std::wstring MakeUniquePipeName() {
@@ -109,7 +164,7 @@ HANDLE OpenNullDevice(bool for_input) {
                      FILE_ATTRIBUTE_NORMAL, nullptr);
 }
 
-class WinChildProcessCore final {
+class WinChildProcessCore final : public MessagePumpForIO::Watcher {
  public:
   explicit WinChildProcessCore(ChildProcessListener* listener)
       : listener_(listener),
@@ -177,10 +232,14 @@ class WinChildProcessCore final {
     PipePair stdin_pipe;
     PipePair stdout_pipe;
     PipePair stderr_pipe;
+    PipePair control_pipe;
+    const bool enable_control_guard = !options.heartbeat_timeout.is_max() &&
+                      options.heartbeat_timeout.InMilliseconds() > 0;
 
     HANDLE child_stdin = INVALID_HANDLE_VALUE;
     HANDLE child_stdout = INVALID_HANDLE_VALUE;
     HANDLE child_stderr = INVALID_HANDLE_VALUE;
+    HANDLE child_control_write = INVALID_HANDLE_VALUE;
 
     if (!ResolveStdHandle(options.stdin_config, /*is_input=*/true, &stdin_pipe,
                           &child_stdin)) {
@@ -210,10 +269,27 @@ class WinChildProcessCore final {
       return false;
     }
 
+    if (enable_control_guard) {
+      if (!CreateOverlappedPipePair(/*child_reads=*/false, &control_pipe)) {
+        NotifyLaunchFailed(listener_);
+        CloseHandleSafe(&child_stdin);
+        CloseHandleSafe(&child_stdout);
+        CloseHandleSafe(&child_stderr);
+        CleanupPipe(stdin_pipe);
+        CleanupPipe(stdout_pipe);
+        CleanupPipe(stderr_pipe);
+        return false;
+      }
+      child_control_write = control_pipe.child_handle;
+    }
+
     std::vector<HANDLE> inherit_handles;
     inherit_handles.push_back(child_stdin);
     inherit_handles.push_back(child_stdout);
     inherit_handles.push_back(child_stderr);
+    if (enable_control_guard) {
+      inherit_handles.push_back(child_control_write);
+    }
 
     STARTUPINFOEXW startup{};
     startup.StartupInfo.cb = sizeof(startup);
@@ -264,12 +340,18 @@ class WinChildProcessCore final {
     }
     cmdline.push_back(L'\0');
 
+    std::vector<wchar_t> env_block;
+    if (enable_control_guard) {
+      env_block = BuildEnvironmentBlockWithControlHandle(child_control_write);
+    }
+
     PROCESS_INFORMATION pi{};
     const DWORD creation_flags = EXTENDED_STARTUPINFO_PRESENT |
                    CREATE_NEW_PROCESS_GROUP |
                    CREATE_SUSPENDED;
     const BOOL created = CreateProcessW(
-        nullptr, cmdline.data(), nullptr, nullptr, TRUE, creation_flags, nullptr,
+      nullptr, cmdline.data(), nullptr, nullptr, TRUE, creation_flags,
+      enable_control_guard ? env_block.data() : nullptr,
         nullptr, &startup.StartupInfo, &pi);
 
     DeleteProcThreadAttributeList(startup.lpAttributeList);
@@ -277,12 +359,18 @@ class WinChildProcessCore final {
     CloseHandleSafe(&child_stdin);
     CloseHandleSafe(&child_stdout);
     CloseHandleSafe(&child_stderr);
+    if (enable_control_guard) {
+      CloseHandleSafe(&child_control_write);
+    }
 
     if (!created) {
       NotifyLaunchFailed(listener_);
       CleanupPipe(stdin_pipe);
       CleanupPipe(stdout_pipe);
       CleanupPipe(stderr_pipe);
+      if (enable_control_guard) {
+        CleanupPipe(control_pipe);
+      }
       return false;
     }
 
@@ -296,6 +384,9 @@ class WinChildProcessCore final {
       CleanupPipe(stdin_pipe);
       CleanupPipe(stdout_pipe);
       CleanupPipe(stderr_pipe);
+      if (enable_control_guard) {
+        CleanupPipe(control_pipe);
+      }
       Cleanup();
       return false;
     }
@@ -309,6 +400,9 @@ class WinChildProcessCore final {
       CleanupPipe(stdin_pipe);
       CleanupPipe(stdout_pipe);
       CleanupPipe(stderr_pipe);
+      if (enable_control_guard) {
+        CleanupPipe(control_pipe);
+      }
       Cleanup();
       return false;
     }
@@ -337,7 +431,29 @@ class WinChildProcessCore final {
     CleanupPipe(stdout_pipe);
     CleanupPipe(stderr_pipe);
 
+    if (enable_control_guard) {
+      control_handle_ = control_pipe.parent_handle;
+      control_pipe.parent_handle = INVALID_HANDLE_VALUE;
+      CleanupPipe(control_pipe);
+    }
+
     origin_runner_ = ThreadTaskRunnerHandle::Get();
+    heartbeat_timeout_ = options.heartbeat_timeout;
+    heartbeat_enabled_ = enable_control_guard;
+    if (heartbeat_enabled_ &&
+        !control_controller_.StartWatching(
+            pump, reinterpret_cast<NativeIOHandle>(control_handle_),
+            MessagePumpForIO::FdWatchController::Mode::READ, this)) {
+      NotifyLaunchFailed(listener_);
+      Cleanup();
+      return false;
+    }
+    if (heartbeat_enabled_) {
+      last_heartbeat_time_ = TimeTicks::Now();
+      ++heartbeat_generation_;
+      ScheduleHeartbeatCheck(heartbeat_generation_);
+    }
+
     if (!RegisterWaitForSingleObject(&wait_handle_, process_handle_,
                                      &WinChildProcessCore::WaitThunk, this,
                                      INFINITE, WT_EXECUTEONLYONCE)) {
@@ -359,6 +475,38 @@ class WinChildProcessCore final {
   AsyncInputStream* stdout_stream() const { return stdout_stream_.get(); }
   AsyncInputStream* stderr_stream() const { return stderr_stream_.get(); }
   AsyncOutputStream* stdin_stream() const { return stdin_stream_.get(); }
+
+  void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override {
+    if (reinterpret_cast<HANDLE>(handle) != control_handle_) {
+      return;
+    }
+
+    std::array<std::uint8_t, 64> buffer{};
+    DWORD read_bytes = 0;
+    const BOOL ok = ReadFile(control_handle_, buffer.data(),
+                             static_cast<DWORD>(buffer.size()), &read_bytes,
+                             nullptr);
+    if (!ok) {
+      const DWORD err = GetLastError();
+      if (err == ERROR_BROKEN_PIPE || err == ERROR_PIPE_NOT_CONNECTED) {
+        DiagnoseTerminationFromPipeBreak();
+      }
+      return;
+    }
+    if (read_bytes == 0) {
+      DiagnoseTerminationFromPipeBreak();
+      return;
+    }
+
+    for (DWORD i = 0; i < read_bytes; ++i) {
+      heartbeat_shift_reg_ = (heartbeat_shift_reg_ << 8) | buffer[i];
+      if (heartbeat_shift_reg_ == 0x42454154ULL) {
+        last_heartbeat_time_ = TimeTicks::Now();
+      }
+    }
+  }
+
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) override {}
 
  private:
   struct DispatchState {
@@ -385,6 +533,10 @@ class WinChildProcessCore final {
       (void)UnregisterWaitEx(wait_handle_, INVALID_HANDLE_VALUE);
       wait_handle_ = nullptr;
     }
+
+    ++heartbeat_generation_;
+    control_controller_.StopWatching();
+    CloseHandleSafe(&control_handle_);
 
     if (dispatch_state_) {
       std::lock_guard<std::mutex> lock(dispatch_state_->lock);
@@ -447,12 +599,22 @@ class WinChildProcessCore final {
       exit_code = static_cast<DWORD>(-1);
     }
 
-    ProcessExitInfo info;
     if (exit_code == STILL_ACTIVE) {
       return;
     }
-    info.state = ProcessState::kExited;
+
+    ProcessExitInfo info;
     info.exit_code = static_cast<int>(exit_code);
+    {
+      std::lock_guard<std::mutex> lock(self->dispatch_state_->lock);
+      if (self->dispatch_state_->state == ProcessState::kTimedOutHung) {
+        info.state = ProcessState::kTimedOutHung;
+      } else if (IsCrashExitCode(exit_code)) {
+        info.state = ProcessState::kCrashed;
+      } else {
+        info.state = ProcessState::kExited;
+      }
+    }
 
     const std::shared_ptr<DispatchState> state = self->dispatch_state_;
     const scoped_refptr<TaskRunner> runner = self->origin_runner_;
@@ -476,6 +638,7 @@ class WinChildProcessCore final {
       }
       if (state->state == ProcessState::kExited ||
           state->state == ProcessState::kCrashed ||
+          state->state == ProcessState::kTimedOutHung ||
           state->state == ProcessState::kFailedToStart) {
         state->terminated_notified = true;
         return;
@@ -487,6 +650,68 @@ class WinChildProcessCore final {
     if (listener != nullptr) {
       listener->OnProcessTerminated(info);
     }
+  }
+
+  void ScheduleHeartbeatCheck(std::uint64_t generation) {
+    if (!heartbeat_enabled_ || origin_runner_.get() == nullptr) {
+      return;
+    }
+    origin_runner_->PostDelayedTask(FROM_HERE,
+      [this, generation]() {
+        if (generation != heartbeat_generation_) {
+          return;
+        }
+
+        ProcessState state_snapshot = ProcessState::kNotStarted;
+        {
+          std::lock_guard<std::mutex> lock(dispatch_state_->lock);
+          state_snapshot = dispatch_state_->state;
+        }
+        if (state_snapshot != ProcessState::kRunning) {
+          return;
+        }
+
+        const TimeTicks now = TimeTicks::Now();
+        if ((now - last_heartbeat_time_).InMilliseconds() >=
+            heartbeat_timeout_.InMilliseconds()) {
+          {
+            std::lock_guard<std::mutex> lock(dispatch_state_->lock);
+            if (dispatch_state_->state == ProcessState::kRunning) {
+              dispatch_state_->state = ProcessState::kTimedOutHung;
+            }
+          }
+          (void)Terminate(0xDEAD, true);
+          return;
+        }
+
+        ScheduleHeartbeatCheck(generation);
+      }, heartbeat_timeout_);
+  }
+
+  void DiagnoseTerminationFromPipeBreak() {
+    if (process_handle_ == nullptr || process_handle_ == INVALID_HANDLE_VALUE) {
+      return;
+    }
+
+    DWORD exit_code = STILL_ACTIVE;
+    if (!GetExitCodeProcess(process_handle_, &exit_code) ||
+        exit_code == STILL_ACTIVE) {
+      return;
+    }
+
+    ProcessExitInfo info;
+    info.exit_code = static_cast<int>(exit_code);
+    {
+      std::lock_guard<std::mutex> lock(dispatch_state_->lock);
+      if (dispatch_state_->state == ProcessState::kTimedOutHung) {
+        info.state = ProcessState::kTimedOutHung;
+      } else if (IsCrashExitCode(exit_code)) {
+        info.state = ProcessState::kCrashed;
+      } else {
+        info.state = ProcessState::kExited;
+      }
+    }
+    DispatchTermination(dispatch_state_, info);
   }
 
   bool ResolveStdHandle(const StdIOConfig& cfg,
@@ -551,9 +776,16 @@ class WinChildProcessCore final {
   HANDLE process_handle_ = INVALID_HANDLE_VALUE;
   HANDLE job_handle_ = nullptr;
   HANDLE wait_handle_ = nullptr;
+  HANDLE control_handle_ = INVALID_HANDLE_VALUE;
   ProcessLaunchOptions options_;
   scoped_refptr<TaskRunner> origin_runner_;
   std::shared_ptr<DispatchState> dispatch_state_;
+  MessagePumpForIO::FdWatchController control_controller_;
+  TimeDelta heartbeat_timeout_ = TimeDelta::Max();
+  bool heartbeat_enabled_ = false;
+  std::uint64_t heartbeat_generation_ = 0;
+  std::uint64_t heartbeat_shift_reg_ = 0;
+  TimeTicks last_heartbeat_time_;
 
   std::unique_ptr<AsyncInputStream> stdout_stream_;
   std::unique_ptr<AsyncInputStream> stderr_stream_;
@@ -737,10 +969,6 @@ AsyncInputStream* ChildProcess::GetStderrStream() const {
 AsyncOutputStream* ChildProcess::GetStdinStream() const {
   return impl_->GetStdinStream();
 }
-
-void ChildProcess::OnFileCanReadWithoutBlocking(NativeIOHandle /*handle*/) {}
-
-void ChildProcess::OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) {}
 
 }  // namespace nei
 

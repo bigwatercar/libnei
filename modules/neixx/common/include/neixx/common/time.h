@@ -4,6 +4,7 @@
 #define NEI_COMMON_TIME_H
 
 #include <cstdint>
+#include <limits>
 
 #include <nei/macros/nei_export.h>
 
@@ -14,6 +15,10 @@ namespace nei {
 class NEI_API TimeDelta {
 public:
     constexpr TimeDelta() : delta_(0) {}
+
+    static constexpr TimeDelta Max() {
+        return TimeDelta(std::numeric_limits<int64_t>::max());
+    }
 
     // Factory methods.
     static constexpr TimeDelta FromDays(int64_t days) {
@@ -67,6 +72,9 @@ public:
     }
     constexpr bool is_negative() const {
         return delta_ < 0;
+    }
+    constexpr bool is_max() const {
+        return delta_ == std::numeric_limits<int64_t>::max();
     }
 
     // Arithmetic operators.

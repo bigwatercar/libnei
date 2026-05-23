@@ -374,6 +374,9 @@ TEST(ChildProcessTest, TerminateForceTrueKillsRunningProcess) {
 TEST(ChildProcessTest, TerminateGracefulStopsRunningProcess) {
   WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
   CapturingProcessListener listener(&done);
+#if !defined(_WIN32)
+  WaitableEvent ready(WaitableEvent::ResetPolicy::kAutomatic, false);
+#endif
   const scoped_refptr<ProcessService> service = ProcessService::Create();
   ASSERT_TRUE(service);
   ChildProcess process(service);
@@ -384,18 +387,38 @@ TEST(ChildProcessTest, TerminateGracefulStopsRunningProcess) {
                         "ping -n 60 127.0.0.1 > nul"};
 #else
   const char* argv[] = {"/bin/sh", "-c",
-                        "trap 'exit 42' TERM; while :; do :; done"};
+                        "trap 'exit 42' TERM; echo ready; while :; do :; done"};
 #endif
   CommandLine command_line(static_cast<int>(sizeof(argv) / sizeof(argv[0])),
                            argv);
 
   ProcessLaunchOptions options;
   options.stdin_config.type = StdIOType::NULL_IO;
+#if defined(_WIN32)
   options.stdout_config.type = StdIOType::NULL_IO;
+#else
+  options.stdout_config.type = StdIOType::PIPE;
+#endif
   options.stderr_config.type = StdIOType::NULL_IO;
 
   ASSERT_TRUE(process.Launch(command_line, options));
   ASSERT_TRUE(listener.launch_succeeded.load(std::memory_order_acquire));
+
+#if !defined(_WIN32)
+  AsyncInputStream* stdout_stream = process.GetStdoutStream();
+  ASSERT_NE(stdout_stream, nullptr);
+  stdout_stream->ReadAsync([&ready](std::vector<std::uint8_t>&& data) {
+    if (data.empty()) {
+      return;
+    }
+    const std::string line = NormalizePipeText(std::move(data));
+    if (line == "ready") {
+      ready.Signal();
+    }
+  });
+  ASSERT_TRUE(ready.TimedWait(std::chrono::seconds(5)));
+#endif
+
   ASSERT_TRUE(process.Terminate(0, false));
   ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
 
