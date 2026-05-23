@@ -31,6 +31,7 @@ struct ProcessLaunchOptions {
   StdIOConfig stdin_config;
   StdIOConfig stdout_config;
   StdIOConfig stderr_config;
+  bool kill_on_destruction = false;
 };
 
 enum class ProcessState {
@@ -63,6 +64,8 @@ class NEI_API ChildProcess : public MessagePumpForIO::Watcher {
 
   bool Launch(const CommandLine& command_line,
               const ProcessLaunchOptions& options);
+
+  bool Terminate(int exit_code, bool force);
 
   void SetListener(ChildProcessListener* listener);
 

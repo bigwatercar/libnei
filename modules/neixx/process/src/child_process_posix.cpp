@@ -96,10 +96,52 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 
   ~PosixChildProcessCore() { Cleanup(); }
 
+  bool Terminate(int /*exit_code*/, bool force) {
+    const int signal_value = force ? SIGKILL : SIGTERM;
+    int pid = -1;
+    int pidfd = -1;
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      if (state_ == ProcessState::kExited ||
+          state_ == ProcessState::kCrashed ||
+          state_ == ProcessState::kFailedToStart) {
+        return false;
+      }
+      pid = pid_;
+      pidfd = pidfd_;
+    }
+
+    if (pid <= 0) {
+      return false;
+    }
+
+#if defined(SYS_pidfd_send_signal)
+    if (pidfd >= 0) {
+      if (syscall(SYS_pidfd_send_signal, pidfd, signal_value, nullptr, 0) == 0) {
+        return true;
+      }
+      if (errno == ESRCH) {
+        return false;
+      }
+    }
+#endif
+
+    if (kill(static_cast<pid_t>(pid), signal_value) == 0) {
+      return true;
+    }
+    return false;
+  }
+
   bool Launch(const CommandLine& command_line,
               const ProcessLaunchOptions& options) {
-    if (state_ == ProcessState::kRunning) {
-      return false;
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      if (state_ == ProcessState::kRunning) {
+        return false;
+      }
+      state_ = ProcessState::kNotStarted;
+      terminated_notified_ = false;
+      options_ = options;
     }
 
     IgnoreSigPipeGlobalOnce();
@@ -230,7 +272,10 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       _exit(127);
     }
 
-    pid_ = static_cast<int>(child_pid);
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      pid_ = static_cast<int>(child_pid);
+    }
 
     CloseFd(&stdin_pipe.child_end);
     CloseFd(&stdout_pipe.child_end);
@@ -255,27 +300,50 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     }
 
 #if defined(SYS_pidfd_open)
-    pidfd_ = static_cast<int>(syscall(SYS_pidfd_open, child_pid, 0));
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      pidfd_ = static_cast<int>(syscall(SYS_pidfd_open, child_pid, 0));
+    }
 #else
-    pidfd_ = -1;
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      pidfd_ = -1;
+    }
 #endif
-    if (pidfd_ < 0) {
-      NotifyLaunchFailed();
-      Cleanup();
-      return false;
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      if (pidfd_ < 0) {
+        NotifyLaunchFailed();
+        Cleanup();
+        return false;
+      }
     }
 
+    int pidfd_for_watch = -1;
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      pidfd_for_watch = pidfd_;
+    }
     if (!pid_controller_.StartWatching(
-            pump, pidfd_, MessagePumpForIO::FdWatchController::Mode::READ,
+            pump, pidfd_for_watch,
+            MessagePumpForIO::FdWatchController::Mode::READ,
             this)) {
       NotifyLaunchFailed();
       Cleanup();
       return false;
     }
 
-    state_ = ProcessState::kRunning;
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      state_ = ProcessState::kRunning;
+    }
     if (listener_ != nullptr) {
-      listener_->OnProcessLaunchSucceeded(pid_);
+      int pid_snapshot = -1;
+      {
+        std::lock_guard<std::mutex> lock(state_lock_);
+        pid_snapshot = pid_;
+      }
+      listener_->OnProcessLaunchSucceeded(pid_snapshot);
     }
     return true;
   }
@@ -285,7 +353,12 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
   AsyncOutputStream* stdin_stream() const { return stdin_stream_.get(); }
 
   void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override {
-    if (static_cast<int>(handle) != pidfd_) {
+    int pidfd_snapshot = -1;
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      pidfd_snapshot = pidfd_;
+    }
+    if (static_cast<int>(handle) != pidfd_snapshot) {
       return;
     }
     HandlePidReadable();
@@ -295,21 +368,37 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 
  private:
   void NotifyLaunchFailed() {
-    state_ = ProcessState::kFailedToStart;
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      state_ = ProcessState::kFailedToStart;
+    }
     if (listener_ != nullptr) {
       listener_->OnProcessLaunchFailed();
     }
   }
 
   void HandlePidReadable() {
-    if (state_ != ProcessState::kRunning || pidfd_ < 0) {
+    int pidfd_snapshot = -1;
+    int pid_snapshot = -1;
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      if (state_ != ProcessState::kRunning || pidfd_ < 0 ||
+          terminated_notified_) {
+        return;
+      }
+      pidfd_snapshot = pidfd_;
+      pid_snapshot = pid_;
+    }
+
+    if (pidfd_snapshot < 0 || pid_snapshot <= 0) {
       return;
     }
 
 #if defined(P_PIDFD)
     siginfo_t si;
     std::memset(&si, 0, sizeof(si));
-    if (waitid(P_PIDFD, static_cast<id_t>(pidfd_), &si, WEXITED | WNOHANG) != 0) {
+    if (waitid(P_PIDFD, static_cast<id_t>(pidfd_snapshot), &si,
+               WEXITED | WNOHANG) != 0) {
       return;
     }
     if (si.si_pid == 0) {
@@ -327,7 +416,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 #else
     ProcessExitInfo info;
     int status = 0;
-    pid_t waited = waitpid(static_cast<pid_t>(pid_), &status, WNOHANG);
+    pid_t waited = waitpid(static_cast<pid_t>(pid_snapshot), &status, WNOHANG);
     if (waited <= 0) {
       return;
     }
@@ -340,24 +429,62 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     }
 #endif
 
-    state_ = info.state;
+    ChildProcessListener* listener = nullptr;
+    int pidfd_to_close = -1;
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      if (terminated_notified_) {
+        return;
+      }
+      terminated_notified_ = true;
+      state_ = info.state;
+      pidfd_to_close = pidfd_;
+      pidfd_ = -1;
+      listener = listener_;
+    }
+
     pid_controller_.StopWatching();
-    CloseFd(&pidfd_);
-    if (listener_ != nullptr) {
-      listener_->OnProcessTerminated(info);
+    if (pidfd_to_close >= 0) {
+      (void)close(pidfd_to_close);
+    }
+    if (listener != nullptr) {
+      listener->OnProcessTerminated(info);
     }
   }
 
   void Cleanup() {
+    bool should_kill = false;
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      should_kill = state_ == ProcessState::kRunning &&
+                    options_.kill_on_destruction;
+    }
+    if (should_kill) {
+      (void)Terminate(-1, true);
+    }
+
+    int pidfd_to_close = -1;
+    {
+      std::lock_guard<std::mutex> lock(state_lock_);
+      pidfd_to_close = pidfd_;
+      pidfd_ = -1;
+      listener_ = nullptr;
+    }
+
     pid_controller_.StopWatching();
-    CloseFd(&pidfd_);
+    if (pidfd_to_close >= 0) {
+      (void)close(pidfd_to_close);
+    }
     stdin_stream_.reset();
     stdout_stream_.reset();
     stderr_stream_.reset();
   }
 
+  mutable std::mutex state_lock_;
   ChildProcessListener* listener_ = nullptr;
   ProcessState state_ = ProcessState::kNotStarted;
+  bool terminated_notified_ = false;
+  ProcessLaunchOptions options_;
   int pid_ = -1;
   int pidfd_ = -1;
   MessagePumpForIO::FdWatchController pid_controller_;
@@ -411,6 +538,25 @@ class ChildProcess::Impl final : public ChildProcessListener {
         stderr_proxy_->Bind(core_->stderr_stream(), io_runner);
         stdin_proxy_->Bind(core_->stdin_stream(), io_runner);
       }
+      done.Signal();
+    });
+    done.Wait();
+    return ok;
+  }
+
+  bool Terminate(int exit_code, bool force) {
+    if (process_service_.get() == nullptr) {
+      return false;
+    }
+    const scoped_refptr<TaskRunner> io_runner = process_service_->GetTaskRunner();
+    if (io_runner.get() == nullptr) {
+      return false;
+    }
+
+    WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+    bool ok = false;
+    io_runner->PostTask(FROM_HERE, [this, exit_code, force, &done, &ok]() {
+      ok = core_ != nullptr && core_->Terminate(exit_code, force);
       done.Signal();
     });
     done.Wait();
@@ -500,6 +646,10 @@ ChildProcess::~ChildProcess() = default;
 bool ChildProcess::Launch(const CommandLine& command_line,
                           const ProcessLaunchOptions& options) {
   return impl_->Launch(command_line, options, listener_);
+}
+
+bool ChildProcess::Terminate(int exit_code, bool force) {
+  return impl_->Terminate(exit_code, force);
 }
 
 void ChildProcess::SetListener(ChildProcessListener* listener) {

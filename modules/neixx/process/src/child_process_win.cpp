@@ -117,6 +117,37 @@ class WinChildProcessCore final {
 
   ~WinChildProcessCore() { Cleanup(); }
 
+  bool Terminate(int exit_code, bool force) {
+    HANDLE process_handle = INVALID_HANDLE_VALUE;
+    int process_id = -1;
+    {
+      std::lock_guard<std::mutex> lock(dispatch_state_->lock);
+      if (!dispatch_state_->alive ||
+          dispatch_state_->state == ProcessState::kExited ||
+          dispatch_state_->state == ProcessState::kCrashed ||
+          dispatch_state_->state == ProcessState::kFailedToStart) {
+        return false;
+      }
+      process_handle = process_handle_;
+      process_id = process_id_;
+    }
+
+    if (process_handle == nullptr || process_handle == INVALID_HANDLE_VALUE) {
+      return false;
+    }
+
+    if (force) {
+      return ::TerminateProcess(process_handle,
+                               static_cast<UINT>(exit_code)) != FALSE;
+    }
+
+    if (process_id <= 0) {
+      return false;
+    }
+    return ::GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT,
+                                      static_cast<DWORD>(process_id)) != FALSE;
+  }
+
   bool Launch(const CommandLine& command_line,
               const ProcessLaunchOptions& options) {
     Cleanup();
@@ -132,7 +163,10 @@ class WinChildProcessCore final {
       dispatch_state_->listener = listener_;
       dispatch_state_->state = ProcessState::kNotStarted;
       dispatch_state_->alive = true;
+      dispatch_state_->terminated_notified = false;
     }
+
+    options_ = options;
 
     PipePair stdin_pipe;
     PipePair stdout_pipe;
@@ -225,7 +259,8 @@ class WinChildProcessCore final {
     cmdline.push_back(L'\0');
 
     PROCESS_INFORMATION pi{};
-    const DWORD creation_flags = EXTENDED_STARTUPINFO_PRESENT;
+    const DWORD creation_flags = EXTENDED_STARTUPINFO_PRESENT |
+                   CREATE_NEW_PROCESS_GROUP;
     const BOOL created = CreateProcessW(
         nullptr, cmdline.data(), nullptr, nullptr, TRUE, creation_flags, nullptr,
         nullptr, &startup.StartupInfo, &pi);
@@ -277,7 +312,10 @@ class WinChildProcessCore final {
       return false;
     }
 
-    dispatch_state_->state = ProcessState::kRunning;
+    {
+      std::lock_guard<std::mutex> lock(dispatch_state_->lock);
+      dispatch_state_->state = ProcessState::kRunning;
+    }
     if (listener_ != nullptr) {
       listener_->OnProcessLaunchSucceeded(process_id_);
     }
@@ -292,11 +330,23 @@ class WinChildProcessCore final {
   struct DispatchState {
     std::mutex lock;
     bool alive = true;
+    bool terminated_notified = false;
     ProcessState state = ProcessState::kNotStarted;
     ChildProcessListener* listener = nullptr;
   };
 
   void Cleanup() {
+    bool should_kill = false;
+    {
+      std::lock_guard<std::mutex> lock(dispatch_state_->lock);
+      should_kill = dispatch_state_->alive &&
+                    dispatch_state_->state == ProcessState::kRunning &&
+                    options_.kill_on_destruction;
+    }
+    if (should_kill) {
+      (void)Terminate(static_cast<int>(0xC0000005), true);
+    }
+
     if (wait_handle_ != nullptr) {
       (void)UnregisterWaitEx(wait_handle_, INVALID_HANDLE_VALUE);
       wait_handle_ = nullptr;
@@ -305,6 +355,7 @@ class WinChildProcessCore final {
     if (dispatch_state_) {
       std::lock_guard<std::mutex> lock(dispatch_state_->lock);
       dispatch_state_->alive = false;
+      dispatch_state_->listener = nullptr;
     }
 
     stdin_stream_.reset();
@@ -327,36 +378,43 @@ class WinChildProcessCore final {
 
     ProcessExitInfo info;
     if (exit_code == STILL_ACTIVE) {
-      info.state = ProcessState::kRunning;
-      info.exit_code = static_cast<int>(exit_code);
-    } else {
-      info.state = ProcessState::kExited;
-      info.exit_code = static_cast<int>(exit_code);
+      return;
     }
+    info.state = ProcessState::kExited;
+    info.exit_code = static_cast<int>(exit_code);
 
     const std::shared_ptr<DispatchState> state = self->dispatch_state_;
     const scoped_refptr<TaskRunner> runner = self->origin_runner_;
     if (runner.get() != nullptr) {
       runner->PostTask(FROM_HERE, [state, info]() {
-        std::lock_guard<std::mutex> lock(state->lock);
-        if (!state->alive) {
-          return;
-        }
-        state->state = info.state;
-        if (state->listener != nullptr) {
-          state->listener->OnProcessTerminated(info);
-        }
+        DispatchTermination(state, info);
       });
       return;
     }
 
-    std::lock_guard<std::mutex> lock(state->lock);
-    if (!state->alive) {
-      return;
+    DispatchTermination(state, info);
+  }
+
+  static void DispatchTermination(const std::shared_ptr<DispatchState>& state,
+                                  const ProcessExitInfo& info) {
+    ChildProcessListener* listener = nullptr;
+    {
+      std::lock_guard<std::mutex> lock(state->lock);
+      if (!state->alive || state->terminated_notified) {
+        return;
+      }
+      if (state->state == ProcessState::kExited ||
+          state->state == ProcessState::kCrashed ||
+          state->state == ProcessState::kFailedToStart) {
+        state->terminated_notified = true;
+        return;
+      }
+      state->state = info.state;
+      state->terminated_notified = true;
+      listener = state->listener;
     }
-    state->state = info.state;
-    if (state->listener != nullptr) {
-      state->listener->OnProcessTerminated(info);
+    if (listener != nullptr) {
+      listener->OnProcessTerminated(info);
     }
   }
 
@@ -409,6 +467,7 @@ class WinChildProcessCore final {
 
   void NotifyLaunchFailed(ChildProcessListener* listener) {
     if (dispatch_state_) {
+      std::lock_guard<std::mutex> lock(dispatch_state_->lock);
       dispatch_state_->state = ProcessState::kFailedToStart;
     }
     if (listener != nullptr) {
@@ -420,6 +479,7 @@ class WinChildProcessCore final {
   int process_id_ = -1;
   HANDLE process_handle_ = INVALID_HANDLE_VALUE;
   HANDLE wait_handle_ = nullptr;
+  ProcessLaunchOptions options_;
   scoped_refptr<TaskRunner> origin_runner_;
   std::shared_ptr<DispatchState> dispatch_state_;
 
@@ -473,6 +533,25 @@ class ChildProcess::Impl final : public ChildProcessListener {
         stderr_proxy_->Bind(core_->stderr_stream(), io_runner);
         stdin_proxy_->Bind(core_->stdin_stream(), io_runner);
       }
+      done.Signal();
+    });
+    done.Wait();
+    return ok;
+  }
+
+  bool Terminate(int exit_code, bool force) {
+    if (process_service_.get() == nullptr) {
+      return false;
+    }
+    const scoped_refptr<TaskRunner> io_runner = process_service_->GetTaskRunner();
+    if (io_runner.get() == nullptr) {
+      return false;
+    }
+
+    WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+    bool ok = false;
+    io_runner->PostTask(FROM_HERE, [this, exit_code, force, &done, &ok]() {
+      ok = core_ != nullptr && core_->Terminate(exit_code, force);
       done.Signal();
     });
     done.Wait();
@@ -562,6 +641,10 @@ ChildProcess::~ChildProcess() = default;
 bool ChildProcess::Launch(const CommandLine& command_line,
                           const ProcessLaunchOptions& options) {
   return impl_->Launch(command_line, options, listener_);
+}
+
+bool ChildProcess::Terminate(int exit_code, bool force) {
+  return impl_->Terminate(exit_code, force);
 }
 
 void ChildProcess::SetListener(ChildProcessListener* listener) {
