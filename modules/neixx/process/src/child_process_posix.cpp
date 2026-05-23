@@ -128,6 +128,16 @@ bool IsCrashSignal(int sig) {
          sig == SIGILL || sig == SIGABRT;
 }
 
+void RestoreEnvVar(const char* name,
+                   bool had_original,
+                   const std::string& original_value) {
+  if (had_original) {
+    (void)setenv(name, original_value.c_str(), 1);
+  } else {
+    (void)unsetenv(name);
+  }
+}
+
 ProcessState ClassifySignaledTermination(int sig, int requested_signal) {
   if (IsCrashSignal(sig)) {
     return ProcessState::kCrashed;
@@ -268,8 +278,42 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     }
     argv_exec.push_back(nullptr);
 
+    // Prepare child control-pipe environment before fork(). In a multithreaded
+    // process, child code after fork must avoid non-async-signal-safe routines
+    // like setenv/snprintf.
+    std::string original_control_env;
+    bool had_original_control_env = false;
+    if (enable_control_guard) {
+      const char* old = getenv("NEI_CONTROL_PIPE_FD");
+      if (old != nullptr) {
+        had_original_control_env = true;
+        original_control_env = old;
+      }
+
+      char control_fd_buf[64] = {0};
+      const int n = std::snprintf(control_fd_buf, sizeof(control_fd_buf), "%d",
+                                  control_pipe.child_write_end);
+      if (n <= 0 || static_cast<std::size_t>(n) >= sizeof(control_fd_buf) ||
+          setenv("NEI_CONTROL_PIPE_FD", control_fd_buf, 1) != 0) {
+        CloseFd(&stdin_pipe.parent_end);
+        CloseFd(&stdin_pipe.child_end);
+        CloseFd(&stdout_pipe.parent_end);
+        CloseFd(&stdout_pipe.child_end);
+        CloseFd(&stderr_pipe.parent_end);
+        CloseFd(&stderr_pipe.child_end);
+        CloseFd(&control_pipe.parent_read_end);
+        CloseFd(&control_pipe.child_write_end);
+        NotifyLaunchFailed();
+        return false;
+      }
+    }
+
     pid_t child_pid = fork();
     if (child_pid < 0) {
+      if (enable_control_guard) {
+        RestoreEnvVar("NEI_CONTROL_PIPE_FD", had_original_control_env,
+                      original_control_env);
+      }
       CloseFd(&stdin_pipe.parent_end);
       CloseFd(&stdin_pipe.child_end);
       CloseFd(&stdout_pipe.parent_end);
@@ -282,13 +326,6 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 
     if (child_pid == 0) {
       const ResourceLimits& limits = options.resource_limits;
-
-      if (enable_control_guard) {
-        char control_fd_buf[64] = {0};
-        std::snprintf(control_fd_buf, sizeof(control_fd_buf), "%d",
-                      control_pipe.child_write_end);
-        (void)setenv("NEI_CONTROL_PIPE_FD", control_fd_buf, 1);
-      }
 
       if (limits.kill_on_parent_death) {
         if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0) {
@@ -378,6 +415,11 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       _exit(127);
     }
 
+    if (enable_control_guard) {
+      RestoreEnvVar("NEI_CONTROL_PIPE_FD", had_original_control_env,
+                    original_control_env);
+    }
+
     {
       std::lock_guard<std::mutex> lock(state_lock_);
       pid_ = static_cast<int>(child_pid);
@@ -424,13 +466,40 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       pidfd_ = -1;
     }
 #endif
+    ChildProcessListener* launch_failed_listener = nullptr;
+    bool pidfd_open_failed = false;
     {
       std::lock_guard<std::mutex> lock(state_lock_);
       if (pidfd_ < 0) {
-        NotifyLaunchFailed();
-        Cleanup();
-        return false;
+        // pidfd creation failed after fork; force-kill/reap child and rollback
+        // resources in-place to prevent orphan/zombie escape.
+        (void)kill(child_pid, SIGKILL);
+        int reap_status = 0;
+        while (waitpid(child_pid, &reap_status, 0) < 0 && errno == EINTR) {
+        }
+
+        if (enable_control_guard) {
+          control_controller_.StopWatching();
+          if (control_fd_ >= 0) {
+            (void)close(control_fd_);
+            control_fd_ = -1;
+          }
+        }
+
+        stdin_stream_.reset();
+        stdout_stream_.reset();
+        stderr_stream_.reset();
+
+        state_ = ProcessState::kFailedToStart;
+        launch_failed_listener = listener_;
+        pidfd_open_failed = true;
       }
+    }
+    if (pidfd_open_failed) {
+      if (launch_failed_listener != nullptr) {
+        launch_failed_listener->OnProcessLaunchFailed();
+      }
+      return false;
     }
 
     int pidfd_for_watch = -1;
@@ -528,79 +597,66 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
   }
 
   void HandlePidReadable() {
-    int pidfd_snapshot = -1;
-    int pid_snapshot = -1;
+    ChildProcessListener* listener = nullptr;
+    int pidfd_to_close = -1;
+    ProcessExitInfo info;
+
     {
       std::lock_guard<std::mutex> lock(state_lock_);
       if (state_ != ProcessState::kRunning || pidfd_ < 0 ||
           terminated_notified_) {
         return;
       }
-      pidfd_snapshot = pidfd_;
-      pid_snapshot = pid_;
-    }
 
-    if (pidfd_snapshot < 0 || pid_snapshot <= 0) {
-      return;
-    }
+      const int pidfd_snapshot = pidfd_;
+      const int pid_snapshot = pid_;
+      if (pidfd_snapshot < 0 || pid_snapshot <= 0) {
+        return;
+      }
 
 #if defined(P_PIDFD)
-    siginfo_t si;
-    std::memset(&si, 0, sizeof(si));
-    if (waitid(P_PIDFD, static_cast<id_t>(pidfd_snapshot), &si,
-               WEXITED | WNOHANG) != 0) {
-      return;
-    }
-    if (si.si_pid == 0) {
-      return;
-    }
+      siginfo_t si;
+      std::memset(&si, 0, sizeof(si));
+      if (waitid(P_PIDFD, static_cast<id_t>(pidfd_snapshot), &si,
+                 WEXITED | WNOHANG) != 0) {
+        return;
+      }
+      if (si.si_pid == 0) {
+        return;
+      }
 
-    ProcessExitInfo info;
-    if (si.si_code == CLD_EXITED) {
-      info.state = ProcessState::kExited;
-      info.exit_code = si.si_status;
-    } else if (si.si_code == CLD_KILLED || si.si_code == CLD_DUMPED) {
-      const int sig = si.si_status;
-      int requested_signal = 0;
-      {
-        std::lock_guard<std::mutex> lock(state_lock_);
-        requested_signal = last_requested_signal_;
+      if (si.si_code == CLD_EXITED) {
+        info.state = ProcessState::kExited;
+        info.exit_code = si.si_status;
+      } else if (si.si_code == CLD_KILLED || si.si_code == CLD_DUMPED) {
+        const int sig = si.si_status;
+        const int requested_signal = last_requested_signal_;
+        info.state = ClassifySignaledTermination(sig, requested_signal);
+        info.exit_code = sig;
+      } else {
+        info.state = ProcessState::kCrashed;
+        info.exit_code = si.si_status;
       }
-      info.state = ClassifySignaledTermination(sig, requested_signal);
-      info.exit_code = sig;
-    } else {
-      info.state = ProcessState::kCrashed;
-      info.exit_code = si.si_status;
-    }
 #else
-    ProcessExitInfo info;
-    int status = 0;
-    pid_t waited = waitpid(static_cast<pid_t>(pid_snapshot), &status, WNOHANG);
-    if (waited <= 0) {
-      return;
-    }
-    if (WIFEXITED(status)) {
-      info.state = ProcessState::kExited;
-      info.exit_code = WEXITSTATUS(status);
-    } else if (WIFSIGNALED(status)) {
-      const int sig = WTERMSIG(status);
-      int requested_signal = 0;
-      {
-        std::lock_guard<std::mutex> lock(state_lock_);
-        requested_signal = last_requested_signal_;
+      int status = 0;
+      pid_t waited = waitpid(static_cast<pid_t>(pid_snapshot), &status, WNOHANG);
+      if (waited <= 0) {
+        return;
       }
-      info.exit_code = sig;
-      info.state = ClassifySignaledTermination(sig, requested_signal);
-    } else {
-      info.state = ProcessState::kCrashed;
-      info.exit_code = WTERMSIG(status);
-    }
+      if (WIFEXITED(status)) {
+        info.state = ProcessState::kExited;
+        info.exit_code = WEXITSTATUS(status);
+      } else if (WIFSIGNALED(status)) {
+        const int sig = WTERMSIG(status);
+        const int requested_signal = last_requested_signal_;
+        info.exit_code = sig;
+        info.state = ClassifySignaledTermination(sig, requested_signal);
+      } else {
+        info.state = ProcessState::kCrashed;
+        info.exit_code = WTERMSIG(status);
+      }
 #endif
 
-    ChildProcessListener* listener = nullptr;
-    int pidfd_to_close = -1;
-    {
-      std::lock_guard<std::mutex> lock(state_lock_);
       if (terminated_notified_) {
         return;
       }
@@ -637,6 +693,8 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 
       const ssize_t rv = read(fd_snapshot, buffer.data(), buffer.size());
       if (rv > 0) {
+        // Heartbeat framing is strictly byte-stream based: child must emit the
+        // ASCII sequence "BEAT" as bytes, not a host-endian uint32_t value.
         for (ssize_t i = 0; i < rv; ++i) {
           heartbeat_shift_reg_ = (heartbeat_shift_reg_ << 8) | buffer[i];
           if (heartbeat_shift_reg_ == 0x42454154u) {
@@ -653,63 +711,28 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
   }
 
   void HandleControlPipeEof() {
-    int pid_snapshot = -1;
+    bool should_force_kill = false;
+    int control_fd_to_close = -1;
     {
       std::lock_guard<std::mutex> lock(state_lock_);
-      if (terminated_notified_) {
-        return;
+      if (!terminated_notified_ && state_ == ProcessState::kRunning &&
+          heartbeat_enabled_) {
+        should_force_kill = true;
       }
-      pid_snapshot = pid_;
+      control_fd_to_close = control_fd_;
+      control_fd_ = -1;
     }
 
-    if (pid_snapshot <= 0) {
-      return;
+    control_controller_.StopWatching();
+    if (control_fd_to_close >= 0) {
+      (void)close(control_fd_to_close);
     }
 
-    int status = 0;
-    pid_t waited = waitpid(static_cast<pid_t>(pid_snapshot), &status, WNOHANG);
-    if (waited <= 0) {
-      return;
-    }
-
-    ProcessExitInfo info;
-    if (WIFEXITED(status)) {
-      info.state = ProcessState::kExited;
-      info.exit_code = WEXITSTATUS(status);
-    } else if (WIFSIGNALED(status)) {
-      const int sig = WTERMSIG(status);
-      int requested_signal = 0;
-      {
-        std::lock_guard<std::mutex> lock(state_lock_);
-        requested_signal = last_requested_signal_;
-      }
-      info.state = ClassifySignaledTermination(sig, requested_signal);
-      info.exit_code = sig;
-    } else {
-      info.state = ProcessState::kCrashed;
-      info.exit_code = status;
-    }
-
-    ChildProcessListener* listener = nullptr;
-    {
-      std::lock_guard<std::mutex> lock(state_lock_);
-      if (terminated_notified_) {
-        return;
-      }
-      terminated_notified_ = true;
-      if (state_ == ProcessState::kTimedOutHung) {
-        info.state = ProcessState::kTimedOutHung;
-      }
-      state_ = info.state;
-      listener = listener_;
-      pid_controller_.StopWatching();
-      control_controller_.StopWatching();
-      CloseFd(&pidfd_);
-      CloseFd(&control_fd_);
-    }
-
-    if (listener != nullptr) {
-      listener->OnProcessTerminated(info);
+    // Control pipe is advisory only; process exit authority stays with pidfd.
+    // If heartbeat guard is enabled and control channel dies unexpectedly while
+    // still running, force terminate and let HandlePidReadable publish exit.
+    if (should_force_kill) {
+      (void)Terminate(0xDEAD, true);
     }
   }
 
