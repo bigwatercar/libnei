@@ -3,6 +3,7 @@
 #include <atomic>
 #include <array>
 #include <chrono>
+#include <thread>
 #include <string>
 #include <vector>
 
