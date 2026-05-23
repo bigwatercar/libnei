@@ -20,6 +20,9 @@ class NEI_API AsyncLineReader {
 
   using LineCallback = std::function<void(std::string&& line)>;
   void StartReadingLines(LineCallback callback);
+  // Explicitly flushes buffered trailing data (without requiring EOF).
+  // No-op if there is no buffered pending line or reader is not started.
+  void FlushPendingLine();
 
  private:
     struct State;

@@ -1,5 +1,6 @@
 #include <neixx/process/process_service.h>
 
+#include <csignal>
 #include <mutex>
 #include <utility>
 
@@ -8,6 +9,19 @@
 
 namespace nei {
 
+namespace {
+
+#if !defined(_WIN32)
+void IgnoreSigPipeGlobalOnce() {
+  static std::once_flag once;
+  std::call_once(once, []() {
+    (void)signal(SIGPIPE, SIG_IGN);
+  });
+}
+#endif
+
+}  // namespace
+
 class ProcessService::Impl final {
  public:
   explicit Impl(std::string thread_name) : io_thread_(std::move(thread_name)) {}
@@ -15,6 +29,11 @@ class ProcessService::Impl final {
   ~Impl() { Shutdown(); }
 
   bool Start() {
+#if !defined(_WIN32)
+    // Apply process-wide SIGPIPE protection before any IO thread startup.
+    IgnoreSigPipeGlobalOnce();
+#endif
+
     std::lock_guard<std::mutex> lock(lock_);
     if (io_runner_.get() != nullptr) {
       return true;

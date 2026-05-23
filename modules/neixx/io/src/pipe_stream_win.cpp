@@ -22,9 +22,21 @@ class WinPipeInputStream final : public AsyncInputStream,
                                  public MessagePumpForIO::Watcher {
  public:
   WinPipeInputStream(MessagePumpForIO* pump, HANDLE handle)
-      : pump_(pump), handle_(handle) {}
+      : pump_(pump), handle_(handle) {
+    // Manual-reset event used to synchronise Close() with the kernel when
+    // a ReadFile is in flight.  The event is injected into read_overlapped_
+    // so the kernel signals it on completion/abort, independently of IOCP.
+    read_event_ = CreateEventW(nullptr, /*bManualReset=*/TRUE,
+                               /*bInitialState=*/FALSE, nullptr);
+  }
 
-  ~WinPipeInputStream() override { Close(); }
+  ~WinPipeInputStream() override {
+    Close();
+    if (read_event_ != nullptr) {
+      CloseHandle(read_event_);
+      read_event_ = nullptr;
+    }
+  }
 
   void ReadAsync(DataCallback callback) override {
     callback_ = std::move(callback);
@@ -51,7 +63,18 @@ class WinPipeInputStream final : public AsyncInputStream,
     closed_ = true;
     controller_.StopWatching();
     if (handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE) {
-      (void)CancelIoEx(handle_, nullptr);
+      if (read_in_flight_) {
+        // CancelIoEx only *requests* cancellation; the kernel may still write
+        // to read_overlapped_ and read_buffer_ after this call returns.
+        // We wait on read_event_ (embedded in the OVERLAPPED) which the kernel
+        // signals synchronously once the I/O is truly finished or aborted.
+        // This wait is always brief (< 1 ms) and does NOT require the IOCP
+        // pump to process anything, so it is deadlock-free even on the IO
+        // thread.
+        (void)CancelIoEx(handle_, &read_overlapped_);
+        (void)WaitForSingleObject(read_event_, INFINITE);
+        read_in_flight_ = false;
+      }
       (void)CloseHandle(handle_);
       handle_ = INVALID_HANDLE_VALUE;
     }
@@ -73,6 +96,17 @@ class WinPipeInputStream final : public AsyncInputStream,
     read_in_flight_ = false;
     if (!ok) {
       const DWORD err = GetLastError();
+      if (err == ERROR_MORE_DATA) {
+        if (transferred > 0 && callback_) {
+          std::vector<std::uint8_t> data(read_buffer_.begin(),
+                                         read_buffer_.begin() + transferred);
+          callback_(std::move(data));
+        }
+        if (!closed_) {
+          IssueRead();
+        }
+        return;
+      }
       if (err == ERROR_BROKEN_PIPE || err == ERROR_HANDLE_EOF) {
         Close();
         return;
@@ -106,6 +140,10 @@ class WinPipeInputStream final : public AsyncInputStream,
     }
 
     std::memset(&read_overlapped_, 0, sizeof(read_overlapped_));
+    // Inject our event so the kernel can signal it on completion/abort.
+    // ResetEvent ensures a clean non-signaled state before each ReadFile.
+    read_overlapped_.hEvent = read_event_;
+    ResetEvent(read_event_);
     DWORD read_bytes = 0;
     const BOOL ok = ReadFile(handle_, read_buffer_.data(),
                              static_cast<DWORD>(read_buffer_.size()), &read_bytes,
@@ -123,6 +161,17 @@ class WinPipeInputStream final : public AsyncInputStream,
     }
 
     const DWORD err = GetLastError();
+    if (err == ERROR_MORE_DATA) {
+      if (read_bytes > 0 && callback_) {
+        std::vector<std::uint8_t> data(read_buffer_.begin(),
+                                       read_buffer_.begin() + read_bytes);
+        callback_(std::move(data));
+      }
+      if (!closed_) {
+        IssueRead();
+      }
+      return;
+    }
     if (err == ERROR_IO_PENDING) {
       read_in_flight_ = true;
       return;
@@ -136,6 +185,9 @@ class WinPipeInputStream final : public AsyncInputStream,
 
   MessagePumpForIO* pump_ = nullptr;
   HANDLE handle_ = INVALID_HANDLE_VALUE;
+  // Manual-reset event signaled by the kernel when each ReadFile completes or
+  // is aborted.  Allows Close() to perform a safe synchronous drain.
+  HANDLE read_event_ = nullptr;
   bool closed_ = false;
   bool read_in_flight_ = false;
   DataCallback callback_;
@@ -154,9 +206,18 @@ class WinPipeOutputStream final : public AsyncOutputStream,
   };
 
   WinPipeOutputStream(MessagePumpForIO* pump, HANDLE handle)
-      : pump_(pump), handle_(handle) {}
+      : pump_(pump), handle_(handle) {
+    write_event_ = CreateEventW(nullptr, /*bManualReset=*/TRUE,
+                                /*bInitialState=*/FALSE, nullptr);
+  }
 
-  ~WinPipeOutputStream() override { Close(); }
+  ~WinPipeOutputStream() override {
+    Close();
+    if (write_event_ != nullptr) {
+      CloseHandle(write_event_);
+      write_event_ = nullptr;
+    }
+  }
 
   void WriteAsync(std::vector<std::uint8_t> data,
                   WriteCompleteCallback callback) override {
@@ -188,7 +249,13 @@ class WinPipeOutputStream final : public AsyncOutputStream,
     closed_ = true;
     controller_.StopWatching();
     if (handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE) {
-      (void)CancelIoEx(handle_, nullptr);
+      if (write_in_flight_) {
+        // Mirror of the read-side drain: wait until the kernel has finished
+        // accessing write_overlapped_ before we destroy it.
+        (void)CancelIoEx(handle_, &write_overlapped_);
+        (void)WaitForSingleObject(write_event_, INFINITE);
+        write_in_flight_ = false;
+      }
       (void)CloseHandle(handle_);
       handle_ = INVALID_HANDLE_VALUE;
     }
@@ -262,6 +329,8 @@ class WinPipeOutputStream final : public AsyncOutputStream,
       }
 
       std::memset(&write_overlapped_, 0, sizeof(write_overlapped_));
+      write_overlapped_.hEvent = write_event_;
+      ResetEvent(write_event_);
       DWORD written = 0;
       const BOOL ok = WriteFile(
           handle_, front.data.data() + front.offset,
@@ -291,6 +360,7 @@ class WinPipeOutputStream final : public AsyncOutputStream,
 
   MessagePumpForIO* pump_ = nullptr;
   HANDLE handle_ = INVALID_HANDLE_VALUE;
+  HANDLE write_event_ = nullptr;
   bool closed_ = false;
   bool write_in_flight_ = false;
   std::deque<PendingWrite> writes_;

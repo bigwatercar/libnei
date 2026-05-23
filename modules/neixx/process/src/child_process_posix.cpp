@@ -136,6 +136,27 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       return false;
     }
 
+    // In multithreaded processes, child code between fork() and exec*() must
+    // avoid heap allocations and other non-async-signal-safe operations.
+    std::vector<std::string> argv_utf8 = BuildExecArgv(command_line);
+    if (argv_utf8.empty() || argv_utf8[0].empty()) {
+      CloseFd(&stdin_pipe.parent_end);
+      CloseFd(&stdin_pipe.child_end);
+      CloseFd(&stdout_pipe.parent_end);
+      CloseFd(&stdout_pipe.child_end);
+      CloseFd(&stderr_pipe.parent_end);
+      CloseFd(&stderr_pipe.child_end);
+      NotifyLaunchFailed();
+      return false;
+    }
+
+    std::vector<char*> argv_exec;
+    argv_exec.reserve(argv_utf8.size() + 1);
+    for (std::string& token : argv_utf8) {
+      argv_exec.push_back(token.data());
+    }
+    argv_exec.push_back(nullptr);
+
     pid_t child_pid = fork();
     if (child_pid < 0) {
       CloseFd(&stdin_pipe.parent_end);
@@ -182,7 +203,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
         if (source_fd < 0) {
           return false;
         }
-        return dup2(source_fd, std_fd) == 0;
+        return dup2(source_fd, std_fd) >= 0;
       };
 
       const bool stdin_ok = BindStdFd(STDIN_FILENO, options.stdin_config,
@@ -204,18 +225,6 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       if (!stdin_ok || !stdout_ok || !stderr_ok) {
         _exit(126);
       }
-
-      std::vector<std::string> argv_utf8 = BuildExecArgv(command_line);
-      if (argv_utf8.empty() || argv_utf8[0].empty()) {
-        _exit(127);
-      }
-
-      std::vector<char*> argv_exec;
-      argv_exec.reserve(argv_utf8.size() + 1);
-      for (std::string& token : argv_utf8) {
-        argv_exec.push_back(token.data());
-      }
-      argv_exec.push_back(nullptr);
 
       execvp(argv_exec[0], argv_exec.data());
       _exit(127);

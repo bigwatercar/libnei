@@ -74,5 +74,43 @@ TEST(AsyncLineReaderTest, FlushesTrailingPartialLineOnEof) {
   EXPECT_EQ(lines[0], "partial-without-newline");
 }
 
+TEST(AsyncLineReaderTest, DestructorDoesNotInvokeCallback) {
+  FakeAsyncInputStream input;
+  std::vector<std::string> lines;
+  {
+    AsyncLineReader reader(&input);
+    reader.StartReadingLines([&lines](std::string&& line) {
+      lines.push_back(std::move(line));
+    });
+
+    input.Emit("trailing-without-eof");
+    // Reader is destroyed without EOF.
+  }
+
+  EXPECT_TRUE(lines.empty());
+}
+
+TEST(AsyncLineReaderTest, FlushPendingLineEmitsTrailingDataAndKeepsReading) {
+  FakeAsyncInputStream input;
+  AsyncLineReader reader(&input);
+
+  std::vector<std::string> lines;
+  reader.StartReadingLines([&lines](std::string&& line) {
+    lines.push_back(std::move(line));
+  });
+
+  input.Emit("trailing");
+  reader.FlushPendingLine();
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0], "trailing");
+
+  input.Emit("next\n");
+  ASSERT_EQ(lines.size(), 2u);
+  EXPECT_EQ(lines[1], "next");
+
+  input.EmitEof();
+  EXPECT_EQ(lines.size(), 2u);
+}
+
 }  // namespace
 }  // namespace nei

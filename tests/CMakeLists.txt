@@ -35,6 +35,7 @@ add_executable(
   functional_test.cpp
   # ref_counted_compile_fail.cpp
   platform_thread_test.cpp
+  pipe_stream_win_test.cpp
   ref_counted_test.cpp
   thread_test.cpp
   message_pump_test.cpp
