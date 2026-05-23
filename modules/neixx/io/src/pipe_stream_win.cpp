@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <exception>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -17,6 +18,25 @@
 
 namespace nei {
 namespace {
+
+constexpr DWORD kIoDrainTimeoutMs = 5000;
+
+bool HandleIoDrainWaitFailure(const char* stream_name, DWORD wait_rv) {
+#if !defined(NDEBUG)
+  (void)stream_name;
+  (void)wait_rv;
+  std::terminate();
+#else
+  OutputDebugStringA("[neixx][io] ");
+  OutputDebugStringA(stream_name);
+  if (wait_rv == WAIT_TIMEOUT) {
+    OutputDebugStringA(" stream drain wait timed out; skipping close to avoid unsafe teardown.\n");
+  } else {
+    OutputDebugStringA(" stream drain wait failed; skipping close to avoid unsafe teardown.\n");
+  }
+  return false;
+#endif
+}
 
 class WinPipeInputStream final : public AsyncInputStream,
                                  public MessagePumpForIO::Watcher {
@@ -68,11 +88,16 @@ class WinPipeInputStream final : public AsyncInputStream,
         // to read_overlapped_ and read_buffer_ after this call returns.
         // We wait on read_event_ (embedded in the OVERLAPPED) which the kernel
         // signals synchronously once the I/O is truly finished or aborted.
-        // This wait is always brief (< 1 ms) and does NOT require the IOCP
-        // pump to process anything, so it is deadlock-free even on the IO
-        // thread.
+        // Normally this wait is brief (< 1 ms) and does NOT require the IOCP
+        // pump to process anything. We still bound the wait to defend against
+        // black-swan kernel/driver stalls where cancellation never completes.
         (void)CancelIoEx(handle_, &read_overlapped_);
-        (void)WaitForSingleObject(read_event_, INFINITE);
+        const DWORD wait_rv = WaitForSingleObject(read_event_, kIoDrainTimeoutMs);
+        if (wait_rv != WAIT_OBJECT_0) {
+          if (!HandleIoDrainWaitFailure("input", wait_rv)) {
+            return;
+          }
+        }
         read_in_flight_ = false;
       }
       (void)CloseHandle(handle_);
@@ -253,7 +278,12 @@ class WinPipeOutputStream final : public AsyncOutputStream,
         // Mirror of the read-side drain: wait until the kernel has finished
         // accessing write_overlapped_ before we destroy it.
         (void)CancelIoEx(handle_, &write_overlapped_);
-        (void)WaitForSingleObject(write_event_, INFINITE);
+        const DWORD wait_rv = WaitForSingleObject(write_event_, kIoDrainTimeoutMs);
+        if (wait_rv != WAIT_OBJECT_0) {
+          if (!HandleIoDrainWaitFailure("output", wait_rv)) {
+            return;
+          }
+        }
         write_in_flight_ = false;
       }
       (void)CloseHandle(handle_);
