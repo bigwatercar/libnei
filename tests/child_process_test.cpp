@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -69,6 +71,7 @@ class CapturingProcessListener final : public ChildProcessListener {
 };
 
 struct LaunchTestState {
+  scoped_refptr<ProcessService> process_service;
   std::unique_ptr<ChildProcess> process;
   std::unique_ptr<CapturingProcessListener> listener;
   std::atomic<bool> post_completed{false};
@@ -88,10 +91,25 @@ std::string NormalizePipeText(std::vector<std::uint8_t> bytes) {
   return text;
 }
 
+std::vector<std::string> SplitLines(const std::string& text) {
+  std::vector<std::string> lines;
+  std::istringstream in(text);
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    lines.push_back(line);
+  }
+  return lines;
+}
+
 TEST(ChildProcessTest, LaunchWorksWithoutCurrentIoPump) {
   WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
   CapturingProcessListener listener(&done);
-  ChildProcess process;
+  const scoped_refptr<ProcessService> service = ProcessService::Create();
+  ASSERT_TRUE(service);
+  ChildProcess process(service);
   process.SetListener(&listener);
 
 #if defined(_WIN32)
@@ -185,7 +203,9 @@ TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
   WaitableEvent line_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   WaitableEvent terminated_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   auto state = std::make_shared<LaunchTestState>();
-  state->process = std::make_unique<ChildProcess>();
+  state->process_service = ProcessService::Create();
+  ASSERT_TRUE(state->process_service);
+  state->process = std::make_unique<ChildProcess>(state->process_service);
   state->listener = std::make_unique<CapturingProcessListener>(&terminated_done);
 
 #if defined(_WIN32)
@@ -226,6 +246,7 @@ TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
   ASSERT_TRUE(line_done.TimedWait(std::chrono::seconds(5)));
   ASSERT_TRUE(terminated_done.TimedWait(std::chrono::seconds(5)));
   state->process.reset();
+  state->process_service.reset();
 
   EXPECT_TRUE(state->post_completed.load(std::memory_order_acquire) ||
               state->launch_returned.load(std::memory_order_acquire) == false);
@@ -245,7 +266,9 @@ TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
   WaitableEvent line_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   WaitableEvent terminated_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   auto state = std::make_shared<LaunchTestState>();
-  state->process = std::make_unique<ChildProcess>();
+  state->process_service = ProcessService::Create();
+  ASSERT_TRUE(state->process_service);
+  state->process = std::make_unique<ChildProcess>(state->process_service);
   state->listener = std::make_unique<CapturingProcessListener>(&terminated_done);
 
 #if defined(_WIN32)
@@ -296,6 +319,7 @@ TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
   ASSERT_TRUE(line_done.TimedWait(std::chrono::seconds(5)));
   ASSERT_TRUE(terminated_done.TimedWait(std::chrono::seconds(5)));
   state->process.reset();
+  state->process_service.reset();
 
   EXPECT_TRUE(state->post_completed.load(std::memory_order_acquire) ||
               state->launch_returned.load(std::memory_order_acquire) == false);
@@ -307,6 +331,176 @@ TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
   EXPECT_TRUE(state->saw_line.load(std::memory_order_acquire));
   EXPECT_EQ(state->captured_line, "echo-through-stdin");
 }
+
+TEST(ChildProcessTest, TerminateForceTrueKillsRunningProcess) {
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  CapturingProcessListener listener(&done);
+  const scoped_refptr<ProcessService> service = ProcessService::Create();
+  ASSERT_TRUE(service);
+  ChildProcess process(service);
+  process.SetListener(&listener);
+
+#if defined(_WIN32)
+  const char* argv[] = {"cmd", "/d", "/c",
+                        "ping -n 60 127.0.0.1 > nul"};
+#else
+  const char* argv[] = {"/bin/sh", "-c", "while :; do sleep 1; done"};
+#endif
+  CommandLine command_line(static_cast<int>(sizeof(argv) / sizeof(argv[0])),
+                           argv);
+
+  ProcessLaunchOptions options;
+  options.stdin_config.type = StdIOType::NULL_IO;
+  options.stdout_config.type = StdIOType::NULL_IO;
+  options.stderr_config.type = StdIOType::NULL_IO;
+
+  ASSERT_TRUE(process.Launch(command_line, options));
+  ASSERT_TRUE(listener.launch_succeeded.load(std::memory_order_acquire));
+  ASSERT_TRUE(process.Terminate(137, true));
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+
+  EXPECT_TRUE(listener.terminated.load(std::memory_order_acquire));
+#if defined(_WIN32)
+  EXPECT_EQ(listener.exit_state.load(std::memory_order_acquire),
+            ProcessState::kExited);
+  EXPECT_EQ(listener.exit_code.load(std::memory_order_acquire), 137);
+#else
+  EXPECT_EQ(listener.exit_state.load(std::memory_order_acquire),
+            ProcessState::kCrashed);
+  EXPECT_EQ(listener.exit_code.load(std::memory_order_acquire), SIGKILL);
+#endif
+}
+
+TEST(ChildProcessTest, TerminateGracefulStopsRunningProcess) {
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  CapturingProcessListener listener(&done);
+  const scoped_refptr<ProcessService> service = ProcessService::Create();
+  ASSERT_TRUE(service);
+  ChildProcess process(service);
+  process.SetListener(&listener);
+
+#if defined(_WIN32)
+  const char* argv[] = {"cmd", "/d", "/c",
+                        "ping -n 60 127.0.0.1 > nul"};
+#else
+  const char* argv[] = {"/bin/sh", "-c",
+                        "trap 'exit 42' TERM; while :; do :; done"};
+#endif
+  CommandLine command_line(static_cast<int>(sizeof(argv) / sizeof(argv[0])),
+                           argv);
+
+  ProcessLaunchOptions options;
+  options.stdin_config.type = StdIOType::NULL_IO;
+  options.stdout_config.type = StdIOType::NULL_IO;
+  options.stderr_config.type = StdIOType::NULL_IO;
+
+  ASSERT_TRUE(process.Launch(command_line, options));
+  ASSERT_TRUE(listener.launch_succeeded.load(std::memory_order_acquire));
+  ASSERT_TRUE(process.Terminate(0, false));
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+
+  EXPECT_TRUE(listener.terminated.load(std::memory_order_acquire));
+#if defined(_WIN32)
+  EXPECT_EQ(listener.exit_state.load(std::memory_order_acquire),
+            ProcessState::kExited);
+#else
+  EXPECT_EQ(listener.exit_state.load(std::memory_order_acquire),
+            ProcessState::kExited);
+  EXPECT_EQ(listener.exit_code.load(std::memory_order_acquire), 42);
+#endif
+}
+
+TEST(ChildProcessTest,
+  KillOnDestructionWithParentDeathPolicyCanCoexistWithTerminate) {
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  CapturingProcessListener listener(&done);
+
+  const scoped_refptr<ProcessService> service = ProcessService::Create();
+  ASSERT_TRUE(service);
+  auto process = std::make_unique<ChildProcess>(service);
+  process->SetListener(&listener);
+
+#if defined(_WIN32)
+  const char* argv[] = {"cmd", "/d", "/c",
+                        "ping -n 60 127.0.0.1 > nul"};
+#else
+  const char* argv[] = {"/bin/sh", "-c", "while :; do sleep 1; done"};
+#endif
+  CommandLine command_line(static_cast<int>(sizeof(argv) / sizeof(argv[0])),
+                           argv);
+
+  ProcessLaunchOptions options;
+  options.stdin_config.type = StdIOType::NULL_IO;
+  options.stdout_config.type = StdIOType::NULL_IO;
+  options.stderr_config.type = StdIOType::NULL_IO;
+  options.kill_on_destruction = true;
+  options.resource_limits.kill_on_parent_death = true;
+
+  ASSERT_TRUE(process->Launch(command_line, options));
+  ASSERT_TRUE(process->Terminate(137, true));
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  EXPECT_TRUE(listener.terminated.load(std::memory_order_acquire));
+  process.reset();
+}
+
+#if !defined(_WIN32)
+TEST(ChildProcessTest, LinuxResourceLimitsAreApplied) {
+  WaitableEvent line_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent terminated_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto state = std::make_shared<LaunchTestState>();
+  state->process_service = ProcessService::Create();
+  ASSERT_TRUE(state->process_service);
+  state->process = std::make_unique<ChildProcess>(state->process_service);
+  state->listener = std::make_unique<CapturingProcessListener>(&terminated_done);
+  state->process->SetListener(state->listener.get());
+
+  const char* argv[] = {"/bin/sh", "-c", "cat /proc/self/limits"};
+  CommandLine command_line(static_cast<int>(sizeof(argv) / sizeof(argv[0])),
+                           argv);
+
+  ProcessLaunchOptions options;
+  options.stdout_config.type = StdIOType::PIPE;
+  options.stdin_config.type = StdIOType::NULL_IO;
+  options.stderr_config.type = StdIOType::NULL_IO;
+  options.resource_limits.max_virtual_memory = 64LL * 1024LL * 1024LL;
+  options.resource_limits.max_file_descriptors = 64;
+
+  ASSERT_TRUE(state->process->Launch(command_line, options));
+  AsyncInputStream* stdout_stream = state->process->GetStdoutStream();
+  ASSERT_NE(stdout_stream, nullptr);
+
+  stdout_stream->ReadAsync([state, &line_done](std::vector<std::uint8_t>&& data) {
+    if (data.empty()) {
+      return;
+    }
+    state->captured_bytes = data;
+    state->captured_line = std::string(data.begin(), data.end());
+    line_done.Signal();
+  });
+
+  ASSERT_TRUE(line_done.TimedWait(std::chrono::seconds(5)));
+  ASSERT_TRUE(terminated_done.TimedWait(std::chrono::seconds(5)));
+
+  const std::vector<std::string> lines = SplitLines(state->captured_line);
+  bool saw_as = false;
+  bool saw_nofile = false;
+  for (const std::string& line : lines) {
+    if (line.find("Max address space") != std::string::npos &&
+        line.find("67108864") != std::string::npos) {
+      saw_as = true;
+    }
+    if (line.find("Max open files") != std::string::npos &&
+        line.find("64") != std::string::npos) {
+      saw_nofile = true;
+    }
+  }
+
+  EXPECT_TRUE(saw_as);
+  EXPECT_TRUE(saw_nofile);
+  state->process.reset();
+  state->process_service.reset();
+}
+#endif
 
 }  // namespace
 }  // namespace nei

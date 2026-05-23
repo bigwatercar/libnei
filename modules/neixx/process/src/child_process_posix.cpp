@@ -14,6 +14,8 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <sys/resource.h>
+#include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -87,6 +89,13 @@ std::vector<std::string> BuildExecArgv(const CommandLine& command_line) {
   const std::vector<std::string> args = command_line.GetArgs();
   argv_utf8.insert(argv_utf8.end(), args.begin(), args.end());
   return argv_utf8;
+}
+
+rlim_t ToRlimOrMax(int64_t value) {
+  if (value <= 0) {
+    return static_cast<rlim_t>(RLIM_INFINITY);
+  }
+  return static_cast<rlim_t>(value);
 }
 
 class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
@@ -212,6 +221,32 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     }
 
     if (child_pid == 0) {
+      const ResourceLimits& limits = options.resource_limits;
+
+      if (limits.kill_on_parent_death) {
+        if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0) {
+          _exit(126);
+        }
+      }
+
+      if (limits.max_virtual_memory > 0) {
+        struct rlimit rl_as;
+        rl_as.rlim_cur = ToRlimOrMax(limits.max_virtual_memory);
+        rl_as.rlim_max = ToRlimOrMax(limits.max_virtual_memory);
+        if (setrlimit(RLIMIT_AS, &rl_as) != 0) {
+          _exit(126);
+        }
+      }
+
+      if (limits.max_file_descriptors > 0) {
+        struct rlimit rl_nofile;
+        rl_nofile.rlim_cur = ToRlimOrMax(limits.max_file_descriptors);
+        rl_nofile.rlim_max = ToRlimOrMax(limits.max_file_descriptors);
+        if (setrlimit(RLIMIT_NOFILE, &rl_nofile) != 0) {
+          _exit(126);
+        }
+      }
+
       int devnull_in = -1;
       int devnull_out = -1;
 

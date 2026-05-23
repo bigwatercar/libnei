@@ -168,6 +168,12 @@ class WinChildProcessCore final {
 
     options_ = options;
 
+    if (!CreateAndConfigureJob(options_)) {
+      NotifyLaunchFailed(listener_);
+      Cleanup();
+      return false;
+    }
+
     PipePair stdin_pipe;
     PipePair stdout_pipe;
     PipePair stderr_pipe;
@@ -260,7 +266,8 @@ class WinChildProcessCore final {
 
     PROCESS_INFORMATION pi{};
     const DWORD creation_flags = EXTENDED_STARTUPINFO_PRESENT |
-                   CREATE_NEW_PROCESS_GROUP;
+                   CREATE_NEW_PROCESS_GROUP |
+                   CREATE_SUSPENDED;
     const BOOL created = CreateProcessW(
         nullptr, cmdline.data(), nullptr, nullptr, TRUE, creation_flags, nullptr,
         nullptr, &startup.StartupInfo, &pi);
@@ -276,6 +283,33 @@ class WinChildProcessCore final {
       CleanupPipe(stdin_pipe);
       CleanupPipe(stdout_pipe);
       CleanupPipe(stderr_pipe);
+      return false;
+    }
+
+    if (job_handle_ != nullptr &&
+        !AssignProcessToJobObject(job_handle_, pi.hProcess)) {
+      (void)TerminateProcess(pi.hProcess, static_cast<UINT>(1));
+      (void)WaitForSingleObject(pi.hProcess, INFINITE);
+      CloseHandleSafe(&pi.hThread);
+      CloseHandleSafe(&pi.hProcess);
+      NotifyLaunchFailed(listener_);
+      CleanupPipe(stdin_pipe);
+      CleanupPipe(stdout_pipe);
+      CleanupPipe(stderr_pipe);
+      Cleanup();
+      return false;
+    }
+
+    if (ResumeThread(pi.hThread) == static_cast<DWORD>(-1)) {
+      (void)TerminateProcess(pi.hProcess, static_cast<UINT>(1));
+      (void)WaitForSingleObject(pi.hProcess, INFINITE);
+      CloseHandleSafe(&pi.hThread);
+      CloseHandleSafe(&pi.hProcess);
+      NotifyLaunchFailed(listener_);
+      CleanupPipe(stdin_pipe);
+      CleanupPipe(stdout_pipe);
+      CleanupPipe(stderr_pipe);
+      Cleanup();
       return false;
     }
 
@@ -363,6 +397,43 @@ class WinChildProcessCore final {
     stderr_stream_.reset();
 
     CloseHandleSafe(&process_handle_);
+    CloseHandleSafe(&job_handle_);
+  }
+
+  bool CreateAndConfigureJob(const ProcessLaunchOptions& options) {
+    const ResourceLimits& limits = options.resource_limits;
+    const bool need_job = limits.kill_on_parent_death ||
+                          limits.max_virtual_memory > 0;
+    if (!need_job) {
+      CloseHandleSafe(&job_handle_);
+      return true;
+    }
+
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    if (job == nullptr || job == INVALID_HANDLE_VALUE) {
+      return false;
+    }
+
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION info{};
+    DWORD limit_flags = 0;
+    if (limits.max_virtual_memory > 0) {
+      info.ProcessMemoryLimit = static_cast<SIZE_T>(limits.max_virtual_memory);
+      limit_flags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+    }
+    if (limits.kill_on_parent_death) {
+      limit_flags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    }
+    info.BasicLimitInformation.LimitFlags = limit_flags;
+
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+                                 &info, sizeof(info))) {
+      CloseHandleSafe(&job);
+      return false;
+    }
+
+    CloseHandleSafe(&job_handle_);
+    job_handle_ = job;
+    return true;
   }
 
   static VOID CALLBACK WaitThunk(PVOID context, BOOLEAN /*timeout*/) {
@@ -478,6 +549,7 @@ class WinChildProcessCore final {
   ChildProcessListener* listener_ = nullptr;
   int process_id_ = -1;
   HANDLE process_handle_ = INVALID_HANDLE_VALUE;
+  HANDLE job_handle_ = nullptr;
   HANDLE wait_handle_ = nullptr;
   ProcessLaunchOptions options_;
   scoped_refptr<TaskRunner> origin_runner_;
