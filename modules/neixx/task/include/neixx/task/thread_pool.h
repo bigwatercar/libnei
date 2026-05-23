@@ -46,7 +46,8 @@ class NEI_API ThreadPool final {
     bool enable_single_queue_fast_path = true;
   };
 
-  explicit ThreadPool(const InitParams& params = InitParams{});
+  ThreadPool();
+  explicit ThreadPool(const InitParams& params);
   ~ThreadPool();
 
   ThreadPool(const ThreadPool&) = delete;

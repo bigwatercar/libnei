@@ -61,6 +61,7 @@ class NEI_API MessagePumpForIO final : public MessagePump {
 
    private:
     friend class MessagePumpForIO;
+    friend class MessagePumpForIOState;
 
     MessagePumpForIO* pump_ = nullptr;
     std::shared_ptr<Impl> impl_;

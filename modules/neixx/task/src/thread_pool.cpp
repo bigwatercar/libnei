@@ -572,6 +572,8 @@ class ThreadPool::Impl {
   std::vector<std::unique_ptr<WorkerThread>> workers_;
 };
 
+ThreadPool::ThreadPool() : ThreadPool(InitParams{}) {}
+
 ThreadPool::ThreadPool(const InitParams& params)
     : impl_(std::make_unique<Impl>(params)) {}
 
