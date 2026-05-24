@@ -22,9 +22,22 @@ class NEI_API AsyncFileWin final : public AsyncFile {
     std::uint64_t open_reached = 0;
     std::uint64_t write_reached = 0;
     std::uint64_t read_reached = 0;
+    std::uint64_t write_post_seq = 0;
+    std::uint64_t write_exec_seq = 0;
+    std::uint64_t read_post_seq = 0;
+    std::uint64_t read_exec_seq = 0;
+    std::uint64_t iocp_completed = 0;
+    std::uint64_t context_hit = 0;
+    std::uint64_t context_miss = 0;
+    std::uint64_t read_finalize_attempted = 0;
+    std::uint64_t read_posted = 0;
+    std::uint64_t callback_weak_dropped = 0;
+    std::uint64_t callback_post_failed = 0;
   };
 
   explicit AsyncFileWin(scoped_refptr<TaskRunner> io_task_runner);
+  AsyncFileWin(AsyncFileWin&& other) noexcept;
+  AsyncFileWin& operator=(AsyncFileWin&& other) noexcept;
   ~AsyncFileWin() override;
 
   AsyncFileWin(const AsyncFileWin&) = delete;

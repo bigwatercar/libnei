@@ -55,6 +55,12 @@ class NEI_API MessagePumpForIO final : public MessagePump {
                                std::uint32_t error_code) = 0;
   };
 
+  struct DebugCounters {
+    std::uint64_t do_work_calls = 0;
+    std::uint64_t do_work_consumed = 0;
+    std::uint64_t wake_dispatches = 0;
+  };
+
   class NEI_API FdWatchController final {
    public:
     enum class Mode {
@@ -99,6 +105,9 @@ class NEI_API MessagePumpForIO final : public MessagePump {
   // Returns the currently running MessagePumpForIO on this thread, or nullptr
   // when the current thread is not inside MessagePumpForIO::Run().
   static MessagePumpForIO* Current();
+
+  static void ResetDebugCountersForTesting();
+  static DebugCounters GetDebugCountersForTesting();
 
   void Run(Delegate* delegate) override;
   void Quit() override;

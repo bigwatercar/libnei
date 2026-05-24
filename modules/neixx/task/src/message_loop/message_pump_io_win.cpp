@@ -34,6 +34,10 @@ ThreadLocalStorage::Slot& GetCurrentPumpSlot() {
 constexpr ULONG_PTR kScheduleWorkCompletionKey = 1;
 constexpr std::size_t kMaxCompletionBatch = 16;
 
+std::atomic<std::uint64_t> g_do_work_calls{0};
+std::atomic<std::uint64_t> g_do_work_consumed{0};
+std::atomic<std::uint64_t> g_wake_dispatches{0};
+
 int ComputeWaitTimeoutMs(const MessagePump::Delegate::NextWorkInfo& next_work_info,
                          const TimeTicks& delayed_run_time) {
   const TimeTicks now = !next_work_info.recent_now.is_null() ? next_work_info.recent_now
@@ -158,14 +162,32 @@ class MessagePumpForIOState {
     }
   }
 
-  void DrainPendingWakeups(MessagePump::Delegate* delegate) {
+  bool DrainPendingWakeups(MessagePump::Delegate* delegate) {
     // 传入 should_run_task=false：仅排干 IOCP 中残留的唤醒包，不触发
     // delegate->DoWork()，防止 DoWork 内部 PostTask 再次不断进入死循环。
-    while (DispatchOneBatch(delegate, 0, /*should_run_task=*/false)) {}
+    bool drained_any = false;
+    while (DispatchOneBatch(delegate, 0, /*should_run_task=*/false)) {
+      drained_any = true;
+    }
+    return drained_any;
   }
 
   bool WaitAndDispatch(MessagePump::Delegate* delegate, int timeout_ms) {
     return DispatchOneBatch(delegate, timeout_ms);
+  }
+
+  static void ResetDebugCountersForTesting() {
+    g_do_work_calls.store(0, std::memory_order_relaxed);
+    g_do_work_consumed.store(0, std::memory_order_relaxed);
+    g_wake_dispatches.store(0, std::memory_order_relaxed);
+  }
+
+  static MessagePumpForIO::DebugCounters GetDebugCountersForTesting() {
+    MessagePumpForIO::DebugCounters out;
+    out.do_work_calls = g_do_work_calls.load(std::memory_order_relaxed);
+    out.do_work_consumed = g_do_work_consumed.load(std::memory_order_relaxed);
+    out.wake_dispatches = g_wake_dispatches.load(std::memory_order_relaxed);
+    return out;
   }
 
   bool RegisterWatch(MessagePumpForIO::FdWatchController* controller,
@@ -244,6 +266,7 @@ class MessagePumpForIOState {
       if (completion_key == kScheduleWorkCompletionKey) {
         ran_work_wakeup = true;
         any_event = true;
+        g_wake_dispatches.fetch_add(1, std::memory_order_relaxed);
         // 立即中断批量消费，优先将执行权交还给 DoWork，避免高吞吐 I/O
         // 场景下 Task 调度饥饿（Starvation）。
         break;
@@ -395,7 +418,9 @@ void MessagePumpForIO::Run(Delegate* delegate) {
   const int run_depth = impl_->EnterRunLoopAndGetDepth(current_thread_id);
 
   while (impl_->IsRunLoopActive(run_depth)) {
+    g_do_work_calls.fetch_add(1, std::memory_order_relaxed);
     if (delegate->DoWork()) {
+      g_do_work_consumed.fetch_add(1, std::memory_order_relaxed);
       continue;
     }
 
@@ -414,7 +439,9 @@ void MessagePumpForIO::Run(Delegate* delegate) {
       break;
     }
 
-    impl_->DrainPendingWakeups(delegate);
+    if (impl_->DrainPendingWakeups(delegate)) {
+      continue;
+    }
     if (!impl_->IsRunLoopActive(run_depth)) {
       break;
     }
@@ -440,6 +467,20 @@ void MessagePumpForIO::Run(Delegate* delegate) {
 
   impl_->ExitRunLoop(run_depth);
   GetCurrentPumpSlot().Set(previous);
+}
+
+void MessagePumpForIO::ResetDebugCountersForTesting() {
+#if defined(_WIN32)
+  MessagePumpForIOState::ResetDebugCountersForTesting();
+#endif
+}
+
+MessagePumpForIO::DebugCounters MessagePumpForIO::GetDebugCountersForTesting() {
+#if defined(_WIN32)
+  return MessagePumpForIOState::GetDebugCountersForTesting();
+#else
+  return DebugCounters{};
+#endif
 }
 
 void MessagePumpForIO::Quit() {

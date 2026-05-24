@@ -39,6 +39,17 @@ constexpr std::size_t kMaxChunkBytes = static_cast<std::size_t>(0xFFFFFFFFu);
 std::atomic<std::uint64_t> g_open_reached{0};
 std::atomic<std::uint64_t> g_write_reached{0};
 std::atomic<std::uint64_t> g_read_reached{0};
+std::atomic<std::uint64_t> g_iocp_completed{0};
+std::atomic<std::uint64_t> g_context_hit{0};
+std::atomic<std::uint64_t> g_context_miss{0};
+std::atomic<std::uint64_t> g_read_finalize_attempted{0};
+std::atomic<std::uint64_t> g_read_posted{0};
+std::atomic<std::uint64_t> g_callback_weak_dropped{0};
+std::atomic<std::uint64_t> g_callback_post_failed{0};
+std::atomic<std::uint64_t> g_write_post_seq{0};
+std::atomic<std::uint64_t> g_write_exec_seq{0};
+std::atomic<std::uint64_t> g_read_post_seq{0};
+std::atomic<std::uint64_t> g_read_exec_seq{0};
 
 DWORD ToWinAccess(AsyncFile::OpenMode mode) {
   switch (mode) {
@@ -49,7 +60,8 @@ DWORD ToWinAccess(AsyncFile::OpenMode mode) {
     case AsyncFile::OpenMode::kReadWrite:
       return GENERIC_READ | GENERIC_WRITE;
     case AsyncFile::OpenMode::kAppend:
-      return FILE_APPEND_DATA;
+      // Keep explicit OVERLAPPED offsets effective in append mode.
+      return GENERIC_WRITE;
   }
   return GENERIC_READ;
 }
@@ -72,12 +84,9 @@ DWORD ToWinDisposition(AsyncFile::OpenDisposition disposition) {
 
 std::wstring ToWide(const std::string& utf8) {
   const std::u16string u16 = UTF8ToUTF16(utf8);
-  std::wstring out;
-  out.reserve(u16.size());
-  for (char16_t ch : u16) {
-    out.push_back(static_cast<wchar_t>(ch));
-  }
-  return out;
+  static_assert(sizeof(wchar_t) == sizeof(char16_t),
+                "Windows wchar_t must be 16-bit for UTF-16 reinterpretation");
+  return std::wstring(reinterpret_cast<const wchar_t*>(u16.data()), u16.size());
 }
 
 }  // namespace
@@ -231,6 +240,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
                      void* overlapped_context,
                      std::uint32_t bytes_transferred,
                      std::uint32_t error_code) override {
+    g_iocp_completed.fetch_add(1, std::memory_order_relaxed);
+
     HANDLE file_snapshot = INVALID_HANDLE_VALUE;
     {
       std::lock_guard<std::mutex> lock(lock_);
@@ -268,6 +279,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       }
       state_ = State::kOpening;
       pending_open_callback_ = std::move(callback);
+      pending_open_mode_ = mode;
       open_id = ++open_request_id_;
     }
 
@@ -367,9 +379,13 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       return;
     }
 
+    (void)::SetFileCompletionNotificationModes(
+        opened, FILE_SKIP_COMPLETION_PORT_ON_SUCCESS);
+
     {
       std::lock_guard<std::mutex> lock(lock_);
       file_handle_ = opened;
+      open_mode_ = pending_open_mode_;
       state_ = State::kConnected;
     }
 
@@ -402,6 +418,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
         }
         return;
       }
+
       pending_operations_.push_back(std::move(op));
     }
 
@@ -410,6 +427,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
   void MaybeStartNextOperationOnIoThread() {
     std::shared_ptr<IOContext> context;
+    std::uint32_t start_error = static_cast<std::uint32_t>(ERROR_SUCCESS);
     {
       std::lock_guard<std::mutex> lock(lock_);
       if (state_ != State::kConnected || file_handle_ == INVALID_HANDLE_VALUE ||
@@ -429,8 +447,24 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
         context->read_buffer.resize(context->total_bytes);
       } else {
         context->write_buffer = std::move(op.write_buffer);
+        if (open_mode_ == OpenMode::kAppend) {
+          LARGE_INTEGER eof = {};
+          if (!::GetFileSizeEx(file_handle_, &eof)) {
+            start_error = static_cast<std::uint32_t>(::GetLastError());
+          } else {
+            context->base_offset = static_cast<std::int64_t>(eof.QuadPart);
+          }
+        }
       }
-      active_io_ = context;
+
+      if (start_error == static_cast<std::uint32_t>(ERROR_SUCCESS)) {
+        active_io_ = context;
+      }
+    }
+
+    if (start_error != static_cast<std::uint32_t>(ERROR_SUCCESS)) {
+      PostWriteCallback(std::move(context->write_callback), false, 0, start_error);
+      return;
     }
 
     IssueNextChunkOnIoThread(std::move(context));
@@ -529,11 +563,14 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       std::lock_guard<std::mutex> lock(lock_);
       auto it = pending_io_.find(overlapped);
       if (it == pending_io_.end()) {
+        g_context_miss.fetch_add(1, std::memory_order_relaxed);
         return;
       }
       context = std::move(it->second);
       pending_io_.erase(it);
     }
+
+    g_context_hit.fetch_add(1, std::memory_order_relaxed);
 
     if (!context) {
       return;
@@ -630,6 +667,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     }
 
     if (context->type == IOContext::Type::kRead) {
+      g_read_finalize_attempted.fetch_add(1, std::memory_order_relaxed);
       if (!success) {
         context->read_buffer.resize(context->transferred_bytes);
         PostReadCallback(std::move(context->read_callback), false,
@@ -683,6 +721,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
         (void)::CancelIoEx(to_close, nullptr);
       }
       file_handle_ = INVALID_HANDLE_VALUE;
+      open_mode_ = OpenMode::kReadWrite;
     }
 
     controller_.StopWatching();
@@ -748,16 +787,20 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       return;
     }
     base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr();
-    io_task_runner_->PostTask(
+    const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
         [weak_this, callback = std::move(callback), success,
          error_code]() mutable {
           if (!weak_this) {
+            g_callback_weak_dropped.fetch_add(1, std::memory_order_relaxed);
             return;
           }
           g_open_reached.fetch_add(1, std::memory_order_relaxed);
           callback(success, error_code);
         });
+    if (!posted) {
+      g_callback_post_failed.fetch_add(1, std::memory_order_relaxed);
+    }
   }
 
   void PostReadCallback(ReadCallback callback,
@@ -767,17 +810,25 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     if (!callback || !io_task_runner_) {
       return;
     }
+    g_read_posted.fetch_add(1, std::memory_order_relaxed);
+    const std::uint64_t read_post_seq =
+        g_read_post_seq.fetch_add(1, std::memory_order_relaxed) + 1;
     base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr();
-    io_task_runner_->PostTask(
+    const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
         [weak_this, callback = std::move(callback), success,
-         data = std::move(data), error_code]() mutable {
+         data = std::move(data), error_code, read_post_seq]() mutable {
           if (!weak_this) {
+            g_callback_weak_dropped.fetch_add(1, std::memory_order_relaxed);
             return;
           }
+          g_read_exec_seq.store(read_post_seq, std::memory_order_relaxed);
           g_read_reached.fetch_add(1, std::memory_order_relaxed);
           callback(success, std::move(data), error_code);
         });
+    if (!posted) {
+      g_callback_post_failed.fetch_add(1, std::memory_order_relaxed);
+    }
   }
 
   void PostWriteCallback(WriteCallback callback,
@@ -787,17 +838,24 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     if (!callback || !io_task_runner_) {
       return;
     }
+    const std::uint64_t write_post_seq =
+        g_write_post_seq.fetch_add(1, std::memory_order_relaxed) + 1;
     base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr();
-    io_task_runner_->PostTask(
+    const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
         [weak_this, callback = std::move(callback), success, bytes_written,
-         error_code]() mutable {
+         error_code, write_post_seq]() mutable {
           if (!weak_this) {
+            g_callback_weak_dropped.fetch_add(1, std::memory_order_relaxed);
             return;
           }
+          g_write_exec_seq.store(write_post_seq, std::memory_order_relaxed);
           g_write_reached.fetch_add(1, std::memory_order_relaxed);
           callback(success, bytes_written, error_code);
         });
+    if (!posted) {
+      g_callback_post_failed.fetch_add(1, std::memory_order_relaxed);
+    }
   }
 
   static void FillOverlappedOffset(OVERLAPPED* overlapped,
@@ -812,6 +870,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   mutable std::mutex lock_;
   State state_ = State::kDisconnected;
   HANDLE file_handle_ = INVALID_HANDLE_VALUE;
+  OpenMode open_mode_ = OpenMode::kReadWrite;
+  OpenMode pending_open_mode_ = OpenMode::kReadWrite;
   std::uint64_t open_request_id_ = 0;
   OpenCallback pending_open_callback_;
   MessagePumpForIO::FdWatchController controller_;
@@ -823,6 +883,17 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
 AsyncFileWin::AsyncFileWin(scoped_refptr<TaskRunner> io_task_runner)
     : impl_(std::make_unique<Impl>(std::move(io_task_runner))) {}
+
+AsyncFileWin::AsyncFileWin(AsyncFileWin&& other) noexcept
+    : impl_(std::move(other.impl_)) {}
+
+AsyncFileWin& AsyncFileWin::operator=(AsyncFileWin&& other) noexcept {
+  if (this == &other) {
+    return *this;
+  }
+  impl_.swap(other.impl_);
+  return *this;
+}
 
 AsyncFileWin::~AsyncFileWin() {
   if (!impl_) {
@@ -866,6 +937,17 @@ void AsyncFileWin::ResetStageCountersForTesting() {
   g_open_reached.store(0, std::memory_order_relaxed);
   g_write_reached.store(0, std::memory_order_relaxed);
   g_read_reached.store(0, std::memory_order_relaxed);
+  g_iocp_completed.store(0, std::memory_order_relaxed);
+  g_context_hit.store(0, std::memory_order_relaxed);
+  g_context_miss.store(0, std::memory_order_relaxed);
+  g_read_finalize_attempted.store(0, std::memory_order_relaxed);
+  g_read_posted.store(0, std::memory_order_relaxed);
+  g_callback_weak_dropped.store(0, std::memory_order_relaxed);
+  g_callback_post_failed.store(0, std::memory_order_relaxed);
+  g_write_post_seq.store(0, std::memory_order_relaxed);
+  g_write_exec_seq.store(0, std::memory_order_relaxed);
+  g_read_post_seq.store(0, std::memory_order_relaxed);
+  g_read_exec_seq.store(0, std::memory_order_relaxed);
 }
 
 AsyncFileWin::StageCounters AsyncFileWin::GetStageCountersForTesting() {
@@ -873,6 +955,20 @@ AsyncFileWin::StageCounters AsyncFileWin::GetStageCountersForTesting() {
   out.open_reached = g_open_reached.load(std::memory_order_relaxed);
   out.write_reached = g_write_reached.load(std::memory_order_relaxed);
   out.read_reached = g_read_reached.load(std::memory_order_relaxed);
+  out.iocp_completed = g_iocp_completed.load(std::memory_order_relaxed);
+  out.context_hit = g_context_hit.load(std::memory_order_relaxed);
+  out.context_miss = g_context_miss.load(std::memory_order_relaxed);
+  out.read_finalize_attempted =
+      g_read_finalize_attempted.load(std::memory_order_relaxed);
+  out.read_posted = g_read_posted.load(std::memory_order_relaxed);
+  out.callback_weak_dropped =
+      g_callback_weak_dropped.load(std::memory_order_relaxed);
+  out.callback_post_failed =
+      g_callback_post_failed.load(std::memory_order_relaxed);
+  out.write_post_seq = g_write_post_seq.load(std::memory_order_relaxed);
+  out.write_exec_seq = g_write_exec_seq.load(std::memory_order_relaxed);
+  out.read_post_seq = g_read_post_seq.load(std::memory_order_relaxed);
+  out.read_exec_seq = g_read_exec_seq.load(std::memory_order_relaxed);
   return out;
 }
 
