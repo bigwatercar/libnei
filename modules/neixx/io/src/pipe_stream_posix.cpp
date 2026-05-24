@@ -1,6 +1,6 @@
 #if !defined(_WIN32)
 
-#include <neixx/io/internal/pipe_stream_factory_internal.h>
+#include "internal/pipe_stream_factory_internal.h"
 
 #include <cerrno>
 #include <csignal>

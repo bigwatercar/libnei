@@ -61,6 +61,9 @@ add_executable(
 )
 
 target_link_libraries(nei_tests PRIVATE nei::all GTest::gtest_main)
+target_include_directories(
+  nei_tests PRIVATE ${PROJECT_SOURCE_DIR}/modules/neixx/io/src
+)
 
 include(GoogleTest)
 #

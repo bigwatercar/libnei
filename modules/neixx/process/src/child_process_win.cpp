@@ -18,7 +18,7 @@
 
 #include <neixx/command_line/command_line.h>
 #include <neixx/common/location.h>
-#include <neixx/io/internal/pipe_stream_factory_internal.h>
+#include <internal/pipe_stream_factory_internal.h>
 #include "child_process_stream_proxy.h"
 #include <neixx/strings/utf_string_conversions.h>
 #include <neixx/synchronization/waitable_event.h>

@@ -3,7 +3,7 @@ set(NEIXX_IO_SOURCES
   include/neixx/io/async_stream.h
   include/neixx/io/async_line_reader.h
   include/neixx/io/async_file_win.h
-  include/neixx/io/internal/pipe_stream_factory_internal.h
+  src/internal/pipe_stream_factory_internal.h
   src/async_line_reader.cpp
 )
 
@@ -21,6 +21,7 @@ target_sources(neixx PRIVATE ${NEIXX_IO_SOURCES})
 target_include_directories(
   neixx PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 if(WIN32)
