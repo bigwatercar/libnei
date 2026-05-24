@@ -1,7 +1,7 @@
 #pragma once
 
-#ifndef NEIXX_IO_PIPE_STREAM_FACTORY_H_
-#define NEIXX_IO_PIPE_STREAM_FACTORY_H_
+#ifndef NEIXX_IO_INTERNAL_PIPE_STREAM_FACTORY_INTERNAL_H_
+#define NEIXX_IO_INTERNAL_PIPE_STREAM_FACTORY_INTERNAL_H_
 
 #include <memory>
 
@@ -22,4 +22,4 @@ NEI_API std::unique_ptr<AsyncOutputStream> CreatePipeOutputStream(
 
 }  // namespace nei
 
-#endif  // NEIXX_IO_PIPE_STREAM_FACTORY_H_
+#endif  // NEIXX_IO_INTERNAL_PIPE_STREAM_FACTORY_INTERNAL_H_

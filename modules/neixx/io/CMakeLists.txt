@@ -3,7 +3,7 @@ set(NEIXX_IO_SOURCES
   include/neixx/io/async_stream.h
   include/neixx/io/async_line_reader.h
   include/neixx/io/async_file_win.h
-  include/neixx/io/pipe_stream_factory.h
+  include/neixx/io/internal/pipe_stream_factory_internal.h
   src/async_line_reader.cpp
 )
 
@@ -27,4 +27,8 @@ if(WIN32)
   target_link_libraries(neixx PRIVATE ws2_32)
 endif()
 
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(
+  DIRECTORY include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  PATTERN "internal" EXCLUDE
+)

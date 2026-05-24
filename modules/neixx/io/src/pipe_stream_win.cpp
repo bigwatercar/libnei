@@ -3,7 +3,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#include <neixx/io/pipe_stream_factory.h>
+#include <neixx/io/internal/pipe_stream_factory_internal.h>
 
 #include <array>
 #include <cstdint>

@@ -6,7 +6,7 @@
 #include <vector>
 
 #include <neixx/common/location.h>
-#include <neixx/io/pipe_stream_factory.h>
+#include <neixx/io/internal/pipe_stream_factory_internal.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/threading/thread.h>
 
