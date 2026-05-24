@@ -18,6 +18,12 @@ class TaskRunner;
 
 class NEI_API AsyncFileWin final : public AsyncFile {
  public:
+  struct StageCounters {
+    std::uint64_t open_reached = 0;
+    std::uint64_t write_reached = 0;
+    std::uint64_t read_reached = 0;
+  };
+
   explicit AsyncFileWin(scoped_refptr<TaskRunner> io_task_runner);
   ~AsyncFileWin() override;
 
@@ -37,6 +43,9 @@ class NEI_API AsyncFileWin final : public AsyncFile {
   bool AsyncWrite(std::int64_t offset,
                   std::vector<std::uint8_t> buffer,
                   WriteCallback callback) override;
+
+  static void ResetStageCountersForTesting();
+  static StageCounters GetStageCountersForTesting();
 
   void Close() override;
   bool is_open() const override;

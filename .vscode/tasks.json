@@ -568,6 +568,248 @@
 				"cd /mnt/c/Personal/Projects/LibNei/libnei-src && cmake --build build-linux -j4 > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_v4_build.log 2>&1; cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R ChildProcessTest --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_v4.log 2>&1; echo $? > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_v4.exit"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "verify-phase2-build-nei-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "kill-nei-tests-lock",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM nei_tests.exe & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify-phase2-build-nei-tests-rerun",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify-phase2-win-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.*:MessagePumpForIOCurrentTest.* & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "repro-asyncfile-single-test",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread --gtest_break_on_failure & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rebuild-nei-tests-after-probe-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-single-asyncfile-test-after-probe-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread --gtest_break_on_failure & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rebuild-nei-tests-after-fallback-restore",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-single-asyncfile-test-after-fallback-restore",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread --gtest_break_on_failure & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "kill-nei-tests-before-diag-run",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM nei_tests.exe & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-nei-tests-diag",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-kill-nei-tests-serial",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM nei_tests.exe & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-build-nei-tests-serial",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-find-kill-nei-tests-processes",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"Get-Process | Where-Object { $_.ProcessName -like 'nei_tests*' -or $_.Path -like '*nei_tests.exe*' } | Select-Object Id,ProcessName,Path; Get-Process | Where-Object { $_.ProcessName -like 'nei_tests*' } | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 200; Get-Process | Where-Object { $_.ProcessName -like 'nei_tests*' } | Select-Object Id,ProcessName,Path; Write-Host 'Done'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-kill-specific-nei-tests-pid",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /PID 48408 & tasklist | findstr /I nei_tests & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-force-kill-then-build",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM nei_tests.exe /T >nul 2>nul & cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-run-single-with-counters",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread --gtest_break_on_failure"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-run-single-with-counters-nobreak",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-rebuild-after-watchid-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM nei_tests.exe /T >nul 2>nul & cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-kill-build-lockers",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM MSBuild.exe >nul 2>nul & taskkill /F /IM mspdbsrv.exe >nul 2>nul & taskkill /F /IM nei_tests.exe >nul 2>nul & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-rebuild-after-kill-lockers",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-rerun-single-after-watchid-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread"
+			],
+			"isBackground": false
 		}
 	]
 }

@@ -36,6 +36,8 @@ std::vector<std::uint8_t> MakePayload(std::size_t size, std::uint8_t salt) {
 }
 
 TEST(AsyncFileWinTest, LargeReadWriteCallbackDeterminismOnIoThread) {
+  AsyncFileWin::ResetStageCountersForTesting();
+
   Thread io_thread("async-file-io");
   Thread::Options io_options;
   io_options.message_pump_type = MessagePumpType::IO;
@@ -149,7 +151,22 @@ TEST(AsyncFileWinTest, LargeReadWriteCallbackDeterminismOnIoThread) {
     }
   });
 
-  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(30)));
+  const bool completed = done.TimedWait(std::chrono::seconds(30));
+  EXPECT_TRUE(completed);
+  const AsyncFileWin::StageCounters counters =
+      AsyncFileWin::GetStageCountersForTesting();
+  if (!completed) {
+    ADD_FAILURE() << "stage counters: open=" << counters.open_reached
+                  << " write=" << counters.write_reached
+                  << " read=" << counters.read_reached;
+  }
+  EXPECT_GE(counters.open_reached, 1u);
+  if (counters.open_reached > 0) {
+    EXPECT_GE(counters.write_reached, 1u);
+  }
+  if (counters.write_reached > 0) {
+    EXPECT_GE(counters.read_reached, 1u);
+  }
   EXPECT_TRUE(ok.load(std::memory_order_acquire));
   EXPECT_TRUE(callback_on_io_thread.load(std::memory_order_acquire));
   EXPECT_FALSE(callback_inline_violation.load(std::memory_order_acquire));
@@ -161,6 +178,8 @@ TEST(AsyncFileWinTest, LargeReadWriteCallbackDeterminismOnIoThread) {
 }
 
 TEST(AsyncFileWinTest, RepeatedStressMaintainsCallbackThreadDeterminism) {
+  AsyncFileWin::ResetStageCountersForTesting();
+
   Thread io_thread("async-file-io-stress");
   Thread::Options io_options;
   io_options.message_pump_type = MessagePumpType::IO;
@@ -286,7 +305,22 @@ TEST(AsyncFileWinTest, RepeatedStressMaintainsCallbackThreadDeterminism) {
         });
   });
 
-  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(60)));
+  const bool completed = done.TimedWait(std::chrono::seconds(60));
+  EXPECT_TRUE(completed);
+  const AsyncFileWin::StageCounters counters =
+      AsyncFileWin::GetStageCountersForTesting();
+  if (!completed) {
+    ADD_FAILURE() << "stage counters: open=" << counters.open_reached
+                  << " write=" << counters.write_reached
+                  << " read=" << counters.read_reached;
+  }
+  EXPECT_GE(counters.open_reached, 1u);
+  if (counters.open_reached > 0) {
+    EXPECT_GE(counters.write_reached, 1u);
+  }
+  if (counters.write_reached > 0) {
+    EXPECT_GE(counters.read_reached, 1u);
+  }
   EXPECT_TRUE(ok.load(std::memory_order_acquire));
   EXPECT_TRUE(callback_on_io_thread.load(std::memory_order_acquire));
   EXPECT_FALSE(callback_inline_violation.load(std::memory_order_acquire));

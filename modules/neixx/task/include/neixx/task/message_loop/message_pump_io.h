@@ -28,12 +28,16 @@ class NEI_API MessagePumpForIO final : public MessagePump {
  public:
   typedef MessagePumpForIOState Impl;
 
+  class CompletionWatcher;
+
   class Watcher {
    public:
     virtual ~Watcher() = default;
 
     virtual void OnFileCanReadWithoutBlocking(NativeIOHandle handle) = 0;
     virtual void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) = 0;
+
+    virtual CompletionWatcher* AsCompletionWatcher() { return nullptr; }
   };
 
   // Optional Windows-only completion callback extension.
@@ -42,6 +46,8 @@ class NEI_API MessagePumpForIO final : public MessagePump {
   class CompletionWatcher : public Watcher {
    public:
     virtual ~CompletionWatcher() = default;
+
+    CompletionWatcher* AsCompletionWatcher() override { return this; }
 
     virtual void OnIOCompleted(NativeIOHandle handle,
                                void* overlapped_context,

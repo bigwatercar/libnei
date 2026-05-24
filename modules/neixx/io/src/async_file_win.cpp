@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -35,6 +36,9 @@ using WeakPtrFactory = nei::WeakPtrFactory<T>;
 namespace {
 
 constexpr std::size_t kMaxChunkBytes = static_cast<std::size_t>(0xFFFFFFFFu);
+std::atomic<std::uint64_t> g_open_reached{0};
+std::atomic<std::uint64_t> g_write_reached{0};
+std::atomic<std::uint64_t> g_read_reached{0};
 
 DWORD ToWinAccess(AsyncFile::OpenMode mode) {
   switch (mode) {
@@ -78,7 +82,7 @@ std::wstring ToWide(const std::string& utf8) {
 
 }  // namespace
 
-class AsyncFileWin::Impl final : public MessagePumpForIO::Watcher {
+class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
  public:
   enum class State {
     kDisconnected,
@@ -221,6 +225,25 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::Watcher {
 
   void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) override {
     OnIoSignalOnIoThread(handle);
+  }
+
+  void OnIOCompleted(NativeIOHandle handle,
+                     void* overlapped_context,
+                     std::uint32_t bytes_transferred,
+                     std::uint32_t error_code) override {
+    HANDLE file_snapshot = INVALID_HANDLE_VALUE;
+    {
+      std::lock_guard<std::mutex> lock(lock_);
+      file_snapshot = file_handle_;
+      if (state_ != State::kConnected || file_snapshot == INVALID_HANDLE_VALUE ||
+          reinterpret_cast<HANDLE>(handle) != file_snapshot) {
+        return;
+      }
+    }
+
+    OnChunkCompletedOnIoThread(static_cast<OVERLAPPED*>(overlapped_context),
+                               static_cast<DWORD>(bytes_transferred),
+                               error_code);
   }
 
  private:
@@ -498,38 +521,6 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::Watcher {
                                 static_cast<std::uint32_t>(err), 0, false, true);
   }
 
-  void OnIoSignalOnIoThread(NativeIOHandle handle) {
-    std::shared_ptr<IOContext> context;
-    HANDLE file_snapshot = INVALID_HANDLE_VALUE;
-    {
-      std::lock_guard<std::mutex> lock(lock_);
-      file_snapshot = file_handle_;
-      if (state_ != State::kConnected || file_snapshot == INVALID_HANDLE_VALUE ||
-          reinterpret_cast<HANDLE>(handle) != file_snapshot ||
-          pending_io_.empty()) {
-        return;
-      }
-      auto it = pending_io_.begin();
-      context = it->second;
-    }
-
-    DWORD transferred = 0;
-    const BOOL ok =
-        ::GetOverlappedResult(file_snapshot, &context->overlapped, &transferred, FALSE);
-    if (!ok) {
-      const DWORD err = ::GetLastError();
-      if (err == ERROR_IO_INCOMPLETE) {
-        return;
-      }
-      OnChunkCompletedOnIoThread(&context->overlapped, 0,
-                                 static_cast<std::uint32_t>(err));
-      return;
-    }
-
-    OnChunkCompletedOnIoThread(&context->overlapped, transferred,
-                               static_cast<std::uint32_t>(ERROR_SUCCESS));
-  }
-
   void OnChunkCompletedOnIoThread(OVERLAPPED* overlapped,
                                   DWORD bytes_transferred,
                                   std::uint32_t error_code) {
@@ -595,6 +586,38 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::Watcher {
           }
           weak_this->IssueNextChunkOnIoThread(std::move(context));
         });
+  }
+
+  void OnIoSignalOnIoThread(NativeIOHandle handle) {
+    std::shared_ptr<IOContext> context;
+    HANDLE file_snapshot = INVALID_HANDLE_VALUE;
+    {
+      std::lock_guard<std::mutex> lock(lock_);
+      file_snapshot = file_handle_;
+      if (state_ != State::kConnected || file_snapshot == INVALID_HANDLE_VALUE ||
+          reinterpret_cast<HANDLE>(handle) != file_snapshot ||
+          pending_io_.empty()) {
+        return;
+      }
+      auto it = pending_io_.begin();
+      context = it->second;
+    }
+
+    DWORD transferred = 0;
+    const BOOL ok =
+        ::GetOverlappedResult(file_snapshot, &context->overlapped, &transferred, FALSE);
+    if (!ok) {
+      const DWORD err = ::GetLastError();
+      if (err == ERROR_IO_INCOMPLETE) {
+        return;
+      }
+      OnChunkCompletedOnIoThread(&context->overlapped, 0,
+                                 static_cast<std::uint32_t>(err));
+      return;
+    }
+
+    OnChunkCompletedOnIoThread(&context->overlapped, transferred,
+                               static_cast<std::uint32_t>(ERROR_SUCCESS));
   }
 
   void FinalizeOperationOnIoThread(std::shared_ptr<IOContext> context,
@@ -732,6 +755,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::Watcher {
           if (!weak_this) {
             return;
           }
+          g_open_reached.fetch_add(1, std::memory_order_relaxed);
           callback(success, error_code);
         });
   }
@@ -751,6 +775,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::Watcher {
           if (!weak_this) {
             return;
           }
+          g_read_reached.fetch_add(1, std::memory_order_relaxed);
           callback(success, std::move(data), error_code);
         });
   }
@@ -770,6 +795,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::Watcher {
           if (!weak_this) {
             return;
           }
+          g_write_reached.fetch_add(1, std::memory_order_relaxed);
           callback(success, bytes_written, error_code);
         });
   }
@@ -834,6 +860,20 @@ bool AsyncFileWin::AsyncWrite(std::int64_t offset,
                               std::vector<std::uint8_t> buffer,
                               WriteCallback callback) {
   return impl_->AsyncWrite(offset, std::move(buffer), std::move(callback));
+}
+
+void AsyncFileWin::ResetStageCountersForTesting() {
+  g_open_reached.store(0, std::memory_order_relaxed);
+  g_write_reached.store(0, std::memory_order_relaxed);
+  g_read_reached.store(0, std::memory_order_relaxed);
+}
+
+AsyncFileWin::StageCounters AsyncFileWin::GetStageCountersForTesting() {
+  StageCounters out;
+  out.open_reached = g_open_reached.load(std::memory_order_relaxed);
+  out.write_reached = g_write_reached.load(std::memory_order_relaxed);
+  out.read_reached = g_read_reached.load(std::memory_order_relaxed);
+  return out;
 }
 
 void AsyncFileWin::Close() {

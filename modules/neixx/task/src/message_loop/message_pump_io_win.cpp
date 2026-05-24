@@ -179,11 +179,22 @@ class MessagePumpForIOState {
     const std::uint64_t watch_id = next_watch_id_.fetch_add(1, std::memory_order_relaxed);
     HANDLE native_handle = reinterpret_cast<HANDLE>(handle);
     if (::CreateIoCompletionPort(native_handle, iocp_, static_cast<ULONG_PTR>(watch_id), 0) == nullptr) {
+      controller->pump_ = nullptr;
+      controller->handle_ = NativeIOHandle{};
+      controller->watcher_ = nullptr;
+      controller->mode_ = MessagePumpForIO::FdWatchController::Mode::READ;
+      controller->watch_id_ = 0;
       return false;
     }
 
     AutoLock lock(state_lock_);
     watches_[watch_id] = WatchRecord{handle, watcher, mode};
+
+    controller->pump_ = nullptr;  // set by owner after success
+    controller->handle_ = handle;
+    controller->watcher_ = watcher;
+    controller->mode_ = mode;
+    controller->watch_id_ = watch_id;
     return true;
   }
 
@@ -253,8 +264,7 @@ class MessagePumpForIOState {
       }
 
       if (overlapped != nullptr) {
-        auto* completion_watcher =
-            dynamic_cast<MessagePumpForIO::CompletionWatcher*>(record.watcher);
+        auto* completion_watcher = record.watcher->AsCompletionWatcher();
         if (completion_watcher != nullptr) {
           const std::uint32_t error_code =
               ok ? static_cast<std::uint32_t>(ERROR_SUCCESS)
