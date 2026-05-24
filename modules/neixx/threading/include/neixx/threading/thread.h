@@ -63,6 +63,7 @@ class NEI_API Thread final : public PlatformThread::Delegate {
 
   scoped_refptr<TaskRunner> GetTaskRunner() const;
   bool IsRunning() const;
+  PlatformThread::PlatformThreadId GetThreadId() const;
 
  private:
   void ThreadMain() override;
@@ -76,6 +77,7 @@ class NEI_API Thread final : public PlatformThread::Delegate {
   bool started_ = false;
   bool running_ = false;
   bool start_succeeded_ = false;
+  PlatformThread::PlatformThreadId thread_id_ = 0;
 };
 
 }  // namespace nei

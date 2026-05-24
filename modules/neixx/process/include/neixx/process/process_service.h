@@ -22,6 +22,7 @@ class NEI_API ProcessService final
 
   bool Start();
   bool IsRunning() const;
+  bool IsOnServiceThread() const;
   scoped_refptr<TaskRunner> GetTaskRunner() const;
 
  private:

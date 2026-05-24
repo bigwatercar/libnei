@@ -9,13 +9,13 @@
 #include <nei/macros/nei_export.h>
 #include <neixx/common/time.h>
 #include <neixx/memory/ref_counted.h>
-#include <neixx/io/async_stream.h>
-#include <neixx/task/message_loop/message_pump_io.h>
 
 namespace nei {
 
 class CommandLine;
 class ProcessService;
+class AsyncInputStream;
+class AsyncOutputStream;
 
 enum class StdIOType {
   /// Inherit the corresponding stdio handle from the parent process.
@@ -32,7 +32,8 @@ struct StdIOConfig {
   /// How this stdio stream is wired for the child process.
   StdIOType type = StdIOType::INHERIT;
   /// Valid when type == REDIRECT.
-  NativeIOHandle target_handle = NativeIOHandle{};
+  /// Windows stores HANDLE as uintptr_t; POSIX stores fd as integer value.
+  std::uintptr_t target_handle = 0;
 };
 
 /// Cross-platform resource and safety limits applied to the launched child.

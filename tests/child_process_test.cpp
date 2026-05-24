@@ -9,9 +9,12 @@
 #include <vector>
 
 #include <neixx/command_line/command_line.h>
+#include <neixx/common/location.h>
+#include <neixx/io/async_stream.h>
 #include <neixx/process/child_process.h>
 #include <neixx/process/process_service.h>
 #include <neixx/synchronization/waitable_event.h>
+#include <neixx/task/task_runner.h>
 
 namespace nei {
 namespace {
@@ -135,6 +138,57 @@ TEST(ChildProcessTest, LaunchWorksWithoutCurrentIoPump) {
   EXPECT_EQ(listener.exit_state.load(std::memory_order_acquire),
             ProcessState::kExited);
   EXPECT_EQ(listener.exit_code.load(std::memory_order_acquire), 0);
+}
+
+TEST(ChildProcessTest, LaunchFromProcessServiceIoThreadDoesNotDeadlock) {
+  const scoped_refptr<ProcessService> service = ProcessService::Create();
+  ASSERT_TRUE(service);
+  ASSERT_TRUE(service->Start());
+  const scoped_refptr<TaskRunner> io_runner = service->GetTaskRunner();
+  ASSERT_TRUE(io_runner);
+
+  WaitableEvent launch_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent terminated_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto listener = std::make_shared<CapturingProcessListener>(&terminated_done);
+  auto process = std::make_shared<ChildProcess>(service);
+  process->SetListener(listener.get());
+  std::atomic<bool> launch_ok{false};
+  std::atomic<bool> task_executed{false};
+
+  const bool posted = io_runner->PostTask(FROM_HERE, [&]() {
+#if defined(_WIN32)
+    const char* argv[] = {"cmd", "/d", "/c", "exit /b 0"};
+#else
+    const char* argv[] = {"/bin/sh", "-c", "exit 0"};
+#endif
+    CommandLine command_line(static_cast<int>(sizeof(argv) / sizeof(argv[0])),
+                             argv);
+
+    ProcessLaunchOptions options;
+    options.stdin_config.type = StdIOType::NULL_IO;
+    options.stdout_config.type = StdIOType::NULL_IO;
+    options.stderr_config.type = StdIOType::NULL_IO;
+
+    launch_ok.store(process->Launch(command_line, options),
+                    std::memory_order_release);
+    task_executed.store(true, std::memory_order_release);
+    launch_done.Signal();
+  });
+  ASSERT_TRUE(posted);
+
+  ASSERT_TRUE(launch_done.TimedWait(std::chrono::seconds(5)));
+  ASSERT_TRUE(task_executed.load(std::memory_order_acquire));
+  ASSERT_TRUE(launch_ok.load(std::memory_order_acquire));
+
+  ASSERT_TRUE(terminated_done.TimedWait(std::chrono::seconds(5)));
+  EXPECT_TRUE(listener->launch_succeeded.load(std::memory_order_acquire));
+  EXPECT_FALSE(listener->launch_failed.load(std::memory_order_acquire));
+  EXPECT_TRUE(listener->terminated.load(std::memory_order_acquire));
+  EXPECT_EQ(listener->exit_state.load(std::memory_order_acquire),
+            ProcessState::kExited);
+  EXPECT_EQ(listener->exit_code.load(std::memory_order_acquire), 0);
+
+  process.reset();
 }
 
 TEST(ChildProcessTest, LaunchMultipleProcessesWithSharedProcessService) {

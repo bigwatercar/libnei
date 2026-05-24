@@ -51,6 +51,7 @@ bool Thread::StartWithOptions(const Options& options) {
     started_ = true;
     start_succeeded_ = false;
     running_ = false;
+    thread_id_ = 0;
   }
 
   if (!PlatformThread::CreateWithType(options.stack_size, this, &handle_,
@@ -58,6 +59,7 @@ bool Thread::StartWithOptions(const Options& options) {
     AutoLock lock(lock_);
     start_event_.reset();
     started_ = false;
+    thread_id_ = 0;
     return false;
   }
 
@@ -118,6 +120,11 @@ bool Thread::IsRunning() const {
   return running_;
 }
 
+PlatformThread::PlatformThreadId Thread::GetThreadId() const {
+  AutoLock lock(lock_);
+  return thread_id_;
+}
+
 void Thread::ThreadMain() {
   if (!name_.empty()) {
     PlatformThread::SetCurrentThreadName(name_);
@@ -138,6 +145,7 @@ void Thread::ThreadMain() {
   WaitableEvent* start_event = nullptr;
   {
     AutoLock lock(lock_);
+    thread_id_ = PlatformThread::CurrentId();
     task_runner_ = default_task_runner;
     start_succeeded_ = default_task_runner.get() != nullptr;
     running_ = start_succeeded_;
@@ -152,6 +160,7 @@ void Thread::ThreadMain() {
     AutoLock lock(lock_);
     task_runner_ = nullptr;
     running_ = false;
+    thread_id_ = 0;
     return;
   }
 
@@ -161,6 +170,7 @@ void Thread::ThreadMain() {
   AutoLock lock(lock_);
   task_runner_ = nullptr;
   running_ = false;
+  thread_id_ = 0;
 }
 
 }  // namespace nei

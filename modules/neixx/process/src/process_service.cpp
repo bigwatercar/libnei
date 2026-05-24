@@ -6,6 +6,7 @@
 
 #include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/threading/thread.h>
+#include <neixx/threading/platform_thread.h>
 
 namespace nei {
 
@@ -34,25 +35,27 @@ class ProcessService::Impl final {
     IgnoreSigPipeGlobalOnce();
 #endif
 
-    std::lock_guard<std::mutex> lock(lock_);
-    if (io_runner_.get() != nullptr) {
-      return true;
-    }
-    if (start_failed_) {
-      return false;
-    }
+    {
+      std::lock_guard<std::mutex> lock(lock_);
+      if (io_runner_.get() != nullptr) {
+        return true;
+      }
+      if (start_failed_) {
+        return false;
+      }
 
-    Thread::Options options;
-    options.message_pump_type = MessagePumpType::IO;
-    if (!io_thread_.StartWithOptions(options)) {
-      start_failed_ = true;
-      return false;
-    }
+      Thread::Options options;
+      options.message_pump_type = MessagePumpType::IO;
+      if (!io_thread_.StartWithOptions(options)) {
+        start_failed_ = true;
+        return false;
+      }
 
-    io_runner_ = io_thread_.GetTaskRunner();
-    if (io_runner_.get() == nullptr) {
-      start_failed_ = true;
-      return false;
+      io_runner_ = io_thread_.GetTaskRunner();
+      if (io_runner_.get() == nullptr) {
+        start_failed_ = true;
+        return false;
+      }
     }
     return true;
   }
@@ -60,6 +63,17 @@ class ProcessService::Impl final {
   bool IsRunning() const {
     std::lock_guard<std::mutex> lock(lock_);
     return io_runner_.get() != nullptr;
+  }
+
+  bool IsOnServiceThread() const {
+    std::lock_guard<std::mutex> lock(lock_);
+    if (io_runner_.get() == nullptr) {
+      return false;
+    }
+    const PlatformThread::PlatformThreadId service_thread_id =
+        io_thread_.GetThreadId();
+    return service_thread_id != 0 &&
+           PlatformThread::CurrentId() == service_thread_id;
   }
 
   scoped_refptr<TaskRunner> GetTaskRunner() const {
@@ -108,6 +122,10 @@ bool ProcessService::Start() {
 
 bool ProcessService::IsRunning() const {
   return impl_->IsRunning();
+}
+
+bool ProcessService::IsOnServiceThread() const {
+  return impl_->IsOnServiceThread();
 }
 
 scoped_refptr<TaskRunner> ProcessService::GetTaskRunner() const {

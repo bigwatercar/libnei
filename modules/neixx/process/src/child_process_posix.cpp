@@ -856,21 +856,35 @@ class ChildProcess::Impl final : public ChildProcessListener {
       return false;
     }
 
-    WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-    bool ok = false;
-    io_runner->PostTask(FROM_HERE, [this, io_runner, &command_line, options, &done, &ok]() {
+    auto launch_on_io = [this, io_runner, &command_line, options](bool* ok) {
       stdout_proxy_->ResetBinding();
       stderr_proxy_->ResetBinding();
       stdin_proxy_->ResetBinding();
       core_.reset();
 
       core_ = std::make_unique<PosixChildProcessCore>(this);
-      ok = core_->Launch(command_line, options);
-      if (ok) {
+      *ok = core_->Launch(command_line, options);
+      if (*ok) {
         stdout_proxy_->Bind(core_->stdout_stream(), io_runner);
         stderr_proxy_->Bind(core_->stderr_stream(), io_runner);
         stdin_proxy_->Bind(core_->stdin_stream(), io_runner);
       }
+    };
+
+    const scoped_refptr<TaskRunner> current_runner = ThreadTaskRunnerHandle::Get();
+    const bool on_service_thread = process_service_->IsOnServiceThread() ||
+                                   (current_runner.get() != nullptr &&
+                                    current_runner.get() == io_runner.get());
+
+    bool ok = false;
+    if (on_service_thread) {
+      launch_on_io(&ok);
+      return ok;
+    }
+
+    WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+    io_runner->PostTask(FROM_HERE, [&, this]() {
+      launch_on_io(&ok);
       done.Signal();
     });
     done.Wait();
@@ -886,10 +900,24 @@ class ChildProcess::Impl final : public ChildProcessListener {
       return false;
     }
 
-    WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+    auto terminate_on_io = [this, exit_code, force](bool* ok) {
+      *ok = core_ != nullptr && core_->Terminate(exit_code, force);
+    };
+
+    const scoped_refptr<TaskRunner> current_runner = ThreadTaskRunnerHandle::Get();
+    const bool on_service_thread = process_service_->IsOnServiceThread() ||
+                                   (current_runner.get() != nullptr &&
+                                    current_runner.get() == io_runner.get());
+
     bool ok = false;
-    io_runner->PostTask(FROM_HERE, [this, exit_code, force, &done, &ok]() {
-      ok = core_ != nullptr && core_->Terminate(exit_code, force);
+    if (on_service_thread) {
+      terminate_on_io(&ok);
+      return ok;
+    }
+
+    WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+    io_runner->PostTask(FROM_HERE, [&, this]() {
+      terminate_on_io(&ok);
       done.Signal();
     });
     done.Wait();
@@ -934,12 +962,25 @@ class ChildProcess::Impl final : public ChildProcessListener {
         return;
       }
 
-      WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-      io_runner->PostTask(FROM_HERE, [this, &done]() {
+      auto shutdown_on_io = [this]() {
         stdout_proxy_->ResetBinding();
         stderr_proxy_->ResetBinding();
         stdin_proxy_->ResetBinding();
         core_.reset();
+      };
+
+      const scoped_refptr<TaskRunner> current_runner = ThreadTaskRunnerHandle::Get();
+      const bool on_service_thread = process_service_->IsOnServiceThread() ||
+                                     (current_runner.get() != nullptr &&
+                                      current_runner.get() == io_runner.get());
+      if (on_service_thread) {
+        shutdown_on_io();
+        return;
+      }
+
+      WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+      io_runner->PostTask(FROM_HERE, [&, this]() {
+        shutdown_on_io();
         done.Signal();
       });
       done.Wait();
