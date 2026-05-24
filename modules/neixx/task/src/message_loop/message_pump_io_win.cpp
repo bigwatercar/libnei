@@ -252,6 +252,21 @@ class MessagePumpForIOState {
         continue;
       }
 
+      if (overlapped != nullptr) {
+        auto* completion_watcher =
+            dynamic_cast<MessagePumpForIO::CompletionWatcher*>(record.watcher);
+        if (completion_watcher != nullptr) {
+          const std::uint32_t error_code =
+              ok ? static_cast<std::uint32_t>(ERROR_SUCCESS)
+                 : static_cast<std::uint32_t>(::GetLastError());
+          completion_watcher->OnIOCompleted(
+              record.handle, overlapped,
+              static_cast<std::uint32_t>(bytes_transferred), error_code);
+          any_event = true;
+          continue;
+        }
+      }
+
       const bool can_read = record.mode == MessagePumpForIO::FdWatchController::Mode::READ ||
                             record.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE;
       const bool can_write = record.mode == MessagePumpForIO::FdWatchController::Mode::WRITE ||

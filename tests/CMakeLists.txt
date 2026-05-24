@@ -20,6 +20,7 @@ enable_testing()
 
 add_executable(
   nei_tests
+  async_file_win_test.cpp
   async_line_reader_test.cpp
   base64_test.cpp
   checksum_hash_test.cpp

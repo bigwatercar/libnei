@@ -412,6 +412,162 @@
 				"-SkipBuild"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "linux-childprocess-acceptance",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"-e",
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R ChildProcessTest --output-on-failure"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "linux-childprocess-acceptance-log",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"-e",
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R ChildProcessTest --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_childprocess_acceptance.log 2>&1; echo EXIT_CODE:$? > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_childprocess_acceptance.exit"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "linux-childprocess-timeout-probe",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"-e",
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R ChildProcessTest.LaunchWorksWithoutCurrentIoPump --output-on-failure --timeout 20 > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_childprocess_probe.log 2>&1; echo EXIT_CODE:$? > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_childprocess_probe.exit"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "linux-childprocess-timeout-probe120",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"-e",
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R ChildProcessTest.LaunchWorksWithoutCurrentIoPump --output-on-failure --timeout 120 > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_childprocess_probe120.log 2>&1; echo EXIT_CODE:$? > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_childprocess_probe120.exit"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "linux-childprocess-acceptance-final",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"-e",
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src && cmake --build build-linux -j4 > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_childprocess_build.log 2>&1; cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R ChildProcessTest --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_childprocess_acceptance.log 2>&1; echo EXIT_CODE:$? > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_childprocess_acceptance.exit"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "linux-childprocess-test25-probe",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"-e",
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R ChildProcessTest.TerminateGracefulStopsRunningProcess --output-on-failure --timeout 20 > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_childprocess_test25.log 2>&1; echo EXIT_CODE:$? > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_childprocess_test25.exit"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "linux-childprocess-acceptance-rerun",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"-e",
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src && cmake --build build-linux -j4 > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_childprocess_build.log 2>&1; cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R ChildProcessTest --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_childprocess_acceptance.log 2>&1; echo EXIT_CODE:$? > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_childprocess_acceptance.exit"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "linux-graceful-terminate-strict-check",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"-e",
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R ChildProcessTest.TerminateGracefulStopsRunningProcess --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_graceful_strict.log 2>&1; echo EXIT_CODE:$? > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/linux_graceful_strict.exit"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-childprocess-ctest-log",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"-e",
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R ChildProcessTest --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_new.log 2>&1; echo $? > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_new.exit"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-childprocess-ctest-log",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"-e",
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src && cmake --build build-linux -j4 > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_new_build.log 2>&1; cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R ChildProcessTest --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_new.log 2>&1; echo $? > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_new.exit"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-childprocess-ctest-rebuild-v2",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"-e",
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src && cmake --build build-linux -j4 > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_v2_build.log 2>&1; cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R ChildProcessTest --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_v2.log 2>&1; echo $? > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_v2.exit"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-childprocess-ctest-rebuild-v3",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"-e",
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src && cmake --build build-linux -j4 > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_v3_build.log 2>&1; cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R ChildProcessTest --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_v3.log 2>&1; echo $? > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_v3.exit"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-childprocess-ctest-rebuild-v4",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"-e",
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src && cmake --build build-linux -j4 > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_v4_build.log 2>&1; cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R ChildProcessTest --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_v4.log 2>&1; echo $? > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_childprocess_ctest_v4.exit"
+			],
+			"isBackground": false
 		}
 	]
 }

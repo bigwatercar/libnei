@@ -36,6 +36,19 @@ class NEI_API MessagePumpForIO final : public MessagePump {
     virtual void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) = 0;
   };
 
+  // Optional Windows-only completion callback extension.
+  // Implementers can downcast from Watcher in the pump and receive raw
+  // OVERLAPPED completion notifications without changing POSIX behavior.
+  class CompletionWatcher : public Watcher {
+   public:
+    virtual ~CompletionWatcher() = default;
+
+    virtual void OnIOCompleted(NativeIOHandle handle,
+                               void* overlapped_context,
+                               std::uint32_t bytes_transferred,
+                               std::uint32_t error_code) = 0;
+  };
+
   class NEI_API FdWatchController final {
    public:
     enum class Mode {

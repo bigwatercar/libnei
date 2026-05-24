@@ -1,12 +1,17 @@
 set(NEIXX_IO_SOURCES
+  include/neixx/io/async_file.h
   include/neixx/io/async_stream.h
   include/neixx/io/async_line_reader.h
+  include/neixx/io/async_file_win.h
   include/neixx/io/pipe_stream_factory.h
   src/async_line_reader.cpp
 )
 
 if(WIN32)
-  list(APPEND NEIXX_IO_SOURCES src/pipe_stream_win.cpp)
+  list(APPEND NEIXX_IO_SOURCES
+    src/pipe_stream_win.cpp
+    src/async_file_win.cpp
+  )
 else()
   list(APPEND NEIXX_IO_SOURCES src/pipe_stream_posix.cpp)
 endif()
