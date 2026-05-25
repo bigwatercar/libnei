@@ -810,6 +810,1211 @@
 				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "diag-rebuild-and-run-with-iocp-counters",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM nei_tests.exe /T >nul 2>nul & taskkill /F /IM MSBuild.exe >nul 2>nul & cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "unlock-nei-tests-exe-hard",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"for /L %i in (1,1,10) do taskkill /F /IM nei_tests.exe >nul 2>nul & del /F /Q build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe & if exist build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe (echo STILL_EXISTS) else (echo DELETED)"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rebuild-nei-tests-after-unlock",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & echo ExitCode=%errorlevel%"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-single-with-full-diag-counters",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rebuild-and-rerun-single-after-skip-completion-flag",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM nei_tests.exe /T >nul 2>nul & taskkill /F /IM MSBuild.exe >nul 2>nul & cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-rebuild-run-after-deeper-counters",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM nei_tests.exe /T >nul 2>nul & taskkill /F /IM MSBuild.exe >nul 2>nul & del /F /Q build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe >nul 2>nul & cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-rebuild-run-after-post-fail-counter",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM nei_tests.exe /T >nul 2>nul & taskkill /F /IM MSBuild.exe >nul 2>nul & del /F /Q build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe >nul 2>nul & cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-rebuild-run-with-pump-counters",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM nei_tests.exe /T >nul 2>nul & taskkill /F /IM MSBuild.exe >nul 2>nul & del /F /Q build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe >nul 2>nul & cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-rerun-with-callback-seqs",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM nei_tests.exe /T >nul 2>nul & taskkill /F /IM MSBuild.exe >nul 2>nul & del /F /Q build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe >nul 2>nul & cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-immediate-task-wake-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM nei_tests.exe /T >nul 2>nul & taskkill /F /IM MSBuild.exe >nul 2>nul & del /F /Q build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe >nul 2>nul & cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-wake-drain-retry-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM nei_tests.exe /T >nul 2>nul & taskkill /F /IM MSBuild.exe >nul 2>nul & del /F /Q build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe >nul 2>nul & cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.LargeReadWriteCallbackDeterminismOnIoThread"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-async-file-win-suite",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "full-regression-windows-3rounds",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"$ErrorActionPreference='Stop'; Set-Location 'c:\\Personal\\Projects\\LibNei\\libnei-src'; $logDir='temp\\regression\\windows'; New-Item -ItemType Directory -Force -Path $logDir | Out-Null; cmake --build build/windows-vs2022-release-shared --config Release --target nei_tests | Out-Host; $summary=@(); foreach($i in 1..3){ $log=Join-Path $logDir (\"round_{0}.log\" -f $i); $raw = (& ctest --test-dir build/windows-vs2022-release-shared -C Release --output-on-failure 2>&1 | Out-String); Set-Content -Path $log -Value $raw -Encoding UTF8; $m=[regex]::Match($raw,'(?m)^(\\d+)% tests passed, (\\d+) tests failed out of (\\d+)'); $failed=[regex]::Matches($raw,'(?m)^\\s*\\d+ - (.+?) \\(Failed\\)$') | ForEach-Object { $_.Groups[1].Value.Trim() }; if($m.Success){ $summary += [pscustomobject]@{ round=$i; passed_percent=[int]$m.Groups[1].Value; failed_count=[int]$m.Groups[2].Value; total=[int]$m.Groups[3].Value; failed_tests=($failed -join '; ') } } else { $summary += [pscustomobject]@{ round=$i; passed_percent=-1; failed_count=-1; total=-1; failed_tests='PARSE_FAILED' } } }; $summaryPath=Join-Path $logDir 'summary.json'; ($summary | ConvertTo-Json -Depth 5) | Set-Content -Path $summaryPath -Encoding UTF8; Get-Content $summaryPath | Out-Host"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "full-regression-windows-3rounds-v2",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"$ErrorActionPreference='Stop'; Set-Location 'c:\\Personal\\Projects\\LibNei\\libnei-src'; $logDir='temp\\regression\\windows'; New-Item -ItemType Directory -Force -Path $logDir | Out-Null; cmake --build build/windows-vs2022-release-shared --config Release --target nei_tests | Out-Host; $summary=@(); foreach($i in 1..3){ $log=Join-Path $logDir ('round_' + $i + '.log'); $raw = (& ctest --test-dir build/windows-vs2022-release-shared -C Release --output-on-failure 2>&1 | Out-String); Set-Content -Path $log -Value $raw -Encoding UTF8; $m=[regex]::Match($raw,'(?m)^(\\d+)% tests passed, (\\d+) tests failed out of (\\d+)'); $failed=[regex]::Matches($raw,'(?m)^\\s*\\d+ - (.+?) \\(Failed\\)$') | ForEach-Object { $_.Groups[1].Value.Trim() }; if($m.Success){ $summary += [pscustomobject]@{ round=$i; passed_percent=[int]$m.Groups[1].Value; failed_count=[int]$m.Groups[2].Value; total=[int]$m.Groups[3].Value; failed_tests=($failed -join '; ') } } else { $summary += [pscustomobject]@{ round=$i; passed_percent=-1; failed_count=-1; total=-1; failed_tests='PARSE_FAILED' } } }; $summaryPath=Join-Path $logDir 'summary.json'; ($summary | ConvertTo-Json -Depth 5) | Set-Content -Path $summaryPath -Encoding UTF8; Get-Content $summaryPath | Out-Host"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "full-regression-windows-3rounds-v3",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'c:\\Personal\\Projects\\LibNei\\libnei-src'; $logDir='temp\\regression\\windows'; New-Item -ItemType Directory -Force -Path $logDir | Out-Null; cmake --build build/windows-vs2022-release-shared --config Release --target nei_tests | Out-Host; $summary=@(); foreach($i in 1..3){ $log=Join-Path $logDir ('round_' + $i + '.log'); $raw = (& ctest --test-dir build/windows-vs2022-release-shared -C Release --output-on-failure 2>&1 | Out-String); $exit=$LASTEXITCODE; Set-Content -Path $log -Value $raw -Encoding UTF8; $m=[regex]::Match($raw,'(?m)^(\\d+)% tests passed, (\\d+) tests failed out of (\\d+)'); $failed=[regex]::Matches($raw,'(?m)^\\s*\\d+ - (.+?) \\(Failed\\)$') | ForEach-Object { $_.Groups[1].Value.Trim() }; if($m.Success){ $summary += [pscustomobject]@{ round=$i; exit_code=$exit; passed_percent=[int]$m.Groups[1].Value; failed_count=[int]$m.Groups[2].Value; total=[int]$m.Groups[3].Value; failed_tests=($failed -join '; ') } } else { $summary += [pscustomobject]@{ round=$i; exit_code=$exit; passed_percent=-1; failed_count=-1; total=-1; failed_tests='PARSE_FAILED' } } }; $summaryPath=Join-Path $logDir 'summary.json'; ($summary | ConvertTo-Json -Depth 5) | Set-Content -Path $summaryPath -Encoding UTF8; Get-Content $summaryPath | Out-Host"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "full-regression-wsl-3rounds",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'c:\\Personal\\Projects\\LibNei\\libnei-src'; $logDir='temp\\regression\\wsl'; New-Item -ItemType Directory -Force -Path $logDir | Out-Null; wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src && cmake --build build-linux --target nei_tests -j' | Out-Host; $summary=@(); foreach($i in 1..3){ $log=Join-Path $logDir ('round_' + $i + '.log'); $raw = (& wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest --output-on-failure' 2>&1 | Out-String); $exit=$LASTEXITCODE; Set-Content -Path $log -Value $raw -Encoding UTF8; $m=[regex]::Match($raw,'(?m)^(\\d+)% tests passed, (\\d+) tests failed out of (\\d+)'); $failed=[regex]::Matches($raw,'(?m)^\\s*\\d+ - (.+?) \\(Failed\\)$') | ForEach-Object { $_.Groups[1].Value.Trim() }; if($m.Success){ $summary += [pscustomobject]@{ round=$i; exit_code=$exit; passed_percent=[int]$m.Groups[1].Value; failed_count=[int]$m.Groups[2].Value; total=[int]$m.Groups[3].Value; failed_tests=($failed -join '; ') } } else { $summary += [pscustomobject]@{ round=$i; exit_code=$exit; passed_percent=-1; failed_count=-1; total=-1; failed_tests='PARSE_FAILED' } } }; $summaryPath=Join-Path $logDir 'summary.json'; ($summary | ConvertTo-Json -Depth 5) | Set-Content -Path $summaryPath -Encoding UTF8; Get-Content $summaryPath | Out-Host"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "probe-wsl-write-file",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"wsl bash -lc \"echo hello_from_wsl > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/regression/wsl/probe.txt\" & if exist temp\\regression\\wsl\\probe.txt (type temp\\regression\\wsl\\probe.txt) else (echo PROBE_MISSING)"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "probe-wsl-write-file-ps",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'echo hello_from_wsl > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/regression/wsl/probe.txt'; Get-Content temp\\regression\\wsl\\probe.txt"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "full-regression-wsl-3rounds-v2",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'c:\\Personal\\Projects\\LibNei\\libnei-src'; $logDirWin='temp\\regression\\wsl'; $logDirWsl='/mnt/c/Personal/Projects/LibNei/libnei-src/temp/regression/wsl'; New-Item -ItemType Directory -Force -Path $logDirWin | Out-Null; wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src && cmake --build build-linux --target nei_tests -j' | Out-Host; $summary=@(); foreach($i in 1..3){ $logWin=Join-Path $logDirWin ('round_' + $i + '.log'); $logWsl=$logDirWsl + '/round_' + $i + '.log'; wsl bash -lc \"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest --output-on-failure > $logWsl 2>&1\"; $exit=$LASTEXITCODE; $raw=Get-Content -Raw -Path $logWin; $m=[regex]::Match($raw,'(?m)^(\\d+)% tests passed, (\\d+) tests failed out of (\\d+)'); $failed=[regex]::Matches($raw,'(?m)^\\s*\\d+ - (.+?) \\(Failed\\)$') | ForEach-Object { $_.Groups[1].Value.Trim() }; if($m.Success){ $summary += [pscustomobject]@{ round=$i; exit_code=$exit; passed_percent=[int]$m.Groups[1].Value; failed_count=[int]$m.Groups[2].Value; total=[int]$m.Groups[3].Value; failed_tests=($failed -join '; ') } } else { $summary += [pscustomobject]@{ round=$i; exit_code=$exit; passed_percent=-1; failed_count=-1; total=-1; failed_tests='PARSE_FAILED' } } }; $summary | ConvertTo-Json -Depth 5 | Out-Host"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-wsl-regression-script",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"temp\\regression\\run_wsl_regression.ps1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-rerun-round2-round3",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'c:\\Personal\\Projects\\LibNei\\libnei-src'; $logDir='/mnt/c/Personal/Projects/LibNei/libnei-src/temp/regression/wsl'; wsl bash -lc \"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest --output-on-failure > $logDir/round_2.log 2>&1\"; $e2=$LASTEXITCODE; wsl bash -lc \"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest --output-on-failure > $logDir/round_3.log 2>&1\"; $e3=$LASTEXITCODE; Get-Item temp\\regression\\wsl\\round_1.log,temp\\regression\\wsl\\round_2.log,temp\\regression\\wsl\\round_3.log | Select-Object Name,Length | Format-Table -AutoSize; Write-Host \"EXIT2=$e2 EXIT3=$e3\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-rerun-wsl-round23-script",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"temp\\regression\\rerun_wsl_round23.ps1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-two-failing-tests-direct",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=TaskQueueTest.OnTaskPostedCallbackNotCalledWhenQueueNonEmpty:ThreadPoolTest.TracingCapturesQueueingDelayAndExecutionCounts"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-targeted-after-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=TaskQueueTest.OnTaskPostedCallbackNotCalledWhenQueueNonEmpty:AsyncFileWinTest.*:ThreadPoolTest.TracingCapturesQueueingDelayAndExecutionCounts"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-postfix-windows-regression",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"temp\\regression\\postfix_windows_regression.ps1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-postfix-wsl-regression",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"temp\\regression\\postfix_wsl_regression.ps1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-postfix-wsl-runonly",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"temp\\regression\\postfix_wsl_runonly.ps1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-round1-tail",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"temp\\regression\\run_wsl_round_tail.ps1",
+				"-Round",
+				"1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "inspect-wsl-round1-full-tail",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"Get-Content temp\\regression\\postfix_wsl_runonly\\round_1_full.log -Tail 60"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-round3-retry-with-log",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"& 'C:\\Windows\\System32\\wsl.exe' bash -lc \"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/regression/wsl_round3_retry.log 2>&1\"; Write-Host \"WSL_EXIT=$LASTEXITCODE\"; Get-Content temp\\regression\\wsl_round3_retry.log -Tail 40"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-wsl-round3-retry-script",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"temp\\regression\\wsl_round3_retry.ps1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-taskqueue-test-direct",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ./tests/nei_tests --gtest_filter=TaskQueueTest.OnTaskPostedCallbackNotCalledWhenQueueNonEmpty'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-threadpool-tracing-test-direct",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ./tests/nei_tests --gtest_filter=ThreadPoolTest.TracingCapturesQueueingDelayAndExecutionCounts'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-full-round-summary-tail",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest --output-on-failure | tail -n 40'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-async-file-demo-target",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target async_file_demo"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-async-file-demo",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\demo\\Release\\async_file_demo.exe"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rebuild-and-run-async-file-demo-main-thread",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target async_file_demo & build\\windows-vs2022-release-shared\\demo\\Release\\async_file_demo.exe"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-async-file-demo-after-main-thread-change",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\demo\\Release\\async_file_demo.exe"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rebuild-run-async-file-demo-main-thread-calls",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target async_file_demo & build\\windows-vs2022-release-shared\\demo\\Release\\async_file_demo.exe"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "list-modified-files",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"git status --porcelain"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "generate-temp-neixx-md",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'c:\\Personal\\Projects\\LibNei\\libnei-src'; $out='temp\\neixx.md'; New-Item -ItemType Directory -Force -Path 'temp' | Out-Null; Set-Content -Path $out -Value '' -Encoding UTF8; $files=@('modules/neixx/io/include/neixx/io/async_file_win.h','modules/neixx/io/src/async_file_win.cpp','modules/neixx/task/include/neixx/task/message_loop/message_pump_io.h','modules/neixx/task/src/message_loop/message_pump_io_win.cpp'); foreach($f in $files){ if(-not (Test-Path $f)){ continue }; $display=$f -replace '^modules/',''; Add-Content -Path $out -Value ('说明: ' + $display) -Encoding UTF8; Add-Content -Path $out -Value '```cpp' -Encoding UTF8; Get-Content -Path $f | Add-Content -Path $out -Encoding UTF8; Add-Content -Path $out -Value '```' -Encoding UTF8; Add-Content -Path $out -Value '' -Encoding UTF8 }; Write-Host 'WROTE:' $out; (Get-Item $out | Select-Object FullName,Length | Format-List | Out-String) | Write-Host"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-nei-tests-after-asyncfile-fixes",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-asyncfile-tests-after-fixes",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-build-nei-tests-after-fixes",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src && cmake --build build-linux --target nei_tests -j'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-full-regression-tail-after-fixes",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest --output-on-failure | tail -n 20'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-nei-tests-with-append-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-new-append-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.AppendModeAppendsIgnoringCallerOffsetInOrder:AsyncFileWinTest.ConcurrentAppendPreservesWholeWriteBlocks"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rebuild-nei-tests-after-append-race-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-new-append-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.AppendModeAppendsIgnoringCallerOffsetInOrder:AsyncFileWinTest.ConcurrentAppendPreservesWholeWriteBlocks"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-asyncfile-win-suite-after-append-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-and-run-line-reader-integration-test",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.FileReadParsesLinesWithAsyncLineReader"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-async-file-win-test-suite",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=AsyncFileWinTest.*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify-child-process-tests-now",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=ChildProcessTest.*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify-win-childprocess-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=ChildProcessTest.*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-single-childprocess-launch-test",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /IM nei_tests.exe >nul 2>nul & cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=ChildProcessTest.LaunchWorksWithoutCurrentIoPump"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "find-and-kill-nei-tests-procs",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"tasklist | findstr /I nei_tests.exe & wmic process where \"name='nei_tests.exe'\" get ProcessId,CommandLine & taskkill /F /IM nei_tests.exe & tasklist | findstr /I nei_tests.exe"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "kill-last-nei-tests-pid",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"taskkill /F /PID 45976 & tasklist | findstr /I nei_tests.exe"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "inspect-nei-tests-parent",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"Get-CimInstance Win32_Process -Filter \"Name='nei_tests.exe'\" | Select-Object ProcessId,ParentProcessId,CommandLine | Format-List"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "inspect-nei-tests-parent-fixed",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"Get-CimInstance Win32_Process -Filter \"Name = 'nei_tests.exe'\" | Select-Object ProcessId,ParentProcessId,CommandLine | Format-List"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-single-childprocess-launch-test",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"cmake --build build\\windows-vs2022-release-shared --config Release --target nei_tests & build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=ChildProcessTest.LaunchWorksWithoutCurrentIoPump"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "ctest-windows-release-full",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"ctest --test-dir build\\windows-vs2022-release-shared -C Release --output-on-failure"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "ctest-wsl-full",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"wsl bash -lc \"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest --output-on-failure\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "ctest-wsl-full-fixed",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux; ctest --output-on-failure'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "ctest-wsl-full-log-tail",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux; ctest --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_ctest.log 2>&1; echo EXITCODE=$?' ; Get-Content -Path temp\\wsl_ctest.log -Tail 40"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "ctest-windows-release-after-io-internalize",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"ctest --test-dir build\\windows-vs2022-release-shared -C Release --output-on-failure"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "ctest-wsl-after-io-internalize",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux; ctest --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_ctest_after_internalize.log 2>&1; echo EXITCODE=$?' ; Get-Content -Path temp\\wsl_ctest_after_internalize.log -Tail 40"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "ctest-windows-after-move-to-src-internal",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"ctest --test-dir build\\windows-vs2022-release-shared -C Release --output-on-failure"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "ctest-wsl-after-move-to-src-internal",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux; ctest --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_ctest_after_src_internal.log 2>&1; echo EXITCODE=$?' ; Get-Content -Path temp\\wsl_ctest_after_src_internal.log -Tail 40"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "ctest-wsl-clean-rerun",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest --output-on-failure'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "ctest-wsl-clean-summary",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux; ctest --output-on-failure > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_ctest_src_internal_move.log 2>&1; echo EXITCODE=$?' ; Get-Content -Path temp\\wsl_ctest_src_internal_move.log -Tail 30"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "ctest-wsl-tail-exit",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest --output-on-failure | tail -n 20; echo EXITCODE=${PIPESTATUS[0]}'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "ctest-wsl-tail-exit-cmd",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"wsl bash -lc \"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest --output-on-failure | tail -n 20; echo EXITCODE=${PIPESTATUS[0]}\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-move-internal-header-to-src",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"git add modules/neixx/io/CMakeLists.txt modules/neixx/io/src/internal/pipe_stream_factory_internal.h modules/neixx/io/src/pipe_stream_posix.cpp modules/neixx/io/src/pipe_stream_win.cpp modules/neixx/process/src/child_process_posix.cpp modules/neixx/process/src/child_process_win.cpp tests/pipe_stream_win_test.cpp tests/CMakeLists.txt & git rm modules/neixx/io/include/neixx/io/internal/pipe_stream_factory_internal.h & git commit -m \"refactor(io): move internal pipe factory header under src/internal\" & git log --oneline -1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "status-after-src-internal-move-commit",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"git status --short"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-ctest-recheck-guarded-summary",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && timeout 1800s ctest --output-on-failure --timeout 120 > /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_ctest_recheck.log 2>&1; ec=$?; echo CTEST_EXIT=$ec; tail -n 40 /mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_ctest_recheck.log; exit $ec'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-ctest-exitcode-only",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"wsl bash -lc \"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && timeout 1800s ctest --quiet --timeout 120 >/dev/null 2>&1; echo CTEST_EXIT=$?\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-ctest-exitcode-only-fixed",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && timeout 1800s ctest --quiet --timeout 120 >/dev/null 2>&1; ec=$?; echo CTEST_EXIT=$ec'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-ctest-exitcode-escaped",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && timeout 1800s ctest --quiet --timeout 120 >/dev/null 2>&1; echo CTEST_EXIT=`$?'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-tools-wsl-guarded-script",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"tools\\run_wsl_ctest_guarded.ps1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-tools-wsl-guarded-script",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"tools\\run_wsl_ctest_guarded.ps1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-single-failing-test-check",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R \"^MessagePumpForIOCurrentTest.CurrentIsBoundOnIoThread$\" --output-on-failure --timeout 120'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-guarded-script-after-fix",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"tools\\run_wsl_ctest_guarded.ps1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-single-current-test-recheck",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest -R \"^MessagePumpForIOCurrentTest.CurrentIsBoundOnIoThread$\" --output-on-failure --timeout 120'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-guarded-full-recheck-after-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"powershell -NoProfile -ExecutionPolicy Bypass -File tools\\run_wsl_ctest_guarded.ps1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-build-nei-tests-after-fix",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && cmake --build . --target nei_tests -j'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-guarded-full-after-rebuild",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"tools\\run_wsl_ctest_guarded.ps1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-repro-childprocess-timeout-20",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest --output-on-failure --timeout 20 -R \"^ChildProcessTest.LaunchWorksWithoutCurrentIoPump$\" -VV'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-repro-range-1-21",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && ctest --output-on-failure --timeout 120 -I 1,21 -VV'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-clean-ctest-procs",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'pkill -f \"ctest|nei_tests\" >/dev/null 2>&1 || true; pgrep -af \"ctest|nei_tests\" || true'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-clean-ctest-procs2",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl --% bash -lc \"pkill -f 'ctest|nei_tests' >/dev/null 2>&1 || true; pgrep -af 'ctest|nei_tests' || true\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-guarded-full-fresh-log",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"tools\\run_wsl_ctest_guarded.ps1",
+				"-LogFile",
+				"temp/wsl_ctest_guarded_latest.log"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-flake-repro-child-stdin",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux/tests && ./nei_tests --gtest_filter=ChildProcessTest.LaunchWithStdinPipeEchoesToStdout --gtest_repeat=50 --gtest_break_on_failure'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-build-nei-tests-eintr-fix",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && cmake --build . --target nei_tests -j'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-flake-repro-after-eintr",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux/tests && ./nei_tests --gtest_filter=ChildProcessTest.LaunchWithStdinPipeEchoesToStdout --gtest_repeat=100 --gtest_break_on_failure'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-build-nei-tests-after-test-sync",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && cmake --build . --target nei_tests -j'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-flake-repro-after-sync",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux/tests && ./nei_tests --gtest_filter=ChildProcessTest.LaunchWithStdinPipeEchoesToStdout --gtest_repeat=100 --gtest_break_on_failure'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-build-after-stdin-test-tune",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && cmake --build . --target nei_tests -j'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-flake-repro-after-assert-tune",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux/tests && ./nei_tests --gtest_filter=ChildProcessTest.LaunchWithStdinPipeEchoesToStdout --gtest_repeat=100 --gtest_break_on_failure'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-guarded-full-after-child-stdin-fix",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"tools\\run_wsl_ctest_guarded.ps1",
+				"-LogFile",
+				"temp/wsl_ctest_guarded_after_childfix.log"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-build-after-child-tests-fix2",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && cmake --build . --target nei_tests -j'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-flake-repro-child-stdout-stdin",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux/tests && ./nei_tests --gtest_filter=ChildProcessTest.LaunchWithStdoutPipeReadsLine:ChildProcessTest.LaunchWithStdinPipeEchoesToStdout --gtest_repeat=100 --gtest_break_on_failure'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-build-after-child-diagnostics",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux && cmake --build . --target nei_tests -j'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-repro-stdin-echo-20",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"wsl bash -lc 'cd /mnt/c/Personal/Projects/LibNei/libnei-src/build-linux/tests && ./nei_tests --gtest_filter=ChildProcessTest.LaunchWithStdinPipeEchoesToStdout --gtest_repeat=20 --gtest_break_on_failure'"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-guarded-full-final-check",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"tools\\run_wsl_ctest_guarded.ps1",
+				"-LogFile",
+				"temp/wsl_ctest_guarded_final.log"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "win-ctest-release-full-after-fix",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"Set-Location 'build/windows-vs2022-release-shared'; ctest -C Release --output-on-failure"
+			],
+			"isBackground": false
 		}
 	]
 }
