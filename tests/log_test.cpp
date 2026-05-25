@@ -169,6 +169,13 @@ static std::string CurrentTestExecutablePath() {
   return std::string(path, static_cast<size_t>(n));
 #endif
 }
+
+// Death test fixture to ensure proper test isolation
+// Note: Running death tests in a multithreaded context may cause
+// GoogleTest warnings about fork() safety. These can be suppressed
+// by running tests with: --gtest_death_test_style=threadsafe
+class LogCDeathTest : public ::testing::Test {};
+
 } // namespace
 
 TEST(LogCTest, FlushFromSinkCallbackDoesNotDeadlock) {
@@ -1354,7 +1361,7 @@ TEST(LogCTest, InstallCrashHandlerIsIdempotent) {
   EXPECT_EQ(nei_log_install_crash_handler(NEI_LOG_INVALID_CONFIG_HANDLE), 0);
 }
 
-TEST(LogCTest, ImmediateCrashOnFatalTriggersProcessExit) {
+TEST_F(LogCDeathTest, ImmediateCrashOnFatalTriggersProcessExit) {
   /* This test uses EXPECT_DEATH to verify that emitting a FATAL log with
    * immediate_crash_on_fatal enabled actually crashes the process.
    * EXPECT_DEATH runs the code in a child process and verifies it exits abnormally. */
