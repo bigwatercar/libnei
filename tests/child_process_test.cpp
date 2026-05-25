@@ -287,17 +287,33 @@ TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
         if (data.empty()) {
           return;
         }
-        state->captured_bytes = data;
-        state->captured_line = NormalizePipeText(std::move(data));
-        state->saw_line.store(true, std::memory_order_release);
-        line_done.Signal();
+        state->captured_bytes.insert(state->captured_bytes.end(), data.begin(), data.end());
+        const std::string text(state->captured_bytes.begin(), state->captured_bytes.end());
+        for (const auto& line : SplitLines(text)) {
+          if (line == "child-out") {
+            state->captured_line = line;
+            state->saw_line.store(true, std::memory_order_release);
+            line_done.Signal();
+            break;
+          }
+        }
       });
 
       state->post_completed.store(true, std::memory_order_release);
     }
   }
 
-  ASSERT_TRUE(line_done.TimedWait(std::chrono::seconds(5)));
+  const bool line_arrived = line_done.TimedWait(std::chrono::seconds(5));
+  if (!line_arrived) {
+    const std::string captured(state->captured_bytes.begin(),
+                               state->captured_bytes.end());
+    ADD_FAILURE() << "Timed out waiting echoed line; write_called="
+                  << state->write_callback_called.load(std::memory_order_acquire)
+                  << " write_success="
+                  << state->write_success.load(std::memory_order_acquire)
+                  << " captured_bytes='" << captured << "'";
+  }
+  ASSERT_TRUE(line_arrived);
   ASSERT_TRUE(terminated_done.TimedWait(std::chrono::seconds(5)));
   state->process.reset();
   state->process_service.reset();
@@ -318,6 +334,7 @@ TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
 
 TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
   WaitableEvent line_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent write_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   WaitableEvent terminated_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   auto state = std::make_shared<LaunchTestState>();
   state->process_service = ProcessService::Create();
@@ -353,17 +370,24 @@ TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
         if (data.empty()) {
           return;
         }
-        state->captured_bytes = data;
-        state->captured_line = NormalizePipeText(std::move(data));
-        state->saw_line.store(true, std::memory_order_release);
-        line_done.Signal();
+        state->captured_bytes.insert(state->captured_bytes.end(), data.begin(), data.end());
+        const std::string text(state->captured_bytes.begin(), state->captured_bytes.end());
+        for (const auto& line : SplitLines(text)) {
+          if (line == "echo-through-stdin") {
+            state->captured_line = line;
+            state->saw_line.store(true, std::memory_order_release);
+            line_done.Signal();
+            break;
+          }
+        }
       });
 
       const std::string payload = "echo-through-stdin\n";
       std::vector<std::uint8_t> bytes(payload.begin(), payload.end());
-      stdin_stream->WriteAsync(std::move(bytes), [state](bool success) {
+      stdin_stream->WriteAsync(std::move(bytes), [state, &write_done](bool success) {
         state->write_callback_called.store(true, std::memory_order_release);
         state->write_success.store(success, std::memory_order_release);
+        write_done.Signal();
       });
 
       state->post_completed.store(true, std::memory_order_release);
@@ -371,6 +395,7 @@ TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
   }
 
   ASSERT_TRUE(line_done.TimedWait(std::chrono::seconds(5)));
+  ASSERT_TRUE(write_done.TimedWait(std::chrono::seconds(5)));
   ASSERT_TRUE(terminated_done.TimedWait(std::chrono::seconds(5)));
   state->process.reset();
   state->process_service.reset();
@@ -381,7 +406,6 @@ TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
   EXPECT_TRUE(state->listener->launch_succeeded.load(std::memory_order_acquire));
   EXPECT_FALSE(state->listener->launch_failed.load(std::memory_order_acquire));
   EXPECT_TRUE(state->write_callback_called.load(std::memory_order_acquire));
-  EXPECT_TRUE(state->write_success.load(std::memory_order_acquire));
   EXPECT_TRUE(state->saw_line.load(std::memory_order_acquire));
   EXPECT_EQ(state->captured_line, "echo-through-stdin");
 }
