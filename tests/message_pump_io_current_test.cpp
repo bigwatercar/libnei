@@ -2,36 +2,49 @@
 
 #include <atomic>
 
-#include <neixx/common/location.h>
-#include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/message_loop/message_pump_io.h>
-#include <neixx/threading/thread.h>
 
 namespace nei {
 namespace {
 
+class CurrentProbeDelegate final : public MessagePump::Delegate {
+ public:
+  explicit CurrentProbeDelegate(MessagePumpForIO* pump) : pump_(pump) {}
+
+  bool DoWork() override {
+    observed_non_null_.store(MessagePumpForIO::Current() != nullptr,
+                             std::memory_order_release);
+    pump_->Quit();
+    return true;
+  }
+
+  bool DoDelayedWork(NextWorkInfo* next_work_info) override {
+    if (next_work_info != nullptr) {
+      next_work_info->next_run_time = NextWorkInfo::kNoScheduledRunTime;
+    }
+    return false;
+  }
+
+  bool DoIdleWork() override {
+    return false;
+  }
+
+  bool observed_non_null() const {
+    return observed_non_null_.load(std::memory_order_acquire);
+  }
+
+ private:
+  MessagePumpForIO* pump_ = nullptr;
+  std::atomic<bool> observed_non_null_{false};
+};
+
 TEST(MessagePumpForIOCurrentTest, CurrentIsBoundOnIoThread) {
-  Thread thread("io-current-test");
-  Thread::Options options;
-  options.message_pump_type = MessagePumpType::IO;
-  ASSERT_TRUE(thread.StartWithOptions(options));
+  MessagePumpForIO pump;
+  CurrentProbeDelegate delegate(&pump);
 
-  auto runner = thread.GetTaskRunner();
-  ASSERT_TRUE(runner);
+  pump.Run(&delegate);
 
-  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-  std::atomic<bool> inside_non_null{false};
-
-  runner->PostTask(FROM_HERE, [&]() {
-    inside_non_null.store(MessagePumpForIO::Current() != nullptr,
-                          std::memory_order_release);
-    done.Signal();
-  });
-
-  done.Wait();
-  thread.Stop();
-
-  EXPECT_TRUE(inside_non_null.load(std::memory_order_acquire));
+  EXPECT_TRUE(delegate.observed_non_null());
   EXPECT_EQ(MessagePumpForIO::Current(), nullptr);
 }
 
