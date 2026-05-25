@@ -85,6 +85,9 @@ class PosixPipeInputStream final : public AsyncInputStream,
         Close();
         return;
       }
+      if (n < 0 && errno == EINTR) {
+        continue;
+      }
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
         return;
       }
@@ -192,6 +195,10 @@ class PosixPipeOutputStream final : public AsyncOutputStream,
       const ssize_t n = write(fd_, ptr, remaining);
       if (n > 0) {
         pending.offset += static_cast<std::size_t>(n);
+        continue;
+      }
+
+      if (n < 0 && errno == EINTR) {
         continue;
       }
 
