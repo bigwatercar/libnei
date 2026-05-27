@@ -6,6 +6,11 @@ target_link_libraries(neixx PUBLIC nei)
 
 if(WIN32)
   target_compile_definitions(neixx PUBLIC NOMINMAX)
+  # Suppress C4251: needs to have dll-interface for use by clients
+  # This warning is expected when exporting STL containers and template classes
+  if(MSVC)
+    target_compile_options(neixx PRIVATE /wd4251)
+  endif()
 endif()
 
 if(BUILD_SHARED_LIBS)
