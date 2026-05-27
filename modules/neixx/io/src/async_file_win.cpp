@@ -131,7 +131,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
   explicit Impl(scoped_refptr<TaskRunner> io_task_runner)
       : io_task_runner_(std::move(io_task_runner)) {
-    DCHECK(io_task_runner_ != nullptr);
+    DCHECK(io_task_runner_);
   }
 
   ~Impl() override {
