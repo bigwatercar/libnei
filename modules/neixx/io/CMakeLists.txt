@@ -1,9 +1,11 @@
 set(NEIXX_IO_SOURCES
   include/neixx/io/async_file.h
+  include/neixx/io/async_file_input_stream.h
   include/neixx/io/async_stream.h
   include/neixx/io/async_line_reader.h
   src/internal/pipe_stream_factory_internal.h
   src/async_file.cpp
+  src/async_file_input_stream.cpp
   src/async_file_posix.h
   src/async_file_win.h
   src/async_line_reader.cpp
