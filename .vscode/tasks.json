@@ -2015,6 +2015,50 @@
 				"Set-Location 'build/windows-vs2022-release-shared'; ctest -C Release --output-on-failure"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "run-posix-asyncfile-stress",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src; cmake --build build-linux --target nei_tests -j4; ./build-linux/tests/nei_tests --gtest_filter=AsyncFilePosixStressTest.* --gtest_color=no"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-posix-asyncfile-stress2",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src; cmake --build build-linux --target nei_tests -j4; ./build-linux/tests/nei_tests --gtest_filter=AsyncFilePosixStressTest.* --gtest_color=no"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-posix-asyncfile-stress3",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src; cmake --build build-linux --target nei_tests -j4; ./build-linux/tests/nei_tests --gtest_filter=AsyncFilePosixStressTest.* --gtest_color=no"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-posix-asyncfile-stress4",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src; cmake --build build-linux --target nei_tests -j4; ./build-linux/tests/nei_tests --gtest_filter=AsyncFilePosixStressTest.* --gtest_color=no"
+			],
+			"isBackground": false
 		}
 	]
 }
