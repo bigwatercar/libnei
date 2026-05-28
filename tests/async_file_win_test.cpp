@@ -14,7 +14,7 @@
 #include <neixx/common/location.h>
 #include <neixx/io/async_line_reader.h>
 #include <neixx/io/async_stream.h>
-#include <neixx/io/async_file_win.h>
+#include <async_file_win.h>
 #include <neixx/task/message_loop/message_pump_io.h>
 #include <neixx/task/task_runner.h>
 #include <neixx/synchronization/waitable_event.h>

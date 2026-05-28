@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -18,6 +19,11 @@ class TaskRunner;
 
 class NEI_API AsyncFile {
  public:
+  // AsyncFile is a byte-stream abstraction. It intentionally does not expose
+  // a text/binary file mode; any text handling belongs in a higher layer.
+  static std::unique_ptr<AsyncFile> Create(
+      scoped_refptr<TaskRunner> io_task_runner);
+
   enum class OpenMode {
     kReadOnly,
     kWriteOnly,

@@ -41,6 +41,13 @@ class NEI_API TaskRunner : public RefCountedThreadSafe<TaskRunner> {
   // the delayed queue. Returns true if successfully enqueued.
   bool PostDelayedTask(const Location& from_here, OnceClosure task, TimeDelta delay);
 
+  template <typename T>
+  bool DeleteSoon(const Location& from_here, T* object) {
+    return PostTask(from_here, [object]() {
+      delete object;
+    });
+  }
+
   virtual bool PostTaskWithTraits(const Location& from_here,
                                   const TaskTraits& traits,
                                   OnceClosure task) = 0;
