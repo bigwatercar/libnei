@@ -24,6 +24,7 @@ add_executable(
   async_file_posix_test.cpp
   async_file_win_test.cpp
   async_line_reader_test.cpp
+  io_buffer_test.cpp
   base64_test.cpp
   checksum_hash_test.cpp
   check_macro_test.cpp
