@@ -13,9 +13,16 @@
 
 namespace nei {
 
+// Base reference-counted byte buffer view.
+//
+// IOBuffer only models pointer semantics (`char* data()`). Ownership of the
+// underlying memory is defined by subclasses. The destructor is protected so
+// callers cannot delete through raw pointers; use scoped_refptr instead.
 class NEI_API IOBuffer : public RefCountedThreadSafe<IOBuffer> {
  public:
+  // Returns mutable storage start. May be null for empty/unbound wrappers.
   char* data() { return data_; }
+  // Returns immutable storage start. May be null for empty/unbound wrappers.
   const char* data() const { return data_; }
 
   IOBuffer(const IOBuffer&) = delete;
@@ -35,10 +42,16 @@ class NEI_API IOBuffer : public RefCountedThreadSafe<IOBuffer> {
 
 class IOBufferPool;
 
+// Owns a contiguous heap allocation with explicit byte size metadata.
+//
+// This is the primary concrete buffer for read/write operations. Instances can
+// optionally return their storage to IOBufferPool during destruction.
 class NEI_API IOBufferWithSize : public IOBuffer {
  public:
+  // Allocates a buffer with `size` bytes.
   explicit IOBufferWithSize(std::size_t size);
 
+  // Number of valid bytes in this allocation.
   std::size_t size() const { return size_; }
 
   IOBufferWithSize(const IOBufferWithSize&) = delete;
@@ -66,6 +79,10 @@ class NEI_API IOBufferWithSize : public IOBuffer {
 
 class NEI_API WrappedIOBuffer final : public IOBuffer {
  public:
+  // Wraps externally owned storage without taking ownership.
+  //
+  // The wrapped pointer must outlive this wrapper. Destruction never frees
+  // the wrapped memory.
   explicit WrappedIOBuffer(char* data);
 
   WrappedIOBuffer(const WrappedIOBuffer&) = delete;
@@ -77,12 +94,21 @@ class NEI_API WrappedIOBuffer final : public IOBuffer {
 
 class NEI_API DrainableIOBuffer final : public IOBuffer {
  public:
+  // Creates a virtual slice on top of `base_buffer` with a logical size
+  // window `[0, size)`. The visible data pointer moves as bytes are consumed.
   DrainableIOBuffer(scoped_refptr<IOBuffer> base_buffer, std::size_t size);
 
+  // Advances the logical read/write cursor by `bytes`.
+  //
+  // In debug builds, over-consume is DCHECKed. In release builds, the cursor
+  // is clamped to the end to avoid undefined pointer movement.
   void DidConsume(std::size_t bytes);
+  // Remaining bytes in the current virtual window.
   std::size_t BytesRemaining() const;
+  // Total bytes consumed since construction.
   std::size_t BytesConsumed() const;
 
+  // Returns the underlying base buffer retained by this slice.
   scoped_refptr<IOBuffer> base_buffer() const { return base_buffer_; }
 
   DrainableIOBuffer(const DrainableIOBuffer&) = delete;
@@ -101,10 +127,13 @@ class NEI_API DrainableIOBuffer final : public IOBuffer {
 
 class NEI_API IOBufferPool {
  public:
+  // Global process-local pool instance.
   static IOBufferPool& GetInstance();
 
   // Acquires a reusable buffer. For hot bucket sizes (4KB and 64KB), this
   // avoids repetitive heap churn by reusing cached blocks.
+  //
+  // Returned buffer size may be normalized to a hot bucket size.
   scoped_refptr<IOBufferWithSize> AcquireBuffer(std::size_t size);
 
   // Test hooks for deterministic pool behavior verification.
