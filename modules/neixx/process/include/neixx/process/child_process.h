@@ -128,6 +128,8 @@ class NEI_API ChildProcessListener {
 /// High-level async child process wrapper.
 class NEI_API ChildProcess {
  public:
+  class Impl;
+
   /// Uses the default ProcessService.
   ChildProcess();
   /// Uses an explicit ProcessService instance.
@@ -159,7 +161,9 @@ class NEI_API ChildProcess {
   AsyncOutputStream* GetStdinStream() const;
 
  private:
-  class Impl;
+  static std::unique_ptr<Impl> CreatePlatformImpl(
+      scoped_refptr<ProcessService> process_service);
+
   std::unique_ptr<Impl> impl_;
   ChildProcessListener* listener_ = nullptr;
 };

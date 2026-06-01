@@ -2,6 +2,9 @@ set(NEIXX_PROCESS_SOURCES
   include/neixx/process/child_process.h
   include/neixx/process/process_service.h
   include/neixx/process/process_util.h
+  src/child_process.cpp
+  src/child_process_stream_proxy.h
+  src/child_process_stream_proxy.cpp
 )
 
 if(WIN32)

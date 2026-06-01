@@ -5,6 +5,8 @@
 
 #include <neixx/process/child_process.h>
 #include <neixx/process/process_service.h>
+#include "child_process_impl_interface.h"
+#include "child_process_impl_common.h"
 
 #include <atomic>
 #include <array>
@@ -19,7 +21,6 @@
 #include <neixx/command_line/command_line.h>
 #include <neixx/common/location.h>
 #include <internal/pipe_stream_factory_internal.h>
-#include "child_process_stream_proxy.h"
 #include <neixx/strings/utf_string_conversions.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/task_runner.h>
@@ -897,222 +898,79 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
 
 }  // namespace
 
-class ChildProcess::Impl final : public ChildProcessListener {
+class ChildProcessPlatformImpl final
+    : public ChildProcess::Impl,
+      public internal::ChildProcessImplBase<ChildProcessPlatformImpl> {
  public:
-  explicit Impl(scoped_refptr<ProcessService> process_service)
-      : process_service_(std::move(process_service)),
-        stdout_proxy_(std::make_unique<internal::AsyncInputStreamProxy>()),
-        stderr_proxy_(std::make_unique<internal::AsyncInputStreamProxy>()),
-        stdin_proxy_(std::make_unique<internal::AsyncOutputStreamProxy>()) {}
+  explicit ChildProcessPlatformImpl(scoped_refptr<ProcessService> process_service)
+      : Base(std::move(process_service)) {}
 
-  ~Impl() { Shutdown(); }
+  ~ChildProcessPlatformImpl() override { Base::Shutdown(); }
 
   bool Launch(const CommandLine& command_line,
               const ProcessLaunchOptions& options,
-              ChildProcessListener* listener) {
-    SetExternalListener(listener);
-    if (process_service_.get() == nullptr) {
-      process_service_ = ProcessService::GetDefault();
+              ChildProcessListener* listener) override {
+    return Base::Launch(command_line, options, listener);
+  }
+
+  bool Terminate(int exit_code, bool force) override {
+    return Base::Terminate(exit_code, force);
+  }
+
+  void SetExternalListener(ChildProcessListener* listener) override {
+    Base::SetExternalListener(listener);
+  }
+
+  AsyncInputStream* GetStdoutStream() const override {
+    return Base::GetStdoutStream();
+  }
+
+  AsyncInputStream* GetStderrStream() const override {
+    return Base::GetStderrStream();
+  }
+
+  AsyncOutputStream* GetStdinStream() const override {
+    return Base::GetStdinStream();
+  }
+
+  bool LaunchOnIoThread(const CommandLine& command_line,
+                       const ProcessLaunchOptions& options,
+                       const scoped_refptr<TaskRunner>& io_runner) {
+    stdout_proxy_->ResetBinding();
+    stderr_proxy_->ResetBinding();
+    stdin_proxy_->ResetBinding();
+    core_.reset();
+
+    core_ = std::make_unique<WinChildProcessCore>(this);
+    const bool ok = core_->Launch(command_line, options);
+    if (ok) {
+      stdout_proxy_->Bind(core_->stdout_stream(), io_runner);
+      stderr_proxy_->Bind(core_->stderr_stream(), io_runner);
+      stdin_proxy_->Bind(core_->stdin_stream(), io_runner);
     }
-    if (process_service_.get() == nullptr || !process_service_->Start()) {
-      NotifyLaunchFailedOnCallerThread();
-      return false;
-    }
-
-    const scoped_refptr<TaskRunner> io_runner = process_service_->GetTaskRunner();
-    if (io_runner.get() == nullptr) {
-      NotifyLaunchFailedOnCallerThread();
-      return false;
-    }
-
-    auto launch_on_io = [this, io_runner, &command_line, options](bool* ok) {
-      stdout_proxy_->ResetBinding();
-      stderr_proxy_->ResetBinding();
-      stdin_proxy_->ResetBinding();
-      core_.reset();
-
-      core_ = std::make_unique<WinChildProcessCore>(this);
-      *ok = core_->Launch(command_line, options);
-      if (*ok) {
-        stdout_proxy_->Bind(core_->stdout_stream(), io_runner);
-        stderr_proxy_->Bind(core_->stderr_stream(), io_runner);
-        stdin_proxy_->Bind(core_->stdin_stream(), io_runner);
-      }
-    };
-
-    const scoped_refptr<TaskRunner> current_runner = ThreadTaskRunnerHandle::Get();
-    const bool on_service_thread = process_service_->IsOnServiceThread() ||
-                                   (current_runner.get() != nullptr &&
-                                    current_runner.get() == io_runner.get());
-
-    bool ok = false;
-    if (on_service_thread) {
-      launch_on_io(&ok);
-      return ok;
-    }
-
-    WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-    io_runner->PostTask(FROM_HERE, [&, this]() {
-      launch_on_io(&ok);
-      done.Signal();
-    });
-    done.Wait();
     return ok;
   }
 
-  bool Terminate(int exit_code, bool force) {
-    if (process_service_.get() == nullptr) {
-      return false;
-    }
-    const scoped_refptr<TaskRunner> io_runner = process_service_->GetTaskRunner();
-    if (io_runner.get() == nullptr) {
-      return false;
-    }
-
-    auto terminate_on_io = [this, exit_code, force](bool* ok) {
-      *ok = core_ != nullptr && core_->Terminate(exit_code, force);
-    };
-
-    const scoped_refptr<TaskRunner> current_runner = ThreadTaskRunnerHandle::Get();
-    const bool on_service_thread = process_service_->IsOnServiceThread() ||
-                                   (current_runner.get() != nullptr &&
-                                    current_runner.get() == io_runner.get());
-
-    bool ok = false;
-    if (on_service_thread) {
-      terminate_on_io(&ok);
-      return ok;
-    }
-
-    WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-    io_runner->PostTask(FROM_HERE, [&, this]() {
-      terminate_on_io(&ok);
-      done.Signal();
-    });
-    done.Wait();
-    return ok;
+  bool TerminateOnIoThread(int exit_code, bool force) {
+    return core_ != nullptr && core_->Terminate(exit_code, force);
   }
 
-  void SetExternalListener(ChildProcessListener* listener) {
-    std::lock_guard<std::mutex> lock(listener_lock_);
-    external_listener_ = listener;
-  }
-
-  AsyncInputStream* GetStdoutStream() const { return stdout_proxy_.get(); }
-  AsyncInputStream* GetStderrStream() const { return stderr_proxy_.get(); }
-  AsyncOutputStream* GetStdinStream() const { return stdin_proxy_.get(); }
-
-  void OnProcessLaunchSucceeded(int pid) override {
-    ChildProcessListener* listener = GetExternalListener();
-    if (listener != nullptr) {
-      listener->OnProcessLaunchSucceeded(pid);
-    }
-  }
-
-  void OnProcessLaunchFailed() override {
-    ChildProcessListener* listener = GetExternalListener();
-    if (listener != nullptr) {
-      listener->OnProcessLaunchFailed();
-    }
-  }
-
-  void OnProcessTerminated(const ProcessExitInfo& info) override {
-    ChildProcessListener* listener = GetExternalListener();
-    if (listener != nullptr) {
-      listener->OnProcessTerminated(info);
-    }
+  void ShutdownOnIoThread() {
+    stdout_proxy_->ResetBinding();
+    stderr_proxy_->ResetBinding();
+    stdin_proxy_->ResetBinding();
+    core_.reset();
   }
 
  private:
-  void Shutdown() {
-    if (process_service_.get() != nullptr) {
-      const scoped_refptr<TaskRunner> io_runner = process_service_->GetTaskRunner();
-      if (io_runner.get() == nullptr) {
-        return;
-      }
-
-      auto shutdown_on_io = [this]() {
-        stdout_proxy_->ResetBinding();
-        stderr_proxy_->ResetBinding();
-        stdin_proxy_->ResetBinding();
-        core_.reset();
-      };
-
-      const scoped_refptr<TaskRunner> current_runner = ThreadTaskRunnerHandle::Get();
-      const bool on_service_thread = process_service_->IsOnServiceThread() ||
-                                     (current_runner.get() != nullptr &&
-                                      current_runner.get() == io_runner.get());
-      if (on_service_thread) {
-        shutdown_on_io();
-        return;
-      }
-
-      WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-      io_runner->PostTask(FROM_HERE, [&, this]() {
-        shutdown_on_io();
-        done.Signal();
-      });
-      done.Wait();
-    }
-  }
-
-  void NotifyLaunchFailedOnCallerThread() {
-    ChildProcessListener* listener = GetExternalListener();
-    if (listener != nullptr) {
-      listener->OnProcessLaunchFailed();
-    }
-  }
-
-  ChildProcessListener* GetExternalListener() {
-    std::lock_guard<std::mutex> lock(listener_lock_);
-    return external_listener_;
-  }
-
-  scoped_refptr<ProcessService> process_service_;
+    using Base = internal::ChildProcessImplBase<ChildProcessPlatformImpl>;
   std::unique_ptr<WinChildProcessCore> core_;
-  std::unique_ptr<internal::AsyncInputStreamProxy> stdout_proxy_;
-  std::unique_ptr<internal::AsyncInputStreamProxy> stderr_proxy_;
-  std::unique_ptr<internal::AsyncOutputStreamProxy> stdin_proxy_;
-  mutable std::mutex listener_lock_;
-  ChildProcessListener* external_listener_ = nullptr;
 };
 
-ChildProcess::ChildProcess()
-  : impl_(std::make_unique<Impl>(ProcessService::GetDefault())) {}
-
-ChildProcess::ChildProcess(scoped_refptr<ProcessService> process_service)
-  : impl_(std::make_unique<Impl>(process_service ? process_service
-                           : ProcessService::GetDefault())) {}
-
-ChildProcess::~ChildProcess() = default;
-
-bool ChildProcess::Launch(const CommandLine& command_line,
-                          const ProcessLaunchOptions& options) {
-  return impl_->Launch(command_line, options, listener_);
-}
-
-bool ChildProcess::Terminate(int exit_code, bool force) {
-  return impl_->Terminate(exit_code, force);
-}
-
-void ChildProcess::SetListener(ChildProcessListener* listener) {
-  listener_ = listener;
-  if (impl_ != nullptr) {
-    impl_->SetExternalListener(listener);
+  std::unique_ptr<ChildProcess::Impl> ChildProcess::CreatePlatformImpl(
+      scoped_refptr<ProcessService> process_service) {
+    return std::make_unique<ChildProcessPlatformImpl>(std::move(process_service));
   }
-}
-
-AsyncInputStream* ChildProcess::GetStdoutStream() const {
-  return impl_->GetStdoutStream();
-}
-
-AsyncInputStream* ChildProcess::GetStderrStream() const {
-  return impl_->GetStderrStream();
-}
-
-AsyncOutputStream* ChildProcess::GetStdinStream() const {
-  return impl_->GetStdinStream();
-}
 
 }  // namespace nei
 
