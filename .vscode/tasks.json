@@ -2294,6 +2294,150 @@
 				"git status --porcelain -uall && git add -A && git commit -m \"fix(io,posix): harden async close race and run dual-platform multi-round ctest\" && git show --name-status --oneline --no-color -1"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "show-last-commit-files",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"git show --name-status --pretty=format:\"%h %s\" --no-color -1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "dump-last-commit-files-to-file",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"git show --name-status --pretty=format:\"%h %s\" --no-color -1 > temp\\last_commit_files.txt"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "cleanup-post-commit-temp-and-status",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"del /f /q temp\\last_commit_files.txt && git status --short --untracked-files=all"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-stream-reader-writer-demo",
+			"type": "shell",
+			"command": "cmake",
+			"args": [
+				"--build",
+				"build/windows-vs2022-release-shared",
+				"--config",
+				"Release",
+				"--target",
+				"stream_reader_writer_demo"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-stream-reader-writer-demo",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\demo\\Release\\stream_reader_writer_demo.exe"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rebuild-stream-reader-writer-demo",
+			"type": "shell",
+			"command": "cmake",
+			"args": [
+				"--build",
+				"build/windows-vs2022-release-shared",
+				"--config",
+				"Release",
+				"--target",
+				"stream_reader_writer_demo"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-stream-reader-writer-demo",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\demo\\Release\\stream_reader_writer_demo.exe"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-stream-reader-writer-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=StreamReaderWriterTest.*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rebuild-nei-tests-with-stream-reader-writer-tests",
+			"type": "shell",
+			"command": "cmake",
+			"args": [
+				"--build",
+				"build/windows-vs2022-release-shared",
+				"--config",
+				"Release",
+				"--target",
+				"nei_tests"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-stream-reader-writer-tests-only",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=StreamReaderWriterTest.*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rebuild-nei-tests-after-stream-reader-writer-test-fix",
+			"type": "shell",
+			"command": "cmake",
+			"args": [
+				"--build",
+				"build/windows-vs2022-release-shared",
+				"--config",
+				"Release",
+				"--target",
+				"nei_tests"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-stream-reader-writer-tests-only-after-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"build\\windows-vs2022-release-shared\\tests\\Release\\nei_tests.exe --gtest_filter=StreamReaderWriterTest.*"
+			],
+			"isBackground": false
 		}
 	]
 }
