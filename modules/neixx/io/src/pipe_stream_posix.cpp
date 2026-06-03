@@ -4,15 +4,16 @@
 
 #include <cerrno>
 #include <csignal>
-#include <cstdint>
+#include <cstddef>
+#include <cstring>
 #include <deque>
 #include <memory>
 #include <mutex>
 #include <utility>
-#include <vector>
 
 #include <unistd.h>
 
+#include <neixx/io/io_buffer.h>
 #include <neixx/task/message_loop/message_pump_io.h>
 
 namespace nei {
@@ -26,13 +27,18 @@ std::mutex& SigPipeMutex() {
 void IgnoreSigPipeOnce() {
   static bool initialized = false;
   std::lock_guard<std::mutex> lock(SigPipeMutex());
-  if (initialized) {
-    return;
-  }
+  if (initialized) return;
   (void)signal(SIGPIPE, SIG_IGN);
   initialized = true;
 }
 
+// ---------------------------------------------------------------------------
+// PosixPipeInputStream
+//
+// Pull model: one ReadAsync() -> one read() -> one callback.
+// The caller-supplied IOBuffer is the read() destination; no copy is needed.
+// A new ReadAsync() must be issued for each chunk wanted.
+// ---------------------------------------------------------------------------
 class PosixPipeInputStream final : public AsyncInputStream,
                                    public MessagePumpForIO::Watcher {
  public:
@@ -41,78 +47,121 @@ class PosixPipeInputStream final : public AsyncInputStream,
 
   ~PosixPipeInputStream() override { Close(); }
 
-  void ReadAsync(DataCallback callback) override {
-    callback_ = std::move(callback);
-    if (closed_ || pump_ == nullptr || fd_ < 0) {
+  void ReadAsync(scoped_refptr<IOBuffer> buf,
+                 std::size_t buf_len,
+                 IOReadCallback callback) override {
+    if (closed_) {
+      if (callback) callback(false, 0u);
       return;
     }
+    if (pending_cb_) {
+      // Overlapping reads not supported.
+      if (callback) callback(false, 0u);
+      return;
+    }
+
+    pending_buf_ = std::move(buf);
+    pending_len_ = buf_len;
+    pending_cb_ = std::move(callback);
+
     if (!controller_.is_watching()) {
       (void)controller_.StartWatching(
           pump_, fd_, MessagePumpForIO::FdWatchController::Mode::READ, this);
     }
+
+    // Attempt an immediate non-blocking read.
+    TryRead();
   }
 
   void Close() override {
-    if (closed_) {
-      return;
-    }
+    if (closed_) return;
     closed_ = true;
     controller_.StopWatching();
     if (fd_ >= 0) {
       (void)close(fd_);
       fd_ = -1;
     }
-    if (callback_) {
-      callback_({});
-      callback_ = nullptr;
+    if (pending_cb_) {
+      IOReadCallback cb = std::move(pending_cb_);
+      pending_buf_.reset();
+      cb(false, 0u);
     }
   }
 
   void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override {
-    if (closed_ || callback_ == nullptr || static_cast<int>(handle) != fd_) {
-      return;
-    }
-
-    for (;;) {
-      std::vector<std::uint8_t> buffer(4096);
-      const ssize_t n = read(fd_, buffer.data(), buffer.size());
-      if (n > 0) {
-        buffer.resize(static_cast<std::size_t>(n));
-        callback_(std::move(buffer));
-        continue;
-      }
-      if (n == 0) {
-        Close();
-        return;
-      }
-      if (n < 0 && errno == EINTR) {
-        continue;
-      }
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        return;
-      }
-      Close();
-      return;
-    }
+    if (closed_ || !pending_cb_ || static_cast<int>(handle) != fd_) return;
+    TryRead();
   }
 
   void OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) override {}
 
  private:
+  void TryRead() {
+    for (;;) {
+      const ssize_t n =
+          read(fd_, pending_buf_->data(), pending_len_);
+      if (n > 0) {
+        DeliverSuccess(static_cast<std::size_t>(n));
+        return;
+      }
+      if (n == 0) {
+        // EOF.
+        DeliverEof();
+        return;
+      }
+      // n < 0
+      if (errno == EINTR) continue;
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        // Not ready; wait for epoll notification.
+        return;
+      }
+      DeliverEof();
+      return;
+    }
+  }
+
+  void DeliverSuccess(std::size_t bytes) {
+    IOReadCallback cb = std::move(pending_cb_);
+    pending_buf_.reset();
+    // Stop watching; the next ReadAsync() will re-enable if needed.
+    controller_.StopWatching();
+    if (cb) cb(true, bytes);
+  }
+
+  void DeliverEof() {
+    IOReadCallback cb = std::move(pending_cb_);
+    pending_buf_.reset();
+    controller_.StopWatching();
+    if (cb) cb(false, 0u);
+  }
+
   MessagePumpForIO* pump_ = nullptr;
   int fd_ = -1;
   bool closed_ = false;
-  DataCallback callback_;
+
+  scoped_refptr<IOBuffer> pending_buf_;
+  std::size_t pending_len_ = 0;
+  IOReadCallback pending_cb_;
+
   MessagePumpForIO::FdWatchController controller_;
 };
 
+// ---------------------------------------------------------------------------
+// PosixPipeOutputStream
+//
+// Each WriteAsync() queues a PendingWrite with a scoped_refptr<IOBuffer>.
+// write() is called directly on buf->data() + offset, so no extra copy.
+// Multiple queued writes are serialised through the deque; each PendingWrite
+// completes atomically (full write before advancing to next entry).
+// ---------------------------------------------------------------------------
 class PosixPipeOutputStream final : public AsyncOutputStream,
                                     public MessagePumpForIO::Watcher {
  public:
   struct PendingWrite {
-    std::vector<std::uint8_t> data;
+    scoped_refptr<IOBuffer> buf;
+    std::size_t buf_len = 0;
     std::size_t offset = 0;
-    WriteCompleteCallback callback;
+    IOWriteCallback callback;
   };
 
   PosixPipeOutputStream(MessagePumpForIO* pump, int fd)
@@ -122,33 +171,30 @@ class PosixPipeOutputStream final : public AsyncOutputStream,
 
   ~PosixPipeOutputStream() override { Close(); }
 
-  void WriteAsync(std::vector<std::uint8_t> data,
-                  WriteCompleteCallback callback) override {
+  void WriteAsync(scoped_refptr<IOBuffer> buf,
+                  std::size_t buf_len,
+                  IOWriteCallback callback) override {
     if (closed_) {
-      if (callback) {
-        callback(false);
-      }
+      if (callback) callback(false, 0u);
       return;
     }
 
-    PendingWrite pending;
-    pending.data = std::move(data);
-    pending.callback = std::move(callback);
-    writes_.push_back(std::move(pending));
+    PendingWrite pw;
+    pw.buf = std::move(buf);
+    pw.buf_len = buf_len;
+    pw.offset = 0;
+    pw.callback = std::move(callback);
+    writes_.push_back(std::move(pw));
 
     DrainWrites();
   }
 
   void Close() override {
-    if (closed_) {
-      return;
-    }
+    if (closed_) return;
     closed_ = true;
     controller_.StopWatching();
     while (!writes_.empty()) {
-      if (writes_.front().callback) {
-        writes_.front().callback(false);
-      }
+      if (writes_.front().callback) writes_.front().callback(false, 0u);
       writes_.pop_front();
     }
     if (fd_ >= 0) {
@@ -160,56 +206,43 @@ class PosixPipeOutputStream final : public AsyncOutputStream,
   void OnFileCanReadWithoutBlocking(NativeIOHandle /*handle*/) override {}
 
   void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) override {
-    if (closed_ || static_cast<int>(handle) != fd_) {
-      return;
-    }
+    if (closed_ || static_cast<int>(handle) != fd_) return;
     DrainWrites();
   }
 
  private:
-  void EnsureWatchMode(MessagePumpForIO::FdWatchController::Mode mode) {
-    if (closed_ || pump_ == nullptr || fd_ < 0) {
-      return;
-    }
+  void EnsureWriteWatch() {
+    if (closed_ || pump_ == nullptr || fd_ < 0) return;
     controller_.StopWatching();
-    (void)controller_.StartWatching(pump_, fd_, mode, this);
+    (void)controller_.StartWatching(
+        pump_, fd_, MessagePumpForIO::FdWatchController::Mode::WRITE, this);
   }
 
   void DrainWrites() {
-    if (closed_) {
-      return;
-    }
+    if (closed_) return;
 
     while (!writes_.empty()) {
-      PendingWrite& pending = writes_.front();
-      const std::uint8_t* ptr = pending.data.data() + pending.offset;
-      const std::size_t remaining = pending.data.size() - pending.offset;
+      PendingWrite& front = writes_.front();
+      const std::size_t remaining = front.buf_len - front.offset;
       if (remaining == 0) {
-        if (pending.callback) {
-          pending.callback(true);
-        }
+        if (front.callback) front.callback(true, front.buf_len);
         writes_.pop_front();
         continue;
       }
 
+      const char* ptr = front.buf->data() + front.offset;
       const ssize_t n = write(fd_, ptr, remaining);
       if (n > 0) {
-        pending.offset += static_cast<std::size_t>(n);
+        front.offset += static_cast<std::size_t>(n);
         continue;
       }
-
-      if (n < 0 && errno == EINTR) {
-        continue;
-      }
-
+      if (n < 0 && errno == EINTR) continue;
       if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-        EnsureWatchMode(MessagePumpForIO::FdWatchController::Mode::WRITE);
+        EnsureWriteWatch();
         return;
       }
-
-      if (pending.callback) {
-        pending.callback(false);
-      }
+      // Error.
+      if (front.callback) front.callback(false, 0u);
       writes_.pop_front();
       Close();
       return;
@@ -235,7 +268,8 @@ std::unique_ptr<AsyncInputStream> CreatePipeInputStream(MessagePumpForIO* pump,
 std::unique_ptr<AsyncOutputStream> CreatePipeOutputStream(
     MessagePumpForIO* pump,
     NativeIOHandle handle) {
-  return std::make_unique<PosixPipeOutputStream>(pump, static_cast<int>(handle));
+  return std::make_unique<PosixPipeOutputStream>(
+      pump, static_cast<int>(handle));
 }
 
 }  // namespace nei

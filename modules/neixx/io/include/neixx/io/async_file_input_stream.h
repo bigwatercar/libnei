@@ -27,7 +27,9 @@ class NEI_API AsyncFileInputStream final : public AsyncInputStream {
   AsyncFileInputStream(const AsyncFileInputStream&) = delete;
   AsyncFileInputStream& operator=(const AsyncFileInputStream&) = delete;
 
-  void ReadAsync(DataCallback callback) override;
+  void ReadAsync(scoped_refptr<IOBuffer> buf,
+                 std::size_t buf_len,
+                 IOReadCallback callback) override;
   void Close() override;
 
  private:

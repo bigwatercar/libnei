@@ -2,6 +2,7 @@
 
 #include <async_file_posix.h>
 
+#include <atomic>
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
@@ -151,11 +152,15 @@ class AsyncFilePosix::Impl final {
   bool AsyncRead(std::int64_t offset,
                  std::size_t size,
                  ReadCallback callback) {
+    // Once Close() is requested, reject new work immediately on caller thread.
+    if (close_requested_.load(std::memory_order_acquire)) {
+      return false;
+    }
     if (!io_task_runner_ || !callback) {
       return false;
     }
 
-    io_task_runner_->PostTask(
+    const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
         [weak_this = weak_factory_.GetWeakPtr(), offset, size,
          callback = std::move(callback)]() mutable {
@@ -164,17 +169,21 @@ class AsyncFilePosix::Impl final {
           }
           weak_this->StartReadOnIoThread(offset, size, std::move(callback));
         });
-    return true;
+    return posted;
   }
 
   bool AsyncWrite(std::int64_t offset,
                   std::vector<std::uint8_t> buffer,
                   WriteCallback callback) {
+    // Symmetric close gate for write side.
+    if (close_requested_.load(std::memory_order_acquire)) {
+      return false;
+    }
     if (!io_task_runner_ || !callback) {
       return false;
     }
 
-    io_task_runner_->PostTask(
+    const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
         [weak_this = weak_factory_.GetWeakPtr(), offset,
          buffer = std::move(buffer), callback = std::move(callback)]() mutable {
@@ -184,10 +193,13 @@ class AsyncFilePosix::Impl final {
           weak_this->StartWriteOnIoThread(offset, std::move(buffer),
                                           std::move(callback));
         });
-    return true;
+    return posted;
   }
 
   void Close() {
+    // Publish close intent first so concurrent callers stop enqueueing work.
+    close_requested_.store(true, std::memory_order_release);
+
     if (!io_task_runner_) {
       return;
     }
@@ -223,6 +235,8 @@ class AsyncFilePosix::Impl final {
       if (state_ != State::kDisconnected) {
         // callback stays non-null; we will post EBUSY outside the lock.
       } else {
+        // New open cycle clears the close gate.
+        close_requested_.store(false, std::memory_order_release);
         state_ = State::kOpening;
         background_runner_ = background_runner;
         pending_open_mode_ = mode;
@@ -441,10 +455,23 @@ class AsyncFilePosix::Impl final {
     return true;
   }
 
+  bool IsCloseRequested() const {
+    return close_requested_.load(std::memory_order_acquire);
+  }
+
   void DispatchChunkToBackground(std::unique_ptr<IOContext> context,
                                  int fd_snapshot,
                                  scoped_refptr<TaskRunner> background_runner) {
     if (!context || !background_runner || !io_task_runner_) {
+      return;
+    }
+
+    // If close has already been requested, fail fast on IO thread without
+    // dispatching more physical IO work.
+    if (IsCloseRequested()) {
+      OnChunkCompletedOnIoThread(
+          std::move(context),
+          ChunkResult{0, static_cast<std::uint32_t>(ECANCELED), false});
       return;
     }
 
@@ -461,8 +488,18 @@ class AsyncFilePosix::Impl final {
           ChunkResult result;
           result.error_code = 0;
 
-          if (context->type == IOContext::Type::kWrite && context->append_mode &&
-              !context->append_offset_initialized) {
+          if (!weak_this) {
+            return;
+          }
+
+          // Close was requested while this context was queued on the background
+          // runner. Skip actual pread/pwrite and complete as canceled.
+          if (weak_this->IsCloseRequested()) {
+            result.error_code = static_cast<std::uint32_t>(ECANCELED);
+          }
+
+          if (result.error_code == 0 && context->type == IOContext::Type::kWrite &&
+              context->append_mode && !context->append_offset_initialized) {
             struct stat st = {};
             for (;;) {
               if (::fstat(fd_snapshot, &st) == 0) {
@@ -756,6 +793,7 @@ class AsyncFilePosix::Impl final {
   scoped_refptr<TaskRunner> background_runner_;
   OpenCallback pending_open_callback_;
   std::unordered_set<IOContext*> active_ios_;
+  std::atomic<bool> close_requested_{false};
   base::WeakPtrFactory<Impl> weak_factory_{this};
 };
 

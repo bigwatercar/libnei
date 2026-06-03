@@ -2,7 +2,8 @@
 
 #include <atomic>
 #include <chrono>
-#include <cstdint>
+#include <cstddef>
+#include <cstring>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -11,6 +12,7 @@
 #include <neixx/command_line/command_line.h>
 #include <neixx/common/location.h>
 #include <neixx/io/async_stream.h>
+#include <neixx/io/io_buffer.h>
 #include <neixx/process/child_process.h>
 #include <neixx/process/process_service.h>
 #include <neixx/synchronization/waitable_event.h>
@@ -86,12 +88,12 @@ struct LaunchTestState {
   std::string captured_line;
 };
 
-std::string NormalizePipeText(std::vector<std::uint8_t> bytes) {
-  std::string text(bytes.begin(), bytes.end());
-  while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) {
-    text.pop_back();
+std::string NormalizePipeText(const std::string& text) {
+  std::string result = text;
+  while (!result.empty() && (result.back() == '\n' || result.back() == '\r')) {
+    result.pop_back();
   }
-  return text;
+  return result;
 }
 
 std::vector<std::string> SplitLines(const std::string& text) {
@@ -105,6 +107,44 @@ std::vector<std::string> SplitLines(const std::string& text) {
     lines.push_back(line);
   }
   return lines;
+}
+
+// ---------------------------------------------------------------------------
+// PullReadLoop
+//
+// Issues repeated ReadAsync() calls on `stream` until EOF/error.  On each
+// successful chunk the `on_chunk` functor is called with the bytes.
+// All calls happen synchronously on the thread that started the loop
+// (same thread the stream is bound to), because FakeAsync / proxy streams
+// complete callbacks inline or via PostTask to the same sequence.
+// The helper keeps the IOBuffer alive via scoped_refptr across each hop.
+// ---------------------------------------------------------------------------
+constexpr std::size_t kTestReadBufSize = 4096;
+
+struct PullReadState {
+  AsyncInputStream* stream = nullptr;
+  std::function<void(const char*, std::size_t)> on_chunk;
+  std::function<void()> on_eof;
+};
+
+// Forward declaration so the lambda can reference it.
+static void IssuePullRead(const std::shared_ptr<PullReadState>& state);
+
+static void IssuePullRead(const std::shared_ptr<PullReadState>& state) {
+  scoped_refptr<IOBufferWithSize> sized_buf =
+      IOBufferPool::GetInstance().AcquireBuffer(kTestReadBufSize);
+  scoped_refptr<IOBuffer> buf(sized_buf.get());
+  state->stream->ReadAsync(
+      buf, kTestReadBufSize,
+      [state, buf](bool ok, std::size_t bytes) mutable {
+        if (!ok || bytes == 0) {
+          if (state->on_eof) state->on_eof();
+          return;
+        }
+        if (state->on_chunk) state->on_chunk(buf->data(), bytes);
+        buf.reset();
+        IssuePullRead(state);
+      });
 }
 
 TEST(ChildProcessTest, LaunchWorksWithoutCurrentIoPump) {
@@ -283,12 +323,12 @@ TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
     if (stdout_stream == nullptr) {
       terminated_done.Signal();
     } else {
-      stdout_stream->ReadAsync([state, &line_done](std::vector<std::uint8_t>&& data) {
-        if (data.empty()) {
-          return;
-        }
-        state->captured_bytes.insert(state->captured_bytes.end(), data.begin(), data.end());
-        const std::string text(state->captured_bytes.begin(), state->captured_bytes.end());
+      auto pull = std::make_shared<PullReadState>();
+      pull->stream = stdout_stream;
+      pull->on_chunk = [state, &line_done](const char* data, std::size_t n) {
+        state->captured_bytes.insert(state->captured_bytes.end(), data, data + n);
+        const std::string text(state->captured_bytes.begin(),
+                               state->captured_bytes.end());
         for (const auto& line : SplitLines(text)) {
           if (line == "child-out") {
             state->captured_line = line;
@@ -297,7 +337,9 @@ TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
             break;
           }
         }
-      });
+      };
+      pull->on_eof = []() {};
+      IssuePullRead(pull);
 
       state->post_completed.store(true, std::memory_order_release);
     }
@@ -307,11 +349,7 @@ TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
   if (!line_arrived) {
     const std::string captured(state->captured_bytes.begin(),
                                state->captured_bytes.end());
-    ADD_FAILURE() << "Timed out waiting echoed line; write_called="
-                  << state->write_callback_called.load(std::memory_order_acquire)
-                  << " write_success="
-                  << state->write_success.load(std::memory_order_acquire)
-                  << " captured_bytes='" << captured << "'";
+    ADD_FAILURE() << "Timed out waiting echoed line; captured='" << captured << "'";
   }
   ASSERT_TRUE(line_arrived);
   ASSERT_TRUE(terminated_done.TimedWait(std::chrono::seconds(5)));
@@ -366,12 +404,13 @@ TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
     if (stdout_stream == nullptr || stdin_stream == nullptr) {
       terminated_done.Signal();
     } else {
-      stdout_stream->ReadAsync([state, &line_done](std::vector<std::uint8_t>&& data) {
-        if (data.empty()) {
-          return;
-        }
-        state->captured_bytes.insert(state->captured_bytes.end(), data.begin(), data.end());
-        const std::string text(state->captured_bytes.begin(), state->captured_bytes.end());
+      // Start pull-read loop on stdout.
+      auto pull = std::make_shared<PullReadState>();
+      pull->stream = stdout_stream;
+      pull->on_chunk = [state, &line_done](const char* data, std::size_t n) {
+        state->captured_bytes.insert(state->captured_bytes.end(), data, data + n);
+        const std::string text(state->captured_bytes.begin(),
+                               state->captured_bytes.end());
         for (const auto& line : SplitLines(text)) {
           if (line == "echo-through-stdin") {
             state->captured_line = line;
@@ -380,15 +419,23 @@ TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
             break;
           }
         }
-      });
+      };
+      pull->on_eof = []() {};
+      IssuePullRead(pull);
 
+      // Write the stdin payload using new IOBuffer-based WriteAsync.
       const std::string payload = "echo-through-stdin\n";
-      std::vector<std::uint8_t> bytes(payload.begin(), payload.end());
-      stdin_stream->WriteAsync(std::move(bytes), [state, &write_done](bool success) {
-        state->write_callback_called.store(true, std::memory_order_release);
-        state->write_success.store(success, std::memory_order_release);
-        write_done.Signal();
-      });
+      scoped_refptr<IOBufferWithSize> wbuf_sized =
+          IOBufferPool::GetInstance().AcquireBuffer(payload.size());
+      scoped_refptr<IOBuffer> wbuf(wbuf_sized.get());
+      std::memcpy(wbuf->data(), payload.data(), payload.size());
+      stdin_stream->WriteAsync(
+          wbuf, payload.size(),
+          [state, &write_done](bool success, std::size_t /*bytes*/) {
+            state->write_callback_called.store(true, std::memory_order_release);
+            state->write_success.store(success, std::memory_order_release);
+            write_done.Signal();
+          });
 
       state->post_completed.store(true, std::memory_order_release);
     }
@@ -483,17 +530,22 @@ TEST(ChildProcessTest, TerminateGracefulStopsRunningProcess) {
   ASSERT_TRUE(listener.launch_succeeded.load(std::memory_order_acquire));
 
 #if !defined(_WIN32)
-  AsyncInputStream* stdout_stream = process.GetStdoutStream();
-  ASSERT_NE(stdout_stream, nullptr);
-  stdout_stream->ReadAsync([&ready](std::vector<std::uint8_t>&& data) {
-    if (data.empty()) {
-      return;
-    }
-    const std::string line = NormalizePipeText(std::move(data));
-    if (line == "ready") {
-      ready.Signal();
-    }
-  });
+  {
+    AsyncInputStream* stdout_stream = process.GetStdoutStream();
+    ASSERT_NE(stdout_stream, nullptr);
+    // Use a shared_ptr<string> so we can accumulate across multiple chunks.
+    auto accumulated = std::make_shared<std::string>();
+    auto pull = std::make_shared<PullReadState>();
+    pull->stream = stdout_stream;
+    pull->on_chunk = [accumulated, &ready](const char* data, std::size_t n) {
+      accumulated->append(data, n);
+      if (NormalizePipeText(*accumulated) == "ready") {
+        ready.Signal();
+      }
+    };
+    pull->on_eof = []() {};
+    IssuePullRead(pull);
+  }
   ASSERT_TRUE(ready.TimedWait(std::chrono::seconds(5)));
 #endif
 
@@ -570,14 +622,16 @@ TEST(ChildProcessTest, LinuxResourceLimitsAreApplied) {
   AsyncInputStream* stdout_stream = state->process->GetStdoutStream();
   ASSERT_NE(stdout_stream, nullptr);
 
-  stdout_stream->ReadAsync([state, &line_done](std::vector<std::uint8_t>&& data) {
-    if (data.empty()) {
-      return;
-    }
-    state->captured_bytes = data;
-    state->captured_line = std::string(data.begin(), data.end());
+  auto pull = std::make_shared<PullReadState>();
+  pull->stream = stdout_stream;
+  pull->on_chunk = [state, &line_done](const char* data, std::size_t n) {
+    state->captured_bytes.insert(state->captured_bytes.end(), data, data + n);
+    state->captured_line = std::string(state->captured_bytes.begin(),
+                                       state->captured_bytes.end());
     line_done.Signal();
-  });
+  };
+  pull->on_eof = []() {};
+  IssuePullRead(pull);
 
   ASSERT_TRUE(line_done.TimedWait(std::chrono::seconds(5)));
   ASSERT_TRUE(terminated_done.TimedWait(std::chrono::seconds(5)));

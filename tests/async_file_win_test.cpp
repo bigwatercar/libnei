@@ -6,6 +6,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -20,6 +21,7 @@
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/threading/platform_thread.h>
 #include <neixx/threading/thread.h>
+#include <neixx/io/io_buffer.h>
 
 namespace nei {
 namespace {
@@ -46,55 +48,79 @@ class FileBackedAsyncInputStream final : public AsyncInputStream {
                              std::size_t chunk_size)
       : file_(std::move(file)), chunk_size_(chunk_size) {}
 
-  void ReadAsync(DataCallback callback) override {
+  void ReadAsync(scoped_refptr<IOBuffer> buf,
+                 std::size_t buf_len,
+                 IOReadCallback callback) override {
+    if (closed_) {
+      if (callback) callback(false, 0u);
+      return;
+    }
+    buf_ = std::move(buf);
+    buf_len_ = buf_len;
     callback_ = std::move(callback);
     ScheduleNextRead();
   }
 
   void Close() override {
     closed_ = true;
-    callback_ = DataCallback();
+    callback_ = IOReadCallback();
+    buf_.reset();
   }
 
  private:
   void ScheduleNextRead() {
-    if (closed_ || !callback_ || !file_) {
+    if (closed_ || !callback_ || !file_ || !buf_) {
       return;
     }
 
+    const std::size_t read_size = (std::min)(buf_len_, chunk_size_);
+    // Capture buf_ by value to keep it alive across the async gap.
+    scoped_refptr<IOBuffer> buf = buf_;
     const bool accepted = file_->AsyncRead(
-        offset_, chunk_size_,
-        [this](bool success, std::vector<std::uint8_t>&& data,
-               std::uint32_t /*error_code*/) {
+        offset_, read_size,
+        [this, buf](bool success, std::vector<std::uint8_t>&& data,
+                    std::uint32_t /*error_code*/) mutable {
           if (closed_ || !callback_) {
             return;
           }
 
           if (!success) {
-            // Surface stream termination on read error.
-            callback_({});
+            IOReadCallback cb = std::move(callback_);
+            buf_.reset();
+            cb(false, 0u);
             return;
           }
 
           const std::size_t got = data.size();
-          callback_(std::move(data));
-
-          if (got == 0 || got < chunk_size_) {
-            callback_({});
+          if (got == 0) {
+            IOReadCallback cb = std::move(callback_);
+            buf_.reset();
+            cb(false, 0u);
             return;
           }
 
+          // Copy data into caller's IOBuffer.
+          std::memcpy(buf->data(), data.data(), got);
           offset_ += static_cast<std::int64_t>(got);
-          ScheduleNextRead();
+
+          IOReadCallback cb = std::move(callback_);
+          buf_.reset();
+          cb(true, got);
         });
 
-    if (!accepted && callback_) {
-      callback_({});
+    if (!accepted) {
+      if (callback_) {
+        IOReadCallback cb = std::move(callback_);
+        buf_.reset();
+        cb(false, 0u);
+      }
     }
   }
 
   std::shared_ptr<AsyncFileWin> file_;
-  DataCallback callback_;
+  IOReadCallback callback_;
+  scoped_refptr<IOBuffer> buf_;
+  std::size_t buf_len_ = 0;
   std::int64_t offset_ = 0;
   std::size_t chunk_size_ = 0;
   bool closed_ = false;

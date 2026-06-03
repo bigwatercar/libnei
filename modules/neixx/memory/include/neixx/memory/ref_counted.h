@@ -249,6 +249,48 @@ private:
   T *ptr_ = nullptr;
 };
 
+// Comparison operators for scoped_refptr.
+//
+// Non-member free functions so that both sides participate in template argument
+// deduction equally, and to allow heterogeneous comparisons between related
+// pointer types (e.g. scoped_refptr<Derived> == scoped_refptr<Base>).
+//
+// Note: scoped_refptr intentionally exposes only `explicit operator bool()`, so
+// `ptr != nullptr` cannot rely on implicit bool conversion.  These overloads
+// provide the expected comparison semantics without an implicit boolean path.
+
+template <typename T, typename U>
+bool operator==(const scoped_refptr<T>& lhs,
+                const scoped_refptr<U>& rhs) noexcept {
+  return lhs.get() == rhs.get();
+}
+
+template <typename T, typename U>
+bool operator!=(const scoped_refptr<T>& lhs,
+                const scoped_refptr<U>& rhs) noexcept {
+  return lhs.get() != rhs.get();
+}
+
+template <typename T>
+bool operator==(const scoped_refptr<T>& lhs, std::nullptr_t) noexcept {
+  return lhs.get() == nullptr;
+}
+
+template <typename T>
+bool operator!=(const scoped_refptr<T>& lhs, std::nullptr_t) noexcept {
+  return lhs.get() != nullptr;
+}
+
+template <typename T>
+bool operator==(std::nullptr_t, const scoped_refptr<T>& rhs) noexcept {
+  return rhs.get() == nullptr;
+}
+
+template <typename T>
+bool operator!=(std::nullptr_t, const scoped_refptr<T>& rhs) noexcept {
+  return rhs.get() != nullptr;
+}
+
 // Factory helper that creates a ref-counted object and returns it as
 // `scoped_refptr<T>`.
 #if defined(__cpp_concepts) && __cpp_concepts >= 201907L

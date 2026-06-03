@@ -1,12 +1,13 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
+#include <cstddef>
+#include <cstring>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include <neixx/common/location.h>
 #include <internal/pipe_stream_factory_internal.h>
+#include <neixx/io/io_buffer.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/threading/thread.h>
 
@@ -25,12 +26,51 @@ std::string BuildUniquePipeName() {
          "_" + std::to_string(tick);
 }
 
+// ---------------------------------------------------------------------------
+// PullReadLoop state for tests
+// ---------------------------------------------------------------------------
+constexpr std::size_t kReadBufSize = 4096;
+
+struct PullState {
+  AsyncInputStream* stream = nullptr;
+  std::string received;
+  bool saw_eof = false;
+  WaitableEvent* done = nullptr;
+};
+
+static void IssuePull(const std::shared_ptr<PullState>& state);
+
+static void IssuePull(const std::shared_ptr<PullState>& state) {
+  scoped_refptr<IOBufferWithSize> sized_buf =
+      IOBufferPool::GetInstance().AcquireBuffer(kReadBufSize);
+  scoped_refptr<IOBuffer> buf(sized_buf.get());
+  state->stream->ReadAsync(
+      buf, kReadBufSize,
+      [state, buf](bool ok, std::size_t bytes) mutable {
+        if (!ok || bytes == 0) {
+          state->saw_eof = true;
+          if (state->done) state->done->Signal();
+          return;
+        }
+        state->received.append(buf->data(), bytes);
+        buf.reset();
+        IssuePull(state);
+      });
+}
+
+// ---------------------------------------------------------------------------
+// WinPipeInputStreamTest.MessageModeLargeReadHandlesMoreData
+//
+// This test verifies that a single large message (> read buffer size) that
+// arrives as ERROR_MORE_DATA is fully reassembled across multiple pull-reads.
+// ---------------------------------------------------------------------------
 TEST(WinPipeInputStreamTest, MessageModeLargeReadHandlesMoreData) {
   const std::string pipe_name = BuildUniquePipeName();
 
   HANDLE server = CreateNamedPipeA(
       pipe_name.c_str(), PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
-      PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT, 1, 0, 0, 0, nullptr);
+      PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT, 1, 0, 0, 0,
+      nullptr);
   ASSERT_NE(server, INVALID_HANDLE_VALUE);
 
   HANDLE client = CreateFileA(pipe_name.c_str(), GENERIC_WRITE, 0, nullptr,
@@ -52,15 +92,13 @@ TEST(WinPipeInputStreamTest, MessageModeLargeReadHandlesMoreData) {
   WaitableEvent setup_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   WaitableEvent read_done(WaitableEvent::ResetPolicy::kAutomatic, false);
 
-  struct SharedState {
-    std::mutex lock;
-    std::string received;
-    bool saw_eof = false;
-    std::unique_ptr<AsyncInputStream> stream;
-  };
-  auto state = std::make_shared<SharedState>();
+  auto state = std::make_shared<PullState>();
+  state->done = &read_done;
 
-  runner->PostTask(FROM_HERE, [state, server, &setup_done, &read_done]() {
+  // The stream is created on the IO thread and the pull loop is started there.
+  std::unique_ptr<AsyncInputStream> stream_holder;
+
+  runner->PostTask(FROM_HERE, [&, server]() {
     MessagePumpForIO* pump = MessagePumpForIO::Current();
     if (pump == nullptr) {
       setup_done.Signal();
@@ -68,18 +106,11 @@ TEST(WinPipeInputStreamTest, MessageModeLargeReadHandlesMoreData) {
       return;
     }
 
-    state->stream = CreatePipeInputStream(
+    stream_holder = CreatePipeInputStream(
         pump, reinterpret_cast<NativeIOHandle>(server));
-    state->stream->ReadAsync([state, &read_done](std::vector<std::uint8_t>&& data) {
-      std::lock_guard<std::mutex> lock(state->lock);
-      if (data.empty()) {
-        state->saw_eof = true;
-        read_done.Signal();
-        return;
-      }
-      state->received.append(reinterpret_cast<const char*>(data.data()), data.size());
-    });
+    state->stream = stream_holder.get();
 
+    IssuePull(state);
     setup_done.Signal();
   });
 
@@ -101,20 +132,18 @@ TEST(WinPipeInputStreamTest, MessageModeLargeReadHandlesMoreData) {
 
   ASSERT_TRUE(read_done.TimedWait(std::chrono::seconds(5)));
 
-  runner->PostTask(FROM_HERE, [state]() {
-    if (state->stream) {
-      state->stream->Close();
-      state->stream.reset();
+  // Tear down: close the stream from the IO thread.
+  runner->PostTask(FROM_HERE, [&]() {
+    if (stream_holder) {
+      stream_holder->Close();
+      stream_holder.reset();
     }
   });
   io_thread.Stop();
 
-  {
-    std::lock_guard<std::mutex> lock(state->lock);
-    EXPECT_TRUE(state->saw_eof);
-    EXPECT_EQ(state->received.size(), payload.size());
-    EXPECT_EQ(state->received, payload);
-  }
+  EXPECT_TRUE(state->saw_eof);
+  EXPECT_EQ(state->received.size(), payload.size());
+  EXPECT_EQ(state->received, payload);
 }
 
 }  // namespace

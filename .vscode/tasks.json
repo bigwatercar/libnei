@@ -2059,6 +2059,241 @@
 				"cd /mnt/c/Personal/Projects/LibNei/libnei-src; cmake --build build-linux --target nei_tests -j4; ./build-linux/tests/nei_tests --gtest_filter=AsyncFilePosixStressTest.* --gtest_color=no"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "wsl-flaky-repeat30-compact",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build/linux-gcc-release-shared/tests && LOG=/tmp/neixx_flaky_repeat30.log && ./nei_tests --gtest_filter=AsyncFilePosixStressTest.CloseRaceCancelsInFlightOperationsWithoutHang --gtest_repeat=30 --gtest_color=no > \"$LOG\" 2>&1; TEST_EXIT=$?; TOTAL_RUNS=$(grep -c \"\\[ RUN      \\] AsyncFilePosixStressTest.CloseRaceCancelsInFlightOperationsWithoutHang\" \"$LOG\" || true); PASS_COUNT=$(grep -c \"\\[       OK \\] AsyncFilePosixStressTest.CloseRaceCancelsInFlightOperationsWithoutHang\" \"$LOG\" || true); FAIL_COUNT=$(grep -c \"\\[  FAILED  \\] AsyncFilePosixStressTest.CloseRaceCancelsInFlightOperationsWithoutHang\" \"$LOG\" || true); FAILED_ITERS=$(awk '/Repeating all tests \\(iteration / { if (match($0, /iteration ([0-9]+)/, m)) iter=m[1]; } /\\[  FAILED  \\] AsyncFilePosixStressTest.CloseRaceCancelsInFlightOperationsWithoutHang/ { if (iter != \"\") print iter; }' \"$LOG\" | tr '\\n' ' '); echo ===== FLAKY SUMMARY =====; echo TOTAL_RUNS=$TOTAL_RUNS; echo PASS_COUNT=$PASS_COUNT; echo FAIL_COUNT=$FAIL_COUNT; echo FAILED_ITERS=${FAILED_ITERS:-none}; echo TEST_EXIT=$TEST_EXIT; if [ \"$FAIL_COUNT\" -gt 0 ]; then echo ===== FAILURE SNIPPET =====; grep -n \"TimedWait\\|Subprocess aborted\\|\\[  FAILED  \\] AsyncFilePosixStressTest.CloseRaceCancelsInFlightOperationsWithoutHang\" \"$LOG\" | head -n 12 || true; fi"
+			]
+		},
+		{
+			"label": "wsl-flaky-repeat30-script",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"/mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_flaky_repeat30.sh"
+			]
+		},
+		{
+			"label": "wsl-flaky-repeat30-script-v2",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"/mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_flaky_repeat30.sh"
+			]
+		},
+		{
+			"label": "wsl-flaky-repeat30-read-summary",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"echo '==== summary ===='; tail -n 40 /tmp/neixx_flaky_repeat30_all.log; echo '==== snippets ===='; sed -n '1,40p' /tmp/neixx_flaky_repeat30_snip.log"
+			]
+		},
+		{
+			"label": "wsl-flaky-repeat30-calc",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"TOTAL=$(grep -c '^=== RUN ' /tmp/neixx_flaky_repeat30_all.log); FAIL=$(grep -c '^--- FAIL RUN ' /tmp/neixx_flaky_repeat30_snip.log); PASS=$((TOTAL-FAIL)); ITERS=$(grep '^--- FAIL RUN ' /tmp/neixx_flaky_repeat30_snip.log | sed -E 's/--- FAIL RUN ([0-9]+).*/\\1/' | tr '\\n' ' '); echo TOTAL_RUNS=$TOTAL; echo PASS_COUNT=$PASS; echo FAIL_COUNT=$FAIL; echo FAILED_ITERS=${ITERS:-none}"
+			]
+		},
+		{
+			"label": "wsl-flaky-repeat30-fail-iters-only",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"grep '^--- FAIL RUN ' /tmp/neixx_flaky_repeat30_snip.log || true"
+			]
+		},
+		{
+			"label": "wsl-read-failed-run4-log",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"sed -n '1,220p' /tmp/neixx_flaky_repeat30_run_4.log"
+			]
+		},
+		{
+			"label": "wsl-read-failed-run5-log",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"sed -n '1,220p' /tmp/neixx_flaky_repeat30_run_5.log"
+			]
+		},
+		{
+			"label": "wsl-build-nei-tests-linux-gcc-release-shared",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build/linux-gcc-release-shared && cmake --build . --target nei_tests -j4"
+			]
+		},
+		{
+			"label": "wsl-rerun-flaky-after-fix-30",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"/mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_flaky_repeat30.sh"
+			]
+		},
+		{
+			"label": "wsl-rerun-flaky-after-fix-read-summary",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"echo '==== summary tail ===='; tail -n 50 /tmp/neixx_flaky_repeat30_all.log; echo '==== fail snippets ===='; sed -n '1,40p' /tmp/neixx_flaky_repeat30_snip.log"
+			]
+		},
+		{
+			"label": "wsl-build-nei-tests-after-close-shortcircuit",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build/linux-gcc-release-shared && cmake --build . --target nei_tests -j4"
+			]
+		},
+		{
+			"label": "wsl-rerun-flaky-30-after-close-shortcircuit",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"/mnt/c/Personal/Projects/LibNei/libnei-src/temp/wsl_flaky_repeat30.sh"
+			]
+		},
+		{
+			"label": "wsl-full-ctest-after-close-fix",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build/linux-gcc-release-shared && ctest --output-on-failure 2>&1; echo CTEST_EXIT:$?"
+			]
+		},
+		{
+			"label": "wsl-ctest-round1-correct-path",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build/linux-gcc-release-shared && ctest --output-on-failure"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-ctest-round2-correct-path",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build/linux-gcc-release-shared && ctest --output-on-failure"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "wsl-build-nei-tests-correct-path",
+			"type": "shell",
+			"command": "C:\\Windows\\System32\\wsl.exe",
+			"args": [
+				"bash",
+				"-lc",
+				"cd /mnt/c/Personal/Projects/LibNei/libnei-src/build/linux-gcc-release-shared && cmake --build . --target nei_tests -j8"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-all-current-changes",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"git add -A && git commit -m \"fix(io,posix): harden async close race and run dual-platform multi-round ctest\" && git show --name-status --oneline --no-color -1"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "show-porcelain-all",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"git status --porcelain -uall"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "remove-garbled-temp-file",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"Get-ChildItem -LiteralPath . -Force | Where-Object { $_.Name -like 'ersylfAppDataRoamingCodeUserworkspaceStorage*' } | Remove-Item -Force"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "find-garbled-file-cmd",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"for %F in (ersylfAppDataRoamingCodeUserworkspaceStorage*) do @echo [%F]"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "delete-garbled-file-cmd",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"del /f /q ersylfAppDataRoamingCodeUserworkspaceStorage*"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-all-current-changes-retry",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"git status --porcelain -uall && git add -A && git commit -m \"fix(io,posix): harden async close race and run dual-platform multi-round ctest\" && git show --name-status --oneline --no-color -1"
+			],
+			"isBackground": false
 		}
 	]
 }

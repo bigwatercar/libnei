@@ -7,10 +7,9 @@
 
 #include <nei/macros/nei_export.h>
 #include <neixx/io/async_stream.h>
+#include <neixx/task/message_loop/message_pump_io.h>
 
 namespace nei {
-
-class MessagePumpForIO;
 
 NEI_API std::unique_ptr<AsyncInputStream> CreatePipeInputStream(
     MessagePumpForIO* pump,
