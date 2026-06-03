@@ -4,6 +4,8 @@ set(NEIXX_IO_SOURCES
   include/neixx/io/async_file_input_stream.h
   include/neixx/io/async_stream.h
   include/neixx/io/async_line_reader.h
+  include/neixx/io/stream_reader.h
+  include/neixx/io/stream_writer.h
   src/internal/pipe_stream_factory_internal.h
   src/io_buffer.cpp
   src/async_file.cpp
@@ -11,6 +13,8 @@ set(NEIXX_IO_SOURCES
   src/async_file_posix.h
   src/async_file_win.h
   src/async_line_reader.cpp
+  src/stream_reader.cpp
+  src/stream_writer.cpp
 )
 
 if(WIN32)
