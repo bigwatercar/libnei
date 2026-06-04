@@ -42,6 +42,47 @@ std::vector<std::uint8_t> MakePayload(std::size_t size, std::uint8_t salt) {
   return data;
 }
 
+bool IssueWrite(const std::shared_ptr<AsyncFileWin>& file,
+                std::uint64_t offset,
+                std::vector<std::uint8_t> data,
+                AsyncFile::WriteCallback callback) {
+  if (!file || !callback) {
+    return false;
+  }
+  scoped_refptr<IOBuffer> buf(new IOBufferWithSize(data.size()));
+  if (!data.empty()) {
+    std::memcpy(buf->data(), data.data(), data.size());
+  }
+  file->WriteAsync(buf, data.size(), offset, std::move(callback));
+  return true;
+}
+
+bool IssueRead(
+    const std::shared_ptr<AsyncFileWin>& file,
+    std::uint64_t offset,
+    std::size_t bytes_to_read,
+    std::function<void(bool success,
+                       std::vector<std::uint8_t>&& data,
+                       std::uint32_t error_code)> callback) {
+  if (!file || !callback) {
+    return false;
+  }
+  scoped_refptr<IOBuffer> buf(new IOBufferWithSize(bytes_to_read));
+  file->ReadAsync(
+      buf, bytes_to_read, offset,
+      [buf, callback = std::move(callback)](bool success,
+                                            std::size_t bytes_read,
+                                            std::uint32_t error_code) mutable {
+        std::vector<std::uint8_t> out;
+        if (bytes_read > 0) {
+          out.resize(bytes_read);
+          std::memcpy(out.data(), buf->data(), bytes_read);
+        }
+        callback(success, std::move(out), error_code);
+      });
+  return true;
+}
+
 class FileBackedAsyncInputStream final : public AsyncInputStream {
  public:
   FileBackedAsyncInputStream(std::shared_ptr<AsyncFileWin> file,
@@ -76,7 +117,8 @@ class FileBackedAsyncInputStream final : public AsyncInputStream {
     const std::size_t read_size = (std::min)(buf_len_, chunk_size_);
     // Capture buf_ by value to keep it alive across the async gap.
     scoped_refptr<IOBuffer> buf = buf_;
-    const bool accepted = file_->AsyncRead(
+    const bool accepted = IssueRead(
+      file_,
         offset_, read_size,
         [this, buf](bool success, std::vector<std::uint8_t>&& data,
                     std::uint32_t /*error_code*/) mutable {
@@ -178,7 +220,8 @@ TEST(AsyncFileWinTest, LargeReadWriteCallbackDeterminismOnIoThread) {
           }
 
           auto write_called = std::make_shared<std::atomic<bool>>(false);
-          const bool write_accepted = file->AsyncWrite(
+            const bool write_accepted = IssueWrite(
+              file,
               0, payload,
               [&, file, payload, write_called](bool write_success,
                                                std::size_t bytes_written,
@@ -197,7 +240,8 @@ TEST(AsyncFileWinTest, LargeReadWriteCallbackDeterminismOnIoThread) {
                 }
 
                 auto read_called = std::make_shared<std::atomic<bool>>(false);
-                const bool read_accepted = file->AsyncRead(
+                const bool read_accepted = IssueRead(
+                  file,
                     0, payload.size(),
                     [&, file, payload, read_called](bool read_success,
                                                     std::vector<std::uint8_t>&& data,
@@ -359,7 +403,8 @@ TEST(AsyncFileWinTest, RepeatedStressMaintainsCallbackThreadDeterminism) {
                 MakePayload(kBytesPerRound, static_cast<std::uint8_t>(round));
 
             auto write_called = std::make_shared<std::atomic<bool>>(false);
-            const bool write_accepted = file->AsyncWrite(
+            const bool write_accepted = IssueWrite(
+              file,
                 0, expected,
                 [&, file, run_round, round, expected,
                  write_called](bool write_success, std::size_t bytes_written,
@@ -379,7 +424,8 @@ TEST(AsyncFileWinTest, RepeatedStressMaintainsCallbackThreadDeterminism) {
                   }
 
                   auto read_called = std::make_shared<std::atomic<bool>>(false);
-                  const bool read_accepted = file->AsyncRead(
+                    const bool read_accepted = IssueRead(
+                      file,
                       0, expected.size(),
                       [&, file, run_round, round, expected,
                        read_called](bool read_success,
@@ -526,7 +572,8 @@ TEST(AsyncFileWinTest, AppendModeAppendsIgnoringCallerOffsetInOrder) {
   ASSERT_TRUE(open_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(open_ok.load(std::memory_order_acquire));
 
-  const bool write1_accepted = file->AsyncWrite(
+    const bool write1_accepted = IssueWrite(
+      file,
       0, payload1,
       [&](bool success, std::size_t bytes_written, std::uint32_t error_code) {
         write1_ok.store(success && error_code == ERROR_SUCCESS,
@@ -539,7 +586,8 @@ TEST(AsyncFileWinTest, AppendModeAppendsIgnoringCallerOffsetInOrder) {
   ASSERT_TRUE(write1_ok.load(std::memory_order_acquire));
   ASSERT_EQ(write1_bytes.load(std::memory_order_acquire), payload1.size());
 
-  const bool write2_accepted = file->AsyncWrite(
+    const bool write2_accepted = IssueWrite(
+      file,
       0, payload2,
       [&](bool success, std::size_t bytes_written, std::uint32_t error_code) {
         write2_ok.store(success && error_code == ERROR_SUCCESS,
@@ -576,7 +624,8 @@ TEST(AsyncFileWinTest, AppendModeAppendsIgnoringCallerOffsetInOrder) {
   ASSERT_TRUE(read_open_ok.load(std::memory_order_acquire));
 
   const std::size_t total_size = payload1.size() + payload2.size();
-  const bool read_accepted = reader->AsyncRead(
+    const bool read_accepted = IssueRead(
+      reader,
       0, total_size,
       [&](bool success, std::vector<std::uint8_t>&& data, std::uint32_t error_code) {
         read_ok.store(success && error_code == ERROR_SUCCESS,
@@ -654,7 +703,8 @@ TEST(AsyncFileWinTest, ConcurrentAppendPreservesWholeWriteBlocks) {
   for (int w = 0; w < kWriters; ++w) {
     writers.emplace_back([&, w]() {
       for (int r = 0; r < kRoundsPerWriter; ++r) {
-        const bool accepted = file->AsyncWrite(
+        const bool accepted = IssueWrite(
+          file,
             0, payloads[static_cast<std::size_t>(w)],
             [&](bool success, std::size_t bytes_written, std::uint32_t error_code) {
               if (!success || error_code != ERROR_SUCCESS || bytes_written != kBlockSize) {
@@ -706,7 +756,8 @@ TEST(AsyncFileWinTest, ConcurrentAppendPreservesWholeWriteBlocks) {
 
   const std::size_t expected_total =
       static_cast<std::size_t>(kWriters * kRoundsPerWriter) * kBlockSize;
-  const bool read_accepted = reader->AsyncRead(
+    const bool read_accepted = IssueRead(
+      reader,
       0, expected_total,
       [&](bool success, std::vector<std::uint8_t>&& data, std::uint32_t error_code) {
         read_ok.store(success && error_code == ERROR_SUCCESS,
@@ -781,7 +832,8 @@ TEST(AsyncFileWinTest, FileReadParsesLinesWithAsyncLineReader) {
   ASSERT_TRUE(open_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(open_ok.load(std::memory_order_acquire));
 
-  const bool write_accepted = writer->AsyncWrite(
+    const bool write_accepted = IssueWrite(
+      writer,
       0, bytes,
       [&](bool success, std::size_t wrote, std::uint32_t error_code) {
         write_ok.store(success && error_code == ERROR_SUCCESS && wrote == bytes.size(),
