@@ -10,7 +10,7 @@
 
 #include <neixx/common/location.h>
 #include <neixx/io/async_file.h>
-#include <neixx/io/async_file_input_stream.h>
+#include <neixx/io/file_stream_adapters.h>
 #include <neixx/io/async_line_reader.h>
 #include <neixx/io/io_buffer.h>
 #include <neixx/synchronization/waitable_event.h>
@@ -25,18 +25,18 @@ std::filesystem::path MakeTempFilePath(const char* name_hint) {
   const auto ticks =
       std::chrono::high_resolution_clock::now().time_since_epoch().count();
   std::filesystem::path p = std::filesystem::temp_directory_path();
-  p /= std::string("nei_async_file_input_stream_") + name_hint + "_" +
+  p /= std::string("nei_file_stream_adapter_") + name_hint + "_" +
        std::to_string(static_cast<long long>(ticks)) + ".txt";
   return p;
 }
 
-TEST(AsyncFileInputStreamTest, BridgesAsyncFileAndAsyncLineReader) {
-  Thread io_thread("async-file-input-stream-io");
+TEST(FileInputStreamAdapterTest, BridgesAsyncFileAndAsyncLineReader) {
+  Thread io_thread("file-stream-adapter-io");
   Thread::Options io_options;
   io_options.message_pump_type = MessagePumpType::IO;
   ASSERT_TRUE(io_thread.StartWithOptions(io_options));
 
-  Thread background_thread("async-file-input-stream-bg");
+  Thread background_thread("file-stream-adapter-bg");
   ASSERT_TRUE(background_thread.Start());
 
   scoped_refptr<TaskRunner> io_runner = io_thread.GetTaskRunner();
@@ -106,7 +106,8 @@ TEST(AsyncFileInputStreamTest, BridgesAsyncFileAndAsyncLineReader) {
   ASSERT_TRUE(read_open_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(read_open_ok.load(std::memory_order_acquire));
 
-  AsyncFileInputStream input_stream(std::move(reader_file), 5);
+  // FileInputStreamAdapter borrows the AsyncFile* (caller retains ownership).
+  FileInputStreamAdapter input_stream(reader_file.get(), io_runner);
   AsyncLineReader line_reader(&input_stream);
 
   WaitableEvent lines_done(WaitableEvent::ResetPolicy::kAutomatic, false);

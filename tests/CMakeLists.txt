@@ -20,7 +20,7 @@ enable_testing()
 
 add_executable(
   nei_tests
-  async_file_input_stream_test.cpp
+  file_stream_adapters_test.cpp
   async_file_posix_test.cpp
   async_file_win_test.cpp
   async_line_reader_test.cpp
