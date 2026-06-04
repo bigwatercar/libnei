@@ -179,7 +179,7 @@ class WorkerThread final : public PlatformThread::Delegate {
     for (;;) {
       // Fetch the next ready task queue.  If a reclaim timeout is configured,
       // use the timed variant so idle workers eventually self-terminate.
-      // The timed wait does NOT hold any pool lock — it only waits on the
+      // The timed wait does NOT hold any pool lock - it only waits on the
       // PooledTaskSource's internal condvar, keeping the pool lock free.
       bool timed_out = false;
       internal::TaskQueue* queue =
@@ -234,12 +234,12 @@ class WorkerThread final : public PlatformThread::Delegate {
             on_blocking_begin_();
           }
 
-          // ── Priority Backgrounding ────────────────────────────────────────
+          // -- Priority Backgrounding ---------------------------------------
           // Dynamically set the OS thread priority to match this task's class.
           // Crucially, this syscall is issued OUTSIDE any pool lock, satisfying
           // the "no syscall under lock_" constraint stated in the design brief.
           ApplyTaskPriority(task.traits.priority());
-          // ─────────────────────────────────────────────────────────────────
+          // ----------------------------------------------------------------
 
           internal::RecordTaskExecutionStarted(task);
 
@@ -260,13 +260,13 @@ class WorkerThread final : public PlatformThread::Delegate {
             observer->OnTaskCompleted(task, run_duration);
           }
 
-          // ── Restore Baseline Priority ─────────────────────────────────────
+          // -- Restore Baseline Priority ------------------------------------
           // Restore before the next dequeue attempt so that:
-          //  • The next task's ApplyTaskPriority() starts from a known state.
-          //  • The idle-wait (if no more tasks arrive) runs at baseline weight.
+          //  - The next task's ApplyTaskPriority() starts from a known state.
+          //  - The idle-wait (if no more tasks arrive) runs at baseline weight.
           // Again: no lock is held during this syscall.
           RestoreBaseline();
-          // ─────────────────────────────────────────────────────────────────
+          // ----------------------------------------------------------------
 
           if (may_block && on_blocking_end_) {
             on_blocking_end_();
@@ -302,7 +302,7 @@ class WorkerThread final : public PlatformThread::Delegate {
   /// 0 = never reclaim; positive = self-terminate after this idle duration.
   const TimeDelta reclaim_time_;
   /// Current OS priority of this thread, updated by Apply/Restore.
-  /// Only accessed from this thread's ThreadMain() — no synchronisation needed.
+  /// Only accessed from this thread's ThreadMain() - no synchronisation needed.
   ThreadType current_thread_type_;
   /// Adaptive per-queue processing budget for this worker thread.
   std::size_t dynamic_turn_budget_ = kTaskBatchSize;
@@ -329,7 +329,7 @@ class ThreadPool::Impl {
     params_ = params;
     params_.max_num_workers = initial_workers;
 
-    // Absolute ceiling: initial slots × blocking multiplier.  Compensation
+    // Absolute ceiling: initial slots x blocking multiplier.  Compensation
     // workers spawned by ScopedBlockingCall are capped here.
     max_worker_count_ = initial_workers * kMaxBlockingMultiplier;
 

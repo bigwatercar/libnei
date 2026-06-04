@@ -16,9 +16,9 @@ namespace nei {
 /// Physical OS-level scheduling priority for a thread.
 ///
 /// Maps to platform-specific mechanisms:
-///   BACKGROUND    → Linux nice +10 / Windows THREAD_PRIORITY_BELOW_NORMAL
-///   DEFAULT       → Linux nice   0 / Windows THREAD_PRIORITY_NORMAL
-///   REALTIME_AUDIO→ Linux nice  -2 / Windows THREAD_PRIORITY_HIGHEST
+///   BACKGROUND    -> Linux nice +10 / Windows THREAD_PRIORITY_BELOW_NORMAL
+///   DEFAULT       -> Linux nice   0 / Windows THREAD_PRIORITY_NORMAL
+///   REALTIME_AUDIO-> Linux nice  -2 / Windows THREAD_PRIORITY_HIGHEST
 ///
 /// Used by PlatformThread::SetCurrentThreadType() and by Thread::Options /
 /// ThreadPool::InitParams to declare the initial OS weight of a thread.

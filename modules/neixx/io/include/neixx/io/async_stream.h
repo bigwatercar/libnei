@@ -19,8 +19,8 @@ namespace nei {
 // caller-supplied `buf` and notifies the caller exactly once via `callback`.
 //
 // Callback contract:
-//   success=true,  bytes_read > 0  → `bytes_read` bytes placed in buf->data()
-//   success=false, bytes_read = 0  → stream closed, error, or EOF
+//   success=true,  bytes_read > 0  -> `bytes_read` bytes placed in buf->data()
+//   success=false, bytes_read = 0  -> stream closed, error, or EOF
 //
 // The caller is responsible for re-issuing ReadAsync() to receive subsequent
 // chunks.  Each buf must remain reachable (via scoped_refptr<>) until the
@@ -56,8 +56,8 @@ class NEI_API AsyncInputStream {
 // once via `callback`.
 //
 // Callback contract:
-//   success=true,  bytes_written = N  → N bytes were accepted by the kernel
-//   success=false, bytes_written = 0  → stream closed or write error
+//   success=true,  bytes_written = N  -> N bytes were accepted by the kernel
+//   success=false, bytes_written = 0  -> stream closed or write error
 //
 // The `buf` scoped_refptr keeps the storage alive across the kernel boundary;
 // the implementation must not release it until the callback has fired.

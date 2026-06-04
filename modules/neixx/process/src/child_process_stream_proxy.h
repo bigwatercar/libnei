@@ -23,17 +23,17 @@ namespace internal {
 // shared_ptr<State> and no std::mutex.
 //
 // Threading model
-// ───────────────
-//   • Bind(), ResetBinding(), and Close() must be called from the IO thread
+// ---------------
+//   - Bind(), ResetBinding(), and Close() must be called from the IO thread
 //     (the same sequence that drives the underlying target stream).
-//   • ReadAsync() may be called from ANY thread.  All fields it captures are
+//   - ReadAsync() may be called from ANY thread.  All fields it captures are
 //     taken by value at call time, so the proxy object itself is never
 //     accessed directly from the IO thread.
-//   • WeakPtr validity check (operator bool) uses an atomic flag and is
+//   - WeakPtr validity check (operator bool) uses an atomic flag and is
 //     safe to evaluate from any thread.
 //
 // Lifetime contract
-// ─────────────────
+// -----------------
 //   io_task_runner_ is initialised once at Bind() and cleared at
 //   ResetBinding().  ReadAsync() must not race with Bind()/ResetBinding()
 //   (the ChildProcess machinery ensures this: Bind happens before the first

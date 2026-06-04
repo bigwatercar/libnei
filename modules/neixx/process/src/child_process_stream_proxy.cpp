@@ -12,7 +12,7 @@ namespace internal {
 // AsyncInputStreamProxy
 // ===========================================================================
 //
-// Design: lockfree trampoline.
+// Design: lock-free trampoline.
 //
 //   1. ReadAsync() runs on the CALLER'S thread (any sequence).
 //      It captures all necessary state by VALUE into a lambda posted to the
@@ -70,7 +70,7 @@ void AsyncInputStreamProxy::ReadAsync(scoped_refptr<IOBuffer> buf,
   }
 
   // Snapshot target and runners at call time.  All subsequent IO thread
-  // access goes through captured values only — proxy members are NOT touched
+  // access goes through captured values only - proxy members are NOT touched
   // from the IO thread.
   AsyncInputStream* raw_target = target_.load(std::memory_order_acquire);
   scoped_refptr<TaskRunner> io_runner = io_task_runner_;
@@ -87,41 +87,41 @@ void AsyncInputStreamProxy::ReadAsync(scoped_refptr<IOBuffer> buf,
   // safe to evaluate from any thread (only operator->/* assert thread affinity).
   auto weak_self = weak_factory_.GetWeakPtr();
 
-  // ── Step 1: hop to IO thread ─────────────────────────────────────────────
+  // -- Step 1: hop to IO thread ---------------------------------------------
   //
   // Captured by value:
-  //   buf           – scoped_refptr keeps storage pinned as the OVERLAPPED /
+  //   buf           - scoped_refptr keeps storage pinned as the OVERLAPPED /
   //                   POSIX read() target.  No extra copy of data is made.
-  //   buf_len       – declared window in buf.
-  //   raw_target    – valid pointer at call time (init-before-use contract).
-  //   io_runner     – scoped_refptr, keeps runner alive across the PostTask.
-  //   target_runner – same; used to trampoline the result back to caller.
-  //   weak_self     – guards callback delivery in Step 2.
-  //   callback      – moved; ownership transferred through the two lambdas.
+  //   buf_len       - declared window in buf.
+  //   raw_target    - valid pointer at call time (init-before-use contract).
+  //   io_runner     - scoped_refptr, keeps runner alive across the PostTask.
+  //   target_runner - same; used to trampoline the result back to caller.
+  //   weak_self     - guards callback delivery in Step 2.
+  //   callback      - moved; ownership transferred through the two lambdas.
   io_runner->PostTask(
       FROM_HERE,
       [raw_target, buf, buf_len, io_runner, target_runner, weak_self,
        callback = std::move(callback)]() mutable {
-        // ── Step 2: IO thread ─────────────────────────────────────────────
+        // -- Step 2: IO thread ----------------------------------------------
         // Call the real pipe/file stream.  buf->data() is the DMA region.
         raw_target->ReadAsync(
             buf, buf_len,
             [target_runner, weak_self, buf,
              callback = std::move(callback)](bool ok,
                                              std::size_t bytes) mutable {
-              // ── Step 3: IO completion ──────────────────────────────────
+              // -- Step 3: IO completion -----------------------------------
               // Trampoline result back to the caller's sequence.
               //
               // Architecture invariants:
-              //   • buf is kept alive by the scoped_refptr captured here,
+              //   - buf is kept alive by the scoped_refptr captured here,
               //     so buf->data()[0..bytes) is valid when callback runs.
-              //   • target_runner outlives this lambda (scoped_refptr).
-              //   • WeakPtr::operator bool() is atomic; no mutex required.
+              //   - target_runner outlives this lambda (scoped_refptr).
+              //   - WeakPtr::operator bool() is atomic; no mutex required.
               target_runner->PostTask(
                   FROM_HERE,
                   [weak_self, buf, ok, bytes,
                    callback = std::move(callback)]() mutable {
-                    // ── Step 4: caller's sequence ─────────────────────────
+                    // -- Step 4: caller's sequence --------------------------
                     if (!weak_self) {
                       // Proxy was closed between IO submission and delivery.
                       return;
@@ -173,10 +173,10 @@ void AsyncInputStreamProxy::Close() {
 // AsyncOutputStreamProxy
 // ===========================================================================
 //
-// Mirrors AsyncInputStreamProxy.  The same lockfree trampoline pattern applies:
-//   • WriteAsync() captures buf + runner + target by value, posts to IO thread.
-//   • IO thread calls target->WriteAsync(buf, buf_len, …).
-//   • On completion, the callback fires on the IO thread (no second hop
+// Mirrors AsyncInputStreamProxy.  The same lock-free trampoline pattern applies:
+//   - WriteAsync() captures buf + runner + target by value, posts to IO thread.
+//   - IO thread calls target->WriteAsync(buf, buf_len, ...).
+//   - On completion, the callback fires on the IO thread (no second hop
 //     because write callers typically don't care which sequence they land on).
 
 AsyncOutputStreamProxy::AsyncOutputStreamProxy() = default;

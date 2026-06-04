@@ -39,7 +39,7 @@ bool HandleIoDrainWaitFailure(const char* stream_name, DWORD wait_rv) {
 // ---------------------------------------------------------------------------
 // WinPipeInputStream
 //
-// Pull model: one ReadAsync() ↔ one ReadFile() ↔ one callback.
+// Pull model: one ReadAsync() <-> one ReadFile() <-> one callback.
 //
 // The caller-supplied IOBuffer is used directly as the ReadFile target region.
 // The scoped_refptr keeps the buffer alive throughout the asynchronous gap.
@@ -51,7 +51,7 @@ class WinPipeInputStream final : public AsyncInputStream,
   WinPipeInputStream(MessagePumpForIO* pump, HANDLE handle)
       : pump_(pump), handle_(handle) {
     // Manual-reset event injected into the OVERLAPPED so the kernel can
-    // signal it on completion or cancellation — used by Close() for safe
+    // signal it on completion or cancellation - used by Close() for safe
     // synchronous drain without requiring the IOCP pump to process anything.
     read_event_ = CreateEventW(nullptr, /*bManualReset=*/TRUE,
                                /*bInitialState=*/FALSE, nullptr);
@@ -144,7 +144,7 @@ class WinPipeInputStream final : public AsyncInputStream,
         DeliverSuccess(static_cast<std::size_t>(transferred));
         return;
       }
-      // ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, or any other error → EOF/error.
+      // ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, or any other error -> EOF/error.
       DeliverEof();
       return;
     }

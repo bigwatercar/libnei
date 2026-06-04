@@ -163,8 +163,8 @@ class MessagePumpForIOState {
   }
 
   bool DrainPendingWakeups(MessagePump::Delegate* delegate) {
-    // 传入 should_run_task=false：仅排干 IOCP 中残留的唤醒包，不触发
-    // delegate->DoWork()，防止 DoWork 内部 PostTask 再次不断进入死循环。
+    // Pass should_run_task=false: only drain residual IOCP wake packets.
+    // Do not invoke delegate->DoWork() here to avoid recursive wake loops.
     bool drained_any = false;
     while (DispatchOneBatch(delegate, 0, /*should_run_task=*/false)) {
       drained_any = true;
@@ -267,8 +267,8 @@ class MessagePumpForIOState {
         ran_work_wakeup = true;
         any_event = true;
         g_wake_dispatches.fetch_add(1, std::memory_order_relaxed);
-        // 立即中断批量消费，优先将执行权交还给 DoWork，避免高吞吐 I/O
-        // 场景下 Task 调度饥饿（Starvation）。
+        // Break batch dispatch immediately and return control to DoWork.
+        // This avoids task scheduling starvation under heavy I/O throughput.
         break;
       }
 

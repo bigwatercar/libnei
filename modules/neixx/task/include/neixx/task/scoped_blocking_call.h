@@ -21,7 +21,7 @@ NEI_API void SetCurrentBlockingCallback(BlockingCallback cb);
 }  // namespace internal
 
 // RAII guard for blocking operations. Construct before entering a blocking API
-// (file I/O, OS wait, mutex, …) and let it destruct when the blocking operation
+// (file I/O, OS wait, mutex, ...) and let it destruct when the blocking operation
 // ends. If the current thread is not a ThreadPool worker this is a no-op.
 //
 // Example:
