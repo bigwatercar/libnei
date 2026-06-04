@@ -82,7 +82,7 @@ bool RunDemo(nei::AsyncFile& file,
       });
 
   if (!write_done.TimedWait(std::chrono::seconds(10))) {
-    std::cerr << "[demo] Timed out waiting for AsyncWrite." << std::endl;
+    std::cerr << "[demo] Timed out waiting for WriteAsync." << std::endl;
     file.Close();
     return false;
   }
@@ -118,7 +118,7 @@ bool RunDemo(nei::AsyncFile& file,
       });
 
   if (!read_done.TimedWait(std::chrono::seconds(10))) {
-    std::cerr << "[demo] Timed out waiting for AsyncRead." << std::endl;
+    std::cerr << "[demo] Timed out waiting for ReadAsync." << std::endl;
     file.Close();
     return false;
   }
