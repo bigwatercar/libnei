@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -11,6 +12,7 @@
 #include <neixx/io/async_file.h>
 #include <neixx/io/async_file_input_stream.h>
 #include <neixx/io/async_line_reader.h>
+#include <neixx/io/io_buffer.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
@@ -69,13 +71,15 @@ TEST(AsyncFileInputStreamTest, BridgesAsyncFileAndAsyncLineReader) {
 
   const std::string text = "alpha\nbeta\ngamma\r\nlast_line";
   std::vector<std::uint8_t> bytes(text.begin(), text.end());
-  const bool write_accepted = writer_file->AsyncWrite(
-      0, bytes, [&](bool success, std::size_t wrote, std::uint32_t error_code) {
+  scoped_refptr<IOBuffer> write_buf(new IOBufferWithSize(bytes.size()));
+  std::memcpy(write_buf->data(), bytes.data(), bytes.size());
+  writer_file->WriteAsync(
+      write_buf, bytes.size(), 0,
+      [&](bool success, std::size_t wrote, std::uint32_t error_code) {
         write_ok.store(success && error_code == 0 && wrote == bytes.size(),
                        std::memory_order_release);
         write_done.Signal();
       });
-  ASSERT_TRUE(write_accepted);
   ASSERT_TRUE(write_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(write_ok.load(std::memory_order_acquire));
 

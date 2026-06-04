@@ -15,6 +15,7 @@
 
 namespace nei {
 
+class IOBuffer;
 class TaskRunner;
 
 class NEI_API AsyncFile {
@@ -41,7 +42,7 @@ class NEI_API AsyncFile {
 
   using OpenCallback = std::function<void(bool success, std::uint32_t error_code)>;
   using ReadCallback =
-      std::function<void(bool success, std::vector<std::uint8_t>&& data,
+      std::function<void(bool success, std::size_t bytes_read,
                          std::uint32_t error_code)>;
   using WriteCallback =
       std::function<void(bool success, std::size_t bytes_written,
@@ -55,13 +56,27 @@ class NEI_API AsyncFile {
                          const scoped_refptr<TaskRunner>& background_runner,
                          OpenCallback callback) = 0;
 
-  virtual bool AsyncRead(std::int64_t offset,
-                         std::size_t size,
+  virtual void ReadAsync(scoped_refptr<IOBuffer> buf,
+                         std::size_t bytes_to_read,
+                         std::uint64_t offset,
                          ReadCallback callback) = 0;
 
-  virtual bool AsyncWrite(std::int64_t offset,
-                          std::vector<std::uint8_t> buffer,
+  virtual void WriteAsync(scoped_refptr<IOBuffer> buf,
+                          std::size_t bytes_to_write,
+                          std::uint64_t offset,
                           WriteCallback callback) = 0;
+
+  bool AsyncRead(std::uint64_t offset,
+                 std::size_t bytes_to_read,
+                 std::function<void(bool success,
+                                    std::vector<std::uint8_t>&& data,
+                                    std::uint32_t error_code)> callback);
+
+  bool AsyncWrite(std::uint64_t offset,
+                  std::vector<std::uint8_t> data,
+                  std::function<void(bool success,
+                                    std::size_t bytes_written,
+                                    std::uint32_t error_code)> callback);
 
   virtual void Close() = 0;
   virtual bool is_open() const = 0;

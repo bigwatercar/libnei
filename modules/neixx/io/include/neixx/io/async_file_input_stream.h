@@ -15,7 +15,7 @@ namespace nei {
 
 struct AsyncFileInputStreamState;
 
-// Adapts AsyncFile's positional reads to AsyncInputStream so AsyncLineReader
+// Adapts AsyncFile's sequential reads to AsyncInputStream so AsyncLineReader
 // and other stream-based consumers can read file contents incrementally.
 class NEI_API AsyncFileInputStream final : public AsyncInputStream {
  public:

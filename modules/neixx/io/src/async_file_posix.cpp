@@ -6,13 +6,11 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_set>
 #include <utility>
-#include <vector>
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -21,6 +19,7 @@
 
 #include <nei/debug/check.h>
 #include <neixx/common/location.h>
+#include <neixx/io/io_buffer.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/task/task_runner.h>
 
@@ -95,14 +94,13 @@ class AsyncFilePosix::Impl final {
     explicit IOContext(Type io_type) : type(io_type) {}
 
     Type type;
-    std::int64_t base_offset = 0;
+    std::uint64_t base_offset = 0;
     std::size_t total_bytes = 0;
     std::size_t transferred_bytes = 0;
     std::size_t last_chunk_size = 0;
     bool append_mode = false;
     bool append_offset_initialized = false;
-    std::vector<std::uint8_t> read_buffer;
-    std::vector<std::uint8_t> write_buffer;
+    scoped_refptr<IOBuffer> buffer;
     ReadCallback read_callback;
     WriteCallback write_callback;
   };
@@ -149,51 +147,64 @@ class AsyncFilePosix::Impl final {
         });
   }
 
-  bool AsyncRead(std::int64_t offset,
-                 std::size_t size,
+  void ReadAsync(scoped_refptr<IOBuffer> buf,
+                 std::size_t bytes_to_read,
+                 std::uint64_t offset,
                  ReadCallback callback) {
     // Once Close() is requested, reject new work immediately on caller thread.
     if (close_requested_.load(std::memory_order_acquire)) {
-      return false;
+      if (callback) {
+        callback(false, 0, static_cast<std::uint32_t>(ECANCELED));
+      }
+      return;
     }
-    if (!io_task_runner_ || !callback) {
-      return false;
+    if (!io_task_runner_ || !callback || !buf) {
+      if (callback) {
+        callback(false, 0, static_cast<std::uint32_t>(EINVAL));
+      }
+      return;
     }
 
-    const bool posted = io_task_runner_->PostTask(
+    io_task_runner_->PostTask(
         FROM_HERE,
-        [weak_this = weak_factory_.GetWeakPtr(), offset, size,
-         callback = std::move(callback)]() mutable {
+        [weak_this = weak_factory_.GetWeakPtr(), buf = std::move(buf),
+         bytes_to_read, offset, callback = std::move(callback)]() mutable {
           if (!weak_this) {
             return;
           }
-          weak_this->StartReadOnIoThread(offset, size, std::move(callback));
+          weak_this->StartReadOnIoThread(std::move(buf), bytes_to_read, offset,
+                                         std::move(callback));
         });
-    return posted;
   }
 
-  bool AsyncWrite(std::int64_t offset,
-                  std::vector<std::uint8_t> buffer,
+  void WriteAsync(scoped_refptr<IOBuffer> buf,
+                  std::size_t bytes_to_write,
+                  std::uint64_t offset,
                   WriteCallback callback) {
     // Symmetric close gate for write side.
     if (close_requested_.load(std::memory_order_acquire)) {
-      return false;
+      if (callback) {
+        callback(false, 0, static_cast<std::uint32_t>(ECANCELED));
+      }
+      return;
     }
-    if (!io_task_runner_ || !callback) {
-      return false;
+    if (!io_task_runner_ || !callback || !buf) {
+      if (callback) {
+        callback(false, 0, static_cast<std::uint32_t>(EINVAL));
+      }
+      return;
     }
 
-    const bool posted = io_task_runner_->PostTask(
+    io_task_runner_->PostTask(
         FROM_HERE,
-        [weak_this = weak_factory_.GetWeakPtr(), offset,
-         buffer = std::move(buffer), callback = std::move(callback)]() mutable {
+        [weak_this = weak_factory_.GetWeakPtr(), buf = std::move(buf),
+         bytes_to_write, offset, callback = std::move(callback)]() mutable {
           if (!weak_this) {
             return;
           }
-          weak_this->StartWriteOnIoThread(offset, std::move(buffer),
-                                          std::move(callback));
+          weak_this->StartWriteOnIoThread(std::move(buf), bytes_to_write,
+                                          offset, std::move(callback));
         });
-    return posted;
   }
 
   void Close() {
@@ -356,24 +367,25 @@ class AsyncFilePosix::Impl final {
     PostOpenCallback(std::move(callback), true, 0);
   }
 
-  void StartReadOnIoThread(std::int64_t offset,
-                           std::size_t size,
+  void StartReadOnIoThread(scoped_refptr<IOBuffer> buf,
+                           std::size_t bytes_to_read,
+                           std::uint64_t offset,
                            ReadCallback callback) {
-    if (offset < 0) {
-      PostReadCallback(std::move(callback), false, {},
+    if (!buf) {
+      PostReadCallback(std::move(callback), false, 0,
                        static_cast<std::uint32_t>(EINVAL));
       return;
     }
 
     auto context = std::make_unique<IOContext>(IOContext::Type::kRead);
+    context->buffer = std::move(buf);
     context->base_offset = offset;
-    context->total_bytes = size;
+    context->total_bytes = bytes_to_read;
     context->read_callback = std::move(callback);
-    context->read_buffer.resize(size);
 
-    if (size == 0) {
+    if (bytes_to_read == 0) {
       ReadCallback done = std::move(context->read_callback);
-      PostReadCallback(std::move(done), true, {}, 0);
+      PostReadCallback(std::move(done), true, 0, 0);
       return;
     }
 
@@ -384,7 +396,7 @@ class AsyncFilePosix::Impl final {
                                          &background_runner_snapshot,
                                          &start_error)) {
       ReadCallback failed = std::move(context->read_callback);
-      PostReadCallback(std::move(failed), false, {}, start_error);
+      PostReadCallback(std::move(failed), false, 0, start_error);
       return;
     }
 
@@ -392,19 +404,20 @@ class AsyncFilePosix::Impl final {
                               std::move(background_runner_snapshot));
   }
 
-  void StartWriteOnIoThread(std::int64_t offset,
-                            std::vector<std::uint8_t> buffer,
+  void StartWriteOnIoThread(scoped_refptr<IOBuffer> buf,
+                            std::size_t bytes_to_write,
+                            std::uint64_t offset,
                             WriteCallback callback) {
-    if (offset < 0) {
+    if (!buf) {
       PostWriteCallback(std::move(callback), false, 0,
                         static_cast<std::uint32_t>(EINVAL));
       return;
     }
 
     auto context = std::make_unique<IOContext>(IOContext::Type::kWrite);
+    context->buffer = std::move(buf);
     context->base_offset = offset;
-    context->total_bytes = buffer.size();
-    context->write_buffer = std::move(buffer);
+    context->total_bytes = bytes_to_write;
     context->write_callback = std::move(callback);
 
     {
@@ -503,7 +516,7 @@ class AsyncFilePosix::Impl final {
             struct stat st = {};
             for (;;) {
               if (::fstat(fd_snapshot, &st) == 0) {
-                context->base_offset = static_cast<std::int64_t>(st.st_size);
+                context->base_offset = static_cast<std::uint64_t>(st.st_size);
                 context->append_offset_initialized = true;
                 break;
               }
@@ -516,19 +529,21 @@ class AsyncFilePosix::Impl final {
           }
 
           if (result.error_code == 0) {
-            const off_t offset = static_cast<off_t>(
-                context->base_offset + static_cast<std::int64_t>(context->transferred_bytes));
+            const std::uint64_t absolute_offset =
+              context->base_offset +
+              static_cast<std::uint64_t>(context->transferred_bytes);
+            const off_t offset = static_cast<off_t>(absolute_offset);
             ssize_t io_result = -1;
             for (;;) {
               if (context->type == IOContext::Type::kRead) {
                 io_result = ::pread(
                     fd_snapshot,
-                    context->read_buffer.data() + context->transferred_bytes,
+                  context->buffer->data() + context->transferred_bytes,
                     context->last_chunk_size, offset);
               } else {
                 io_result = ::pwrite(
                     fd_snapshot,
-                    context->write_buffer.data() + context->transferred_bytes,
+                  context->buffer->data() + context->transferred_bytes,
                     context->last_chunk_size, offset);
               }
 
@@ -649,10 +664,7 @@ class AsyncFilePosix::Impl final {
   void SucceedReadContext(std::unique_ptr<IOContext> context) {
     DCHECK(context);
     ReadCallback callback = std::move(context->read_callback);
-    std::vector<std::uint8_t> out;
-    out.swap(context->read_buffer);
-    out.resize(context->transferred_bytes);
-    PostReadCallback(std::move(callback), true, std::move(out), 0);
+    PostReadCallback(std::move(callback), true, context->transferred_bytes, 0);
   }
 
   void SucceedContext(std::unique_ptr<IOContext> context) {
@@ -670,10 +682,8 @@ class AsyncFilePosix::Impl final {
     DCHECK(context);
     if (context->type == IOContext::Type::kRead) {
       ReadCallback callback = std::move(context->read_callback);
-      std::vector<std::uint8_t> out;
-      out.swap(context->read_buffer);
-      out.resize(context->transferred_bytes);
-      PostReadCallback(std::move(callback), false, std::move(out), error_code);
+      PostReadCallback(std::move(callback), false, context->transferred_bytes,
+                       error_code);
       return;
     }
 
@@ -731,7 +741,7 @@ class AsyncFilePosix::Impl final {
 
   void PostReadCallback(ReadCallback callback,
                         bool success,
-                        std::vector<std::uint8_t> data,
+                        std::size_t bytes_read,
                         std::uint32_t error_code) {
     if (!callback || !io_task_runner_) {
       return;
@@ -740,11 +750,11 @@ class AsyncFilePosix::Impl final {
     io_task_runner_->PostTask(
         FROM_HERE,
         [weak_this, callback = std::move(callback), success,
-         data = std::move(data), error_code]() mutable {
+         bytes_read, error_code]() mutable {
           if (!weak_this) {
             return;
           }
-          callback(success, std::move(data), error_code);
+          callback(success, bytes_read, error_code);
         });
   }
 
@@ -758,8 +768,8 @@ class AsyncFilePosix::Impl final {
     base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr();
     io_task_runner_->PostTask(
         FROM_HERE,
-        [weak_this, callback = std::move(callback), success, bytes_written,
-         error_code]() mutable {
+        [weak_this, callback = std::move(callback), success,
+         bytes_written, error_code]() mutable {
           if (!weak_this) {
             return;
           }
@@ -834,16 +844,19 @@ void AsyncFilePosix::OpenAsync(const std::string& path,
                    std::move(callback));
 }
 
-bool AsyncFilePosix::AsyncRead(std::int64_t offset,
-                               std::size_t size,
+void AsyncFilePosix::ReadAsync(scoped_refptr<IOBuffer> buf,
+                               std::size_t bytes_to_read,
+                               std::uint64_t offset,
                                ReadCallback callback) {
-  return impl_->AsyncRead(offset, size, std::move(callback));
+  impl_->ReadAsync(std::move(buf), bytes_to_read, offset, std::move(callback));
 }
 
-bool AsyncFilePosix::AsyncWrite(std::int64_t offset,
-                                std::vector<std::uint8_t> buffer,
+void AsyncFilePosix::WriteAsync(scoped_refptr<IOBuffer> buf,
+                                std::size_t bytes_to_write,
+                                std::uint64_t offset,
                                 WriteCallback callback) {
-  return impl_->AsyncWrite(offset, std::move(buffer), std::move(callback));
+  impl_->WriteAsync(std::move(buf), bytes_to_write, offset,
+                    std::move(callback));
 }
 
 void AsyncFilePosix::Close() {

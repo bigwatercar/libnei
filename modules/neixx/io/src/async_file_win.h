@@ -7,7 +7,6 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 #include <nei/macros/nei_export.h>
 #include <neixx/io/async_file.h>
@@ -49,12 +48,14 @@ class NEI_API AsyncFileWin final : public AsyncFile {
                  const scoped_refptr<TaskRunner>& background_runner,
                  OpenCallback callback) override;
 
-  bool AsyncRead(std::int64_t offset,
-                 std::size_t size,
+  void ReadAsync(scoped_refptr<IOBuffer> buf,
+                 std::size_t bytes_to_read,
+                 std::uint64_t offset,
                  ReadCallback callback) override;
 
-  bool AsyncWrite(std::int64_t offset,
-                  std::vector<std::uint8_t> buffer,
+  void WriteAsync(scoped_refptr<IOBuffer> buf,
+                  std::size_t bytes_to_write,
+                  std::uint64_t offset,
                   WriteCallback callback) override;
 
   static void ResetStageCountersForTesting();

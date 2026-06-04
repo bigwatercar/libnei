@@ -19,6 +19,7 @@
 
 #include <nei/debug/check.h>
 #include <neixx/common/location.h>
+#include <neixx/io/io_buffer.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/strings/utf_string_conversions.h>
 #include <neixx/task/message_loop/message_pump_io.h>
@@ -110,21 +111,20 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
     Type type;
     OVERLAPPED overlapped{};
-    std::int64_t base_offset = 0;
+    std::uint64_t base_offset = 0;
     std::size_t total_bytes = 0;
     std::size_t transferred_bytes = 0;
     std::size_t active_chunk_bytes = 0;
-    std::vector<std::uint8_t> read_buffer;
-    std::vector<std::uint8_t> write_buffer;
+    scoped_refptr<IOBuffer> buffer;
     ReadCallback read_callback;
     WriteCallback write_callback;
   };
 
   struct PendingOperation {
     IOContext::Type type = IOContext::Type::kRead;
-    std::int64_t offset = 0;
+    std::uint64_t offset = 0;
     std::size_t size = 0;
-    std::vector<std::uint8_t> write_buffer;
+    scoped_refptr<IOBuffer> buffer;
     ReadCallback read_callback;
     WriteCallback write_callback;
   };
@@ -161,17 +161,22 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
         });
   }
 
-  bool AsyncRead(std::int64_t offset,
-                 std::size_t size,
+  void ReadAsync(scoped_refptr<IOBuffer> buf,
+                 std::size_t bytes_to_read,
+                 std::uint64_t offset,
                  ReadCallback callback) {
-    if (!io_task_runner_ || !callback) {
-      return false;
+    if (!io_task_runner_ || !callback || !buf) {
+      if (callback) {
+        callback(false, 0, static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER));
+      }
+      return;
     }
 
     PendingOperation op;
     op.type = IOContext::Type::kRead;
     op.offset = offset;
-    op.size = size;
+    op.size = bytes_to_read;
+    op.buffer = std::move(buf);
     op.read_callback = std::move(callback);
 
     io_task_runner_->PostTask(
@@ -182,21 +187,24 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
           }
           weak_this->EnqueueOperationOnIoThread(std::move(op));
         });
-    return true;
   }
 
-  bool AsyncWrite(std::int64_t offset,
-                  std::vector<std::uint8_t> buffer,
+  void WriteAsync(scoped_refptr<IOBuffer> buf,
+                  std::size_t bytes_to_write,
+                  std::uint64_t offset,
                   WriteCallback callback) {
-    if (!io_task_runner_ || !callback) {
-      return false;
+    if (!io_task_runner_ || !callback || !buf) {
+      if (callback) {
+        callback(false, 0, static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER));
+      }
+      return;
     }
 
     PendingOperation op;
     op.type = IOContext::Type::kWrite;
     op.offset = offset;
-    op.size = buffer.size();
-    op.write_buffer = std::move(buffer);
+    op.size = bytes_to_write;
+    op.buffer = std::move(buf);
     op.write_callback = std::move(callback);
 
     io_task_runner_->PostTask(
@@ -207,7 +215,6 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
           }
           weak_this->EnqueueOperationOnIoThread(std::move(op));
         });
-    return true;
   }
 
   void Close() {
@@ -395,9 +402,9 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   }
 
   void EnqueueOperationOnIoThread(PendingOperation op) {
-    if (op.offset < 0) {
+    if (!op.buffer) {
       if (op.type == IOContext::Type::kRead) {
-        PostReadCallback(std::move(op.read_callback), false, {},
+        PostReadCallback(std::move(op.read_callback), false, 0,
                          static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER));
       } else {
         PostWriteCallback(std::move(op.write_callback), false, 0,
@@ -410,7 +417,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       std::lock_guard<std::mutex> lock(lock_);
       if (state_ != State::kConnected || file_handle_ == INVALID_HANDLE_VALUE) {
         if (op.type == IOContext::Type::kRead) {
-          PostReadCallback(std::move(op.read_callback), false, {},
+          PostReadCallback(std::move(op.read_callback), false, 0,
                            static_cast<std::uint32_t>(ERROR_INVALID_HANDLE));
         } else {
           PostWriteCallback(std::move(op.write_callback), false, 0,
@@ -441,18 +448,16 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       context = std::make_shared<IOContext>(op.type);
       context->base_offset = op.offset;
       context->total_bytes = op.size;
+      context->buffer = std::move(op.buffer);
       context->read_callback = std::move(op.read_callback);
       context->write_callback = std::move(op.write_callback);
-      if (context->type == IOContext::Type::kRead) {
-        context->read_buffer.resize(context->total_bytes);
-      } else {
-        context->write_buffer = std::move(op.write_buffer);
+      if (context->type == IOContext::Type::kWrite) {
         if (open_mode_ == OpenMode::kAppend) {
           LARGE_INTEGER eof = {};
           if (!::GetFileSizeEx(file_handle_, &eof)) {
             start_error = static_cast<std::uint32_t>(::GetLastError());
           } else {
-            context->base_offset = static_cast<std::int64_t>(eof.QuadPart);
+            context->base_offset = static_cast<std::uint64_t>(eof.QuadPart);
           }
         }
       }
@@ -463,7 +468,11 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     }
 
     if (start_error != static_cast<std::uint32_t>(ERROR_SUCCESS)) {
-      PostWriteCallback(std::move(context->write_callback), false, 0, start_error);
+      if (context->type == IOContext::Type::kRead) {
+        PostReadCallback(std::move(context->read_callback), false, 0, start_error);
+      } else {
+        PostWriteCallback(std::move(context->write_callback), false, 0, start_error);
+      }
       return;
     }
 
@@ -497,9 +506,10 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     const std::size_t remaining = context->total_bytes - context->transferred_bytes;
     const std::size_t chunk = (std::min)(remaining, kMaxChunkBytes);
     context->active_chunk_bytes = chunk;
+    const std::uint64_t chunk_offset =
+      context->base_offset + static_cast<std::uint64_t>(context->transferred_bytes);
     FillOverlappedOffset(&context->overlapped,
-                         context->base_offset +
-                             static_cast<std::int64_t>(context->transferred_bytes));
+               chunk_offset);
 
     {
       std::lock_guard<std::mutex> lock(lock_);
@@ -510,12 +520,12 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     BOOL ok = FALSE;
     if (context->type == IOContext::Type::kRead) {
       ok = ::ReadFile(handle,
-                      context->read_buffer.data() + context->transferred_bytes,
+                      context->buffer->data() + context->transferred_bytes,
                       static_cast<DWORD>(chunk), &transferred_now,
                       &context->overlapped);
     } else {
       ok = ::WriteFile(handle,
-                       context->write_buffer.data() + context->transferred_bytes,
+                       context->buffer->data() + context->transferred_bytes,
                        static_cast<DWORD>(chunk), &transferred_now,
                        &context->overlapped);
     }
@@ -669,14 +679,12 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     if (context->type == IOContext::Type::kRead) {
       g_read_finalize_attempted.fetch_add(1, std::memory_order_relaxed);
       if (!success) {
-        context->read_buffer.resize(context->transferred_bytes);
         PostReadCallback(std::move(context->read_callback), false,
-                         std::move(context->read_buffer), error_code);
+                         context->transferred_bytes, error_code);
       } else {
         (void)last_chunk_bytes;
-        context->read_buffer.resize(context->transferred_bytes);
         PostReadCallback(std::move(context->read_callback), true,
-                         std::move(context->read_buffer),
+                         context->transferred_bytes,
                          static_cast<std::uint32_t>(ERROR_SUCCESS));
       }
     } else {
@@ -736,7 +744,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
     for (auto& op : queued) {
       if (op.type == IOContext::Type::kRead) {
-        PostReadCallback(std::move(op.read_callback), false, {},
+        PostReadCallback(std::move(op.read_callback), false, 0,
                          static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
       } else {
         PostWriteCallback(std::move(op.write_callback), false, 0,
@@ -746,9 +754,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
     if (active) {
       if (active->type == IOContext::Type::kRead) {
-        active->read_buffer.resize(active->transferred_bytes);
         PostReadCallback(std::move(active->read_callback), false,
-                         std::move(active->read_buffer),
+                         active->transferred_bytes,
                          static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
       } else {
         PostWriteCallback(std::move(active->write_callback), false,
@@ -763,9 +770,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
         continue;
       }
       if (context->type == IOContext::Type::kRead) {
-        context->read_buffer.resize(context->transferred_bytes);
         PostReadCallback(std::move(context->read_callback), false,
-                         std::move(context->read_buffer),
+                         context->transferred_bytes,
                          static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
       } else {
         PostWriteCallback(std::move(context->write_callback), false,
@@ -805,7 +811,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
   void PostReadCallback(ReadCallback callback,
                         bool success,
-                        std::vector<std::uint8_t> data,
+                        std::size_t bytes_read,
                         std::uint32_t error_code) {
     if (!callback || !io_task_runner_) {
       return;
@@ -817,14 +823,14 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
         [weak_this, callback = std::move(callback), success,
-         data = std::move(data), error_code, read_post_seq]() mutable {
+         bytes_read, error_code, read_post_seq]() mutable {
           if (!weak_this) {
             g_callback_weak_dropped.fetch_add(1, std::memory_order_relaxed);
             return;
           }
           g_read_exec_seq.store(read_post_seq, std::memory_order_relaxed);
           g_read_reached.fetch_add(1, std::memory_order_relaxed);
-          callback(success, std::move(data), error_code);
+          callback(success, bytes_read, error_code);
         });
     if (!posted) {
       g_callback_post_failed.fetch_add(1, std::memory_order_relaxed);
@@ -859,11 +865,10 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   }
 
   static void FillOverlappedOffset(OVERLAPPED* overlapped,
-                                   std::int64_t offset) {
+                                   std::uint64_t offset) {
     std::memset(overlapped, 0, sizeof(*overlapped));
-    const std::uint64_t value = static_cast<std::uint64_t>(offset);
-    overlapped->Offset = static_cast<DWORD>(value & 0xFFFFFFFFULL);
-    overlapped->OffsetHigh = static_cast<DWORD>((value >> 32) & 0xFFFFFFFFULL);
+    overlapped->Offset = static_cast<DWORD>(offset & 0xFFFFFFFFULL);
+    overlapped->OffsetHigh = static_cast<DWORD>((offset >> 32) & 0xFFFFFFFFULL);
   }
 
   scoped_refptr<TaskRunner> io_task_runner_;
@@ -921,16 +926,19 @@ void AsyncFileWin::OpenAsync(const std::string& path,
                    std::move(callback));
 }
 
-bool AsyncFileWin::AsyncRead(std::int64_t offset,
-                             std::size_t size,
+void AsyncFileWin::ReadAsync(scoped_refptr<IOBuffer> buf,
+                             std::size_t bytes_to_read,
+                             std::uint64_t offset,
                              ReadCallback callback) {
-  return impl_->AsyncRead(offset, size, std::move(callback));
+  impl_->ReadAsync(std::move(buf), bytes_to_read, offset, std::move(callback));
 }
 
-bool AsyncFileWin::AsyncWrite(std::int64_t offset,
-                              std::vector<std::uint8_t> buffer,
+void AsyncFileWin::WriteAsync(scoped_refptr<IOBuffer> buf,
+                              std::size_t bytes_to_write,
+                              std::uint64_t offset,
                               WriteCallback callback) {
-  return impl_->AsyncWrite(offset, std::move(buffer), std::move(callback));
+  impl_->WriteAsync(std::move(buf), bytes_to_write, offset,
+                    std::move(callback));
 }
 
 void AsyncFileWin::ResetStageCountersForTesting() {

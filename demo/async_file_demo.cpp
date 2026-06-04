@@ -1,6 +1,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -8,6 +9,7 @@
 
 #include <neixx/common/location.h>
 #include <neixx/io/async_file.h>
+#include <neixx/io/io_buffer.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
@@ -66,8 +68,12 @@ bool RunDemo(nei::AsyncFile& file,
   std::atomic<std::uint32_t> write_error{0};
   std::atomic<std::size_t> bytes_written{0};
 
-  const bool write_accepted = file.AsyncWrite(
-      0, payload,
+    nei::scoped_refptr<nei::IOBuffer> write_buf(
+      new nei::IOBufferWithSize(payload.size()));
+  std::memcpy(write_buf->data(), payload.data(), payload.size());
+
+  file.WriteAsync(
+      write_buf, payload.size(), 0,
       [&](bool success, std::size_t written, std::uint32_t error_code) {
         write_ok.store(success, std::memory_order_release);
         bytes_written.store(written, std::memory_order_release);
@@ -75,11 +81,6 @@ bool RunDemo(nei::AsyncFile& file,
         write_done.Signal();
       });
 
-  if (!write_accepted) {
-    std::cerr << "[demo] AsyncWrite not accepted." << std::endl;
-    file.Close();
-    return false;
-  }
   if (!write_done.TimedWait(std::chrono::seconds(10))) {
     std::cerr << "[demo] Timed out waiting for AsyncWrite." << std::endl;
     file.Close();
@@ -87,7 +88,7 @@ bool RunDemo(nei::AsyncFile& file,
   }
   if (!write_ok.load(std::memory_order_acquire) ||
       bytes_written.load(std::memory_order_acquire) != payload.size()) {
-    std::cerr << "[demo] AsyncWrite failed, error="
+    std::cerr << "[demo] WriteAsync failed, error="
               << write_error.load(std::memory_order_acquire)
               << ", bytes_written="
               << bytes_written.load(std::memory_order_acquire) << std::endl;
@@ -102,38 +103,36 @@ bool RunDemo(nei::AsyncFile& file,
                                false);
   std::atomic<bool> read_ok{false};
   std::atomic<std::uint32_t> read_error{0};
-  std::vector<std::uint8_t> read_data;
+  std::atomic<std::size_t> bytes_read{0};
 
-  const bool read_accepted = file.AsyncRead(
-      0, payload.size(),
-      [&](bool success, std::vector<std::uint8_t>&& data,
-          std::uint32_t error_code) {
+    nei::scoped_refptr<nei::IOBuffer> read_buf(
+      new nei::IOBufferWithSize(payload.size()));
+
+  file.ReadAsync(
+      read_buf, payload.size(), 0,
+      [&](bool success, std::size_t read_now, std::uint32_t error_code) {
         read_ok.store(success, std::memory_order_release);
+        bytes_read.store(read_now, std::memory_order_release);
         read_error.store(error_code, std::memory_order_release);
-        read_data = std::move(data);
         read_done.Signal();
       });
 
-  if (!read_accepted) {
-    std::cerr << "[demo] AsyncRead not accepted." << std::endl;
-    file.Close();
-    return false;
-  }
   if (!read_done.TimedWait(std::chrono::seconds(10))) {
     std::cerr << "[demo] Timed out waiting for AsyncRead." << std::endl;
     file.Close();
     return false;
   }
-  if (!read_ok.load(std::memory_order_acquire) || read_data != payload) {
-    std::cerr << "[demo] AsyncRead failed, error="
+  const std::size_t read_size = bytes_read.load(std::memory_order_acquire);
+  const std::string read_text(read_buf->data(), read_size);
+  if (!read_ok.load(std::memory_order_acquire) || read_text != payload_text) {
+    std::cerr << "[demo] ReadAsync failed, error="
               << read_error.load(std::memory_order_acquire)
-              << ", size=" << read_data.size() << std::endl;
+              << ", size=" << read_size << std::endl;
     file.Close();
     return false;
   }
 
-  const std::string text(read_data.begin(), read_data.end());
-  std::cout << "[demo] Read back: " << text << std::endl;
+  std::cout << "[demo] Read back: " << read_text << std::endl;
 
   file.Close();
   return true;
