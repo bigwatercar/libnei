@@ -60,8 +60,8 @@ TEST(FileInputStreamAdapterTest, BridgesAsyncFileAndAsyncLineReader) {
   writer_file->OpenAsync(
       path_utf8, AsyncFile::OpenMode::kReadWrite,
       AsyncFile::OpenDisposition::kCreateAlways, bg_runner,
-      [&](bool success, std::uint32_t error_code) {
-        write_open_ok.store(success && error_code == 0,
+      [&](bool success, AsyncFile::Error error) {
+        write_open_ok.store(success && error.ok(),
                             std::memory_order_release);
         write_open_done.Signal();
       });
@@ -75,8 +75,8 @@ TEST(FileInputStreamAdapterTest, BridgesAsyncFileAndAsyncLineReader) {
   std::memcpy(write_buf->data(), bytes.data(), bytes.size());
   writer_file->WriteAsync(
       write_buf, bytes.size(), 0,
-      [&](bool success, std::size_t wrote, std::uint32_t error_code) {
-        write_ok.store(success && error_code == 0 && wrote == bytes.size(),
+      [&](bool success, std::size_t wrote, AsyncFile::Error error) {
+        write_ok.store(success && error.ok() && wrote == bytes.size(),
                        std::memory_order_release);
         write_done.Signal();
       });
@@ -98,8 +98,8 @@ TEST(FileInputStreamAdapterTest, BridgesAsyncFileAndAsyncLineReader) {
   reader_file->OpenAsync(
       path_utf8, AsyncFile::OpenMode::kReadOnly,
       AsyncFile::OpenDisposition::kOpenExisting, bg_runner,
-      [&](bool success, std::uint32_t error_code) {
-        read_open_ok.store(success && error_code == 0,
+      [&](bool success, AsyncFile::Error error) {
+        read_open_ok.store(success && error.ok(),
                            std::memory_order_release);
         read_open_done.Signal();
       });

@@ -32,6 +32,7 @@ Include paths follow `include/nei/...` under each module; after install, use `#i
 - docs/neixx_io_technical.md
 - docs/neixx_io_api_examples.md
 - docs/neixx_io_quick_reference.md
+- docs/neixx_async_file_error_model.md
 - docs/neixx_command_line_technical.md
 - docs/neixx_command_line_quick_reference.md
 - docs/neixx_task_module_technical.md

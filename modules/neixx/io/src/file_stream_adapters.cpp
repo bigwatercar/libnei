@@ -76,11 +76,11 @@ void FileInputStreamAdapter::ReadAsyncOnTarget(scoped_refptr<IOBuffer> buf,
   file_->ReadAsync(
       std::move(buf), buf_len, read_offset,
       [weak_this, target_runner, user_callback = std::move(callback)](
-          bool success, std::size_t bytes_read, std::uint32_t error_code) mutable {
+        bool success, std::size_t bytes_read, AsyncFile::Error error) mutable {
         // This lambda runs on the backend thread (platform-specific I/O thread
         // pool). Post the result back to the target sequence for safe state
         // mutation and user callback delivery.
-        (void)error_code;  // error_code not used; propagate success flag instead.
+        (void)error;  // error not used; propagate success flag instead.
         auto deliver = [weak_this, success, bytes_read,
                         user_callback = std::move(user_callback)]() mutable {
           if (!weak_this) {
@@ -228,11 +228,11 @@ void FileOutputStreamAdapter::WriteAsyncOnTarget(scoped_refptr<IOBuffer> buf,
   file_->WriteAsync(
       std::move(buf), bytes_to_write, write_offset,
       [weak_this, target_runner, user_callback = std::move(callback)](
-          bool success, std::size_t bytes_written, std::uint32_t error_code) mutable {
+        bool success, std::size_t bytes_written, AsyncFile::Error error) mutable {
         // This lambda runs on the backend thread (platform-specific I/O thread
         // pool). Post the result back to the target sequence for user callback
         // delivery.
-        (void)error_code;  // error_code not used; propagate success flag instead.
+        (void)error;  // error not used; propagate success flag instead.
         auto deliver = [weak_this, success, bytes_written,
                         user_callback = std::move(user_callback)]() mutable {
           if (!weak_this) {

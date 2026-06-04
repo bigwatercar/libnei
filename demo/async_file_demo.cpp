@@ -44,9 +44,9 @@ bool RunDemo(nei::AsyncFile& file,
   file.OpenAsync(
       path_str, nei::AsyncFile::OpenMode::kReadWrite,
       nei::AsyncFile::OpenDisposition::kCreateAlways, background_runner,
-      [&](bool success, std::uint32_t error_code) {
+      [&](bool success, nei::AsyncFile::Error error) {
         open_ok.store(success, std::memory_order_release);
-        open_error.store(error_code, std::memory_order_release);
+        open_error.store(error.native_code, std::memory_order_release);
         open_done.Signal();
       });
 
@@ -74,10 +74,10 @@ bool RunDemo(nei::AsyncFile& file,
 
   file.WriteAsync(
       write_buf, payload.size(), 0,
-      [&](bool success, std::size_t written, std::uint32_t error_code) {
+      [&](bool success, std::size_t written, nei::AsyncFile::Error error) {
         write_ok.store(success, std::memory_order_release);
         bytes_written.store(written, std::memory_order_release);
-        write_error.store(error_code, std::memory_order_release);
+        write_error.store(error.native_code, std::memory_order_release);
         write_done.Signal();
       });
 
@@ -110,10 +110,10 @@ bool RunDemo(nei::AsyncFile& file,
 
   file.ReadAsync(
       read_buf, payload.size(), 0,
-      [&](bool success, std::size_t read_now, std::uint32_t error_code) {
+      [&](bool success, std::size_t read_now, nei::AsyncFile::Error error) {
         read_ok.store(success, std::memory_order_release);
         bytes_read.store(read_now, std::memory_order_release);
-        read_error.store(error_code, std::memory_order_release);
+        read_error.store(error.native_code, std::memory_order_release);
         read_done.Signal();
       });
 

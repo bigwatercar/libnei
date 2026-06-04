@@ -22,6 +22,7 @@
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/task/task_runner.h>
+#include <internal/async_file_error_code.h>
 
 namespace nei {
 
@@ -129,7 +130,8 @@ class AsyncFilePosix::Impl final {
                  OpenCallback callback) {
     if (!io_task_runner_) {
       if (callback) {
-        callback(false, static_cast<std::uint32_t>(EINVAL));
+        callback(false, internal::NormalizeAsyncFileError(
+                            static_cast<std::uint32_t>(EINVAL)));
       }
       return;
     }
@@ -154,13 +156,17 @@ class AsyncFilePosix::Impl final {
     // Once Close() is requested, reject new work immediately on caller thread.
     if (close_requested_.load(std::memory_order_acquire)) {
       if (callback) {
-        callback(false, 0, static_cast<std::uint32_t>(ECANCELED));
+        callback(false, 0,
+                 internal::NormalizeAsyncFileError(
+                     static_cast<std::uint32_t>(ECANCELED)));
       }
       return;
     }
     if (!io_task_runner_ || !callback || !buf) {
       if (callback) {
-        callback(false, 0, static_cast<std::uint32_t>(EINVAL));
+        callback(false, 0,
+                 internal::NormalizeAsyncFileError(
+                     static_cast<std::uint32_t>(EINVAL)));
       }
       return;
     }
@@ -184,13 +190,17 @@ class AsyncFilePosix::Impl final {
     // Symmetric close gate for write side.
     if (close_requested_.load(std::memory_order_acquire)) {
       if (callback) {
-        callback(false, 0, static_cast<std::uint32_t>(ECANCELED));
+        callback(false, 0,
+                 internal::NormalizeAsyncFileError(
+                     static_cast<std::uint32_t>(ECANCELED)));
       }
       return;
     }
     if (!io_task_runner_ || !callback || !buf) {
       if (callback) {
-        callback(false, 0, static_cast<std::uint32_t>(EINVAL));
+        callback(false, 0,
+                 internal::NormalizeAsyncFileError(
+                     static_cast<std::uint32_t>(EINVAL)));
       }
       return;
     }
@@ -735,7 +745,7 @@ class AsyncFilePosix::Impl final {
           if (!weak_this) {
             return;
           }
-          callback(success, error_code);
+          callback(success, internal::NormalizeAsyncFileError(error_code));
         });
   }
 
@@ -754,7 +764,8 @@ class AsyncFilePosix::Impl final {
           if (!weak_this) {
             return;
           }
-          callback(success, bytes_read, error_code);
+          callback(success, bytes_read,
+                   internal::NormalizeAsyncFileError(error_code));
         });
   }
 
@@ -773,7 +784,8 @@ class AsyncFilePosix::Impl final {
           if (!weak_this) {
             return;
           }
-          callback(success, bytes_written, error_code);
+              callback(success, bytes_written,
+               internal::NormalizeAsyncFileError(error_code));
         });
   }
 

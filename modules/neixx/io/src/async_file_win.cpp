@@ -24,6 +24,7 @@
 #include <neixx/strings/utf_string_conversions.h>
 #include <neixx/task/message_loop/message_pump_io.h>
 #include <neixx/task/task_runner.h>
+#include <internal/async_file_error_code.h>
 
 namespace nei {
 
@@ -167,7 +168,9 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
                  ReadCallback callback) {
     if (!io_task_runner_ || !callback || !buf) {
       if (callback) {
-        callback(false, 0, static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER));
+        callback(false, 0,
+                 internal::NormalizeAsyncFileError(
+                     static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER)));
       }
       return;
     }
@@ -195,7 +198,9 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
                   WriteCallback callback) {
     if (!io_task_runner_ || !callback || !buf) {
       if (callback) {
-        callback(false, 0, static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER));
+        callback(false, 0,
+                 internal::NormalizeAsyncFileError(
+                     static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER)));
       }
       return;
     }
@@ -802,7 +807,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
             return;
           }
           g_open_reached.fetch_add(1, std::memory_order_relaxed);
-          callback(success, error_code);
+          callback(success, internal::NormalizeAsyncFileError(error_code));
         });
     if (!posted) {
       g_callback_post_failed.fetch_add(1, std::memory_order_relaxed);
@@ -830,7 +835,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
           }
           g_read_exec_seq.store(read_post_seq, std::memory_order_relaxed);
           g_read_reached.fetch_add(1, std::memory_order_relaxed);
-          callback(success, bytes_read, error_code);
+          callback(success, bytes_read,
+                   internal::NormalizeAsyncFileError(error_code));
         });
     if (!posted) {
       g_callback_post_failed.fetch_add(1, std::memory_order_relaxed);
@@ -857,7 +863,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
           }
           g_write_exec_seq.store(write_post_seq, std::memory_order_relaxed);
           g_write_reached.fetch_add(1, std::memory_order_relaxed);
-          callback(success, bytes_written, error_code);
+          callback(success, bytes_written,
+                   internal::NormalizeAsyncFileError(error_code));
         });
     if (!posted) {
       g_callback_post_failed.fetch_add(1, std::memory_order_relaxed);

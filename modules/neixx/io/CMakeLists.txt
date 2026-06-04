@@ -7,6 +7,7 @@ set(NEIXX_IO_SOURCES
   include/neixx/io/stream_writer.h
   include/neixx/io/file_stream_adapters.h
   src/internal/pipe_stream_factory_internal.h
+  src/internal/async_file_error_code.h
   src/io_buffer.cpp
   src/async_file.cpp
   src/file_stream_adapters.cpp

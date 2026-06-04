@@ -39,13 +39,50 @@ class NEI_API AsyncFile {
     kTruncateExisting,
   };
 
-  using OpenCallback = std::function<void(bool success, std::uint32_t error_code)>;
+  // Cross-platform normalized error domain used by AsyncFile callbacks.
+  //
+  // Mapping intent (semantic layer):
+  // - kInvalidArgument  : bad parameters (Win ERROR_INVALID_PARAMETER / POSIX EINVAL)
+  // - kNotFound         : missing path/object (Win ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND / POSIX ENOENT)
+  // - kPermissionDenied : access denied (Win ERROR_ACCESS_DENIED / POSIX EACCES)
+  // - kBusy             : busy or sharing conflict (Win ERROR_BUSY, ERROR_SHARING_VIOLATION / POSIX EBUSY)
+  // - kAlreadyExists    : create-existing conflict (Win ERROR_FILE_EXISTS, ERROR_ALREADY_EXISTS / POSIX EEXIST)
+  // - kBadFileDescriptor: invalid handle/fd (Win ERROR_INVALID_HANDLE / POSIX EBADF)
+  // - kCanceled         : canceled operation (Win ERROR_OPERATION_ABORTED / POSIX ECANCELED)
+  // - kInvalidData      : invalid data/seek/range category
+  // - kIoError          : generic I/O failure or unknown fallback
+  // - kUnknown          : reserved bucket before fallback normalization
+  enum class ErrorCode : std::uint32_t {
+    kOk = 0,
+    kInvalidArgument,
+    kNotFound,
+    kPermissionDenied,
+    kBusy,
+    kAlreadyExists,
+    kBadFileDescriptor,
+    kCanceled,
+    kInvalidData,
+    kIoError,
+    kUnknown,
+  };
+
+  // Two-layer error model:
+  // 1) code        : normalized cross-platform semantic error.
+  // 2) native_code : raw platform error (Win32 GetLastError / POSIX errno).
+  struct Error {
+    ErrorCode code = ErrorCode::kOk;
+    std::uint32_t native_code = 0;
+
+    bool ok() const { return code == ErrorCode::kOk; }
+  };
+
+  using OpenCallback = std::function<void(bool success, Error error)>;
   using ReadCallback =
       std::function<void(bool success, std::size_t bytes_read,
-                         std::uint32_t error_code)>;
+                         Error error)>;
   using WriteCallback =
       std::function<void(bool success, std::size_t bytes_written,
-                         std::uint32_t error_code)>;
+                         Error error)>;
 
   virtual ~AsyncFile() = default;
 
