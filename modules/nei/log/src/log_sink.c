@@ -78,9 +78,7 @@ static FILE *_nei_log_open_default_file_sink_file(const char *filename) {
     return NULL;
   }
 #if defined(_WIN32)
-  if (fopen_s(&fp, filename, "ab") != 0) {
-    fp = NULL;
-  }
+  fp = _fsopen(filename, "ab", _SH_DENYWR);
 #else
   fp = fopen(filename, "ab");
 #endif
