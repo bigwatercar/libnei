@@ -1,4 +1,5 @@
 target_sources(nei PRIVATE src/endian.c)
+target_sources(nei PRIVATE src/float_ctrl.c)
 
 if(WIN32)
   target_sources(nei PRIVATE src/endian_win.c)
