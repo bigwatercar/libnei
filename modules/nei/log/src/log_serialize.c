@@ -484,6 +484,20 @@ static const char *_nei_log_wstr_to_mbs_or_placeholder(const wchar_t *ws, char *
 
 #pragma region serialization functions
 
+/** Deep-copy a source-location C string into an inline header buffer.
+ *  Always '\\0'-terminates; truncates silently when src is too long. */
+static void _nei_log_strcpy_trunc(char *dst, size_t dst_cap, const char *src) {
+  size_t n;
+  if (src == NULL || dst_cap == 0U) {
+    if (dst_cap > 0U) dst[0] = '\0';
+    return;
+  }
+  n = strlen(src);
+  if (n >= dst_cap) n = dst_cap - 1U;
+  memcpy(dst, src, n);
+  dst[n] = '\0';
+}
+
 size_t _nei_log_serialize_event(uint8_t *out,
                                 size_t out_cap,
                                 nei_log_config_handle_t config_handle,
@@ -508,9 +522,9 @@ size_t _nei_log_serialize_event(uint8_t *out,
   memset(&header, 0, sizeof(header));
   header.timestamp_ns = _nei_log_now_ns();
   header.config_handle = config_handle;
-  header.file_ptr = file;
-  header.func_ptr = func;
-  header.fmt_ptr = fmt;
+  _nei_log_strcpy_trunc(header.file, sizeof(header.file), file);
+  _nei_log_strcpy_trunc(header.func, sizeof(header.func), func);
+  _nei_log_strcpy_trunc(header.fmt,  sizeof(header.fmt),  fmt);
   header.level = level;
   header.line = line;
   header.verbose = verbose;
@@ -605,9 +619,9 @@ size_t _nei_log_serialize_literal_msg(uint8_t *out,
   memset(&header, 0, sizeof(header));
   header.timestamp_ns = _nei_log_now_ns();
   header.config_handle = config_handle;
-  header.file_ptr = file;
-  header.func_ptr = func;
-  header.fmt_ptr = NULL;
+  _nei_log_strcpy_trunc(header.file, sizeof(header.file), file);
+  _nei_log_strcpy_trunc(header.func, sizeof(header.func), func);
+  header.is_literal = 1;
   header.level = level;
   header.line = line;
   header.verbose = verbose;

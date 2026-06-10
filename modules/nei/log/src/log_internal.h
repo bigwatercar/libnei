@@ -93,6 +93,12 @@ typedef volatile uint64_t _nei_log_atomic64_t;
 /// @brief Maximum deep-copy size for string arguments in bytes.
 #define _NEI_LOG_MAX_STRING_COPY 4096U
 
+/** Maximum inline-copy size for producer-side source-location strings stored
+ *  directly in the event header (avoids dangling DLL/SO pointers). */
+#define _NEI_LOG_MAX_FILE_COPY 128U
+#define _NEI_LOG_MAX_FUNC_COPY 160U
+#define _NEI_LOG_MAX_FMT_COPY  112U
+
 /** Number of fixed slots in the MPSC ring buffer.  Each slot holds one full
  *  serialized event (up to _NEI_LOG_EVENT_BUFFER_SIZE bytes).
  *  Default is 256 and can be overridden via CMake option NEI_LOG_RING_SLOTS. */
@@ -135,21 +141,30 @@ enum _nei_log_payload_type_e {
 /**
  * @brief Header for a compact serialized log record.
  * @details The payload follows immediately after the header; total_size allows fast skipping.
+ *
+ * Source-location strings (file, func, fmt) are deep-copied into inline buffers
+ * at serialization time so the event is self-contained. This eliminates
+ * dangling-pointer risks when a DLL/SO is unloaded between emit and consume.
  */
 typedef struct _nei_log_event_header_st {
   uint32_t total_size;
   uint64_t timestamp_ns;
   nei_log_config_handle_t config_handle;
-  const char *file_ptr;
-  const char *func_ptr;
-  const char *fmt_ptr;
   int32_t level;
   int32_t line;
   int32_t verbose;
   /** Length of @ref thread_id_str captured at emit time; @c 0 means omit @c tid= from output. */
   uint8_t thread_id_len;
+  /** 1 = literal message (no printf-format string); 0 = printf-style. */
+  uint8_t is_literal;
   /** Thread id text (not necessarily '\\0'-terminated; use @ref thread_id_len). Max 23 bytes. */
   char thread_id_str[23];
+  /** Deep-copied source file path (truncated at _NEI_LOG_MAX_FILE_COPY). */
+  char file[_NEI_LOG_MAX_FILE_COPY];
+  /** Deep-copied function signature (truncated at _NEI_LOG_MAX_FUNC_COPY). */
+  char func[_NEI_LOG_MAX_FUNC_COPY];
+  /** Deep-copied printf format string (truncated at _NEI_LOG_MAX_FMT_COPY); empty when @ref is_literal. */
+  char fmt[_NEI_LOG_MAX_FMT_COPY];
 } nei_log_event_header_st;
 
 /**
