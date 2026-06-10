@@ -877,9 +877,12 @@ class ChildProcessPlatformImpl final
     core_ = std::make_unique<PosixChildProcessCore>(this);
     const bool ok = core_->Launch(command_line, options);
     if (ok) {
-      stdout_proxy_->Bind(core_->stdout_stream(), io_runner);
-      stderr_proxy_->Bind(core_->stderr_stream(), io_runner);
-      stdin_proxy_->Bind(core_->stdin_stream(), io_runner);
+      if (core_->stdout_stream())
+        stdout_proxy_->Bind(core_->stdout_stream(), io_runner);
+      if (core_->stderr_stream())
+        stderr_proxy_->Bind(core_->stderr_stream(), io_runner);
+      if (core_->stdin_stream())
+        stdin_proxy_->Bind(core_->stdin_stream(), io_runner);
     }
     return ok;
   }
