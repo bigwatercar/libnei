@@ -44,8 +44,61 @@ extern "C" {
  */
 NEI_API int nei_get_executable_path(char *buf, size_t size);
 
+/**
+ * @brief Get the absolute directory path containing the current process's
+ *        executable file.
+ *
+ * This is a convenience wrapper around nei_get_executable_path() that
+ * returns only the directory portion of the executable path (i.e., the
+ * path with the final filename component removed).
+ *
+ * If the executable path does not contain any directory separator (which
+ * can happen on POSIX when the process was launched with just a filename),
+ * the function returns "." (a single dot representing the current directory).
+ *
+ * The encoding semantics are identical to nei_get_executable_path().
+ *
+ * @note This function uses an internal 4 KiB (4096-byte) stack buffer to
+ *       first obtain the full executable path.  If the full path (including
+ *       the filename component) is 4096 bytes or longer, it will be
+ *       truncated before the directory split, and the result may be
+ *       incomplete.  In practice this is unlikely on all supported
+ *       platforms, as filesystem path length limits are typically far
+ *       below this threshold.
+ *
+ * @param buf  Output buffer to receive the directory path (must not be NULL).
+ * @param size Size of @p buf in bytes.
+ * @return On success, returns the number of bytes written to @p buf
+ *         (excluding the null terminator). If @p buf is too small,
+ *         returns the required buffer size as a positive value.
+ *         On error, returns a negative value.
+ */
+NEI_API int nei_get_executable_dir(char *buf, size_t size);
+
 #ifdef __cplusplus
 }
+
+#include <string>
+#include <stdexcept>
+
+inline std::string nei_get_executable_path() {
+  char buf[4096];
+  int len = nei_get_executable_path(buf, sizeof(buf));
+  if (len < 0) {
+    throw std::runtime_error("Failed to get executable path");
+  }
+  return std::string(buf, (size_t)len);
+}
+
+inline std::string nei_get_executable_dir() {
+  char buf[4096];
+  int len = nei_get_executable_dir(buf, sizeof(buf));
+  if (len < 0) {
+    throw std::runtime_error("Failed to get executable directory");
+  }
+  return std::string(buf, (size_t)len);
+}
+
 #endif
 
 #endif /* NEI_SYS_PROCESS_H */

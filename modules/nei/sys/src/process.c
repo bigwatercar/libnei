@@ -125,3 +125,51 @@ int nei_get_executable_path(char *buf, size_t size) {
   }
 #endif
 }
+
+int nei_get_executable_dir(char *buf, size_t size) {
+  if (buf == NULL || size == 0) {
+    return -1;
+  }
+
+  /* First, get the full executable path (may need an internal buffer). */
+  char full_path[4096];
+  int full_len = nei_get_executable_path(full_path, sizeof(full_path));
+  if (full_len < 0) {
+    return full_len;
+  }
+
+  /* Find the last path separator (handle both / and \ for cross-platform
+     consistency, e.g. WSL interop paths). */
+  const char *last_sep = NULL;
+  for (int i = full_len - 1; i >= 0; --i) {
+    char c = full_path[i];
+    if (c == '/' || c == '\\') {
+      last_sep = &full_path[i];
+      break;
+    }
+  }
+
+  size_t dir_len;
+  const char *src;
+
+  if (last_sep != NULL) {
+    dir_len = (size_t)(last_sep - full_path);
+    src = full_path;
+  } else {
+    /* No directory separator found: executable was launched with a bare
+       filename.  Return "." to represent the current directory. */
+    dir_len = 1;
+    src = ".";
+  }
+
+  if (dir_len >= size) {
+    /* Buffer too small: truncate and return required size. */
+    memcpy(buf, src, size - 1);
+    buf[size - 1] = '\0';
+    return (int)dir_len;
+  }
+
+  memcpy(buf, src, dir_len);
+  buf[dir_len] = '\0';
+  return (int)dir_len;
+}
