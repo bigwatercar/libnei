@@ -3,6 +3,7 @@
 #define NEI_DEBUG_CHECK_H
 
 #include <nei/log/log.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #if !defined(NEI_CHROMIUM_LIKE_CHECK)
@@ -20,6 +21,7 @@
 #if NEI_CHROMIUM_LIKE_CHECK
 #define NEI_INTERNAL_CHECK_FAIL(kind, expr_text)                                                                       \
   do {                                                                                                                 \
+    fprintf(stderr, "[FATAL:%s:%d] %s failed: (%s)\n", __FILE__, __LINE__, kind, expr_text);                           \
     NEI_LOG_FATAL("%s failed: (%s)", kind, expr_text);                                                               \
     nei_log_flush();                                                                                                   \
     abort();                                                                                                           \
