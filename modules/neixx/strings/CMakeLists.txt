@@ -1,11 +1,18 @@
 target_sources(
   neixx
-  PRIVATE src/utf_string_conversions.cpp
-          src/string_util.cpp
+  PRIVATE include/neixx/strings/cjk_width.h
+          include/neixx/strings/split_string.h
+          include/neixx/strings/string_number_conversions.h
+          include/neixx/strings/string_util.h
+          include/neixx/strings/text_normalization.h
+          include/neixx/strings/utf_string_conversions.h
+          src/cjk_width.cpp
           src/split_string.cpp
           src/string_number_conversions.cpp
+          src/string_util.cpp
           src/text_normalization.cpp
-          src/cjk_width.cpp
+          src/utf_string_conversions_fallback.h
+          src/utf_string_conversions.cpp
 )
 
 if(WIN32)

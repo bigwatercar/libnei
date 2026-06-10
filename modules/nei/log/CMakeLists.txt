@@ -1,12 +1,14 @@
 target_sources(
   nei
-  PRIVATE src/log_config.c
-          src/log_sink.c
-          src/log_api.c
-          src/log_thread_id.c
-          src/log_serialize.c
+  PRIVATE include/nei/log/log.h
+  PRIVATE src/log_api.c
+          src/log_config.c
           src/log_format.c
+          src/log_internal.h
           src/log_runtime.c
+          src/log_serialize.c
+          src/log_sink.c
+          src/log_thread_id.c
 )
 
 target_include_directories(

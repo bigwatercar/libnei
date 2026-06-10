@@ -1,5 +1,8 @@
-target_sources(nei PRIVATE src/endian.c)
-target_sources(nei PRIVATE src/float_ctrl.c)
+target_sources(
+  nei
+  PRIVATE include/nei/core/endian.h include/nei/core/float_ctrl.h
+  PRIVATE src/endian.c src/float_ctrl.c
+)
 
 if(WIN32)
   target_sources(nei PRIVATE src/endian_win.c)

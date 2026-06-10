@@ -1,5 +1,11 @@
 target_sources(
-  neixx PRIVATE src/condition_variable.cpp src/lock.cpp src/waitable_event.cpp
+  neixx
+  PRIVATE include/neixx/synchronization/condition_variable.h
+          include/neixx/synchronization/lock.h
+          include/neixx/synchronization/waitable_event.h
+          src/condition_variable.cpp
+          src/lock.cpp
+          src/waitable_event.cpp
 )
 
 target_include_directories(

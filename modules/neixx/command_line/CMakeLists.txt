@@ -1,4 +1,7 @@
-target_sources(neixx PRIVATE src/command_line.cpp)
+target_sources(
+  neixx PRIVATE include/neixx/command_line/command_line.h
+          src/command_line.cpp
+)
 
 target_include_directories(
   neixx PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

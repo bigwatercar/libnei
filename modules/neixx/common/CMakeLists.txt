@@ -1,4 +1,12 @@
-target_sources(neixx PRIVATE src/location.cpp src/time.cpp src/time_source.cpp)
+target_sources(
+  neixx
+  PRIVATE include/neixx/common/location.h
+          include/neixx/common/time.h
+          include/neixx/common/time_source.h
+          src/location.cpp
+          src/time.cpp
+          src/time_source.cpp
+)
 
 target_include_directories(
   neixx PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
