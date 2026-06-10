@@ -148,6 +148,7 @@ enum _nei_log_payload_type_e {
  */
 typedef struct _nei_log_event_header_st {
   uint32_t total_size;
+  /* natural padding to align timestamp_ns on 8-byte boundary */
   uint64_t timestamp_ns;
   nei_log_config_handle_t config_handle;
   int32_t level;
@@ -159,6 +160,9 @@ typedef struct _nei_log_event_header_st {
   uint8_t is_literal;
   /** Thread id text (not necessarily '\\0'-terminated; use @ref thread_id_len). Max 23 bytes. */
   char thread_id_str[23];
+  /** Padding to align the following char arrays to a 4-byte boundary; absorbs
+   *  what would otherwise be trailing padding at the end of the struct. */
+  char _reserved[3];
   /** Deep-copied source file path (truncated at _NEI_LOG_MAX_FILE_COPY). */
   char file[_NEI_LOG_MAX_FILE_COPY];
   /** Deep-copied function signature (truncated at _NEI_LOG_MAX_FUNC_COPY). */
