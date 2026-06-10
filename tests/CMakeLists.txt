@@ -4,17 +4,20 @@ if(POLICY CMP0135)
   cmake_policy(SET CMP0135 NEW)
 endif()
 
-FetchContent_Declare(
-  googletest
-  URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.zip
-      DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-)
+find_package(GTest QUIET)
+if(NOT GTest_FOUND)
+  FetchContent_Declare(
+    googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.zip
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
 
-set(gtest_force_shared_crt
-    ON
-    CACHE BOOL "" FORCE
-)
-FetchContent_MakeAvailable(googletest)
+  set(gtest_force_shared_crt
+      ON
+      CACHE BOOL "" FORCE
+  )
+  FetchContent_MakeAvailable(googletest)
+endif()
 
 enable_testing()
 
@@ -74,7 +77,7 @@ include(GoogleTest)
 # Avoid running the test executable during build time on Windows shared builds
 # (DLLs may not be staged yet). Discover tests at test time instead.
 #
- gtest_discover_tests(nei_tests DISCOVERY_MODE PRE_TEST)
+gtest_discover_tests(nei_tests DISCOVERY_MODE PRE_TEST)
 
 # Optional compile-fail check for scoped_refptr constraints. This target is
 # excluded from default builds and is intended to be invoked manually to inspect
