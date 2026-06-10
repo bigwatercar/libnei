@@ -5,6 +5,17 @@
 #include <nei/debug/check.h>
 #include <neixx/common/location.h>
 
+// Stream proxies capture WeakPtr in lambdas that hop between IO thread and
+// caller's thread.  The proxy uses atomics for its mutable state, so WeakPtr
+// dereference from any thread is safe.
+namespace nei {
+template <>
+struct WeakPtrThreadSafe<internal::AsyncInputStreamProxy> : std::true_type {};
+
+template <>
+struct WeakPtrThreadSafe<internal::AsyncOutputStreamProxy> : std::true_type {};
+}  // namespace nei
+
 namespace nei {
 namespace internal {
 

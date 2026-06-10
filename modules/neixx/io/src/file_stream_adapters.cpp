@@ -9,6 +9,14 @@
 #include <neixx/task/task_runner.h>
 #include <neixx/task/thread_task_runner_handle.h>
 
+// FileInputStreamAdapter captures WeakPtr in read-ahead lambdas that hop
+// between IO thread and target runner.  The adapter uses atomics for its
+// state, so WeakPtr dereference from any thread is safe.
+namespace nei {
+template <>
+struct WeakPtrThreadSafe<FileInputStreamAdapter> : std::true_type {};
+}  // namespace nei
+
 namespace nei {
 
 // ---------------------------------------------------------------------------

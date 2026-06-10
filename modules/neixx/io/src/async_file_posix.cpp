@@ -77,6 +77,13 @@ int ToOpenFlags(AsyncFile::OpenMode mode, AsyncFile::OpenDisposition disposition
 
 }  // namespace
 
+// AsyncFilePosix::Impl uses WeakPtr in cross-thread callbacks (posted from
+// IO thread to background thread and back).  The Impl guards its mutable
+// state with atomics and mutexes, so dereferencing the WeakPtr from any
+// thread is safe.
+template <>
+struct WeakPtrThreadSafe<AsyncFilePosix::Impl> : std::true_type {};
+
 class AsyncFilePosix::Impl final {
  public:
   enum class State {
