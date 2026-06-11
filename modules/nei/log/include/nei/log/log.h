@@ -290,13 +290,16 @@ NEI_API int nei_log_add_config(const nei_log_config_st *config, nei_log_config_h
  * @brief Remove a log configuration by handle
  *
  * @details Unpublishes the configuration from the internal table and
- * releases all registered sinks.  Internally this performs a double-flush
- * (before and after the snapshot bump) to guarantee that the consumer
- * thread is not accessing any sink when its release callback is invoked.
+ * releases all registered sinks via their @ref nei_log_sink_st::release
+ * callback.  Internally this performs a double-flush (before and after
+ * the snapshot bump) to guarantee that the consumer thread is not
+ * accessing any sink when its release callback is invoked.
  *
  * @note This call may block while the consumer thread finishes draining
  * pending events.  After it returns, the configuration handle is invalid
- * and all sink resources have been released.
+ * and all sink resources have been released — do **not** call
+ * @ref nei_log_destroy_sink on sinks that were registered with this
+ * configuration, as they have already been released.
  *
  * @param[in] handle Configuration handle
  */

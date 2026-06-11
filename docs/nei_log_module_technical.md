@@ -164,7 +164,7 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 | API | 说明 |
 |-----|------|
 | `nei_log_add_config` | 添加配置，返回 handle |
-| `nei_log_remove_config` | 按 handle 移除配置（内部双重 flush 保证安全释放 sink） |
+| `nei_log_remove_config` | 按 handle 移除配置（已含 sink 释放，**勿**再手动 destroy 其 sink） |
 | `nei_log_update_config` | 发布原地修改，使配置变更对所有线程生效 |
 | `nei_log_add_sink` | 将 sink 插入配置的 sinks 数组首个空位 |
 | `nei_log_get_config` | 按 handle 获取可修改的配置指针（修改后须调用 `nei_log_update_config`） |
