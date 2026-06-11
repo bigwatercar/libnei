@@ -168,22 +168,61 @@ int nei_log_add_config(const nei_log_config_st *config, nei_log_config_handle_t 
 
 void nei_log_remove_config(nei_log_config_handle_t handle) {
   size_t slot = 0U;
+  nei_log_sink_st *sinks_to_release[NEI_LOG_MAX_SINKS_OF_CONFIG];
+  size_t num_sinks = 0;
+
+  /* Flush once before taking the lock: drain any events already in the ring
+   * buffer so the consumer is idle when we modify the config table. */
+  nei_log_flush();
+
   _nei_log_config_lock_write();
   _nei_log_ensure_config_table_initialized();
   if (_nei_log_slot_from_handle(handle, &slot) != 0 || s_config_used[slot] == 0U) {
     _nei_log_config_unlock_write();
     return;
   }
+
+  /* Save sink pointers with release callbacks before clearing the slot.
+   * This prevents races with slot reuse and ensures sinks are released
+   * outside the write lock (release() may perform I/O or take other locks). */
+  {
+    const nei_log_config_st *cfg = s_config_ptrs[slot];
+    if (cfg != NULL) {
+      size_t i;
+      for (i = 0; i < NEI_LOG_MAX_SINKS_OF_CONFIG; ++i) {
+        if (cfg->sinks[i] != NULL && cfg->sinks[i]->release != NULL) {
+          sinks_to_release[num_sinks++] = cfg->sinks[i];
+        }
+      }
+    }
+  }
+
   if (slot == 0U) {
     _nei_log_reset_default_config();
-    _nei_log_config_snapshot_bump();
-    _nei_log_config_unlock_write();
-    return;
+  } else {
+    s_config_used[slot] = 0U;
+    s_config_ptrs[slot] = NULL;
   }
-  s_config_used[slot] = 0U;
-  s_config_ptrs[slot] = NULL;
   _nei_log_config_snapshot_bump();
   _nei_log_config_unlock_write();
+
+  if (num_sinks > 0U) {
+    /* Flush again after the snapshot bump: drain any events that were
+     * enqueued between the first flush and the snapshot update.  The
+     * consumer's resolve_config_cached() will now see the new snapshot
+     * and find the config removed, so it will skip emit_message() for
+     * these events — guaranteeing no consumer is accessing the sinks
+     * when we call release(). */
+    nei_log_flush();
+
+    /* Release sinks: at this point the config is unpublished and the
+     * consumer has drained all events, so it is safe to release sink
+     * resources (close handles, free memory, etc.). */
+    size_t i;
+    for (i = 0; i < num_sinks; ++i) {
+      sinks_to_release[i]->release(sinks_to_release[i]);
+    }
+  }
 }
 
 void nei_log_update_config(void) {

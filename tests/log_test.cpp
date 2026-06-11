@@ -1425,3 +1425,119 @@ TEST(LogCTest, ImmediateCrashOnFatalFallbackPathTerminates) {
   }, ::testing::ExitedWithCode(134), ".*");
 #endif
 }
+
+// ---------------------------------------------------------------------------
+// Config management tests (update_config / remove_config / destroy_sink release)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+struct SinkReleaseTracker {
+  std::atomic<int> release_count{0};
+};
+
+extern "C" void ConfigTest_TrackRelease(struct nei_log_sink_st *sink) {
+  auto *tracker = static_cast<SinkReleaseTracker *>(sink->opaque);
+  tracker->release_count.fetch_add(1, std::memory_order_relaxed);
+}
+
+}  // namespace
+
+// Verifies that in-place config modifications followed by nei_log_update_config()
+// are visible to subsequent log calls.
+TEST(LogCTest, UpdateConfigMakesInPlaceChangesVisible) {
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+
+  DefaultConfigSinkGuard guard;
+  guard.set_primary_sink(&sink);
+
+  // Default: all levels enabled, INFO should go through.
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "update-cfg", "before");
+  nei_log_flush();
+  {
+    std::lock_guard<std::mutex> lock(collector.mu);
+    ASSERT_EQ(collector.messages.size(), 1U);
+  }
+
+  // Disable INFO level in-place and publish.
+  nei_log_config_st *cfg = nei_log_default_config();
+  cfg->level_flags.all &= ~(1U << static_cast<uint32_t>(NEI_L_INFO));
+  nei_log_update_config();
+
+  collector.messages.clear();
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "update-cfg", "after");
+  nei_log_flush();
+  {
+    std::lock_guard<std::mutex> lock(collector.mu);
+    EXPECT_EQ(collector.messages.size(), 0U);
+  }
+
+  // Restore.
+  cfg->level_flags.all |= (1U << static_cast<uint32_t>(NEI_L_INFO));
+  nei_log_update_config();
+}
+
+// Verifies that removing a custom config via nei_log_remove_config() invokes
+// the release callback on each registered sink.
+TEST(LogCTest, RemoveConfigCallsSinkRelease) {
+  SinkReleaseTracker tracker;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.release = ConfigTest_TrackRelease;
+  sink.opaque = &tracker;
+
+  nei_log_config_st config = *nei_log_default_config();
+  config.sinks[0] = &sink;
+  config.sinks[1] = nullptr;
+
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&config, &cfg_handle), 0);
+
+  EXPECT_EQ(tracker.release_count.load(), 0);
+  nei_log_remove_config(cfg_handle);
+  EXPECT_EQ(tracker.release_count.load(), 1);
+}
+
+// Verifies that nei_log_destroy_sink() invokes the release callback before
+// freeing the sink structure.
+TEST(LogCTest, DestroySinkCallsSinkRelease) {
+  SinkReleaseTracker tracker;
+  nei_log_sink_st *sink = static_cast<nei_log_sink_st *>(calloc(1U, sizeof(nei_log_sink_st)));
+  ASSERT_NE(sink, nullptr);
+  sink->release = ConfigTest_TrackRelease;
+  sink->opaque = &tracker;
+
+  EXPECT_EQ(tracker.release_count.load(), 0);
+  nei_log_destroy_sink(sink);
+  EXPECT_EQ(tracker.release_count.load(), 1);
+}
+
+// Verifies that removing the default config (slot 0) via
+// nei_log_remove_config(NEI_LOG_DEFAULT_CONFIG_HANDLE) invokes the release
+// callback on its sinks.
+TEST(LogCTest, RemoveDefaultConfigCallsSinkRelease) {
+  SinkReleaseTracker tracker;
+  nei_log_sink_st sink = {};
+  sink.release = ConfigTest_TrackRelease;
+  sink.opaque = &tracker;
+
+  // Register a sink on the default config.
+  nei_log_config_st *cfg = nei_log_default_config();
+  nei_log_sink_st *saved_sinks[NEI_LOG_MAX_SINKS_OF_CONFIG];
+  memcpy(saved_sinks, cfg->sinks, sizeof(saved_sinks));
+  cfg->sinks[0] = &sink;
+  cfg->sinks[1] = nullptr;
+  nei_log_update_config();
+
+  EXPECT_EQ(tracker.release_count.load(), 0);
+  nei_log_remove_config(NEI_LOG_DEFAULT_CONFIG_HANDLE);
+  EXPECT_EQ(tracker.release_count.load(), 1);
+
+  // Restore default config sinks so other tests aren't affected.
+  cfg = nei_log_default_config();
+  memcpy(cfg->sinks, saved_sinks, sizeof(saved_sinks));
+  nei_log_update_config();
+}

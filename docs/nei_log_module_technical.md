@@ -107,13 +107,15 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 
 注意：若某 producer 在 `fetch_add` 预留槽位后被抢占，flush 会等待该 producer 恢复并提交，这是设计行为（不允许"洞"）。
 
-### 4.6 File Sink 设计
+### 4.6 File Sink 与自定义 Sink 生命周期
 
 - 支持 append 写入、批量 buffer 聚合（默认 64KB）、按条数周期 fflush（默认 256 条）。
 - Linux 优先 writev 路径，降低 syscall 次数与拷贝开销。
 - 支持按文件大小轮转与备份链（.1/.2/...）。
 - 通过环境变量可调 flush interval 与文件缓冲大小（用于 bench/调优）。
 - 文件流 buffer 与批量写 buffer 互斥：启用批量写时禁用流缓冲（避免双重缓冲）。
+
+**Sink release 回调**：`nei_log_sink_st::release` 是可选的资源清理回调。当配置被 `nei_log_remove_config` 移除时，库会遍历该配置的所有 sink 并调用其 `release` 回调释放资源（如关闭句柄、断开连接、释放 `opaque` 内存）。`nei_log_destroy_sink` 也会在释放 sink 结构体之前调用 `release`。内部默认 file sink 的 `release` 为 NULL，其资源由 `nei_log_destroy_sink` 内部逻辑处理。
 
 ### 4.7 Crash Handler 与崩溃回溯日志
 
@@ -162,7 +164,7 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 | API | 说明 |
 |-----|------|
 | `nei_log_add_config` | 添加配置，返回 handle |
-| `nei_log_remove_config` | 按 handle 移除配置 |
+| `nei_log_remove_config` | 按 handle 移除配置（内部双重 flush 保证安全释放 sink） |
 | `nei_log_update_config` | 发布原地修改，使配置变更对所有线程生效 |
 | `nei_log_get_config` | 按 handle 获取可修改的配置指针（修改后须调用 `nei_log_update_config`） |
 | `nei_log_default_config` | 获取默认配置（slot 0，修改后须调用 `nei_log_update_config`） |
@@ -181,7 +183,7 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 | `log_thread_id` | `uint32_t:1` | 是否输出 `tid=` |
 | `log_to_console` | `uint32_t:1` | 是否镜像到 stdout |
 | `immediate_crash_on_fatal` | `uint32_t:1` | FATAL 日志后立即崩溃 |
-| `sinks` | `nei_log_sink_st*[8]` | sink 数组（NULL 终止） |
+| `sinks` | `nei_log_sink_st*[8]` | sink 数组（NULL 终止）。sink 可设置 `release` 回调由库在 remove/destroy 时调用 |
 
 ### 5.2 记录 API
 
@@ -200,7 +202,7 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 |-----|------|
 | `nei_log_default_file_sink_options()` | 获取默认 file sink 选项 |
 | `nei_log_create_default_file_sink(path, opts)` | 创建内置 file sink |
-| `nei_log_destroy_sink(sink)` | 销毁 sink 并释放资源 |
+| `nei_log_destroy_sink(sink)` | 销毁 sink（先调 release 回调，再释放内存） |
 
 ### 5.4 宏 API
 

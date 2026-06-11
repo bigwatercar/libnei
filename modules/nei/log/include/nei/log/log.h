@@ -228,6 +228,18 @@ struct nei_log_sink_st {
   void (*llog)(const struct nei_log_sink_st *sink, nei_log_level_e level, const char *message, size_t length);
   /** @brief Callback for verbose logs (can be NULL). */
   void (*vlog)(const struct nei_log_sink_st *sink, int verbose, const char *message, size_t length);
+  /**
+   * @brief Optional callback to release sink-owned resources.
+   *
+   * @details Set this to a custom cleanup function if your sink holds
+   * resources that must be released (file handles, network connections,
+   * allocated memory in @ref opaque, etc.).  The log module calls this:
+   * - From @ref nei_log_remove_config (after the config is unpublished)
+   * - From @ref nei_log_destroy_sink (before freeing the struct)
+   *
+   * Set to NULL if no custom cleanup is needed.
+   */
+  void (*release)(struct nei_log_sink_st *sink);
   /** @brief User data pointer; lifetime is managed by the caller. */
   void *opaque;
 };
@@ -276,6 +288,15 @@ NEI_API int nei_log_add_config(const nei_log_config_st *config, nei_log_config_h
 
 /**
  * @brief Remove a log configuration by handle
+ *
+ * @details Unpublishes the configuration from the internal table and
+ * releases all registered sinks.  Internally this performs a double-flush
+ * (before and after the snapshot bump) to guarantee that the consumer
+ * thread is not accessing any sink when its release callback is invoked.
+ *
+ * @note This call may block while the consumer thread finishes draining
+ * pending events.  After it returns, the configuration handle is invalid
+ * and all sink resources have been released.
  *
  * @param[in] handle Configuration handle
  */
@@ -425,9 +446,10 @@ NEI_API nei_log_sink_st *nei_log_create_default_file_sink(const char *filename,
  *
  * @param[in] sink Sink pointer to destroy. NULL is allowed.
  *
- * @note For the default file sink, @ref nei_log_sink_st::opaque is closed and
- * freed. For custom sinks, release @p opaque yourself first if needed; this
- * routine always @c free()s the @ref nei_log_sink_st itself.
+ * @details If the sink has a non-NULL @ref nei_log_sink_st::release
+ * callback, it is invoked first to allow the owner to release custom
+ * resources.  The routine always @c free()s the @ref nei_log_sink_st
+ * itself.
  */
 NEI_API void nei_log_destroy_sink(nei_log_sink_st *sink);
 
@@ -633,7 +655,7 @@ NEI_API void nei_log_reset_perf_stats_for_test(void);
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_C(config_handle, level, fmt, ...)                                                                       \
+#define NEI_LOG_C(config_handle, level, fmt, ...)                                                                      \
   nei_llog(config_handle, level, __FILE__, __LINE__, NEI_FUNC, fmt, ##__VA_ARGS__)
 
 /**
@@ -644,11 +666,11 @@ NEI_API void nei_log_reset_perf_stats_for_test(void);
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
  */
-#define NEI_LOG_C_IF(condition, config_handle, level, fmt, ...)                                                         \
-  do {                                                                                                                   \
-    if (condition) {                                                                                                     \
-      NEI_LOG_C(config_handle, level, fmt, ##__VA_ARGS__);                                                              \
-    }                                                                                                                    \
+#define NEI_LOG_C_IF(condition, config_handle, level, fmt, ...)                                                        \
+  do {                                                                                                                 \
+    if (condition) {                                                                                                   \
+      NEI_LOG_C(config_handle, level, fmt, ##__VA_ARGS__);                                                             \
+    }                                                                                                                  \
   } while (0)
 
 /**
@@ -768,7 +790,8 @@ NEI_API void nei_log_reset_perf_stats_for_test(void);
 #define NEI_LOG(level, fmt, ...) ((void)(level))
 #define NEI_LOG_IF(condition, level, fmt, ...) ((void)(condition))
 #define NEI_LOG_C(config_handle, level, fmt, ...) ((void)(config_handle), (void)(level))
-#define NEI_LOG_C_IF(condition, config_handle, level, fmt, ...) ((void)(condition), (void)(config_handle), (void)(level))
+#define NEI_LOG_C_IF(condition, config_handle, level, fmt, ...)                                                        \
+  ((void)(condition), (void)(config_handle), (void)(level))
 #define NEI_LOG_VERBOSE(verbose, fmt, ...) void(0)
 #define NEI_LOG_VERBOSE_IF(condition, verbose, fmt, ...) ((void)(condition))
 #define NEI_LOG_TRACE(fmt, ...) NEI_LOG(NEI_L_TRACE, fmt, ##__VA_ARGS__)

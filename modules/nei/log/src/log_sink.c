@@ -355,6 +355,21 @@ void _nei_log_default_file_vlog(const nei_log_sink_st *sink, int verbose, const 
   }
 }
 
+static void _nei_log_default_file_sink_release(struct nei_log_sink_st *sink) {
+  nei_log_default_file_sink_ctx_st *ctx = (nei_log_default_file_sink_ctx_st *)sink->opaque;
+  if (ctx == NULL || ctx->magic != _NEI_LOG_DEFAULT_FILE_SINK_MAGIC) {
+    return;
+  }
+  if (ctx->fp != NULL) {
+    _nei_log_file_sink_flush_pending(ctx, 1);
+    fclose(ctx->fp);
+  }
+  free(ctx->write_batch_buf);
+  free(ctx->filename);
+  free(ctx);
+  sink->opaque = NULL;
+}
+
 void _nei_log_emit_message(const nei_log_config_st *config, int32_t level, int32_t verbose, const char *message, size_t length) {
   const nei_log_config_st *effective = config;
   size_t i;
@@ -486,41 +501,24 @@ nei_log_sink_st *nei_log_create_default_file_sink(const char *filename,
 
   sink->llog = _nei_log_default_file_llog;
   sink->vlog = _nei_log_default_file_vlog;
+  sink->release = _nei_log_default_file_sink_release;
   sink->opaque = ctx;
   return sink;
 }
 
 void nei_log_destroy_sink(nei_log_sink_st *sink) {
-  nei_log_default_file_sink_ctx_st *ctx = NULL;
   if (sink == NULL) {
     return;
   }
 
-  if (sink->opaque != NULL && sink->llog == _nei_log_default_file_llog && sink->vlog == _nei_log_default_file_vlog) {
-    ctx = (nei_log_default_file_sink_ctx_st *)sink->opaque;
-    if (ctx->magic == _NEI_LOG_DEFAULT_FILE_SINK_MAGIC) {
-      if (ctx->fp != NULL) {
-        _nei_log_file_sink_flush_pending(ctx, 1);
-        fclose(ctx->fp);
-      }
-      if (ctx->write_batch_buf != NULL) {
-        free(ctx->write_batch_buf);
-      }
-      if (ctx->filename != NULL) {
-        free(ctx->filename);
-      }
-      ctx->filename = NULL;
-      ctx->max_backup_files = 0U;
-      ctx->write_batch_buf = NULL;
-      ctx->current_size = 0U;
-      ctx->max_file_bytes = 0U;
-      ctx->write_batch_cap = 0U;
-      ctx->write_batch_used = 0U;
-      ctx->fp = NULL;
-      ctx->magic = 0U;
-      free(ctx);
-    }
+  /* Delegate resource cleanup to the sink's release callback (if set).
+   * For built-in sinks this is _nei_log_default_file_sink_release; custom
+   * sinks set their own callback.  The callback is responsible for freeing
+   * opaque and any other owned resources. */
+  if (sink->release != NULL) {
+    sink->release(sink);
   }
+
   free(sink);
 }
 
