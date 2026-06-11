@@ -282,12 +282,29 @@ NEI_API int nei_log_add_config(const nei_log_config_st *config, nei_log_config_h
 NEI_API void nei_log_remove_config(nei_log_config_handle_t handle);
 
 /**
+ * @brief Publish in-place configuration changes so they take effect.
+ *
+ * @details After modifying a configuration struct obtained via
+ * @ref nei_log_get_config or @ref nei_log_default_config, the caller
+ * **must** call this function to make the changes visible to log producers
+ * running on other threads.  Internally this bumps a global generation
+ * counter so that every thread's per-thread config cache is invalidated
+ * and re-read on the next log call.
+ *
+ * This is a lightweight atomic operation that does not take any lock.
+ */
+NEI_API void nei_log_update_config(void);
+
+/**
  * @brief Get a log configuration by handle
  *
  * @param[in] handle Configuration handle
  * @return Pointer to the library-owned configuration, or NULL if not found.
- * The object may be modified in place (same caveats as
- * @ref nei_log_default_config regarding thread safety).
+ *
+ * @note The returned pointer may be modified in-place.  After modifying any
+ * fields, call @ref nei_log_update_config to publish the changes.
+ *
+ * @see nei_log_default_config, nei_log_update_config
  */
 NEI_API nei_log_config_st *nei_log_get_config(nei_log_config_handle_t handle);
 
@@ -298,8 +315,12 @@ NEI_API nei_log_config_st *nei_log_get_config(nei_log_config_handle_t handle);
  *
  * The returned pointer is managed by the logging library and remains valid for
  * the lifetime of the process. Callers may override fields in-place (e.g.
- * `sinks`, formatting options); such changes are not guaranteed to be
- * thread-safe.
+ * `sinks`, formatting options).
+ *
+ * @note After modifying any fields, call @ref nei_log_update_config
+ * to publish the changes.  In-place modifications are not guaranteed to be
+ * thread-safe; the caller should serialize access if multiple threads may
+ * write the same configuration concurrently.
  *
  * @return Pointer to the default configuration.
  */

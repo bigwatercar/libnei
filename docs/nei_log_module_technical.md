@@ -55,6 +55,7 @@ log 模块是 C 语言层的高性能异步日志基础设施，目标是：
 
 - 配置表容量固定（含 default 在内最多 16 个配置槽位）。
 - 通过读写锁保护配置修改；通过 snapshot 版本号通知并发读路径。
+- `nei_log_get_config()` / `nei_log_default_config()` 返回可原地修改的配置指针；修改后**必须**调用 `nei_log_update_config()` 使变更对日志生产者线程可见（触发 snapshot bump）。
 - `nei_log_default_config()` 快路径仅获取读锁（双重检查锁定，仅首次初始化需写锁）。
 - producer 侧使用 TLS 缓存整表指针：
   - 快路径：仅做 snapshot 读取与数组索引
@@ -162,8 +163,9 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 |-----|------|
 | `nei_log_add_config` | 添加配置，返回 handle |
 | `nei_log_remove_config` | 按 handle 移除配置 |
-| `nei_log_get_config` | 按 handle 获取可修改的配置指针 |
-| `nei_log_default_config` | 获取默认配置（slot 0） |
+| `nei_log_update_config` | 发布原地修改，使配置变更对所有线程生效 |
+| `nei_log_get_config` | 按 handle 获取可修改的配置指针（修改后须调用 `nei_log_update_config`） |
+| `nei_log_default_config` | 获取默认配置（slot 0，修改后须调用 `nei_log_update_config`） |
 
 关键配置项（`nei_log_config_st`）：
 

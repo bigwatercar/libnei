@@ -186,6 +186,10 @@ void nei_log_remove_config(nei_log_config_handle_t handle) {
   _nei_log_config_unlock_write();
 }
 
+void nei_log_update_config(void) {
+  _nei_log_config_snapshot_bump();
+}
+
 nei_log_config_st *nei_log_get_config(nei_log_config_handle_t handle) {
   nei_log_config_st *cfg = NULL;
   size_t slot = 0U;
