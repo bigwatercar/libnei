@@ -202,16 +202,27 @@ nei_log_config_st *nei_log_get_config(nei_log_config_handle_t handle) {
 
 nei_log_config_st *nei_log_default_config(void) {
   nei_log_config_st *cfg = NULL;
-  _nei_log_config_lock_write();
+
+  _nei_log_config_lock_read();
   _nei_log_ensure_config_table_initialized();
   cfg = s_config_ptrs[0];
-  if (cfg == NULL) {
+  _nei_log_config_unlock_read();
+
+  if (cfg != NULL) {
+    return cfg;
+  }
+
+  /* Slow path: first access initializes the default config under a write
+   * lock, but the common case (post-init) only takes the read lock. */
+  _nei_log_config_lock_write();
+  _nei_log_ensure_config_table_initialized();
+  if (s_config_ptrs[0] == NULL) {
     s_config_used[0] = 1U;
     s_config_ptrs[0] = &s_custom_configs[0];
-    cfg = s_config_ptrs[0];
-    _nei_log_fill_default_config(cfg);
+    _nei_log_fill_default_config(s_config_ptrs[0]);
     _nei_log_config_snapshot_bump();
   }
+  cfg = s_config_ptrs[0];
   _nei_log_config_unlock_write();
   return cfg;
 }

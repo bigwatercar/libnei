@@ -100,6 +100,11 @@ void _nei_log_format_timestamp(uint64_t timestamp_ns, nei_log_timestamp_style_e 
   millis = (unsigned)((timestamp_ns % 1000000000ULL) / 1000000ULL);
   nanos = (unsigned)(timestamp_ns % 1000000000ULL);
 
+  /* Guard against NTP clock rollback: if the second regressed, the cached
+   * datetime string is stale and must be rebuilt. */
+  if (cache->ready && sec < cache->sec) {
+    cache->ready = 0;
+  }
   cache_hit = cache->ready && cache->sec == sec && cache->style == style;
   if (!cache_hit) {
 #if defined(_WIN32)

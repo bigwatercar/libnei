@@ -117,7 +117,7 @@ static void AppendCodepointAsUtf8(std::string *out, char32_t cp) {
 }
 #endif
 
-/** Matches log.c non-Windows path: UTF-8 from native wchar_t (WCHAR_T / Unicode scalar values). */
+/** Matches log_serialize.c Windows path: UTF-8 via WideCharToMultiByte(CP_UTF8, ...). */
 static std::string ExpectedMbFromWideForLogCTest(const wchar_t *ws) {
   if (ws == nullptr) {
     return "(null)";
@@ -127,12 +127,12 @@ static std::string ExpectedMbFromWideForLogCTest(const wchar_t *ws) {
   if (nchars == 0) {
     return {};
   }
-  const int nb = WideCharToMultiByte(CP_ACP, 0, ws, nchars, nullptr, 0, nullptr, nullptr);
+  const int nb = WideCharToMultiByte(CP_UTF8, 0, ws, nchars, nullptr, 0, nullptr, nullptr);
   if (nb <= 0) {
     return "[encoding error]";
   }
   std::string out(static_cast<size_t>(nb), '\0');
-  const int wr = WideCharToMultiByte(CP_ACP, 0, ws, nchars, out.data(), nb, nullptr, nullptr);
+  const int wr = WideCharToMultiByte(CP_UTF8, 0, ws, nchars, out.data(), nb, nullptr, nullptr);
   if (wr <= 0) {
     return "[encoding error]";
   }

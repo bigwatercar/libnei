@@ -113,9 +113,9 @@ static int _nei_log_payload_emit_arg(uint8_t *out,
       v64 = (int64_t)_NEI_LOG_VA_ARG(args, long long);
     } else if (conv_lm == 5U) {
       v64 = (int64_t)_NEI_LOG_VA_ARG(args, intmax_t);
-    } else if (conv_lm == 6U) {
-      v64 = (int64_t)_NEI_LOG_VA_ARG(args, ptrdiff_t);
-    } else if (conv_lm == 7U) {
+    } else if (conv_lm == 6U || conv_lm == 7U) {
+      /* 'z' (size_t signed) and 't' (ptrdiff_t) are the same width on all
+       * supported ABIs (ILP32 / LP64 / LLP64); read as ptrdiff_t. */
       v64 = (int64_t)_NEI_LOG_VA_ARG(args, ptrdiff_t);
     } else {
       v64 = (int64_t)_NEI_LOG_VA_ARG(args, long long);
@@ -131,6 +131,7 @@ static int _nei_log_payload_emit_arg(uint8_t *out,
     } else if (conv_lm == 5U) {
       v64 = (uint64_t)_NEI_LOG_VA_ARG(args, uintmax_t);
     } else if (conv_lm == 6U || conv_lm == 7U) {
+      /* 'z' (size_t) and 't' (ptrdiff_t) are the same width; read as size_t. */
       v64 = (uint64_t)_NEI_LOG_VA_ARG(args, size_t);
     } else {
       v64 = (uint64_t)_NEI_LOG_VA_ARG(args, unsigned long long);
@@ -358,7 +359,7 @@ static int _nei_log_build_fmt_plan(const char *fmt, _nei_log_fmt_plan_cache_st *
   return 1;
 }
 
-/** Windows: ACP (ANSI code page). POSIX: UTF-8 via iconv from WCHAR_T. */
+/** Windows: UTF-8.  POSIX: UTF-8 via iconv from WCHAR_T. */
 static const char *_nei_log_wstr_to_mbs_or_placeholder(const wchar_t *ws, char *buf, size_t buf_cap) {
   static const char s_null_placeholder[] = "(null)";
   static const char s_encoding_error_placeholder[] = "[encoding error]";
@@ -389,10 +390,10 @@ static const char *_nei_log_wstr_to_mbs_or_placeholder(const wchar_t *ws, char *
     return s_encoding_error_placeholder;
   }
 
-  /* Use system ANSI code page (ACP), not UTF-8, so log text matches typical console/file encodings. */
-  out_bytes = WideCharToMultiByte(CP_ACP, 0, ws, (int)wlen, NULL, 0, NULL, NULL);
+  /* Convert wide strings to UTF-8 for consistent cross-system log encoding. */
+  out_bytes = WideCharToMultiByte(CP_UTF8, 0, ws, (int)wlen, NULL, 0, NULL, NULL);
   if (out_bytes > 0 && (size_t)out_bytes <= (buf_cap - 1U)) {
-    int written = WideCharToMultiByte(CP_ACP, 0, ws, (int)wlen, buf, (int)(buf_cap - 1U), NULL, NULL);
+    int written = WideCharToMultiByte(CP_UTF8, 0, ws, (int)wlen, buf, (int)(buf_cap - 1U), NULL, NULL);
     if (written <= 0) {
       return s_encoding_error_placeholder;
     }
@@ -409,7 +410,7 @@ static const char *_nei_log_wstr_to_mbs_or_placeholder(const wchar_t *ws, char *
       if (mid > (size_t)INT_MAX) {
         need = -1;
       } else {
-        need = WideCharToMultiByte(CP_ACP, 0, ws, (int)mid, NULL, 0, NULL, NULL);
+        need = WideCharToMultiByte(CP_UTF8, 0, ws, (int)mid, NULL, 0, NULL, NULL);
       }
     }
     if (need >= 0 && (size_t)need <= (buf_cap - 1U)) {
@@ -428,7 +429,7 @@ static const char *_nei_log_wstr_to_mbs_or_placeholder(const wchar_t *ws, char *
   if (best > (size_t)INT_MAX) {
     return s_encoding_error_placeholder;
   }
-  out_bytes = WideCharToMultiByte(CP_ACP, 0, ws, (int)best, buf, (int)(buf_cap - 1U), NULL, NULL);
+  out_bytes = WideCharToMultiByte(CP_UTF8, 0, ws, (int)best, buf, (int)(buf_cap - 1U), NULL, NULL);
   if (out_bytes <= 0) {
     return s_encoding_error_placeholder;
   }

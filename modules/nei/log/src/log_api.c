@@ -37,8 +37,11 @@ static nei_log_config_handle_t s_crash_config_handle = NEI_LOG_INVALID_CONFIG_HA
  * @brief Set to 1 while the crash handler is actively writing backtrace lines.
  * Prevents nei_llog_literal(FATAL) from re-triggering immediate_crash_on_fatal
  * and causing a recursive crash.
+ *
+ * @c volatile sig_atomic_t guarantees safe access between the signal handler
+ * (writer) and ordinary threads (readers) without a lock.
  */
-static int s_in_crash_handler = 0;
+static volatile sig_atomic_t s_in_crash_handler = 0;
 
 #if defined(_WIN32)
 static int _nei_log_win_printf(char *out, size_t out_cap, const char *fmt, ...) {
@@ -367,7 +370,11 @@ void nei_llog(nei_log_config_handle_t config_handle,
 
   /* Early filter: check if this level is enabled before serialization. */
   config = _nei_log_get_config_fast(config_handle);
-  if (config != NULL) {
+  if (config == NULL) {
+    --_s_tls_log_depth;
+    return;
+  }
+  {
     const uint32_t mask = (uint32_t)(1U << (uint32_t)level);
     if (level < (int32_t)NEI_L_VERBOSE || level > (int32_t)NEI_L_FATAL || (config->level_flags.all & mask) == 0U) {
       --_s_tls_log_depth;
@@ -423,7 +430,11 @@ void nei_vlog(nei_log_config_handle_t config_handle,
 
   /* Early filter: check if this verbose level passes threshold before serialization. */
   config = _nei_log_get_config_fast(config_handle);
-  if (config != NULL && config->verbose_threshold >= 0 && verbose > config->verbose_threshold) {
+  if (config == NULL) {
+    --_s_tls_log_depth;
+    return;
+  }
+  if (config->verbose_threshold >= 0 && verbose > config->verbose_threshold) {
     --_s_tls_log_depth;
     return; /* Verbose level exceeds threshold, skip serialization. */
   }
@@ -467,7 +478,11 @@ void nei_llog_literal(nei_log_config_handle_t config_handle,
 
   /* Early filter: check if this level is enabled before serialization. */
   config = _nei_log_get_config_fast(config_handle);
-  if (config != NULL) {
+  if (config == NULL) {
+    --_s_tls_log_depth;
+    return;
+  }
+  {
     const uint32_t mask = (uint32_t)(1U << (uint32_t)level);
     if (level < (int32_t)NEI_L_VERBOSE || level > (int32_t)NEI_L_FATAL || (config->level_flags.all & mask) == 0U) {
       --_s_tls_log_depth;
@@ -520,7 +535,11 @@ void nei_vlog_literal(nei_log_config_handle_t config_handle,
 
   /* Early filter: check if this verbose level passes threshold before serialization. */
   config = _nei_log_get_config_fast(config_handle);
-  if (config != NULL && config->verbose_threshold >= 0 && verbose > config->verbose_threshold) {
+  if (config == NULL) {
+    --_s_tls_log_depth;
+    return;
+  }
+  if (config->verbose_threshold >= 0 && verbose > config->verbose_threshold) {
     --_s_tls_log_depth;
     return;
   }

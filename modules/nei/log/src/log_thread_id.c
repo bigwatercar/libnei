@@ -29,7 +29,22 @@ void _nei_log_tls_thread_id_cstr(const char **out_str, size_t *out_len) {
 #else
   const pthread_t self = pthread_self();
   if (s_tls_tid_ready == 0U || pthread_equal(s_tls_tid_pt, self) == 0) {
-    (void)snprintf(s_tls_tid_buf, sizeof(s_tls_tid_buf), "%lu", (unsigned long)self);
+    /* pthread_t is opaque; print its bytes as hex in human-readable order.
+     * On little-endian the bytes are reversed so the output matches what
+     * a debugger or the original integral value would show.  The endianness
+     * check is evaluated at compile time by any modern compiler. */
+    {
+      const unsigned char *p = (const unsigned char *)&self;
+      const unsigned probe = 1U;
+      const int little_endian = (*(const unsigned char *)&probe) == 1U;
+      int off = 0;
+      size_t j;
+      for (j = 0; j < sizeof(self) && off < (int)sizeof(s_tls_tid_buf) - 3; ++j) {
+        const size_t idx = little_endian ? (sizeof(self) - 1U - j) : j;
+        off += snprintf(s_tls_tid_buf + off, sizeof(s_tls_tid_buf) - (size_t)off,
+                        "%02x", (unsigned)p[idx]);
+      }
+    }
     s_tls_tid_pt = self;
     s_tls_tid_ready = 1U;
   }
