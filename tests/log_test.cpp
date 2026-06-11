@@ -1435,6 +1435,11 @@ extern "C" void ConfigTest_TrackRelease(struct nei_log_sink_st *sink) {
   tracker->release_count.fetch_add(1, std::memory_order_relaxed);
 }
 
+extern "C" void ConfigTest_TrackAndFreeRelease(struct nei_log_sink_st *sink) {
+  ConfigTest_TrackRelease(sink);
+  free(sink);
+}
+
 }  // namespace
 
 // Verifies that in-place config modifications followed by nei_log_update_config()
@@ -1495,13 +1500,12 @@ TEST(LogCTest, RemoveConfigCallsSinkRelease) {
   EXPECT_EQ(tracker.release_count.load(), 1);
 }
 
-// Verifies that nei_log_destroy_sink() invokes the release callback before
-// freeing the sink structure.
+// Verifies that nei_log_destroy_sink() invokes the release callback.
 TEST(LogCTest, DestroySinkCallsSinkRelease) {
   SinkReleaseTracker tracker;
   nei_log_sink_st *sink = static_cast<nei_log_sink_st *>(calloc(1U, sizeof(nei_log_sink_st)));
   ASSERT_NE(sink, nullptr);
-  sink->release = ConfigTest_TrackRelease;
+  sink->release = ConfigTest_TrackAndFreeRelease;
   sink->opaque = &tracker;
 
   EXPECT_EQ(tracker.release_count.load(), 0);

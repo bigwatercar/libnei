@@ -327,6 +327,11 @@ static void _nei_log_stdout_vlog(const nei_log_sink_st *sink, int verbose,
   (void)fputc('\n', stdout);
 }
 
+static void _nei_log_stdout_sink_release(struct nei_log_sink_st *sink) {
+  (void)sink;
+  free(sink);
+}
+
 void _nei_log_default_file_llog(const nei_log_sink_st *sink, nei_log_level_e level, const char *message, size_t length) {
   nei_log_default_file_sink_ctx_st *ctx = NULL;
   (void)level;
@@ -393,7 +398,7 @@ static void _nei_log_default_file_sink_release(struct nei_log_sink_st *sink) {
   free(ctx->write_batch_buf);
   free(ctx->filename);
   free(ctx);
-  sink->opaque = NULL;
+  free(sink);
 }
 
 void _nei_log_emit_message(const nei_log_config_st *config, int32_t level, int32_t verbose, const char *message, size_t length) {
@@ -533,15 +538,12 @@ void nei_log_destroy_sink(nei_log_sink_st *sink) {
     return;
   }
 
-  /* Delegate resource cleanup to the sink's release callback (if set).
-   * For built-in sinks this is _nei_log_default_file_sink_release; custom
-   * sinks set their own callback.  The callback is responsible for freeing
-   * opaque and any other owned resources. */
+  /* Delegate to the sink's release callback.  For built-in sinks this
+   * frees all resources (ctx, file handles, the sink struct itself).
+   * Custom sinks should set release to free their own resources. */
   if (sink->release != NULL) {
     sink->release(sink);
   }
-
-  free(sink);
 }
 
 nei_log_sink_st *nei_log_create_stdout_sink(void) {
@@ -551,6 +553,7 @@ nei_log_sink_st *nei_log_create_stdout_sink(void) {
   }
   sink->llog = _nei_log_stdout_llog;
   sink->vlog = _nei_log_stdout_vlog;
+  sink->release = _nei_log_stdout_sink_release;
   return sink;
 }
 

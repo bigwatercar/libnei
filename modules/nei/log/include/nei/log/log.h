@@ -226,15 +226,18 @@ struct nei_log_sink_st {
   /** @brief Callback for verbose logs (can be NULL). */
   void (*vlog)(const struct nei_log_sink_st *sink, int verbose, const char *message, size_t length);
   /**
-   * @brief Optional callback to release sink-owned resources.
+   * @brief Optional callback to release all sink-owned resources.
    *
-   * @details Set this to a custom cleanup function if your sink holds
-   * resources that must be released (file handles, network connections,
-   * allocated memory in @ref opaque, etc.).  The log module calls this:
-   * - From @ref nei_log_remove_config (after the config is unpublished)
-   * - From @ref nei_log_destroy_sink (before freeing the struct)
+   * @details For built-in sinks created by the library (file sink,
+   * stdout sink), this callback frees the sink struct itself in
+   * addition to any internal resources.  For custom sinks, implement
+   * this to release resources held via @ref opaque; the sink struct
+   * lifetime is managed by the caller.
    *
-   * Set to NULL if no custom cleanup is needed.
+   * The log module calls this from @ref nei_log_remove_config (after
+   * the config is unpublished and the consumer is drained).
+   *
+   * Set to NULL if no cleanup is needed.
    */
   void (*release)(struct nei_log_sink_st *sink);
   /** @brief User data pointer; lifetime is managed by the caller. */
@@ -460,23 +463,26 @@ NEI_API nei_log_sink_st *nei_log_create_default_file_sink(const char *filename,
  * @details Returns a heap-allocated sink that writes each formatted log
  * line to @c stdout followed by a newline.
  *
- * The returned sink has no release callback; use @ref nei_log_destroy_sink
- * to free the sink structure when no longer needed.
+ * The returned sink is released via its release callback (called by
+ * @ref nei_log_remove_config or @ref nei_log_destroy_sink).
  *
  * @return Heap-allocated sink pointer, or NULL on allocation failure.
  */
 NEI_API nei_log_sink_st *nei_log_create_stdout_sink(void);
 
 /**
- * @brief Destroy a log sink structure allocated by the library (e.g.
- * @ref nei_log_create_default_file_sink).
+ * @brief Release a log sink by invoking its release callback.
  *
- * @param[in] sink Sink pointer to destroy. NULL is allowed.
+ * @param[in] sink Sink pointer. NULL is allowed.
  *
- * @details If the sink has a non-NULL @ref nei_log_sink_st::release
- * callback, it is invoked first to allow the owner to release custom
- * resources.  The routine always @c free()s the @ref nei_log_sink_st
- * itself.
+ * @details Delegates entirely to @ref nei_log_sink_st::release.
+ * For built-in sinks this frees all resources including the sink
+ * struct itself.  For custom sinks, the callback should release
+ * @ref nei_log_sink_st::opaque and any other owned resources.
+ *
+ * @note Normally sinks are released automatically by
+ * @ref nei_log_remove_config.  Use this only when you need to
+ * manually release a sink without removing its config.
  */
 NEI_API void nei_log_destroy_sink(nei_log_sink_st *sink);
 

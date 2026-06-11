@@ -115,7 +115,7 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 - 通过环境变量可调 flush interval 与文件缓冲大小（用于 bench/调优）。
 - 文件流 buffer 与批量写 buffer 互斥：启用批量写时禁用流缓冲（避免双重缓冲）。
 
-**Sink release 回调**：`nei_log_sink_st::release` 是可选的资源清理回调。当配置被 `nei_log_remove_config` 移除时，库会遍历该配置的所有 sink 并调用其 `release` 回调释放资源（如关闭句柄、断开连接、释放 `opaque` 内存）。`nei_log_destroy_sink` 也会在释放 sink 结构体之前调用 `release`。内部默认 file sink 的 `release` 为 NULL，其资源由 `nei_log_destroy_sink` 内部逻辑处理。
+**Sink release 回调**：`nei_log_sink_st::release` 是可选的资源清理回调。当配置被 `nei_log_remove_config` 移除时，库会遍历该配置的所有 sink 并调用其 `release` 回调。内置 sink（file sink、stdout sink）的 release 会释放所有内部资源及 sink 结构体本身。自定义 sink 应在 release 中释放 `opaque` 及自有资源。
 
 ### 4.7 Crash Handler 与崩溃回溯日志
 
@@ -203,7 +203,7 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 | `nei_log_default_file_sink_options()` | 获取默认 file sink 选项 |
 | `nei_log_create_default_file_sink(path, opts)` | 创建内置 file sink |
 | `nei_log_create_stdout_sink()` | 创建内置 stdout sink |
-| `nei_log_destroy_sink(sink)` | 销毁 sink（先调 release 回调，再释放内存） |
+| `nei_log_destroy_sink(sink)` | 调用 sink 的 release 回调释放资源 |
 
 ### 5.4 宏 API
 
