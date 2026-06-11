@@ -1560,3 +1560,66 @@ TEST(LogCTest, AddSinkInsertsAtFirstNullSlot) {
   }
   EXPECT_EQ(nei_log_add_sink(&cfg, &s1), -1);
 }
+
+// Verifies that auto-flush interval defaults to 0 (disabled).
+TEST(LogCTest, AutoFlushDefaultDisabled) {
+  EXPECT_EQ(nei_log_get_auto_flush_interval_ms(), 0U);
+}
+
+// Verifies set/get round-trip for auto-flush interval.
+TEST(LogCTest, AutoFlushSetGetRoundTrip) {
+  nei_log_set_auto_flush_interval_ms(500);
+  EXPECT_EQ(nei_log_get_auto_flush_interval_ms(), 500U);
+
+  nei_log_set_auto_flush_interval_ms(0);
+  EXPECT_EQ(nei_log_get_auto_flush_interval_ms(), 0U);
+}
+
+// Verifies that auto-flush actually flushes pending data to a file sink
+// without an explicit nei_log_flush() call.
+TEST(LogCTest, AutoFlushFlushesPendingData) {
+  char tmp_name[L_tmpnam] = {};
+#if defined(_WIN32)
+  ASSERT_EQ(tmpnam_s(tmp_name, L_tmpnam), 0);
+#else
+  ASSERT_NE(std::tmpnam(tmp_name), nullptr);
+#endif
+  const std::string file_path = std::string(tmp_name) + ".log";
+  (void)std::remove(file_path.c_str());
+
+  /* Disable batch flushing so data goes to the FILE* buffer but isn't
+   * fflush'd until the auto-flush timer fires. */
+  nei_log_default_file_sink_options_st opts = nei_log_default_file_sink_options();
+  opts.flush_interval    = 0U;   /* never auto-flush per record count */
+  opts.write_batch_bytes = 0U;   /* disable batch writing */
+  nei_log_sink_st *sink = nei_log_create_default_file_sink(file_path.c_str(), &opts);
+  ASSERT_NE(sink, nullptr);
+
+  nei_log_config_st cfg = *nei_log_default_config();
+  cfg.level_flags = {};
+  cfg.level_flags.flags.info = 1U;
+  cfg.sinks[0] = sink;
+  cfg.sinks[1] = nullptr;
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&cfg, &cfg_handle), 0);
+
+  /* Log without flushing — data is in the stdio buffer only. */
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "auto-flush", "line1");
+  nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "auto-flush", "line2");
+
+  /* Enable auto-flush at 100ms and wait. */
+  nei_log_set_auto_flush_interval_ms(100);
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+  nei_log_remove_config(cfg_handle);
+  nei_log_set_auto_flush_interval_ms(0);
+
+  /* The file should now contain the log lines (flushed by the timer). */
+  std::ifstream in(file_path, std::ios::binary);
+  ASSERT_TRUE(in.good());
+  const std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  (void)std::remove(file_path.c_str());
+
+  EXPECT_NE(content.find("line1"), std::string::npos);
+  EXPECT_NE(content.find("line2"), std::string::npos);
+}
