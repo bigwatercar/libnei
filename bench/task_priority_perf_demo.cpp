@@ -299,10 +299,6 @@ int main(int argc, char* argv[]) {
     return 2;
   }
 
-  if (nei_log_config_st* log_config = nei_log_get_config(NEI_LOG_DEFAULT_CONFIG_HANDLE)) {
-    log_config->log_to_console = 1;
-  }
-
   const std::uint64_t total_tasks = static_cast<std::uint64_t>(config.tasks_per_priority) * 3;
   nei::ThreadPool pool(nei::ThreadPool::InitParams{config.worker_count});
   PerformanceObserver observer(total_tasks);

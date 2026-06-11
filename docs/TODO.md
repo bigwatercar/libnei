@@ -393,7 +393,6 @@ typedef struct _nei_log_event_header_st {
   nei_log_level_flags_u level_flags_snapshot;
   int verbose_threshold_snapshot;
   int short_level_tag_snapshot;
-  int log_to_console_snapshot;
 
   const char *file_ptr;
   // ...

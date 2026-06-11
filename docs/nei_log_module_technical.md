@@ -31,7 +31,7 @@ log 模块是 C 语言层的高性能异步日志基础设施，目标是：
 3. 事件序列化为紧凑二进制格式（header + payload），header 中深拷贝源位置字符串
 4. 写入 MPSC ring buffer（固定 256 槽位，每槽一个自包含事件）
 5. Consumer 线程按序消费并格式化文本
-6. 按配置分发到 sinks 与可选 console
+6. 按配置分发到 sinks
 
 ### 3.2 分层结构
 
@@ -181,7 +181,6 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 | `log_location` | `uint32_t:1` | 是否输出源位置 |
 | `log_location_after_message` | `uint32_t:1` | 源位置放消息前/后 |
 | `log_thread_id` | `uint32_t:1` | 是否输出 `tid=` |
-| `log_to_console` | `uint32_t:1` | 是否镜像到 stdout |
 | `immediate_crash_on_fatal` | `uint32_t:1` | FATAL 日志后立即崩溃 |
 | `sinks` | `nei_log_sink_st*[8]` | sink 数组（NULL 终止）。sink 可设置 `release` 回调由库在 remove/destroy 时调用 |
 
@@ -202,6 +201,7 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 |-----|------|
 | `nei_log_default_file_sink_options()` | 获取默认 file sink 选项 |
 | `nei_log_create_default_file_sink(path, opts)` | 创建内置 file sink |
+| `nei_log_create_stdout_sink()` | 创建内置 stdout sink |
 | `nei_log_destroy_sink(sink)` | 销毁 sink（先调 release 回调，再释放内存） |
 
 ### 5.4 宏 API

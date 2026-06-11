@@ -27,7 +27,6 @@ int main(void) {
   }
 
   nei_log_config_st *cfg = nei_log_default_config();
-  cfg->log_to_console = 0;
   cfg->level_flags.all = 0xFFFFFFFFu;
   cfg->immediate_crash_on_fatal = 1U;
   cfg->sinks[0] = sink;

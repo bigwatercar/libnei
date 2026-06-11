@@ -301,6 +301,32 @@ static void _nei_log_file_write_line(FILE *fp, const char *message, size_t lengt
   (void)fputc('\n', fp);
 }
 
+// ---------------------------------------------------------------------------
+// Stdout sink callbacks
+// ---------------------------------------------------------------------------
+
+static void _nei_log_stdout_llog(const nei_log_sink_st *sink, nei_log_level_e level,
+                                 const char *message, size_t length) {
+  (void)sink;
+  (void)level;
+  if (message == NULL) {
+    return;
+  }
+  (void)fwrite(message, 1U, length, stdout);
+  (void)fputc('\n', stdout);
+}
+
+static void _nei_log_stdout_vlog(const nei_log_sink_st *sink, int verbose,
+                                 const char *message, size_t length) {
+  (void)sink;
+  (void)verbose;
+  if (message == NULL) {
+    return;
+  }
+  (void)fwrite(message, 1U, length, stdout);
+  (void)fputc('\n', stdout);
+}
+
 void _nei_log_default_file_llog(const nei_log_sink_st *sink, nei_log_level_e level, const char *message, size_t length) {
   nei_log_default_file_sink_ctx_st *ctx = NULL;
   (void)level;
@@ -401,10 +427,6 @@ void _nei_log_emit_message(const nei_log_config_st *config, int32_t level, int32
         sink->llog(sink, (nei_log_level_e)level, message, length);
       }
     }
-  }
-  if (effective->log_to_console) {
-    (void)fwrite(message, 1U, length, stdout);
-    (void)fputc('\n', stdout);
   }
 }
 
@@ -520,6 +542,16 @@ void nei_log_destroy_sink(nei_log_sink_st *sink) {
   }
 
   free(sink);
+}
+
+nei_log_sink_st *nei_log_create_stdout_sink(void) {
+  nei_log_sink_st *sink = (nei_log_sink_st *)calloc(1U, sizeof(*sink));
+  if (sink == NULL) {
+    return NULL;
+  }
+  sink->llog = _nei_log_stdout_llog;
+  sink->vlog = _nei_log_stdout_vlog;
+  return sink;
 }
 
 #pragma endregion

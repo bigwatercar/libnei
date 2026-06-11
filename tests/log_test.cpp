@@ -1048,7 +1048,6 @@ TEST(LogCTest, BuiltinFileSinkOwnsFileHandleLifecycle) {
   ASSERT_NE(sink, nullptr);
 
   nei_log_config_st cfg = *nei_log_default_config();
-  cfg.log_to_console = 0;
   cfg.level_flags = {};
   cfg.level_flags.flags.info = 1U;
   cfg.verbose_threshold = 2;
@@ -1098,7 +1097,6 @@ TEST(LogCTest, BuiltinFileSinkRotatesAtConfiguredSize) {
   ASSERT_NE(sink, nullptr);
 
   nei_log_config_st cfg = *nei_log_default_config();
-  cfg.log_to_console = 0;
   cfg.level_flags = {};
   cfg.level_flags.flags.info = 1U;
   cfg.timestamp_style = NEI_LOG_TIMESTAMP_STYLE_NONE;
@@ -1146,7 +1144,6 @@ TEST(LogCTest, ConfigAddRemoveIsThreadSafeAtRuntime) {
   sink.opaque = &collector;
 
   nei_log_config_st cfg = *nei_log_default_config();
-  cfg.log_to_console = 0;
   cfg.sinks[0] = &sink;
   cfg.sinks[1] = nullptr;
   nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
@@ -1368,7 +1365,6 @@ TEST_F(LogCDeathTest, ImmediateCrashOnFatalTriggersProcessExit) {
   EXPECT_DEATH({
     nei_log_config_st cfg = *nei_log_default_config();
     cfg.immediate_crash_on_fatal = 1U;
-    cfg.log_to_console = 0U;
     cfg.level_flags.all = 0xFFFFFFFFu;  /* Enable all levels */
 
     nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
@@ -1394,7 +1390,6 @@ TEST(LogCTest, ImmediateCrashOnFatalFallbackPathTerminates) {
 
     nei_log_config_st cfg = *nei_log_default_config();
     cfg.immediate_crash_on_fatal = 1U;
-    cfg.log_to_console = 0U;
     cfg.level_flags.all = 0xFFFFFFFFu;
 
     nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
@@ -1412,7 +1407,6 @@ TEST(LogCTest, ImmediateCrashOnFatalFallbackPathTerminates) {
 
     nei_log_config_st cfg = *nei_log_default_config();
     cfg.immediate_crash_on_fatal = 1U;
-    cfg.log_to_console = 0U;
     cfg.level_flags.all = 0xFFFFFFFFu;
 
     nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;

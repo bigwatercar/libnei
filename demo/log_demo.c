@@ -9,7 +9,6 @@ int main() {
   }
 
   nei_log_config_st *cfg = nei_log_default_config();
-  cfg->log_to_console = 0;
   cfg->level_flags.all = 0xffffffffU;
   cfg->verbose_threshold = 2;
   cfg->sinks[0] = sink;

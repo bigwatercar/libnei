@@ -191,15 +191,12 @@ extern "C" void nei_collect_vlog_only(const nei_log_sink_st *sink, int verbose, 
 struct NeiConfigGuard {
   nei_log_sink_st *saved[NEI_LOG_MAX_SINKS_OF_CONFIG]{};
   int saved_log_thread_id = 0;
-  int saved_log_to_console = 0;
 
   NeiConfigGuard() {
     nei_log_config_st *cfg = nei_log_default_config();
     saved_log_thread_id = cfg->log_thread_id;
-    saved_log_to_console = cfg->log_to_console;
     // Fair-compare mode: do not inject tid= payload by default.
     cfg->log_thread_id = 0;
-    cfg->log_to_console = 0;
     for (size_t i = 0; i < NEI_LOG_MAX_SINKS_OF_CONFIG; ++i) {
       saved[i] = cfg->sinks[i];
       cfg->sinks[i] = nullptr;
@@ -217,7 +214,6 @@ struct NeiConfigGuard {
   ~NeiConfigGuard() {
     nei_log_config_st *cfg = nei_log_default_config();
     cfg->log_thread_id = saved_log_thread_id;
-    cfg->log_to_console = saved_log_to_console;
     for (size_t i = 0; i < NEI_LOG_MAX_SINKS_OF_CONFIG; ++i) {
       cfg->sinks[i] = saved[i];
     }
