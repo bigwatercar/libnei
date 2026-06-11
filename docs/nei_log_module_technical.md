@@ -205,7 +205,7 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 | `nei_log_default_file_sink_options()` | 获取默认 file sink 选项 |
 | `nei_log_create_default_file_sink(path, opts)` | 创建内置 file sink |
 | `nei_log_create_stdout_sink()` | 创建内置 stdout sink |
-| `nei_log_destroy_sink(sink)` | 调用 sink 的 release 回调释放资源 |
+| `nei_log_release_sink(sink)` | 调用 sink 的 release 回调释放资源 |
 
 ### 5.4 宏 API
 

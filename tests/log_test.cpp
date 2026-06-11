@@ -1063,7 +1063,6 @@ TEST(LogCTest, BuiltinFileSinkOwnsFileHandleLifecycle) {
   nei_log_flush();
 
   nei_log_remove_config(cfg_handle);
-  nei_log_destroy_sink(sink);
 
   std::ifstream in(file_path, std::ios::binary);
   ASSERT_TRUE(in.good());
@@ -1115,7 +1114,6 @@ TEST(LogCTest, BuiltinFileSinkRotatesAtConfiguredSize) {
   nei_log_flush();
 
   nei_log_remove_config(cfg_handle);
-  nei_log_destroy_sink(sink);
 
   std::ifstream current(file_path, std::ios::binary);
   std::ifstream rotated1(file_path_1, std::ios::binary);
@@ -1500,7 +1498,7 @@ TEST(LogCTest, RemoveConfigCallsSinkRelease) {
   EXPECT_EQ(tracker.release_count.load(), 1);
 }
 
-// Verifies that nei_log_destroy_sink() invokes the release callback.
+// Verifies that nei_log_release_sink() invokes the release callback.
 TEST(LogCTest, DestroySinkCallsSinkRelease) {
   SinkReleaseTracker tracker;
   nei_log_sink_st *sink = static_cast<nei_log_sink_st *>(calloc(1U, sizeof(nei_log_sink_st)));
@@ -1509,7 +1507,7 @@ TEST(LogCTest, DestroySinkCallsSinkRelease) {
   sink->opaque = &tracker;
 
   EXPECT_EQ(tracker.release_count.load(), 0);
-  nei_log_destroy_sink(sink);
+  nei_log_release_sink(sink);
   EXPECT_EQ(tracker.release_count.load(), 1);
 }
 

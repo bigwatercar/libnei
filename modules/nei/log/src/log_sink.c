@@ -533,7 +533,7 @@ nei_log_sink_st *nei_log_create_default_file_sink(const char *filename,
   return sink;
 }
 
-void nei_log_destroy_sink(nei_log_sink_st *sink) {
+void nei_log_release_sink(nei_log_sink_st *sink) {
   if (sink == NULL) {
     return;
   }

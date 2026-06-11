@@ -20,6 +20,6 @@ int main() {
 
   nei_log_flush();
   cfg->sinks[0] = NULL;
-  nei_log_destroy_sink(sink);
+  nei_log_release_sink(sink);
   return 0;
 }

@@ -298,7 +298,7 @@ NEI_API int nei_log_add_config(const nei_log_config_st *config, nei_log_config_h
  * @note This call may block while the consumer thread finishes draining
  * pending events.  After it returns, the configuration handle is invalid
  * and all sink resources have been released — do **not** call
- * @ref nei_log_destroy_sink on sinks that were registered with this
+ * @ref nei_log_release_sink on sinks that were registered with this
  * configuration, as they have already been released.
  *
  * @param[in] handle Configuration handle
@@ -317,7 +317,7 @@ NEI_API void nei_log_remove_config(nei_log_config_handle_t handle);
  * clean teardown.  After this call, the logging subsystem is in its
  * initial uninitialized state and can be re-used if needed.
  *
- * @note Do **not** call @ref nei_log_destroy_sink on sinks that were
+ * @note Do **not** call @ref nei_log_release_sink on sinks that were
  * registered through the config API — they are released by this call.
  */
 NEI_API void nei_log_shutdown(void);
@@ -358,8 +358,8 @@ NEI_API int nei_log_add_sink(nei_log_config_st *config, nei_log_sink_st *sink);
  *
  * @details Finds @p sink in @p config->sinks, removes it (sets the slot
  * to NULL), and compacts the array so that remaining sinks stay contiguous
- * with no gaps.  The sink is @em not released by this call — call
- * @ref nei_log_sink_st::release directly if the sink should be freed.
+ * with no gaps.  Does **not** invoke the sink's release callback — call
+ * @ref nei_log_release_sink separately if the sink should be freed.
  *
  * @note After calling this function, invoke @ref nei_log_update_config
  * to publish the change to log producers.
@@ -485,7 +485,7 @@ NEI_API nei_log_default_file_sink_options_st nei_log_default_file_sink_options(v
  * @ref nei_log_config_st (see @ref nei_log_config_st::level_flags and
  * @ref nei_log_config_st::verbose_threshold). Custom per-sink state should use
  * @ref nei_log_sink_st::opaque on a sink you own; release the sink with
- * @ref nei_log_destroy_sink.
+ * @ref nei_log_release_sink.
  *
  * @details When @c options->max_file_bytes and @c options->max_backup_files are
  * both non-zero, size-based rotation is enabled: the active file is renamed to
@@ -502,7 +502,7 @@ NEI_API nei_log_sink_st *nei_log_create_default_file_sink(const char *filename,
  * line to @c stdout followed by a newline.
  *
  * The returned sink is released via its release callback (called by
- * @ref nei_log_remove_config or @ref nei_log_destroy_sink).
+ * @ref nei_log_remove_config or @ref nei_log_release_sink).
  *
  * @return Heap-allocated sink pointer, or NULL on allocation failure.
  */
@@ -522,7 +522,7 @@ NEI_API nei_log_sink_st *nei_log_create_stdout_sink(void);
  * @ref nei_log_remove_config.  Use this only when you need to
  * manually release a sink without removing its config.
  */
-NEI_API void nei_log_destroy_sink(nei_log_sink_st *sink);
+NEI_API void nei_log_release_sink(nei_log_sink_st *sink);
 
 /** @} */ /* end of nei_log_api_sink */
 

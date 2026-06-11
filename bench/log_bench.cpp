@@ -249,7 +249,7 @@ void run_file_log_benchmark(const std::string &name,
   }
 
   // Destroy sink first
-  nei_log_destroy_sink(file_sink);
+  nei_log_release_sink(file_sink);
 
   // Then check file size
   std::ifstream check_file(filename, std::ios::binary | std::ios::ate);

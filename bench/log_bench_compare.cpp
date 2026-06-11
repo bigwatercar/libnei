@@ -292,7 +292,7 @@ NeiBenchResult time_nei_file_ms(F &&f, int iters, const char *path) {
     result.micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     (void)nei_log_get_perf_stats_for_test(&result.stats);
   }
-  nei_log_destroy_sink(fs);
+  nei_log_release_sink(fs);
   return result;
 }
 
@@ -319,7 +319,7 @@ NeiBenchResult time_nei_file_sync_ms(F &&f, int iters, const char *path) {
     result.micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     (void)nei_log_get_perf_stats_for_test(&result.stats);
   }
-  nei_log_destroy_sink(fs);
+  nei_log_release_sink(fs);
   return result;
 }
 
@@ -352,7 +352,7 @@ NeiBenchResult time_nei_file_strict_sync_ms(F &&f, int iters, const char *path) 
     result.micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     (void)nei_log_get_perf_stats_for_test(&result.stats);
   }
-  nei_log_destroy_sink(fs);
+  nei_log_release_sink(fs);
   return result;
 }
 
