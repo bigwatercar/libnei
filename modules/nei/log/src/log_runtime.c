@@ -15,6 +15,7 @@ static void _nei_log_process_events(const uint8_t *buf, size_t size);
 nei_log_runtime_st s_runtime = {
   .stop_requested = 0,
   .initialized = 0,
+  .auto_flush_interval_ms = 0,
 };
 
 static uint32_t s_runtime_init_count = 0U;
