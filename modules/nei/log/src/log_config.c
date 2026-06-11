@@ -228,6 +228,23 @@ void nei_log_update_config(void) {
   _nei_log_config_snapshot_bump();
 }
 
+int nei_log_add_sink(nei_log_config_st *config, nei_log_sink_st *sink) {
+  size_t i;
+
+  if (config == NULL || sink == NULL) {
+    return -1;
+  }
+
+  for (i = 0; i < NEI_LOG_MAX_SINKS_OF_CONFIG; ++i) {
+    if (config->sinks[i] == NULL) {
+      config->sinks[i] = sink;
+      return 0;
+    }
+  }
+
+  return -1; /* Sink array is full */
+}
+
 nei_log_config_st *nei_log_get_config(nei_log_config_handle_t handle) {
   nei_log_config_st *cfg = NULL;
   size_t slot = 0U;

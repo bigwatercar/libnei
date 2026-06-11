@@ -1535,3 +1535,26 @@ TEST(LogCTest, RemoveDefaultConfigCallsSinkRelease) {
   memcpy(cfg->sinks, saved_sinks, sizeof(saved_sinks));
   nei_log_update_config();
 }
+
+// Verifies that nei_log_add_sink inserts into the first available NULL slot
+// and returns -1 when the array is full.
+TEST(LogCTest, AddSinkInsertsAtFirstNullSlot) {
+  nei_log_config_st cfg = *nei_log_default_config();
+  nei_log_sink_st s1 = {}, s2 = {}, s3 = {};
+
+  memset(cfg.sinks, 0, sizeof(cfg.sinks));
+
+  EXPECT_EQ(nei_log_add_sink(NULL, &s1), -1);
+  EXPECT_EQ(nei_log_add_sink(&cfg, NULL), -1);
+
+  EXPECT_EQ(nei_log_add_sink(&cfg, &s1), 0);
+  EXPECT_EQ(cfg.sinks[0], &s1);
+  EXPECT_EQ(nei_log_add_sink(&cfg, &s2), 0);
+  EXPECT_EQ(cfg.sinks[1], &s2);
+
+  // Fill remaining slots and verify full detection.
+  for (size_t i = 2; i < NEI_LOG_MAX_SINKS_OF_CONFIG; ++i) {
+    cfg.sinks[i] = &s3;
+  }
+  EXPECT_EQ(nei_log_add_sink(&cfg, &s1), -1);
+}
