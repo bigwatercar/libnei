@@ -93,6 +93,13 @@ std::wstring ToWide(const std::string& utf8) {
 
 }  // namespace
 
+// AsyncFileWin::Impl uses WeakPtr in cross-thread callbacks (posted from
+// IO thread to background thread and back).  The Impl guards its mutable
+// state with atomics and mutexes, so dereferencing the WeakPtr from any
+// thread is safe.
+template <>
+struct WeakPtrThreadSafe<AsyncFileWin::Impl> : std::true_type {};
+
 class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
  public:
   enum class State {
