@@ -228,6 +228,19 @@ void nei_log_update_config(void) {
   _nei_log_config_snapshot_bump();
 }
 
+void nei_log_shutdown(void) {
+  size_t slot;
+
+  /* Remove every active configuration.  nei_log_remove_config handles
+   * flush + snapshot + sink release internally for each slot. */
+  for (slot = 0U; slot < _NEI_LOG_MAX_CONFIGS; ++slot) {
+    nei_log_remove_config(_nei_log_make_handle_from_slot(slot));
+  }
+
+  /* Stop the consumer thread and destroy runtime resources. */
+  _nei_log_shutdown_runtime();
+}
+
 int nei_log_add_sink(nei_log_config_st *config, nei_log_sink_st *sink) {
   size_t i;
 

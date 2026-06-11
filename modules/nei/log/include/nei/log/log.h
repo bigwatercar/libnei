@@ -306,6 +306,23 @@ NEI_API int nei_log_add_config(const nei_log_config_st *config, nei_log_config_h
 NEI_API void nei_log_remove_config(nei_log_config_handle_t handle);
 
 /**
+ * @brief Shut down the logging subsystem and release all resources.
+ *
+ * @details Removes every active configuration (including the default),
+ * releasing all registered sinks via their @ref nei_log_sink_st::release
+ * callbacks, then stops the consumer thread and destroys internal
+ * synchronization primitives.
+ *
+ * This is intended to be called once at application exit to perform a
+ * clean teardown.  After this call, the logging subsystem is in its
+ * initial uninitialized state and can be re-used if needed.
+ *
+ * @note Do **not** call @ref nei_log_destroy_sink on sinks that were
+ * registered through the config API — they are released by this call.
+ */
+NEI_API void nei_log_shutdown(void);
+
+/**
  * @brief Publish in-place configuration changes so they take effect.
  *
  * @details After modifying a configuration struct obtained via
