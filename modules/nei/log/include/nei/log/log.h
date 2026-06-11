@@ -354,6 +354,24 @@ NEI_API void nei_log_update_config(void);
 NEI_API int nei_log_add_sink(nei_log_config_st *config, nei_log_sink_st *sink);
 
 /**
+ * @brief Remove a sink from a configuration's sink array.
+ *
+ * @details Finds @p sink in @p config->sinks, removes it (sets the slot
+ * to NULL), and compacts the array so that remaining sinks stay contiguous
+ * with no gaps.  The sink is @em not released by this call — call
+ * @ref nei_log_sink_st::release directly if the sink should be freed.
+ *
+ * @note After calling this function, invoke @ref nei_log_update_config
+ * to publish the change to log producers.
+ *
+ * @param[in,out] config Configuration to modify (must be non-NULL).
+ * @param[in]     sink   Sink to remove (must be non-NULL).
+ * @return @c 0 on success, @c -1 if @p config or @p sink is NULL,
+ *         or the sink was not found.
+ */
+NEI_API int nei_log_remove_sink(nei_log_config_st *config, nei_log_sink_st *sink);
+
+/**
  * @brief Get a log configuration by handle
  *
  * @param[in] handle Configuration handle

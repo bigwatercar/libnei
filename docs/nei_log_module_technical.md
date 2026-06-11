@@ -168,6 +168,7 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 | `nei_log_shutdown` | 移除所有配置并停止消费者线程，释放全部资源 |
 | `nei_log_update_config` | 发布原地修改，使配置变更对所有线程生效 |
 | `nei_log_add_sink` | 将 sink 插入配置的 sinks 数组首个空位 |
+| `nei_log_remove_sink` | 从 sinks 数组中移除指定 sink（不释放，紧凑数组） |
 | `nei_log_get_config` | 按 handle 获取可修改的配置指针（修改后须调用 `nei_log_update_config`） |
 | `nei_log_default_config` | 获取默认配置（slot 0，修改后须调用 `nei_log_update_config`） |
 

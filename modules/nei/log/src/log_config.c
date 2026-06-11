@@ -258,6 +258,41 @@ int nei_log_add_sink(nei_log_config_st *config, nei_log_sink_st *sink) {
   return -1; /* Sink array is full */
 }
 
+int nei_log_remove_sink(nei_log_config_st *config, nei_log_sink_st *sink) {
+  size_t i;
+  size_t found = (size_t)-1;
+
+  if (config == NULL || sink == NULL) {
+    return -1;
+  }
+
+  /* Find the sink in the array. */
+  for (i = 0; i < NEI_LOG_MAX_SINKS_OF_CONFIG; ++i) {
+    if (config->sinks[i] == sink) {
+      found = i;
+      break;
+    }
+    if (config->sinks[i] == NULL) {
+      break; /* End of active sinks */
+    }
+  }
+
+  if (found == (size_t)-1) {
+    return -1;
+  }
+
+  /* Compact: shift remaining sinks left to keep the array contiguous. */
+  for (i = found; i < NEI_LOG_MAX_SINKS_OF_CONFIG - 1U; ++i) {
+    config->sinks[i] = config->sinks[i + 1];
+    if (config->sinks[i] == NULL) {
+      break;
+    }
+  }
+  config->sinks[NEI_LOG_MAX_SINKS_OF_CONFIG - 1U] = NULL;
+
+  return 0;
+}
+
 nei_log_config_st *nei_log_get_config(nei_log_config_handle_t handle) {
   nei_log_config_st *cfg = NULL;
   size_t slot = 0U;
