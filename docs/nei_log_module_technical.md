@@ -115,6 +115,8 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 - 通过环境变量可调 flush interval 与文件缓冲大小（用于 bench/调优）。
 - 文件流 buffer 与批量写 buffer 互斥：启用批量写时禁用流缓冲（避免双重缓冲）。
 
+**定时自动刷新**：通过 `nei_log_set_auto_flush_interval_ms()` 可配置消费者线程的定时唤醒间隔。消费者空闲时按此间隔自动刷新所有 file sink 的缓冲数据，确保 `tail -f` 等外部工具能实时看到日志输出（默认禁用，推荐值 1000ms）。
+
 **Sink release 回调**：`nei_log_sink_st::release` 是可选的资源清理回调。当配置被 `nei_log_remove_config` 移除时，库会遍历该配置的所有 sink 并调用其 `release` 回调。内置 sink（file sink、stdout sink）的 release 会释放所有内部资源及 sink 结构体本身。自定义 sink 应在 release 中释放 `opaque` 及自有资源。
 
 ### 4.7 Crash Handler 与崩溃回溯日志
@@ -207,7 +209,17 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 | `nei_log_create_stdout_sink()` | 创建内置 stdout sink |
 | `nei_log_release_sink(sink)` | 调用 sink 的 release 回调释放资源 |
 
-### 5.4 宏 API
+### 5.4 运行时 API
+
+| API | 说明 |
+|-----|------|
+| `nei_log_flush()` | 等待所有已入队事件消费完成 |
+| `nei_log_set_auto_flush_interval_ms(ms)` | 设置定时自动刷新间隔（默认 0=禁用，推荐 1000） |
+| `nei_log_get_auto_flush_interval_ms()` | 获取当前定时刷新间隔 |
+| `nei_log_shutdown()` | 移除所有配置并停止消费者线程，释放全部资源 |
+| `nei_log_install_crash_handler(handle)` | 安装崩溃处理器 |
+
+### 5.5 宏 API
 
 - `NEI_LOG_TRACE` / `NEI_LOG_DEBUG` / `NEI_LOG_INFO` / `NEI_LOG_WARN` / `NEI_LOG_ERROR` / `NEI_LOG_FATAL`
 - `NEI_LOG` / `NEI_LOG_IF` -- 默认配置的通用 level 宏

@@ -437,6 +437,44 @@ void _nei_log_emit_message(const nei_log_config_st *config, int32_t level, int32
 
 #pragma endregion
 
+void _nei_log_auto_flush_file_sinks(void) {
+  size_t slot;
+
+  _nei_log_config_lock_read();
+  for (slot = 0U; slot < _NEI_LOG_MAX_CONFIGS; ++slot) {
+    const nei_log_config_st *cfg;
+    size_t i;
+
+    if (s_config_used[slot] == 0U) {
+      continue;
+    }
+    cfg = s_config_ptrs[slot];
+    if (cfg == NULL) {
+      continue;
+    }
+
+    for (i = 0; i < NEI_LOG_MAX_SINKS_OF_CONFIG; ++i) {
+      nei_log_sink_st *sink = cfg->sinks[i];
+      nei_log_default_file_sink_ctx_st *ctx;
+
+      if (sink == NULL) {
+        break;
+      }
+
+      /* Only flush built-in file sinks. */
+      if (sink->llog != _nei_log_default_file_llog) {
+        continue;
+      }
+      ctx = (nei_log_default_file_sink_ctx_st *)sink->opaque;
+      if (ctx == NULL || ctx->magic != _NEI_LOG_DEFAULT_FILE_SINK_MAGIC || ctx->fp == NULL) {
+        continue;
+      }
+      _nei_log_file_sink_flush_pending(ctx, 1);
+    }
+  }
+  _nei_log_config_unlock_read();
+}
+
 #pragma region public API
 
 #define _NEI_LOG_DEFAULT_FLUSH_INTERVAL    256U

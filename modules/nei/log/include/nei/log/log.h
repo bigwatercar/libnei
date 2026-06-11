@@ -628,6 +628,29 @@ NEI_API void nei_vlog_literal(nei_log_config_handle_t config_handle,
 NEI_API void nei_log_flush(void);
 
 /**
+ * @brief Set the interval for automatic periodic sink flushing.
+ *
+ * @details When the consumer thread is idle (no events to process), it
+ * will wake up every @p interval_ms milliseconds and flush pending
+ * buffered data in all registered sinks.  This ensures that log output
+ * is visible to external tools (e.g. @c tail -f) without waiting for
+ * the per-sink batch flush threshold to be reached.
+ *
+ * Set to 0 to disable auto-flush (default).  A typical value is 1000
+ * (1 second).
+ *
+ * @param[in] interval_ms Interval in milliseconds, 0 to disable.
+ */
+NEI_API void nei_log_set_auto_flush_interval_ms(uint32_t interval_ms);
+
+/**
+ * @brief Get the current auto-flush interval.
+ *
+ * @return Interval in milliseconds, 0 if disabled.
+ */
+NEI_API uint32_t nei_log_get_auto_flush_interval_ms(void);
+
+/**
  * @brief Install process-level crash handlers and emit call stack on crash.
  *
  * @details

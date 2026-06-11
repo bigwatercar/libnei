@@ -172,6 +172,14 @@ void _nei_log_reset_perf_stats_for_test(void) {
   _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_ring_high_watermark, 0U);
 }
 
+void nei_log_set_auto_flush_interval_ms(uint32_t interval_ms) {
+  s_runtime.auto_flush_interval_ms = interval_ms;
+}
+
+uint32_t nei_log_get_auto_flush_interval_ms(void) {
+  return s_runtime.auto_flush_interval_ms;
+}
+
 void _nei_log_shutdown_runtime(void) {
   if (!s_runtime.initialized) {
     return;
@@ -390,12 +398,26 @@ static void *_nei_log_consumer_thread(void *arg) {
   EnterCriticalSection(&rt->mutex);
   for (;;) {
     while (!_nei_log_ring_has_ready_slot(&rt->ring) && !rt->stop_requested) {
+      DWORD wait_ms;
+
       _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 1U);
       if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
         _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 0U);
         break;
       }
-      SleepConditionVariableCS(&rt->cond, &rt->mutex, INFINITE);
+
+      wait_ms = rt->auto_flush_interval_ms;
+      if (wait_ms == 0U) {
+        wait_ms = INFINITE;
+      }
+
+      if (!SleepConditionVariableCS(&rt->cond, &rt->mutex, wait_ms)) {
+        /* Timeout: no new events, trigger auto-flush of file sinks. */
+        _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 0U);
+        _nei_log_auto_flush_file_sinks();
+        continue;
+      }
+
       _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 0U);
       (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_wakeups, 1U);
     }
@@ -447,7 +469,27 @@ static void *_nei_log_consumer_thread(void *arg) {
         _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 0U);
         break;
       }
-      pthread_cond_wait(&rt->cond, &rt->mutex);
+
+      if (rt->auto_flush_interval_ms > 0U) {
+        struct timespec ts;
+        int rc;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec  += (time_t)(rt->auto_flush_interval_ms / 1000U);
+        ts.tv_nsec += (long)((rt->auto_flush_interval_ms % 1000U) * 1000000U);
+        if (ts.tv_nsec >= 1000000000L) {
+          ts.tv_sec  += 1;
+          ts.tv_nsec -= 1000000000L;
+        }
+        rc = pthread_cond_timedwait(&rt->cond, &rt->mutex, &ts);
+        if (rc == ETIMEDOUT) {
+          _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 0U);
+          _nei_log_auto_flush_file_sinks();
+          continue;
+        }
+      } else {
+        pthread_cond_wait(&rt->cond, &rt->mutex);
+      }
+
       _NEI_LOG_ATOMIC_STORE32(&rt->consumer_sleeping, 0U);
       (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_wakeups, 1U);
     }

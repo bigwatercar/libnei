@@ -215,6 +215,7 @@ typedef struct _nei_log_runtime_st {
   pthread_cond_t cond;
   pthread_t thread;
 #endif
+  uint32_t auto_flush_interval_ms; /**< Consumer idle-wake interval (ms), 0=disabled. */
 } nei_log_runtime_st;
 
 typedef struct _nei_log_default_file_sink_ctx_st {
@@ -279,6 +280,7 @@ void _nei_log_config_snapshot_bump(void);
 /* From log_runtime.c */
 int _nei_log_ensure_runtime_initialized(void);
 void _nei_log_shutdown_runtime(void);
+void _nei_log_auto_flush_file_sinks(void);
 int _nei_log_enqueue_event(const uint8_t *event, size_t len);
 void _nei_log_signal_consumer_if_sleeping(void);
 uint32_t _nei_log_get_runtime_init_count_for_test(void);
