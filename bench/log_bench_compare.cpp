@@ -296,9 +296,12 @@ NeiBenchResult time_nei_file_ms(F &&f, int iters, const char *path) {
   return result;
 }
 
-/** NEI file sink + nei_log_flush() after each log (caller blocks until that record is processed). */
+/** NEI file sink with auto-flush: the consumer thread periodically flushes
+ *  buffered data without the producer blocking on nei_log_flush().  This
+ *  replaces the old per-call flush pattern with a more efficient timer-based
+ *  approach that still guarantees timely visibility. */
 template <class F>
-NeiBenchResult time_nei_file_sync_ms(F &&f, int iters, const char *path) {
+NeiBenchResult time_nei_file_autoflush_ms(F &&f, int iters, const char *path) {
   (void)std::remove(path);
   nei_log_sink_st *fs = nei_log_create_default_file_sink(path, NULL);
   if (!fs) {
@@ -310,12 +313,21 @@ NeiBenchResult time_nei_file_sync_ms(F &&f, int iters, const char *path) {
     NeiConfigGuard guard;
     guard.set_primary(fs);
     nei_log_reset_perf_stats_for_test();
+
+    /* Use an ultra-short auto-flush interval so the consumer flushes
+     * pending data almost immediately after each log call. */
+    const uint32_t saved_interval = nei_log_get_auto_flush_interval_ms();
+    nei_log_set_auto_flush_interval_ms(1);
+
     const auto t0 = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < iters; ++i) {
       f();
-      nei_log_flush();
     }
+    /* One final flush to guarantee all data is on disk before we stop the clock. */
+    nei_log_flush();
     const auto t1 = std::chrono::high_resolution_clock::now();
+
+    nei_log_set_auto_flush_interval_ms(saved_interval);
     result.micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     (void)nei_log_get_perf_stats_for_test(&result.stats);
   }
@@ -324,8 +336,9 @@ NeiBenchResult time_nei_file_sync_ms(F &&f, int iters, const char *path) {
 }
 
 /**
- * NEI strict sync: force sink to fflush each record and disable sink-side write batching,
- * then keep per-call nei_log_flush as delivery barrier.
+ * NEI strict sync with auto-flush: force sink to fflush each record and
+ * disable sink-side write batching, with the consumer auto-flushing on a
+ * 1ms timer instead of per-call nei_log_flush().
  */
 template <class F>
 NeiBenchResult time_nei_file_strict_sync_ms(F &&f, int iters, const char *path) {
@@ -343,12 +356,18 @@ NeiBenchResult time_nei_file_strict_sync_ms(F &&f, int iters, const char *path) 
     NeiConfigGuard guard;
     guard.set_primary(fs);
     nei_log_reset_perf_stats_for_test();
+
+    const uint32_t saved_interval = nei_log_get_auto_flush_interval_ms();
+    nei_log_set_auto_flush_interval_ms(1);
+
     const auto t0 = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < iters; ++i) {
       f();
-      nei_log_flush();
     }
+    nei_log_flush();
     const auto t1 = std::chrono::high_resolution_clock::now();
+
+    nei_log_set_auto_flush_interval_ms(saved_interval);
     result.micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     (void)nei_log_get_perf_stats_for_test(&result.stats);
   }
@@ -688,16 +707,16 @@ int main(int argc, char **argv) {
   const std::string spd_multi_sync = out_file(out_dir, "spdlog_cmp_multi_sync.log");
 
   {
-    const auto result = time_nei_file_sync_ms(
+    const auto result = time_nei_file_autoflush_ms(
         [] {
           nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", "test message %s", "test");
         },
         kFileSyncIters,
         nei_simple_sync.c_str());
     if (result.micros < 0) {
-      std::cout << "[NEI] file sync simple: failed to create sink\n\n";
+      std::cout << "[NEI] file autoflush simple: failed to create sink\n\n";
     } else {
-      print_stats("[NEI] file sync simple (flush request each log)", kFileSyncIters, result.micros, result.stats);
+      print_stats("[NEI] file autoflush simple (1ms consumer flush timer)", kFileSyncIters, result.micros, result.stats);
       print_file_size(nei_simple_sync);
     }
   }
@@ -712,7 +731,7 @@ int main(int argc, char **argv) {
   }
 
   {
-    const auto result = time_nei_file_sync_ms(
+    const auto result = time_nei_file_autoflush_ms(
         [] {
           nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
                    NEI_L_INFO,
@@ -727,9 +746,9 @@ int main(int argc, char **argv) {
         kFileSyncIters,
         nei_multi_sync.c_str());
     if (result.micros < 0) {
-      std::cout << "[NEI] file sync multi: failed to create sink\n\n";
+      std::cout << "[NEI] file autoflush multi: failed to create sink\n\n";
     } else {
-      print_stats("[NEI] file sync multi (flush request each log)", kFileSyncIters, result.micros, result.stats);
+      print_stats("[NEI] file autoflush multi (1ms consumer flush timer)", kFileSyncIters, result.micros, result.stats);
       print_file_size(nei_multi_sync);
     }
   }
@@ -747,7 +766,7 @@ int main(int argc, char **argv) {
   const std::string nei_vlit_sync = out_file(out_dir, "nei_cmp_vlog_literal_sync.log");
 
   {
-    const auto result = time_nei_file_sync_ms(
+    const auto result = time_nei_file_autoflush_ms(
         [] {
           static const char body[] = "sync literal body";
           nei_llog_literal(
@@ -756,15 +775,15 @@ int main(int argc, char **argv) {
         kFileSyncIters,
         nei_lit_sync.c_str());
     if (result.micros < 0) {
-      std::cout << "[NEI] file sync llog_literal: failed to create sink\n\n";
+      std::cout << "[NEI] file autoflush llog_literal: failed to create sink\n\n";
     } else {
-      print_stats("[NEI] file sync llog_literal (flush request each log)", kFileSyncIters, result.micros, result.stats);
+      print_stats("[NEI] file autoflush llog_literal (1ms consumer flush timer)", kFileSyncIters, result.micros, result.stats);
       print_file_size(nei_lit_sync);
     }
   }
 
   {
-    const auto result = time_nei_file_sync_ms(
+    const auto result = time_nei_file_autoflush_ms(
         [] {
           static const char body[] = "sync vlog literal";
           nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "bench", body, sizeof(body) - 1U);
@@ -772,9 +791,9 @@ int main(int argc, char **argv) {
         kFileSyncIters,
         nei_vlit_sync.c_str());
     if (result.micros < 0) {
-      std::cout << "[NEI] file sync vlog_literal: failed to create sink\n\n";
+      std::cout << "[NEI] file autoflush vlog_literal: failed to create sink\n\n";
     } else {
-      print_stats("[NEI] file sync vlog_literal (flush request each log)", kFileSyncIters, result.micros, result.stats);
+      print_stats("[NEI] file autoflush vlog_literal (1ms consumer flush timer)", kFileSyncIters, result.micros, result.stats);
       print_file_size(nei_vlit_sync);
     }
   }
