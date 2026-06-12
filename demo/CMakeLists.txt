@@ -28,6 +28,9 @@ target_link_libraries(stream_reader_writer_demo PRIVATE nei::all)
 add_executable(nei_demo nei_demo.cpp)
 target_link_libraries(nei_demo PRIVATE nei::all)
 
+add_executable(elevated_process_demo elevated_process_demo.cpp)
+target_link_libraries(elevated_process_demo PRIVATE nei::all)
+
 if(WIN32 AND BUILD_SHARED_LIBS)
   function(nei_copy_runtime_dlls target_name)
     add_custom_command(

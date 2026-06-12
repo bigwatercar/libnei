@@ -43,17 +43,17 @@ std::wstring QuoteArg(const std::wstring& arg) {
   return quoted;
 }
 
-std::wstring BuildParameters(const CommandLine& command_line) {
-  std::wstring params;
-  const std::vector<std::string> args = command_line.GetArgs();
-  for (std::size_t i = 0; i < args.size(); ++i) {
-    const std::wstring arg = ToWString(UTF8ToUTF16(args[i]));
-    if (!params.empty()) {
-      params.push_back(L' ');
+std::wstring BuildArgString(const CommandLine::StringVector& argv,
+                           std::size_t start_index) {
+  std::wstring out;
+  for (std::size_t i = start_index; i < argv.size(); ++i) {
+    const std::wstring arg = ToWString(argv[i]);
+    if (!out.empty()) {
+      out.push_back(L' ');
     }
-    params += QuoteArg(arg);
+    out += QuoteArg(arg);
   }
-  return params;
+  return out;
 }
 
 }  // namespace
@@ -63,8 +63,35 @@ ProcessExitInfo ProcessUtil::LaunchProcessElevated(
     const ElevatedProcessOptions& options) {
   ProcessExitInfo info;
 
-  const std::wstring file = ToWString(UTF8ToUTF16(command_line.GetProgram()));
-  const std::wstring params = BuildParameters(command_line);
+  const CommandLine::StringVector& wrapper_argv =
+      command_line.GetWrapperArgv();
+  const CommandLine::StringVector& raw_argv = command_line.GetRawArgv();
+
+  std::wstring file;
+  std::wstring params;
+
+  if (!wrapper_argv.empty()) {
+    // Wrapper mode: file = wrapper program, params = wrapper args + full child
+    file = ToWString(wrapper_argv[0]);
+    std::wstring wrapper_args = BuildArgString(wrapper_argv, 1);
+    std::wstring child_args = BuildArgString(raw_argv, 0);
+    if (!wrapper_args.empty()) {
+      params = wrapper_args;
+    }
+    if (!child_args.empty()) {
+      if (!params.empty()) {
+        params.push_back(L' ');
+      }
+      params += child_args;
+    }
+  } else if (!raw_argv.empty()) {
+    // Direct mode: file = child program, params = child args only
+    file = ToWString(raw_argv[0]);
+    params = BuildArgString(raw_argv, 1);
+  } else {
+    info.state = ProcessState::kFailedToStart;
+    return info;
+  }
 
   SHELLEXECUTEINFOW sei{};
   sei.cbSize = sizeof(sei);
