@@ -12,6 +12,23 @@ static void *_nei_log_consumer_thread(void *arg);
 /* Forward declaration */
 static void _nei_log_process_events(const uint8_t *buf, size_t size);
 
+static void _nei_log_advance_committed_pos(nei_log_ring_st *ring) {
+  for (;;) {
+    uint64_t committed = _NEI_LOG_ATOMIC_LOAD64(&ring->committed_pos);
+    nei_log_ring_slot_st *slot = &ring->slots[(uint32_t)(committed % (uint64_t)_NEI_LOG_RING_SLOTS)];
+    uint64_t expected_published = committed + 1U;
+    uint64_t observed_published = _NEI_LOG_ATOMIC_LOAD64(&slot->published_seq);
+    uint64_t compare_expected = committed;
+
+    if (observed_published != expected_published) {
+      return;
+    }
+    if (_NEI_LOG_ATOMIC_CAS64(&ring->committed_pos, compare_expected, committed + 1U)) {
+      continue;
+    }
+  }
+}
+
 nei_log_runtime_st s_runtime = {
   .stop_requested = 0,
   .initialized = 0,
@@ -173,6 +190,33 @@ void _nei_log_reset_perf_stats_for_test(void) {
   _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_ring_high_watermark, 0U);
 }
 
+int _nei_log_reserve_unpublished_slot_for_test(uint64_t *out_reserved_pos) {
+  if (out_reserved_pos == NULL) {
+    return -1;
+  }
+  if (_nei_log_ensure_runtime_initialized() != 0) {
+    return -1;
+  }
+
+  *out_reserved_pos = _NEI_LOG_ATOMIC_FETCH_ADD64(&s_runtime.ring.write_pos, 1U);
+  return 0;
+}
+
+int _nei_log_rollback_unpublished_slot_for_test(uint64_t reserved_pos) {
+  if (_NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.write_pos) != reserved_pos + 1U) {
+    return -1;
+  }
+  if (_NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.committed_pos) > reserved_pos) {
+    return -1;
+  }
+  if (_NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos) > reserved_pos) {
+    return -1;
+  }
+
+  _NEI_LOG_ATOMIC_STORE64(&s_runtime.ring.write_pos, reserved_pos);
+  return 0;
+}
+
 void nei_log_set_auto_flush_interval_ms(uint32_t interval_ms) {
   s_runtime.auto_flush_interval_ms = interval_ms;
 }
@@ -317,6 +361,8 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
   slot->size = (uint32_t)len;
   memcpy(slot->data, event, len);
   _NEI_LOG_ATOMIC_STORE32(&slot->state, 1U);
+  _NEI_LOG_ATOMIC_STORE64(&slot->published_seq, pos + 1U);
+  _nei_log_advance_committed_pos(&s_runtime.ring);
 
   /* Fast path: only wake the consumer when it has actually gone to sleep. */
   _nei_log_signal_consumer_if_sleeping();
@@ -327,50 +373,24 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
 
 #pragma region consumer
 
-typedef struct _nei_log_consumer_cfg_cache_st {
-  nei_log_config_handle_t handle;
-  uint64_t snapshot;
-  const nei_log_config_st *cfg;
-} nei_log_consumer_cfg_cache_st;
-
-static _NEI_LOG_TLS nei_log_consumer_cfg_cache_st s_tls_consumer_cfg_cache;
-
-static const nei_log_config_st *_nei_log_resolve_config_cached(nei_log_config_handle_t handle) {
-  size_t slot = 0U;
-  const nei_log_config_st *cfg = NULL;
-  const uint64_t snapshot = _nei_log_config_snapshot_load();
-
-  if (s_tls_consumer_cfg_cache.handle == handle && s_tls_consumer_cfg_cache.snapshot == snapshot) {
-    return s_tls_consumer_cfg_cache.cfg;
-  }
-
-  _nei_log_config_lock_read();
-  _nei_log_ensure_config_table_initialized();
-  if (_nei_log_slot_from_handle(handle, &slot) == 0 && s_config_used[slot] != 0U) {
-    cfg = s_config_ptrs[slot];
-  }
-  _nei_log_config_unlock_read();
-
-  s_tls_consumer_cfg_cache.handle = handle;
-  s_tls_consumer_cfg_cache.snapshot = snapshot;
-  s_tls_consumer_cfg_cache.cfg = cfg;
-  return cfg;
-}
-
 static void _nei_log_process_events(const uint8_t *buf, size_t size) {
   size_t offset = 0U;
   char message[2048];
   while (offset + sizeof(nei_log_event_header_st) <= size) {
     const nei_log_config_st *config = NULL;
+    size_t config_slot = (size_t)-1;
     const nei_log_event_header_st *header = (const nei_log_event_header_st *)(buf + offset);
     const size_t payload_size = (size_t)header->total_size - sizeof(nei_log_event_header_st);
     const uint8_t *payload = buf + offset + sizeof(nei_log_event_header_st);
     if (header->total_size == 0U || offset + header->total_size > size) {
       break;
     }
-    config = _nei_log_resolve_config_cached(header->config_handle);
+    config = _nei_log_acquire_config_for_emit(header->config_handle, &config_slot);
     if (config != NULL && _nei_log_format_event(header, config, payload, payload_size, message, sizeof(message)) == 0) {
       _nei_log_emit_message(config, header->level, header->verbose, message, strlen(message));
+    }
+    if (config_slot != (size_t)-1) {
+      _nei_log_release_config_after_emit(config_slot);
     }
     offset += header->total_size;
   }

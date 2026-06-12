@@ -576,10 +576,11 @@ void nei_log_flush(void) {
     return;
   }
 
-  /* Sample the current write position.  Everything enqueued before this point
-   * must be consumed before flush returns.  Producers that are mid-commit will
-   * finish writing their slot; the consumer will drain them as they commit. */
-  flush_target = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.write_pos);
+  /* Sample the contiguous published prefix. Only reservations that have fully
+   * published their payload and become visible in-order to the consumer are
+   * included in this target. This avoids waiting on future reservations that
+   * have incremented write_pos but are still blocked before commit. */
+  flush_target = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.committed_pos);
   if (flush_target == 0U) {
     return;
   }
@@ -642,6 +643,14 @@ int nei_log_get_perf_stats_for_test(nei_log_perf_stats_st *out_stats) {
 
 void nei_log_reset_perf_stats_for_test(void) {
   _nei_log_reset_perf_stats_for_test();
+}
+
+int nei_log_reserve_unpublished_slot_for_test(uint64_t *out_reserved_pos) {
+  return _nei_log_reserve_unpublished_slot_for_test(out_reserved_pos);
+}
+
+int nei_log_rollback_unpublished_slot_for_test(uint64_t reserved_pos) {
+  return _nei_log_rollback_unpublished_slot_for_test(reserved_pos);
 }
 
 #pragma endregion

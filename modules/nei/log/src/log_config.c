@@ -6,6 +6,7 @@
 nei_log_config_st *s_config_ptrs[_NEI_LOG_MAX_CONFIGS];
 nei_log_config_st s_custom_configs[_NEI_LOG_MAX_CONFIGS];
 uint8_t s_config_used[_NEI_LOG_MAX_CONFIGS];
+_nei_log_atomic32_t s_config_active_emit_counts[_NEI_LOG_MAX_CONFIGS];
 int s_config_table_initialized = 0;
 #if defined(_WIN32)
 volatile LONGLONG s_config_snapshot = 1;
@@ -30,6 +31,7 @@ void _nei_log_ensure_config_table_initialized(void) {
   memset(s_config_ptrs, 0, sizeof(s_config_ptrs));
   memset(s_custom_configs, 0, sizeof(s_custom_configs));
   memset(s_config_used, 0, sizeof(s_config_used));
+  memset((void *)s_config_active_emit_counts, 0, sizeof(s_config_active_emit_counts));
 
   // Slot 0 is the default config.
   s_config_used[0] = 1U;
@@ -128,6 +130,69 @@ void _nei_log_config_snapshot_bump(void) {
 #endif
 }
 
+const nei_log_config_st *_nei_log_acquire_config_for_emit(nei_log_config_handle_t handle, size_t *out_slot) {
+  size_t slot = 0U;
+  const nei_log_config_st *cfg = NULL;
+
+  if (out_slot == NULL) {
+    return NULL;
+  }
+  *out_slot = (size_t)-1;
+
+  _nei_log_config_lock_read();
+  _nei_log_ensure_config_table_initialized();
+  if (_nei_log_slot_from_handle(handle, &slot) == 0 && s_config_used[slot] != 0U) {
+    cfg = s_config_ptrs[slot];
+    if (cfg != NULL) {
+      (void)_NEI_LOG_ATOMIC_FETCH_ADD32(&s_config_active_emit_counts[slot], 1U);
+      *out_slot = slot;
+    }
+  }
+  _nei_log_config_unlock_read();
+  return cfg;
+}
+
+void _nei_log_release_config_after_emit(size_t slot) {
+  if (slot >= _NEI_LOG_MAX_CONFIGS) {
+    return;
+  }
+
+  (void)_NEI_LOG_ATOMIC_FETCH_SUB32(&s_config_active_emit_counts[slot], 1U);
+
+#if defined(_WIN32)
+  EnterCriticalSection(&s_runtime.mutex);
+  _NEI_LOG_SIGNAL_COND(&s_runtime.cond);
+  LeaveCriticalSection(&s_runtime.mutex);
+#else
+  pthread_mutex_lock(&s_runtime.mutex);
+  pthread_cond_signal(&s_runtime.cond);
+  pthread_mutex_unlock(&s_runtime.mutex);
+#endif
+}
+
+void _nei_log_wait_for_emit_quiescent(size_t slot) {
+  if (slot >= _NEI_LOG_MAX_CONFIGS || !s_runtime.initialized) {
+    return;
+  }
+  if (_NEI_LOG_ATOMIC_LOAD32(&s_config_active_emit_counts[slot]) == 0U) {
+    return;
+  }
+
+#if defined(_WIN32)
+  EnterCriticalSection(&s_runtime.mutex);
+  while (_NEI_LOG_ATOMIC_LOAD32(&s_config_active_emit_counts[slot]) != 0U) {
+    SleepConditionVariableCS(&s_runtime.cond, &s_runtime.mutex, INFINITE);
+  }
+  LeaveCriticalSection(&s_runtime.mutex);
+#else
+  pthread_mutex_lock(&s_runtime.mutex);
+  while (_NEI_LOG_ATOMIC_LOAD32(&s_config_active_emit_counts[slot]) != 0U) {
+    pthread_cond_wait(&s_runtime.cond, &s_runtime.mutex);
+  }
+  pthread_mutex_unlock(&s_runtime.mutex);
+#endif
+}
+
 #pragma endregion
 
 #pragma region public API
@@ -170,10 +235,6 @@ void nei_log_remove_config(nei_log_config_handle_t handle) {
   nei_log_sink_st *sinks_to_release[NEI_LOG_MAX_SINKS_OF_CONFIG];
   size_t num_sinks = 0;
 
-  /* Flush once before taking the lock: drain any events already in the ring
-   * buffer so the consumer is idle when we modify the config table. */
-  nei_log_flush();
-
   _nei_log_config_lock_write();
   _nei_log_ensure_config_table_initialized();
   if (_nei_log_slot_from_handle(handle, &slot) != 0 || s_config_used[slot] == 0U) {
@@ -205,18 +266,14 @@ void nei_log_remove_config(nei_log_config_handle_t handle) {
   _nei_log_config_snapshot_bump();
   _nei_log_config_unlock_write();
 
-  if (num_sinks > 0U) {
-    /* Flush again after the snapshot bump: drain any events that were
-     * enqueued between the first flush and the snapshot update.  The
-     * consumer's resolve_config_cached() will now see the new snapshot
-     * and find the config removed, so it will skip emit_message() for
-     * these events — guaranteeing no consumer is accessing the sinks
-     * when we call release(). */
-    nei_log_flush();
+  /* The config is now unpublished, so queued events will resolve to NULL and
+   * be skipped. Only wait for any sink callback already in progress on the
+   * consumer thread before releasing sink-owned resources. */
+  _nei_log_wait_for_emit_quiescent(slot);
 
-    /* Release sinks: at this point the config is unpublished and the
-     * consumer has drained all events, so it is safe to release sink
-     * resources (close handles, free memory, etc.). */
+  if (num_sinks > 0U) {
+    /* Release sinks after the config is unpublished and no callback is still
+     * executing against the old slot. */
     size_t i;
     for (i = 0; i < num_sinks; ++i) {
       sinks_to_release[i]->release(sinks_to_release[i]);

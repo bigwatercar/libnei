@@ -67,7 +67,14 @@ typedef volatile LONGLONG _nei_log_atomic64_t;
 /** Release-store a 64-bit value. */
 #  define _NEI_LOG_ATOMIC_STORE64(p, v) \
       (void)InterlockedExchange64((volatile LONGLONG *)(p), (LONGLONG)(v))
+/** Atomic compare-and-swap; returns non-zero on success. */
+#  define _NEI_LOG_ATOMIC_CAS64(p, expected, desired) \
+  (InterlockedCompareExchange64((volatile LONGLONG *)(p), (LONGLONG)(desired), (LONGLONG)(expected)) == (LONGLONG)(expected))
 /** Atomic fetch-and-add (returns old value, full barrier). */
+#  define _NEI_LOG_ATOMIC_FETCH_ADD32(p, v) \
+  ((uint32_t)InterlockedExchangeAdd((volatile LONG *)(p), (LONG)(v)))
+#  define _NEI_LOG_ATOMIC_FETCH_SUB32(p, v) \
+  ((uint32_t)InterlockedExchangeAdd((volatile LONG *)(p), -(LONG)(v)))
 #  define _NEI_LOG_ATOMIC_FETCH_ADD64(p, v) \
       ((uint64_t)InterlockedExchangeAdd64((volatile LONGLONG *)(p), (LONGLONG)(v)))
 /** Yield CPU hint inside a spin loop. */
@@ -77,8 +84,12 @@ typedef volatile uint32_t _nei_log_atomic32_t;
 typedef volatile uint64_t _nei_log_atomic64_t;
 #  define _NEI_LOG_ATOMIC_LOAD32(p)          __atomic_load_n((p),  __ATOMIC_ACQUIRE)
 #  define _NEI_LOG_ATOMIC_STORE32(p, v)      __atomic_store_n((p), (v), __ATOMIC_RELEASE)
+#  define _NEI_LOG_ATOMIC_FETCH_ADD32(p, v)  __atomic_fetch_add((p), (v), __ATOMIC_ACQ_REL)
+#  define _NEI_LOG_ATOMIC_FETCH_SUB32(p, v)  __atomic_fetch_sub((p), (v), __ATOMIC_ACQ_REL)
 #  define _NEI_LOG_ATOMIC_LOAD64(p)          __atomic_load_n((p),  __ATOMIC_ACQUIRE)
 #  define _NEI_LOG_ATOMIC_STORE64(p, v)      __atomic_store_n((p), (v), __ATOMIC_RELEASE)
+#  define _NEI_LOG_ATOMIC_CAS64(p, expected, desired) \
+  __atomic_compare_exchange_n((p), &(expected), (desired), 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)
 #  define _NEI_LOG_ATOMIC_FETCH_ADD64(p, v)  __atomic_fetch_add((p), (v), __ATOMIC_ACQ_REL)
 #  define _NEI_LOG_CPU_YIELD()               sched_yield()
 #endif
@@ -177,8 +188,9 @@ typedef struct _nei_log_event_header_st {
  *          `state` is the commit flag: 0 = empty (consumer owns), 1 = committed (data valid).
  */
 typedef struct {
-  _nei_log_atomic32_t state; /**< 0 = empty; 1 = committed. */
-  uint32_t            size;  /**< Valid byte count in @ref data. */
+  _nei_log_atomic32_t state;         /**< 0 = empty; 1 = committed. */
+  uint32_t            size;          /**< Valid byte count in @ref data. */
+  _nei_log_atomic64_t published_seq; /**< Absolute sequence + 1 once this reservation is fully published. */
   uint8_t             data[_NEI_LOG_EVENT_BUFFER_SIZE];
 } nei_log_ring_slot_st;
 
@@ -192,6 +204,7 @@ typedef struct {
 typedef struct {
   nei_log_ring_slot_st slots[_NEI_LOG_RING_SLOTS];
   _nei_log_atomic64_t  write_pos;    /**< Next slot to reserve (producers). */
+  _nei_log_atomic64_t  committed_pos; /**< One-past-last contiguous fully published reservation. */
   _nei_log_atomic64_t  consumer_pos; /**< Next slot to consume (consumer + flush readers). */
 } nei_log_ring_st;
 
@@ -239,6 +252,7 @@ typedef struct _nei_log_default_file_sink_ctx_st {
 extern nei_log_config_st *s_config_ptrs[_NEI_LOG_MAX_CONFIGS];
 extern nei_log_config_st s_custom_configs[_NEI_LOG_MAX_CONFIGS];
 extern uint8_t s_config_used[_NEI_LOG_MAX_CONFIGS];
+extern _nei_log_atomic32_t s_config_active_emit_counts[_NEI_LOG_MAX_CONFIGS];
 extern int s_config_table_initialized;
 #if defined(_WIN32)
 extern volatile LONGLONG s_config_snapshot;
@@ -276,6 +290,9 @@ nei_log_config_handle_t _nei_log_make_handle_from_slot(size_t slot);
 int _nei_log_slot_from_handle(nei_log_config_handle_t handle, size_t *out_slot);
 uint64_t _nei_log_config_snapshot_load(void);
 void _nei_log_config_snapshot_bump(void);
+const nei_log_config_st *_nei_log_acquire_config_for_emit(nei_log_config_handle_t handle, size_t *out_slot);
+void _nei_log_release_config_after_emit(size_t slot);
+void _nei_log_wait_for_emit_quiescent(size_t slot);
 
 /* From log_runtime.c */
 int _nei_log_ensure_runtime_initialized(void);
@@ -286,6 +303,8 @@ void _nei_log_signal_consumer_if_sleeping(void);
 uint32_t _nei_log_get_runtime_init_count_for_test(void);
 int _nei_log_get_perf_stats_for_test(nei_log_perf_stats_st *out_stats);
 void _nei_log_reset_perf_stats_for_test(void);
+int _nei_log_reserve_unpublished_slot_for_test(uint64_t *out_reserved_pos);
+int _nei_log_rollback_unpublished_slot_for_test(uint64_t reserved_pos);
 
 /* From log_thread_id.c */
 void _nei_log_tls_thread_id_cstr(const char **out_str, size_t *out_len);

@@ -700,6 +700,31 @@ NEI_API int nei_log_get_perf_stats_for_test(nei_log_perf_stats_st *out_stats);
  */
 NEI_API void nei_log_reset_perf_stats_for_test(void);
 
+/**
+ * @brief Reserve one ring slot without publishing it.
+ *
+ * @details Test-only API used to reproduce flush behavior around a producer
+ * that has advanced the reservation cursor but not yet committed the slot.
+ * Call @ref nei_log_rollback_unpublished_slot_for_test afterwards to restore
+ * the runtime state. Do not use concurrently with ordinary logging.
+ *
+ * @param[out] out_reserved_pos Receives the reserved absolute slot position.
+ * @return 0 on success, -1 on invalid arguments or init failure.
+ */
+NEI_API int nei_log_reserve_unpublished_slot_for_test(uint64_t *out_reserved_pos);
+
+/**
+ * @brief Roll back a slot previously reserved by
+ * @ref nei_log_reserve_unpublished_slot_for_test.
+ *
+ * @details Test-only API. This succeeds only if no other producer has changed
+ * the write cursor since the reservation was created.
+ *
+ * @param reserved_pos Absolute slot position returned by the reserve API.
+ * @return 0 on success, -1 if the runtime state has moved on.
+ */
+NEI_API int nei_log_rollback_unpublished_slot_for_test(uint64_t reserved_pos);
+
 /** @} */ /* end of nei_log_functions */
 
 /**

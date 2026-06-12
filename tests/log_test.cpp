@@ -5,8 +5,10 @@
 #include <cwchar>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <fstream>
+#include <future>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -25,6 +27,13 @@ struct LogCollector {
   std::mutex mu;
   std::vector<std::string> messages;
   int last_verbose = -1;
+};
+
+struct BlockingSinkState {
+  std::mutex mu;
+  std::condition_variable cv;
+  bool allow_emit = false;
+  int entered = 0;
 };
 
 extern "C" void
@@ -62,6 +71,18 @@ FlushInsideSinkVerboseLog(const nei_log_sink_st *sink, int verbose, const char *
   std::lock_guard<std::mutex> lock(collector->mu);
   collector->last_verbose = verbose;
   collector->messages.emplace_back(message, length);
+}
+
+extern "C" void
+BlockUntilReleasedLevelLog(const nei_log_sink_st *sink, nei_log_level_e level, const char *message, size_t length) {
+  (void)level;
+  (void)message;
+  (void)length;
+  auto *state = static_cast<BlockingSinkState *>(sink->opaque);
+  std::unique_lock<std::mutex> lock(state->mu);
+  ++state->entered;
+  state->cv.notify_all();
+  state->cv.wait(lock, [&]() { return state->allow_emit; });
 }
 
 struct DefaultConfigSinkGuard {
@@ -1188,6 +1209,91 @@ TEST(LogCTest, ConfigAddRemoveIsThreadSafeAtRuntime) {
 
   std::lock_guard<std::mutex> lock(collector.mu);
   EXPECT_GT(collector.messages.size(), 0U);
+}
+
+TEST(LogCTest, ConfigRemoveDoesNotWaitForFutureReservedSlots) {
+  BlockingSinkState state;
+  nei_log_sink_st sink = {};
+  sink.llog = BlockUntilReleasedLevelLog;
+  sink.opaque = &state;
+
+  nei_log_config_st cfg = *nei_log_default_config();
+  cfg.sinks[0] = &sink;
+  cfg.sinks[1] = nullptr;
+
+  nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+  ASSERT_EQ(nei_log_add_config(&cfg, &cfg_handle), 0);
+
+  nei_log_reset_perf_stats_for_test();
+  std::atomic<int> stop{0};
+  std::thread producer([&]() {
+    int i = 0;
+    while (stop.load(std::memory_order_relaxed) == 0) {
+      nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "blocked-sink", "payload=%d", i);
+      ++i;
+    }
+  });
+
+  {
+    std::unique_lock<std::mutex> lock(state.mu);
+    ASSERT_TRUE(state.cv.wait_for(lock, std::chrono::seconds(2), [&]() { return state.entered > 0; }));
+  }
+
+  {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    nei_log_perf_stats_st stats = {};
+    int saturated = 0;
+    while (std::chrono::steady_clock::now() < deadline) {
+      ASSERT_EQ(nei_log_get_perf_stats_for_test(&stats), 0);
+      if (stats.ring_high_watermark >= 257U) {
+        saturated = 1;
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ASSERT_EQ(saturated, 1);
+  }
+
+  auto remove_future = std::async(std::launch::async, [&]() {
+    nei_log_remove_config(cfg_handle);
+    return 1;
+  });
+
+  EXPECT_EQ(remove_future.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
+
+  {
+    std::lock_guard<std::mutex> lock(state.mu);
+    state.allow_emit = true;
+  }
+  state.cv.notify_all();
+
+  EXPECT_EQ(remove_future.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+  stop.store(1, std::memory_order_relaxed);
+  producer.join();
+  nei_log_flush();
+}
+
+TEST(LogCTest, FlushIgnoresReservedButUnpublishedSlot) {
+  DefaultConfigSinkGuard guard;
+  LogCollector collector;
+  nei_log_sink_st sink = {};
+  sink.llog = CollectLevelLog;
+  sink.opaque = &collector;
+  guard.set_primary_sink(&sink);
+  nei_log_update_config();
+
+  nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "flush-target", "warmup=%d", 1);
+  nei_log_flush();
+
+  uint64_t reserved_pos = 0U;
+  ASSERT_EQ(nei_log_reserve_unpublished_slot_for_test(&reserved_pos), 0);
+  auto flush_future = std::async(std::launch::async, []() {
+    nei_log_flush();
+    return 1;
+  });
+  EXPECT_EQ(flush_future.wait_for(std::chrono::milliseconds(200)), std::future_status::ready);
+
+  ASSERT_EQ(nei_log_rollback_unpublished_slot_for_test(reserved_pos), 0);
 }
 
 #if defined(__clang__) || defined(__GNUC__)
