@@ -97,7 +97,13 @@ BenchEntry BenchWrite(nei::AsyncFile& file,
   // Flow control: atomic semaphore limits in-flight chunks to avoid
   // overwhelming the IO runner.  All chunks are issued from the main thread
   // in a single pass with back-pressure from the callback.
+  // On POSIX the single background thread serializes all I/O, so a small
+  // in-flight limit avoids pipeline congestion.
+#if defined(_WIN32)
   const std::size_t kMaxInFlight = 256;
+#else
+  const std::size_t kMaxInFlight = 4;
+#endif
   std::atomic<std::size_t> in_flight{0};
   std::atomic<std::size_t> done{0};
   nei::WaitableEvent all(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -105,7 +111,13 @@ BenchEntry BenchWrite(nei::AsyncFile& file,
 
   for (std::size_t i = 0; i < nchunks; ++i) {
     while (in_flight.load(std::memory_order_acquire) >= kMaxInFlight) {
+#if defined(_WIN32)
       std::this_thread::yield();
+#else
+      // On POSIX the single background thread serializes all I/O;
+      // a short sleep avoids starving the IO/BG threads on limited vCPUs.
+      std::this_thread::sleep_for(std::chrono::microseconds(100));
+#endif
     }
     in_flight.fetch_add(1, std::memory_order_acq_rel);
 
@@ -163,7 +175,11 @@ BenchEntry BenchRead(nei::AsyncFile& file,
   ev.Wait();
   if (!ok.load(std::memory_order_acquire)) return {};
 
+#if defined(_WIN32)
   const std::size_t kMaxInFlight = 256;
+#else
+  const std::size_t kMaxInFlight = 4;
+#endif
   std::atomic<std::size_t> in_flight{0};
   std::atomic<std::size_t> done{0};
   nei::WaitableEvent all(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -171,7 +187,11 @@ BenchEntry BenchRead(nei::AsyncFile& file,
 
   for (std::size_t i = 0; i < nchunks; ++i) {
     while (in_flight.load(std::memory_order_acquire) >= kMaxInFlight) {
+#if defined(_WIN32)
       std::this_thread::yield();
+#else
+      std::this_thread::sleep_for(std::chrono::microseconds(100));
+#endif
     }
     in_flight.fetch_add(1, std::memory_order_acq_rel);
 
