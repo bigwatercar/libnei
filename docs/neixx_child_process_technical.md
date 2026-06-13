@@ -7,6 +7,7 @@
 本文档重点覆盖：
 
 - `ChildProcess` 公开 API 使用指南
+- `ProcessUtil` 简化启动接口（fire-and-forget / 同步等待）
 - `ProcessService` 服务线程模型
 - `StdIOType` 四种 stdio 连线策略
 - `ProcessLaunchOptions` 完整配置项
@@ -19,11 +20,14 @@
 
 - `modules/neixx/process/include/neixx/process/child_process.h`（公开 API）
 - `modules/neixx/process/include/neixx/process/process_service.h`（进程服务）
+- `modules/neixx/process/include/neixx/process/process_util.h`（简化启动接口）
 - `modules/neixx/process/src/child_process.cpp`（PIMPL 桥接）
 - `modules/neixx/process/src/child_process_impl_common.h`（CRTP 基类）
 - `modules/neixx/process/src/child_process_impl_interface.h`（平台实现接口）
 - `modules/neixx/process/src/child_process_win.cpp`（Windows 实现）
 - `modules/neixx/process/src/child_process_posix.cpp`（POSIX 实现）
+- `modules/neixx/process/src/process_util_win.cpp`（Windows ProcessUtil）
+- `modules/neixx/process/src/process_util_posix.cpp`（POSIX ProcessUtil）
 
 ## 2. 模块定位
 
@@ -483,17 +487,159 @@ POSIX 平台 `fork()` 后、`execvp()` 前的子进程代码**必须遵循异步
 
 当前实现将 `setenv("NEI_CONTROL_PIPE_FD")` 放在 `fork()` 之前，子进程仅执行 `dup2`、`close`、`prctl`、`setrlimit`、`execvp` 等信号安全操作。
 
-## 10. 源文件索引
+## 10. ProcessUtil —— 简化启动接口
+
+### 10.1 定位
+
+`ProcessUtil` 提供一组**无需 IO 线程、无需回调监听器、无需异步管道**的轻量级进程启动 API。适用于"启动即忘记"的一次性脚本调用、简单命令行工具等场景。
+
+| | `ChildProcess` | `ProcessUtil::Launch` |
+|---|---|---|
+| **IO 线程** | 必须（ProcessService） | 不需要 |
+| **回调方式** | `ChildProcessListener` 三步回调 | 同步返回值 `ProcessExitInfo` |
+| **管道读写** | 异步 `AsyncInputStream` / `AsyncOutputStream` | 不支持（PIPE 降级为 NULL_IO） |
+| **心跳守护** | 支持 | 不支持 |
+| **资源限制** | 支持（Job Object / prctl + rlimit） | 支持（POSIX 端，Windows 端不支持 Job Object） |
+| **进程提权** | 不支持 | `LaunchProcessElevated()` |
+| **僵尸进程** | IO 线程自动 waitpid | fire-and-forget 用 double-fork 避免 |
+| **适用场景** | 长期守护子进程、流式 I/O | 一次性任务、脚本调用、fire-and-forget |
+
+### 10.2 相关文件
+
+- `modules/neixx/process/include/neixx/process/process_util.h`（API 声明）
+- `modules/neixx/process/src/process_util_win.cpp`（Windows：`CreateProcessW`）
+- `modules/neixx/process/src/process_util_posix.cpp`（POSIX：`fork`/`exec` / double-fork）
+
+### 10.3 ProcessUtil::Launch
+
+最简单的进程启动——无 IO 线程、无回调、同步返回结果。
+
+```cpp
+static ProcessExitInfo Launch(
+    const CommandLine& command_line,
+    const ProcessLaunchOptions& options = ProcessLaunchOptions{},
+    TimeDelta wait_timeout = TimeDelta::Max());
+```
+
+**参数说明**：
+
+| 参数 | 说明 |
+|---|---|
+| `command_line` | 要执行的程序和参数 |
+| `options` | stdio 连线及资源限制。`heartbeat_timeout` 等需要 IO 线程的字段被忽略 |
+| `wait_timeout` | `Max()`（默认）= fire-and-forget；有限值 = 阻塞等待退出或超时 |
+
+**返回值**：`ProcessExitInfo`，其中 `state` 可能为：
+
+| state | 含义 |
+|---|---|
+| `kRunning` | fire-and-forget 成功，或等待超时 |
+| `kExited` | 等待模式下子进程正常退出 |
+| `kCrashed` | 等待模式下子进程异常终止 |
+| `kFailedToStart` | `fork`/`CreateProcess` 失败 |
+
+### 10.4 使用示例
+
+**Fire-and-forget（启动即忘记）**：
+
+```cpp
+#include <neixx/process/process_util.h>
+#include <neixx/command_line/command_line.h>
+
+const char* argv[] = {"my_tool", "--flag"};
+nei::CommandLine cmd(2, argv);
+
+// 默认 fire-and-forget：立即返回 kRunning
+auto info = nei::ProcessUtil::Launch(cmd);
+if (info.state == nei::ProcessState::kRunning) {
+  printf("Process started successfully.\n");
+}
+```
+
+**等待子进程退出并获取退出码**：
+
+```cpp
+auto info = nei::ProcessUtil::Launch(cmd, {},
+    nei::TimeDelta::FromSeconds(30));  // 最多等 30 秒
+
+if (info.state == nei::ProcessState::kExited) {
+  printf("Exit code: %d\n", info.exit_code);
+} else if (info.state == nei::ProcessState::kRunning) {
+  printf("Still running after timeout.\n");
+}
+```
+
+**自定义 stdio 连线**：
+
+```cpp
+nei::ProcessLaunchOptions opts;
+opts.stdin_config.type  = nei::StdIOType::NULL_IO;
+opts.stdout_config.type = nei::StdIOType::INHERIT;   // 子进程输出到父进程控制台
+opts.stderr_config.type = nei::StdIOType::INHERIT;
+
+ProcessUtil::Launch(cmd, opts);
+```
+
+**启用资源限制**：
+
+```cpp
+nei::ProcessLaunchOptions opts;
+opts.resource_limits.max_virtual_memory = 256LL * 1024 * 1024;  // 256 MiB
+opts.resource_limits.max_file_descriptors = 128;
+opts.resource_limits.kill_on_parent_death = true;
+
+ProcessUtil::Launch(cmd, opts);
+```
+
+### 10.5 ProcessUtil::LaunchProcessElevated
+
+以管理员/sudo 权限启动子进程。
+
+```cpp
+struct ElevatedProcessOptions {
+  bool inherit_console = false;
+  TimeDelta wait_timeout = TimeDelta::Max();
+};
+
+static ProcessExitInfo LaunchProcessElevated(
+    const CommandLine& command_line,
+    const ElevatedProcessOptions& options);
+```
+
+- **Windows**：通过 `ShellExecuteExW` + `runas` 触发 UAC 提权
+- **POSIX**：依次尝试 `pkexec` → `sudo` 执行
+
+### 10.6 实现要点
+
+**Windows**（`process_util_win.cpp`）：
+- 使用 `CreateProcessW` 直接创建进程（非 `ShellExecuteEx`，无需提权）
+- stdio 连线：`INHERIT` → `DuplicateHandle` 父进程标准句柄；`NULL_IO` → 打开 `NUL`；`PIPE` → `CreatePipe` 创建匿名管道；`REDIRECT` → `DuplicateHandle` 目标句柄
+- Fire-and-forget：`CreateProcess` 后立即关闭 `hProcess` / `hThread`
+
+**POSIX**（`process_util_posix.cpp`）：
+- Fire-and-forget 使用 **double-fork** 避免僵尸进程：
+  1. 父进程 fork 出中间子进程
+  2. 中间子进程 fork 出孙进程（执行目标）
+  3. 中间子进程立即 `_exit(0)`
+  4. 父进程 `waitpid` 回收中间子进程
+  5. 孙进程变为孤儿进程，由 init（PID 1）接管
+- Wait 模式使用单次 `fork` + `waitpid`
+- 子进程侧应用 `prctl(PR_SET_PDEATHSIG)`、`setrlimit` 等资源限制
+
+## 11. 源文件索引
 
 | 文件 | 职责 |
 |---|---|
 | `modules/neixx/process/include/neixx/process/child_process.h` | 公开 API：ChildProcess、ChildProcessListener、StdIOConfig 等类型定义 |
 | `modules/neixx/process/include/neixx/process/process_service.h` | ProcessService 公开 API |
+| `modules/neixx/process/include/neixx/process/process_util.h` | ProcessUtil 公开 API：Launch、LaunchProcessElevated |
 | `modules/neixx/process/src/child_process.cpp` | PIMPL 桥接：公开类方法转发到 Impl |
 | `modules/neixx/process/src/child_process_impl_interface.h` | ChildProcess::Impl 接口定义 |
 | `modules/neixx/process/src/child_process_impl_common.h` | CRTP 基类：IO 线程转发、流代理、监听器管理 |
 | `modules/neixx/process/src/child_process_win.cpp` | Windows 实现：CreateProcessW、IOCP 管道、Job Object |
 | `modules/neixx/process/src/child_process_posix.cpp` | POSIX 实现：fork/exec、pipe2、pidfd、prctl |
+| `modules/neixx/process/src/process_util_win.cpp` | Windows ProcessUtil 实现 |
+| `modules/neixx/process/src/process_util_posix.cpp` | POSIX ProcessUtil 实现 |
 | `modules/neixx/io/include/neixx/io/async_stream.h` | AsyncInputStream / AsyncOutputStream 接口（管道读写） |
 | `modules/neixx/io/include/neixx/io/io_buffer.h` | IOBuffer / IOBufferPool（异步 I/O 缓冲区） |
 | `tests/child_process_test.cpp` | 单元测试与集成测试 |
