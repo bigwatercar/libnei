@@ -576,9 +576,12 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
                 ov, transferred, static_cast<std::uint32_t>(ERROR_SUCCESS));
           });
       if (!posted) {
-        OnChunkCompletedOnIoThread(
-            &context->overlapped, transferred_now,
-            static_cast<std::uint32_t>(ERROR_SUCCESS));
+        // Task queue is shutting down; close gracefully.  This avoids
+        // unbounded recursion that would result from chaining
+        // OnChunkCompletedOnIoThread → MaybeStartNextOperationOnIoThread
+        // → IssueNextChunkOnIoThread synchronously on every PostTask
+        // failure (see OnChunkCompletedOnIoThread fallback below).
+        CloseOnIoThread();
       }
       return;
     }
@@ -671,7 +674,15 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
           weak_this->IssueNextChunkOnIoThread(std::move(context));
         });
     if (!posted) {
-      IssueNextChunkOnIoThread(std::move(context));
+      // Task queue is shutting down.  Finalize the current (partially-
+      // completed) context inline, then close gracefully.  This avoids
+      // unbounded recursion while ensuring no callback is lost.
+      // (context was already erased from pending_io_ above, so
+      // CloseOnIoThread won't see it.)
+      FinalizeOperationOnIoThread(std::move(context),
+                                  static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED),
+                                  0, false, true);
+      CloseOnIoThread();
     }
   }
 
