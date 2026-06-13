@@ -261,7 +261,6 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     if (!ResolveStdHandle(options.stdout_config, /*is_input=*/false,
                           &stdout_pipe, &child_stdout)) {
       NotifyLaunchFailed(listener_);
-      CloseHandleSafe(&child_stdin);
       CleanupPipe(stdin_pipe);
       CleanupPipe(stdout_pipe);
       CleanupPipe(stderr_pipe);
@@ -270,8 +269,6 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     if (!ResolveStdHandle(options.stderr_config, /*is_input=*/false,
                           &stderr_pipe, &child_stderr)) {
       NotifyLaunchFailed(listener_);
-      CloseHandleSafe(&child_stdin);
-      CloseHandleSafe(&child_stdout);
       CleanupPipe(stdin_pipe);
       CleanupPipe(stdout_pipe);
       CleanupPipe(stderr_pipe);
@@ -281,9 +278,6 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     if (enable_control_guard) {
       if (!CreateOverlappedPipePair(/*child_reads=*/false, &control_pipe)) {
         NotifyLaunchFailed(listener_);
-        CloseHandleSafe(&child_stdin);
-        CloseHandleSafe(&child_stdout);
-        CloseHandleSafe(&child_stderr);
         CleanupPipe(stdin_pipe);
         CleanupPipe(stdout_pipe);
         CleanupPipe(stderr_pipe);
@@ -320,9 +314,6 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     if (!InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0,
                                            &attr_list_size)) {
       NotifyLaunchFailed(listener_);
-      CloseHandleSafe(&child_stdin);
-      CloseHandleSafe(&child_stdout);
-      CloseHandleSafe(&child_stderr);
       CleanupPipe(stdin_pipe);
       CleanupPipe(stdout_pipe);
       CleanupPipe(stderr_pipe);
@@ -335,9 +326,6 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
             nullptr, nullptr)) {
       DeleteProcThreadAttributeList(startup.lpAttributeList);
       NotifyLaunchFailed(listener_);
-      CloseHandleSafe(&child_stdin);
-      CloseHandleSafe(&child_stdout);
-      CloseHandleSafe(&child_stderr);
       CleanupPipe(stdin_pipe);
       CleanupPipe(stdout_pipe);
       CleanupPipe(stderr_pipe);
@@ -370,11 +358,14 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
 
     DeleteProcThreadAttributeList(startup.lpAttributeList);
 
-    CloseHandleSafe(&child_stdin);
-    CloseHandleSafe(&child_stdout);
-    CloseHandleSafe(&child_stderr);
+    // Close child-end handles now that the child process has its own
+    // copies. PipePair is the single owner: closing through the pipe
+    // here ensures CleanupPipe below will be a no-op for child ends.
+    CloseHandleSafe(&stdin_pipe.child_handle);
+    CloseHandleSafe(&stdout_pipe.child_handle);
+    CloseHandleSafe(&stderr_pipe.child_handle);
     if (enable_control_guard) {
-      CloseHandleSafe(&child_control_write);
+      CloseHandleSafe(&control_pipe.child_handle);
     }
 
     if (!created) {
@@ -825,6 +816,7 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
         if (inherited == INVALID_HANDLE_VALUE) {
           return false;
         }
+        pipe->child_handle = inherited;
         *child_handle = inherited;
         return true;
       }
@@ -833,6 +825,7 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
         if (nul == INVALID_HANDLE_VALUE) {
           return false;
         }
+        pipe->child_handle = nul;
         *child_handle = nul;
         return true;
       }
@@ -842,6 +835,7 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
         if (redirected == INVALID_HANDLE_VALUE) {
           return false;
         }
+        pipe->child_handle = redirected;
         *child_handle = redirected;
         return true;
       }

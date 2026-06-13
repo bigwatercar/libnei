@@ -596,6 +596,46 @@ TEST(ChildProcessTest,
   process.reset();
 }
 
+// Regression test: exercises the handle cleanup path when all three
+// stdio pipes are PIPE type.  Before the double-close fix this would
+// crash in Debug builds because child handles were closed individually
+// AND then again by CleanupPipe (child_std == pipe.child_handle).
+TEST(ChildProcessTest, LaunchWithAllThreePipesStressHandleCleanup) {
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  CapturingProcessListener listener(&done);
+  const scoped_refptr<ProcessService> service = ProcessService::Create();
+  ASSERT_TRUE(service);
+  ChildProcess process(service);
+  process.SetListener(&listener);
+
+#if defined(_WIN32)
+  const char* argv[] = {"cmd", "/d", "/c", "echo ok & exit /b 0"};
+#else
+  const char* argv[] = {"/bin/sh", "-c", "echo ok; exit 0"};
+#endif
+  CommandLine command_line(static_cast<int>(sizeof(argv) / sizeof(argv[0])),
+                           argv);
+
+  // All three stdio handles use PIPE — this is the worst-case for the
+  // cleanup path: after CreateProcessW every child handle aliases a
+  // pipe and must be closed exactly once.
+  ProcessLaunchOptions options;
+  options.stdin_config.type = StdIOType::PIPE;
+  options.stdout_config.type = StdIOType::PIPE;
+  options.stderr_config.type = StdIOType::PIPE;
+
+  const bool ok = process.Launch(command_line, options);
+  ASSERT_TRUE(ok);
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+
+  EXPECT_TRUE(listener.launch_succeeded.load(std::memory_order_acquire));
+  EXPECT_FALSE(listener.launch_failed.load(std::memory_order_acquire));
+  EXPECT_TRUE(listener.terminated.load(std::memory_order_acquire));
+  EXPECT_EQ(listener.exit_state.load(std::memory_order_acquire),
+            ProcessState::kExited);
+  EXPECT_EQ(listener.exit_code.load(std::memory_order_acquire), 0);
+}
+
 #if !defined(_WIN32)
 TEST(ChildProcessTest, LinuxResourceLimitsAreApplied) {
   WaitableEvent line_done(WaitableEvent::ResetPolicy::kAutomatic, false);
