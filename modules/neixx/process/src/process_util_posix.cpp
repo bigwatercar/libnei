@@ -13,6 +13,8 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <sys/prctl.h>
+#include <sys/resource.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -144,6 +146,137 @@ ProcessExitInfo ProcessUtil::LaunchProcessElevated(
   }
 
   return WaitWithTimeout(pid, options.wait_timeout);
+}
+
+void ApplyLimitsAndRedirect(const ProcessLaunchOptions& options) {
+  const ResourceLimits& limits = options.resource_limits;
+
+  if (limits.kill_on_parent_death) {
+    (void)prctl(PR_SET_PDEATHSIG, SIGKILL);
+  }
+  if (limits.max_virtual_memory > 0) {
+    struct rlimit rl;
+    rl.rlim_cur = static_cast<rlim_t>(limits.max_virtual_memory);
+    rl.rlim_max = rl.rlim_cur;
+    (void)setrlimit(RLIMIT_AS, &rl);
+  }
+  if (limits.max_file_descriptors > 0) {
+    struct rlimit rl;
+    rl.rlim_cur = static_cast<rlim_t>(limits.max_file_descriptors);
+    rl.rlim_max = rl.rlim_cur;
+    (void)setrlimit(RLIMIT_NOFILE, &rl);
+  }
+
+  auto RedirectFd = [](int target_fd, const StdIOConfig& cfg, bool is_input) {
+    int source_fd = -1;
+    switch (cfg.type) {
+      case StdIOType::INHERIT:
+        return;
+      case StdIOType::NULL_IO: {
+        int devnull = open("/dev/null",
+                           is_input ? O_RDONLY : O_WRONLY);
+        if (devnull >= 0) {
+          (void)dup2(devnull, target_fd);
+          (void)close(devnull);
+        }
+        return;
+      }
+      case StdIOType::PIPE:
+        // Pipe type is not supported in fire-and-forget mode;
+        // fall through to NULL_IO.
+        source_fd = open("/dev/null",
+                         is_input ? O_RDONLY : O_WRONLY);
+        if (source_fd >= 0) {
+          (void)dup2(source_fd, target_fd);
+          (void)close(source_fd);
+        }
+        return;
+      case StdIOType::REDIRECT:
+        source_fd = static_cast<int>(cfg.target_handle);
+        if (source_fd >= 0) {
+          (void)dup2(source_fd, target_fd);
+        }
+        return;
+    }
+  };
+
+  RedirectFd(STDIN_FILENO,  options.stdin_config,  /*is_input=*/true);
+  RedirectFd(STDOUT_FILENO, options.stdout_config, /*is_input=*/false);
+  RedirectFd(STDERR_FILENO, options.stderr_config, /*is_input=*/false);
+}
+
+ProcessExitInfo ProcessUtil::Launch(
+    const CommandLine& command_line,
+    const ProcessLaunchOptions& options,
+    TimeDelta wait_timeout) {
+  ProcessExitInfo info;
+  std::vector<std::string> argv_utf8 = BuildArgvUtf8(command_line);
+  if (argv_utf8.empty()) {
+    info.state = ProcessState::kFailedToStart;
+    return info;
+  }
+
+  const bool no_timeout = wait_timeout.InMicroseconds() >=
+                          TimeDelta::FromDays(36500).InMicroseconds();
+
+  if (no_timeout) {
+    // Fire-and-forget: double-fork to avoid zombie processes.
+    // The intermediate child exits immediately so the grandchild is
+    // adopted by init (PID 1), which will reap it on exit.
+    pid_t pid = fork();
+    if (pid < 0) {
+      info.state = ProcessState::kFailedToStart;
+      return info;
+    }
+    if (pid == 0) {
+      // Intermediate child.
+      pid_t grandchild = fork();
+      if (grandchild < 0) {
+        _exit(1);
+      }
+      if (grandchild == 0) {
+        // Grandchild: exec the target.
+        ApplyLimitsAndRedirect(options);
+
+        std::vector<char*> argv_exec;
+        argv_exec.reserve(argv_utf8.size() + 1);
+        for (std::string& token : argv_utf8) {
+          argv_exec.push_back(token.data());
+        }
+        argv_exec.push_back(nullptr);
+        execvp(argv_exec[0], argv_exec.data());
+        _exit(127);
+      }
+      // Intermediate child exits, grandchild becomes orphan -> init.
+      _exit(0);
+    }
+    // Parent: reap the intermediate child.
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+    info.state = ProcessState::kRunning;
+    return info;
+  }
+
+  // Wait mode: single fork.
+  pid_t pid = fork();
+  if (pid < 0) {
+    info.state = ProcessState::kFailedToStart;
+    return info;
+  }
+  if (pid == 0) {
+    ApplyLimitsAndRedirect(options);
+
+    std::vector<char*> argv_exec;
+    argv_exec.reserve(argv_utf8.size() + 1);
+    for (std::string& token : argv_utf8) {
+      argv_exec.push_back(token.data());
+    }
+    argv_exec.push_back(nullptr);
+    execvp(argv_exec[0], argv_exec.data());
+    _exit(127);
+  }
+
+  return WaitWithTimeout(pid, wait_timeout);
 }
 
 }  // namespace nei

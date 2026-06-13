@@ -6,6 +6,7 @@
 
 #include <neixx/process/process_util.h>
 
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
@@ -138,6 +139,151 @@ ProcessExitInfo ProcessUtil::LaunchProcessElevated(
   info.state = ProcessState::kExited;
   info.exit_code = static_cast<int>(exit_code);
   CloseHandle(sei.hProcess);
+  return info;
+}
+
+HANDLE OpenNulHandle(bool for_input) {
+  SECURITY_ATTRIBUTES sa{};
+  sa.nLength = sizeof(sa);
+  sa.bInheritHandle = TRUE;
+  return CreateFileW(L"NUL", for_input ? GENERIC_READ : GENERIC_WRITE,
+                     FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING,
+                     FILE_ATTRIBUTE_NORMAL, nullptr);
+}
+
+HANDLE DupInheritable(HANDLE source) {
+  if (source == nullptr || source == INVALID_HANDLE_VALUE) {
+    return INVALID_HANDLE_VALUE;
+  }
+  HANDLE dup = INVALID_HANDLE_VALUE;
+  if (!DuplicateHandle(GetCurrentProcess(), source, GetCurrentProcess(),
+                       &dup, 0, TRUE, DUPLICATE_SAME_ACCESS)) {
+    return INVALID_HANDLE_VALUE;
+  }
+  return dup;
+}
+
+ProcessExitInfo ProcessUtil::Launch(
+    const CommandLine& command_line,
+    const ProcessLaunchOptions& options,
+    TimeDelta wait_timeout) {
+  ProcessExitInfo info;
+
+  const auto& raw_argv = command_line.GetRawArgv();
+  if (raw_argv.empty()) {
+    info.state = ProcessState::kFailedToStart;
+    return info;
+  }
+
+  // Build command line string.
+  std::wstring cmdline = BuildArgString(raw_argv, 0);
+
+  // Resolve stdio handles.
+  auto ResolveHandle = [](const StdIOConfig& cfg, bool is_input) -> HANDLE {
+    switch (cfg.type) {
+      case StdIOType::INHERIT:
+        return DupInheritable(
+            GetStdHandle(is_input ? STD_INPUT_HANDLE : STD_OUTPUT_HANDLE));
+      case StdIOType::NULL_IO:
+        return OpenNulHandle(is_input);
+      case StdIOType::REDIRECT:
+        return DupInheritable(
+            reinterpret_cast<HANDLE>(static_cast<uintptr_t>(cfg.target_handle)));
+      case StdIOType::PIPE: {
+        // Simple anonymous pipe for fire-and-forget — no overlapped I/O.
+        HANDLE read_end = INVALID_HANDLE_VALUE;
+        HANDLE write_end = INVALID_HANDLE_VALUE;
+        SECURITY_ATTRIBUTES sa{};
+        sa.nLength = sizeof(sa);
+        sa.bInheritHandle = TRUE;
+        if (!CreatePipe(&read_end, &write_end, &sa, 0)) {
+          return INVALID_HANDLE_VALUE;
+        }
+        // Make the appropriate end non-inheritable.
+        if (is_input) {
+          SetHandleInformation(write_end, HANDLE_FLAG_INHERIT, 0);
+          CloseHandle(write_end);
+          return read_end;
+        } else {
+          SetHandleInformation(read_end, HANDLE_FLAG_INHERIT, 0);
+          CloseHandle(read_end);
+          return write_end;
+        }
+      }
+    }
+    return INVALID_HANDLE_VALUE;
+  };
+
+  HANDLE child_stdin  = ResolveHandle(options.stdin_config,  /*is_input=*/true);
+  HANDLE child_stdout = ResolveHandle(options.stdout_config, /*is_input=*/false);
+  HANDLE child_stderr = ResolveHandle(options.stderr_config, /*is_input=*/false);
+
+  // Closer helper.
+  auto CloseChildHandle = [](HANDLE h) {
+    if (h != nullptr && h != INVALID_HANDLE_VALUE) {
+      CloseHandle(h);
+    }
+  };
+
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  si.dwFlags = STARTF_USESTDHANDLES;
+  si.hStdInput  = child_stdin;
+  si.hStdOutput = child_stdout;
+  si.hStdError  = child_stderr;
+
+  PROCESS_INFORMATION pi{};
+  const DWORD flags = CREATE_NEW_PROCESS_GROUP;
+
+  // Use CreateProcessW directly (not ShellExecuteEx) for non-elevated launch.
+  std::vector<wchar_t> cmdline_buf(cmdline.size() + 1, L'\0');
+  std::memcpy(cmdline_buf.data(), cmdline.data(), cmdline.size() * sizeof(wchar_t));
+
+  if (!CreateProcessW(nullptr, cmdline_buf.data(), nullptr, nullptr, TRUE,
+                      flags, nullptr, nullptr, &si, &pi)) {
+    CloseChildHandle(child_stdin);
+    CloseChildHandle(child_stdout);
+    CloseChildHandle(child_stderr);
+    info.state = ProcessState::kFailedToStart;
+    return info;
+  }
+
+  CloseChildHandle(child_stdin);
+  CloseChildHandle(child_stdout);
+  CloseChildHandle(child_stderr);
+  CloseHandle(pi.hThread);
+
+  const bool no_timeout = wait_timeout.InMicroseconds() >=
+                          TimeDelta::FromDays(36500).InMicroseconds();
+  if (no_timeout) {
+    // Fire-and-forget.
+    CloseHandle(pi.hProcess);
+    info.state = ProcessState::kRunning;
+    return info;
+  }
+
+  // Wait mode.
+  const DWORD wait_ms =
+      static_cast<DWORD>(wait_timeout.InMilliseconds());
+  const DWORD wait_result = WaitForSingleObject(pi.hProcess, wait_ms);
+  if (wait_result == WAIT_TIMEOUT) {
+    info.state = ProcessState::kRunning;
+    info.exit_code = -1;
+    CloseHandle(pi.hProcess);
+    return info;
+  }
+
+  DWORD exit_code = STILL_ACTIVE;
+  if (!GetExitCodeProcess(pi.hProcess, &exit_code)) {
+    info.state = ProcessState::kCrashed;
+    info.exit_code = -1;
+    CloseHandle(pi.hProcess);
+    return info;
+  }
+
+  info.state = ProcessState::kExited;
+  info.exit_code = static_cast<int>(exit_code);
+  CloseHandle(pi.hProcess);
   return info;
 }
 
