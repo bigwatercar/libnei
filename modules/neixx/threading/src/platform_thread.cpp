@@ -11,7 +11,7 @@ PlatformThread::Handle::~Handle() {
   // The Handle must be explicitly Join()ed or Detach()ed before destruction.
   // Letting the destructor implicitly detach hides thread-lifecycle bugs and
   // risks orphaning threads.
-  DCHECK(!impl_);
+  DCHECK_MSG(!impl_, "Handle destroyed without being Join()ed or Detach()ed");
 }
 PlatformThread::Handle::Handle(Handle &&) noexcept = default;
 PlatformThread::Handle &PlatformThread::Handle::operator=(Handle &&) noexcept = default;

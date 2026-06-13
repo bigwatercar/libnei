@@ -75,15 +75,15 @@ bool PlatformThread::CreateWithType(std::size_t stack_size,
                                     Delegate *delegate,
                                     Handle *handle,
                                     ThreadType thread_type) {
-  DCHECK(delegate);
-  DCHECK(handle);
+  DCHECK_MSG(delegate, "delegate is null");
+  DCHECK_MSG(handle, "handle is null");
   if (delegate == nullptr || handle == nullptr) {
     return false;
   }
 
   pthread_attr_t attr;
   const int init_result = pthread_attr_init(&attr);
-  DCHECK_EQ(init_result, 0);
+  DCHECK_EQ_MSG(init_result, 0, "pthread_attr_init failed");
   if (init_result != 0) {
     return false;
   }
@@ -92,7 +92,7 @@ bool PlatformThread::CreateWithType(std::size_t stack_size,
     const std::size_t minimum_stack = PTHREAD_STACK_MIN;
     const std::size_t requested_stack = stack_size < minimum_stack ? minimum_stack : stack_size;
     const int stacksize_result = pthread_attr_setstacksize(&attr, requested_stack);
-    DCHECK_EQ(stacksize_result, 0);
+    DCHECK_EQ_MSG(stacksize_result, 0, "pthread_attr_setstacksize failed");
   }
 
   auto start_state = std::make_unique<nei::StartState>();
@@ -101,7 +101,7 @@ bool PlatformThread::CreateWithType(std::size_t stack_size,
   pthread_t native_handle{};
   const int create_result = pthread_create(&native_handle, &attr, &ThreadEntry, start_state.get());
   const int destroy_result = pthread_attr_destroy(&attr);
-  DCHECK_EQ(destroy_result, 0);
+  DCHECK_EQ_MSG(destroy_result, 0, "pthread_attr_destroy failed");
   if (create_result != 0) {
     return false;
   }
@@ -117,28 +117,29 @@ bool PlatformThread::CreateWithType(std::size_t stack_size,
 }
 
 bool PlatformThread::Join(Handle *handle) {
-  DCHECK(handle);
+  DCHECK_MSG(handle, "handle is null");
   if (handle == nullptr || handle->impl_ == nullptr || !handle->impl_->joinable) {
     return false;
   }
 
   // Self-join is a guaranteed deadlock (the thread would wait on itself).
   // Crash immediately with a clear message rather than hanging forever.
-  CHECK(!pthread_equal(handle->impl_->native_handle, pthread_self()));
+  CHECK_MSG(!pthread_equal(handle->impl_->native_handle, pthread_self()),
+            "self-join would cause deadlock");
 
   const int join_result = pthread_join(handle->impl_->native_handle, nullptr);
-  DCHECK_EQ(join_result, 0);
+  DCHECK_EQ_MSG(join_result, 0, "pthread_join failed");
   handle->impl_.reset();
   return true;
 }
 
 bool PlatformThread::Detach(Handle *handle) {
-  DCHECK(handle);
+  DCHECK_MSG(handle, "handle is null");
   if (handle == nullptr || handle->impl_ == nullptr || !handle->impl_->joinable) {
     return false;
   }
   const int detach_result = pthread_detach(handle->impl_->native_handle);
-  DCHECK_EQ(detach_result, 0);
+  DCHECK_EQ_MSG(detach_result, 0, "pthread_detach failed");
   handle->impl_.reset();
   return true;
 }

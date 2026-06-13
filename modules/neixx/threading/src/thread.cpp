@@ -95,7 +95,8 @@ void Thread::Stop() {
 
   // Self-join is guaranteed to deadlock: the calling thread would wait on
   // itself. Catch this programmer error early in debug builds.
-  DCHECK_NE(GetThreadId(), PlatformThread::CurrentId());
+  DCHECK_NE_MSG(GetThreadId(), PlatformThread::CurrentId(),
+                "self-stop would cause deadlock");
 
   if (runner) {
     runner->PostTask(FROM_HERE, []() {

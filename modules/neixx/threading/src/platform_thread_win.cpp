@@ -134,8 +134,8 @@ bool PlatformThread::CreateWithType(std::size_t stack_size,
                                     Delegate *delegate,
                                     Handle *handle,
                                     ThreadType thread_type) {
-  DCHECK(delegate);
-  DCHECK(handle);
+  DCHECK_MSG(delegate, "delegate is null");
+  DCHECK_MSG(handle, "handle is null");
   if (delegate == nullptr || handle == nullptr) {
     return false;
   }
@@ -166,14 +166,15 @@ bool PlatformThread::CreateWithType(std::size_t stack_size,
 }
 
 bool PlatformThread::Join(Handle *handle) {
-  DCHECK(handle);
+  DCHECK_MSG(handle, "handle is null");
   if (handle == nullptr || handle->impl_ == nullptr || !handle->impl_->joinable) {
     return false;
   }
 
   // Self-join is a guaranteed deadlock (the thread would wait on itself).
   // Crash immediately with a clear message rather than hanging forever.
-  CHECK_NE(::GetThreadId(handle->impl_->native_handle), ::GetCurrentThreadId());
+  CHECK_NE_MSG(::GetThreadId(handle->impl_->native_handle), ::GetCurrentThreadId(),
+               "self-join would cause deadlock");
 
   (void)::WaitForSingleObject(handle->impl_->native_handle, INFINITE);
   (void)::CloseHandle(handle->impl_->native_handle);
@@ -182,7 +183,7 @@ bool PlatformThread::Join(Handle *handle) {
 }
 
 bool PlatformThread::Detach(Handle *handle) {
-  DCHECK(handle);
+  DCHECK_MSG(handle, "handle is null");
   if (handle == nullptr || handle->impl_ == nullptr || !handle->impl_->joinable) {
     return false;
   }
