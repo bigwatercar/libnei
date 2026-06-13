@@ -72,6 +72,33 @@ TEST(PlatformThreadTest, SleepAndYieldAreCallable) {
   SUCCEED();
 }
 
+// Verifies that short Sleep() calls complete within a reasonable wall-clock
+// bound rather than being rounded up to the default ~15.6 ms timer tick.
+// This guards against catastrophic timer-resolution regression (e.g. missing
+// timeBeginPeriod call on Windows).
+TEST(PlatformThreadTest, SleepShortDurationPrecision) {
+  constexpr int kIterations = 5;
+  // With the high-res timer active, Sleep(1ms) should complete in ~1-3 ms
+  // per call.  Without it, Windows rounds up to a full tick (~15.6 ms).
+  // A bound of 8 ms average is generous for CI jitter while still well
+  // below one default tick.
+  constexpr int64_t kMaxAvgUs = 8'000;
+
+  int64_t total_us = 0;
+  for (int i = 0; i < kIterations; ++i) {
+    const auto t0 = std::chrono::high_resolution_clock::now();
+    nei::PlatformThread::Sleep(nei::TimeDelta::FromMilliseconds(1));
+    const auto t1 = std::chrono::high_resolution_clock::now();
+    total_us +=
+        std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+  }
+
+  const int64_t avg_us = total_us / kIterations;
+  EXPECT_LT(avg_us, kMaxAvgUs)
+      << "Average Sleep(1ms) took " << avg_us
+      << " us — high-resolution timer may not be active.";
+}
+
 TEST(PlatformThreadTest, SetCurrentThreadNameBestEffort) {
   nei::PlatformThread::SetCurrentThreadName("nei-thread-main");
 

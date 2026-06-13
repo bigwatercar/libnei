@@ -2,6 +2,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
+#include <timeapi.h>
 
 #include <process.h>
 
@@ -9,6 +10,11 @@
 #include <memory>
 #include <string>
 #include <thread>
+
+// Required for ::timeBeginPeriod (winmm.lib).
+#ifdef _MSC_VER
+#pragma comment(lib, "winmm.lib")
+#endif
 
 #include <neixx/strings/utf_string_conversions.h>
 #include <neixx/threading/platform_thread.h>
@@ -58,6 +64,17 @@ bool SetCurrentThreadNameLegacy(const std::string &name) {
   return true;
 }
 
+// Enables 1 ms system timer resolution on first call.
+// The Windows default is ~15.6 ms; without this, ::Sleep() rounds up to the
+// nearest tick and destroys precision for sub-15 ms requests.
+void EnableHighResTimer() {
+  static const bool enabled = []() -> bool {
+    ::timeBeginPeriod(1);
+    return true;
+  }();
+  (void)enabled;
+}
+
 } // namespace
 
 namespace nei {
@@ -74,8 +91,42 @@ void PlatformThread::Sleep(TimeDelta duration) {
   if (duration.InMicroseconds() <= 0) {
     return;
   }
-  const auto ms = duration.InMilliseconds();
-  ::Sleep(static_cast<DWORD>(ms <= 0 ? 0 : ms));
+
+  // Boost the system timer resolution to 1 ms on first call.
+  EnableHighResTimer();
+
+  const int64_t duration_ms = duration.InMilliseconds();
+
+  // ::Sleep(0) merely yields the remainder of the current quantum.
+  if (duration_ms == 0) {
+    ::Sleep(0);
+    return;
+  }
+
+  // For very short durations (< 10 ms), spin-wait for the remainder after
+  // a minimal ::Sleep(1) to avoid burning CPU unnecessarily while still
+  // bounding the worst-case scheduler overshoot.
+  if (duration_ms < 10) {
+    LARGE_INTEGER freq;
+    LARGE_INTEGER start;
+    ::QueryPerformanceFrequency(&freq);
+    ::QueryPerformanceCounter(&start);
+
+    const int64_t target_ticks =
+        start.QuadPart + (duration.InMicroseconds() * freq.QuadPart) / 1'000'000LL;
+
+    ::Sleep(1);
+
+    LARGE_INTEGER now;
+    ::QueryPerformanceCounter(&now);
+    while (now.QuadPart < target_ticks) {
+      YieldProcessor();
+      ::QueryPerformanceCounter(&now);
+    }
+    return;
+  }
+
+  ::Sleep(static_cast<DWORD>(duration_ms));
 }
 
 bool PlatformThread::CreateWithType(std::size_t stack_size,
