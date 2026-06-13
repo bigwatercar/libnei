@@ -118,8 +118,6 @@ bool PlatformThread::CreateWithType(std::size_t stack_size,
 
 bool PlatformThread::Join(Handle *handle) {
   DCHECK(handle);
-  DCHECK(handle->impl_);
-  DCHECK(handle->impl_->joinable);
   if (handle == nullptr || handle->impl_ == nullptr || !handle->impl_->joinable) {
     return false;
   }
@@ -131,8 +129,6 @@ bool PlatformThread::Join(Handle *handle) {
 
 bool PlatformThread::Detach(Handle *handle) {
   DCHECK(handle);
-  DCHECK(handle->impl_);
-  DCHECK(handle->impl_->joinable);
   if (handle == nullptr || handle->impl_ == nullptr || !handle->impl_->joinable) {
     return false;
   }
