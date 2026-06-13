@@ -73,7 +73,9 @@ class NEI_API Thread final : public PlatformThread::Delegate {
   mutable Lock lock_;
   PlatformThread::Handle handle_;
   scoped_refptr<TaskRunner> task_runner_;
-  std::unique_ptr<WaitableEvent> start_event_;
+  // Non-owning pointer to a WaitableEvent on the call stack of
+  // StartWithOptions().  Must only be read/written under |lock_|.
+  WaitableEvent* start_event_ = nullptr;
   bool started_ = false;
   bool running_ = false;
   bool start_succeeded_ = false;

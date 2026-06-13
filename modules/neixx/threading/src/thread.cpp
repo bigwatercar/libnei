@@ -41,14 +41,14 @@ bool Thread::Start() {
 }
 
 bool Thread::StartWithOptions(const Options& options) {
+  WaitableEvent start_event(WaitableEvent::ResetPolicy::kManual, false);
   {
     AutoLock lock(lock_);
     if (started_) {
       return false;
     }
     options_ = options;
-    start_event_ =
-        std::make_unique<WaitableEvent>(WaitableEvent::ResetPolicy::kManual, false);
+    start_event_ = &start_event;
     started_ = true;
     start_succeeded_ = false;
     running_ = false;
@@ -58,19 +58,19 @@ bool Thread::StartWithOptions(const Options& options) {
   if (!PlatformThread::CreateWithType(options.stack_size, this, &handle_,
                                       options.thread_type)) {
     AutoLock lock(lock_);
-    start_event_.reset();
+    start_event_ = nullptr;
     started_ = false;
     thread_id_ = 0;
     return false;
   }
 
-  start_event_->Wait();
+  start_event.Wait();
 
   bool start_succeeded = false;
   {
     AutoLock lock(lock_);
     start_succeeded = start_succeeded_;
-    start_event_.reset();
+    start_event_ = nullptr;
   }
 
   if (!start_succeeded) {
@@ -112,7 +112,7 @@ void Thread::Stop() {
   task_runner_ = nullptr;
   running_ = false;
   start_succeeded_ = false;
-  start_event_.reset();
+  start_event_ = nullptr;
 }
 
 scoped_refptr<TaskRunner> Thread::GetTaskRunner() const {
@@ -154,7 +154,7 @@ void Thread::ThreadMain() {
     task_runner_ = default_task_runner;
     start_succeeded_ = default_task_runner.get() != nullptr;
     running_ = start_succeeded_;
-    start_event = start_event_.get();
+    start_event = start_event_;
   }
 
   if (start_event != nullptr) {
