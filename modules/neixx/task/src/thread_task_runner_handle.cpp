@@ -10,7 +10,7 @@ scoped_refptr<TaskRunner> ThreadTaskRunnerHandle::Get() {
   if (sequence_manager == nullptr) {
     return nullptr;
   }
-  return sequence_manager->CreateTaskRunner();
+  return sequence_manager->GetDefaultTaskRunner();
 }
 
 }  // namespace nei

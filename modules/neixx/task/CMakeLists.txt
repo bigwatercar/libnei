@@ -3,6 +3,7 @@
   include/neixx/task/internal/task_tracing.h
   include/neixx/task/task_observer.h
   include/neixx/task/scoped_blocking_call.h
+  include/neixx/task/sequence_token.h
   include/neixx/task/thread_pool_instance.h
   src/internal/delayed_task_manager.h
   src/internal/pooled_task_source.h
