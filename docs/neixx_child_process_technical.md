@@ -493,16 +493,16 @@ POSIX 平台 `fork()` 后、`execvp()` 前的子进程代码**必须遵循异步
 
 `ProcessUtil` 提供一组**无需 IO 线程、无需回调监听器、无需异步管道**的轻量级进程启动 API。适用于"启动即忘记"的一次性脚本调用、简单命令行工具等场景。
 
-| | `ChildProcess` | `ProcessUtil::Launch` |
-|---|---|---|
-| **IO 线程** | 必须（ProcessService） | 不需要 |
-| **回调方式** | `ChildProcessListener` 三步回调 | 同步返回值 `ProcessExitInfo` |
-| **管道读写** | 异步 `AsyncInputStream` / `AsyncOutputStream` | 不支持（PIPE 降级为 NULL_IO） |
-| **心跳守护** | 支持 | 不支持 |
-| **资源限制** | 支持（Job Object / prctl + rlimit） | 支持（POSIX 端，Windows 端不支持 Job Object） |
-| **进程提权** | 不支持 | `LaunchProcessElevated()` |
-| **僵尸进程** | IO 线程自动 waitpid | fire-and-forget 用 double-fork 避免 |
-| **适用场景** | 长期守护子进程、流式 I/O | 一次性任务、脚本调用、fire-and-forget |
+| | `ChildProcess` | `ProcessUtil::Launch` | `ProcessUtil::ShellExecute` |
+|---|---|---|---|
+| **IO 线程** | 必须（ProcessService） | 不需要 | 不需要 |
+| **回调方式** | `ChildProcessListener` 三步回调 | 同步返回值 `ProcessExitInfo` | 同步返回值 `ProcessExitInfo` |
+| **管道读写** | 异步 `AsyncInputStream` / `AsyncOutputStream` | 不支持（PIPE 降级为 NULL_IO） | 不支持 |
+| **心跳守护** | 支持 | 不支持 | 不支持 |
+| **资源限制** | 支持（Job Object / prctl + rlimit） | 支持（POSIX 端） | 不支持 |
+| **进程提权** | 不支持 | `LaunchProcessElevated()` | `ShellExecuteExW + runas` |
+| **僵尸进程** | IO 线程自动 waitpid | fire-and-forget 用 double-fork 避免 | POSIX 用 fork + waitpid |
+| **适用场景** | 长期守护子进程、流式 I/O | 一次性任务、脚本调用 | 打开文件/URL、启动关联程序 |
 
 ### 10.2 相关文件
 
@@ -609,7 +609,46 @@ static ProcessExitInfo LaunchProcessElevated(
 - **Windows**：通过 `ShellExecuteExW` + `runas` 触发 UAC 提权
 - **POSIX**：依次尝试 `pkexec` → `sudo` 执行
 
-### 10.6 实现要点
+### 10.6 ProcessUtil::ShellExecute
+
+使用操作系统 Shell 的默认关联程序打开文件、文档、目录或 URL。
+
+```cpp
+struct ShellExecuteOptions {
+  std::string operation = "open";    // 操作 verb（Windows）
+  std::string parameters;            // 传给处理程序的参数
+  std::string working_dir;           // 工作目录
+  bool show_window = true;           // 是否显示窗口
+};
+
+static ProcessExitInfo ShellExecute(
+    const std::string& path_or_url,
+    const ShellExecuteOptions& options = {});
+```
+
+- **Windows**：封装 `ShellExecuteExW`，支持 `open` / `edit` / `print` / `explore` / `runas` 等 verb
+- **POSIX**：`fork` 子进程依次尝试 `xdg-open` → `open`（macOS）→ `gio open` → `gnome-open` → `kde-open`；父进程 `waitpid` 回收
+- 全程 fire-and-forget，返回 `kRunning` 即表示 Shell 已接受打开请求
+
+**使用示例**：
+
+```cpp
+// 打开网页
+ProcessUtil::ShellExecute("https://github.com");
+
+// 打开本地文件
+ProcessUtil::ShellExecute("/home/user/report.pdf");
+
+// Windows：以"编辑"方式打开
+nei::ShellExecuteOptions opts;
+opts.operation = "edit";
+opts.show_window = true;
+ProcessUtil::ShellExecute("C:\\docs\\notes.txt", opts);
+
+// POSIX 端 operation / parameters 字段被忽略（xdg-open 等不支持）
+```
+
+### 10.7 实现要点
 
 **Windows**（`process_util_win.cpp`）：
 - 使用 `CreateProcessW` 直接创建进程（非 `ShellExecuteEx`，无需提权）
@@ -632,7 +671,7 @@ static ProcessExitInfo LaunchProcessElevated(
 |---|---|
 | `modules/neixx/process/include/neixx/process/child_process.h` | 公开 API：ChildProcess、ChildProcessListener、StdIOConfig 等类型定义 |
 | `modules/neixx/process/include/neixx/process/process_service.h` | ProcessService 公开 API |
-| `modules/neixx/process/include/neixx/process/process_util.h` | ProcessUtil 公开 API：Launch、LaunchProcessElevated |
+| `modules/neixx/process/include/neixx/process/process_util.h` | ProcessUtil 公开 API：Launch、LaunchProcessElevated、ShellExecute |
 | `modules/neixx/process/src/child_process.cpp` | PIMPL 桥接：公开类方法转发到 Impl |
 | `modules/neixx/process/src/child_process_impl_interface.h` | ChildProcess::Impl 接口定义 |
 | `modules/neixx/process/src/child_process_impl_common.h` | CRTP 基类：IO 线程转发、流代理、监听器管理 |
