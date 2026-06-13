@@ -46,7 +46,11 @@ class NEI_API RunLoop final {
 
   // Returns a closure that will call Quit() when invoked.
   // Useful for binding as a callback from other threads or async operations.
-  // The returned closure captures a weak reference to this RunLoop.
+  //
+  // NOTE: The returned closure captures a raw pointer to this RunLoop
+  // (Chromium-style Unretained convention). The caller must ensure the
+  // RunLoop outlives the closure. In typical stack-allocated usage this
+  // is trivially satisfied because Run() blocks until Quit() is called.
   OnceClosure QuitClosure();
 
  private:

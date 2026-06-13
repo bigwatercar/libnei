@@ -512,21 +512,25 @@ class ThreadPool::Impl {
   }
 
   void StartWorkers(std::size_t count) {
-    std::vector<std::unique_ptr<WorkerThread>> workers;
-    workers.reserve(count);
-
+    // Register each worker in workers_ BEFORE starting its thread.
+    // This guarantees that MaySpawnCompensationWorker (which can be
+    // triggered from within a just-started worker's task) sees a
+    // consistent workers_.size() and worker_count_ state.
     for (std::size_t i = 0; i < count; ++i) {
       auto worker = MakeWorker(i);
-      if (!worker->Start()) {
+      WorkerThread* raw_worker = worker.get();
+
+      // Phase 1: register under lock.
+      {
+        AutoLock lock(lock_);
+        workers_.push_back(std::move(worker));
+        ++worker_count_;
+      }
+
+      // Phase 2: start thread outside lock (Start() involves OS syscalls).
+      if (!raw_worker->Start()) {
         break;
       }
-      workers.push_back(std::move(worker));
-    }
-
-    AutoLock lock(lock_);
-    worker_count_ = workers.size();
-    for (auto& worker : workers) {
-      workers_.push_back(std::move(worker));
     }
   }
 
