@@ -230,7 +230,9 @@ class WorkerThread final : public PlatformThread::Delegate {
 
           const bool may_block = task.traits.may_block();
           if (may_block && on_blocking_begin_) {
-            InstallBlockingCallback();
+            // InstallBlockingCallback() already called at ThreadMain start;
+            // on_blocking_begin_() triggers OnWorkerBeganBlocking which may
+            // spawn a compensation worker.
             on_blocking_begin_();
           }
 

@@ -92,6 +92,10 @@ class SequenceManager::Impl {
   void BindToCurrentThreadIfUnbound() {
     SequenceManagerThreadState* state = GetSequenceManagerThreadState();
     if (state != nullptr && state->manager != nullptr) {
+      // A SequenceManager is already bound to this thread. Creating a second
+      // one on the same thread is a programming error — only the first one
+      // will actually pump tasks. The second instance will fail with a DCHECK
+      // later in BindToCurrentThread() if Run() is called on it.
       return;
     }
     (void)BindToCurrentThread();
@@ -383,14 +387,28 @@ class SequenceManager::Impl {
       }
     }
 
+    // Weighted round-robin priority schedule: 4:2:1 ratio.
+    // UserBlocking tasks get 4× the dispatch slots of BestEffort tasks,
+    // ensuring low-latency work is serviced proportionally faster.
+    constexpr std::size_t kUserBlockingSlots = 4;
+    constexpr std::size_t kUserVisibleSlots = 2;
+    constexpr std::size_t kBestEffortSlots = 1;
+
     queues_view_ = new_view;
     user_blocking_priority_queues_ = std::move(user_blocking_priority_queues);
     user_visible_priority_queues_ = std::move(user_visible_priority_queues);
     best_effort_priority_queues_ = std::move(best_effort_priority_queues);
-    priority_schedule_ = {PriorityBucket::kUserBlocking, PriorityBucket::kUserBlocking,
-                          PriorityBucket::kUserBlocking, PriorityBucket::kUserBlocking,
-                          PriorityBucket::kUserVisible, PriorityBucket::kUserVisible,
-                          PriorityBucket::kBestEffort};
+
+    priority_schedule_.clear();
+    for (std::size_t i = 0; i < kUserBlockingSlots; ++i) {
+      priority_schedule_.push_back(PriorityBucket::kUserBlocking);
+    }
+    for (std::size_t i = 0; i < kUserVisibleSlots; ++i) {
+      priority_schedule_.push_back(PriorityBucket::kUserVisible);
+    }
+    for (std::size_t i = 0; i < kBestEffortSlots; ++i) {
+      priority_schedule_.push_back(PriorityBucket::kBestEffort);
+    }
 
     if (priority_schedule_.empty()) {
       next_priority_index_ = 0;

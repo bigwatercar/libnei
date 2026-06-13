@@ -67,11 +67,15 @@ class MessagePumpForIOState {
   MessagePumpForIOState() {
     epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
     if (epoll_fd_ < 0) {
+      std::fprintf(stderr, "[MessagePumpForIO] epoll_create1 failed: %s\n",
+                   std::strerror(errno));
       return;
     }
 
     event_fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (event_fd_ < 0) {
+      std::fprintf(stderr, "[MessagePumpForIO] eventfd failed: %s\n",
+                   std::strerror(errno));
       (void)close(epoll_fd_);
       epoll_fd_ = -1;
       return;
@@ -81,6 +85,8 @@ class MessagePumpForIOState {
     ev.events = EPOLLIN;
     ev.data.u64 = kWakeEventId;
     if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, event_fd_, &ev) != 0) {
+      std::fprintf(stderr, "[MessagePumpForIO] epoll_ctl ADD wakefd failed: %s\n",
+                   std::strerror(errno));
       (void)close(event_fd_);
       (void)close(epoll_fd_);
       event_fd_ = -1;

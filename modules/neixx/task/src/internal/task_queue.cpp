@@ -299,6 +299,11 @@ class TaskQueue::Impl {
   std::deque<Task> immediate_fifo_queue_;
   std::int64_t immediate_sequence_num_ = 0;
   std::int64_t delayed_sequence_num_ = 0;
+  // The name "delayed_incoming_queue_" is intentionally retained even though
+  // the underlying type is a min-heap (std::priority_queue) rather than a
+  // traditional queue/deque.  The _queue suffix emphasises the FIFO semantics
+  // that callers observe once deadlines expire, while the heap is an internal
+  // implementation detail.
   TaskMinHeap delayed_incoming_queue_;
   OnTaskPostedCallback on_task_posted_callback_;
   OnTaskEnqueuedCallback on_task_enqueued_callback_;
