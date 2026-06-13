@@ -16,6 +16,7 @@
 #pragma comment(lib, "winmm.lib")
 #endif
 
+#include <nei/debug/check.h>
 #include <neixx/strings/utf_string_conversions.h>
 #include <neixx/threading/platform_thread.h>
 
@@ -133,6 +134,8 @@ bool PlatformThread::CreateWithType(std::size_t stack_size,
                                     Delegate *delegate,
                                     Handle *handle,
                                     ThreadType thread_type) {
+  DCHECK(delegate);
+  DCHECK(handle);
   if (delegate == nullptr || handle == nullptr) {
     return false;
   }
@@ -163,6 +166,9 @@ bool PlatformThread::CreateWithType(std::size_t stack_size,
 }
 
 bool PlatformThread::Join(Handle *handle) {
+  DCHECK(handle);
+  DCHECK(handle->impl_);
+  DCHECK(handle->impl_->joinable);
   if (handle == nullptr || handle->impl_ == nullptr || !handle->impl_->joinable) {
     return false;
   }
@@ -173,6 +179,9 @@ bool PlatformThread::Join(Handle *handle) {
 }
 
 bool PlatformThread::Detach(Handle *handle) {
+  DCHECK(handle);
+  DCHECK(handle->impl_);
+  DCHECK(handle->impl_->joinable);
   if (handle == nullptr || handle->impl_ == nullptr || !handle->impl_->joinable) {
     return false;
   }
