@@ -113,6 +113,13 @@ void DelayedTaskManager::ThreadMain() {
       continue;
     }
 
+    // Design note: this thread uses a polling-based timer approach.
+    // When wait_delta is small (e.g. 1 ms), the thread may enter a
+    // pop-push-timedwait cycle that re-evaluates the deadline each
+    // iteration. This is intentionally simple and avoids platform-
+    // specific timer APIs (timerfd, waitable timers). In practice,
+    // OnQueueUpdated() signals wake_event_ when external changes
+    // arrive, short-circuiting the timed wait.
     const TimeTicks now = TimeTicks::Now();
     TimeDelta wait_delta = wait_until - now;
     if (wait_delta.is_positive()) {

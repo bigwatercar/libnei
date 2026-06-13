@@ -91,6 +91,11 @@ class PooledTaskSource final {
   };
 
   bool EnqueueLocked(TaskQueue* queue, std::size_t shard_index);
+
+  // Must be called AFTER releasing the shard lock to avoid the
+  // signal-under-lock anti-pattern (hurry-up-and-wait).
+  void NotifyWorkAvailable();
+
   std::size_t GetShardIndex(TaskQueue* queue) const;
 
   static constexpr std::size_t kShardCount = 4;

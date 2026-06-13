@@ -129,31 +129,37 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue* queue) {
   std::size_t shard_index = GetShardIndex(queue);
   Shard& shard = shards_[shard_index];
 
-  AutoLock lock(shard.lock);
-  if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
-    return false;
+  bool enqueued = false;
+  {
+    AutoLock lock(shard.lock);
+    if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
+      return false;
+    }
+
+    auto it = shard.states.find(queue);
+    if (it == shard.states.end()) {
+      return false;
+    }
+
+    QueueState& state = it->second;
+    if (state.in_flight) {
+      state.reenqueue_requested = true;
+      return false;
+    }
+
+    if (state.queued) {
+      return false;
+    }
+
+    if (queue->HasImmediateWork()) {
+      enqueued = EnqueueLocked(queue, shard_index);
+    }
   }
 
-  auto it = shard.states.find(queue);
-  if (it == shard.states.end()) {
-    return false;
+  if (enqueued) {
+    NotifyWorkAvailable();
   }
-
-  QueueState& state = it->second;
-  if (state.in_flight) {
-    state.reenqueue_requested = true;
-    return false;
-  }
-
-  if (state.queued) {
-    return false;
-  }
-
-  if (queue->HasImmediateWork()) {
-    return EnqueueLocked(queue, shard_index);
-  }
-
-  return false;
+  return enqueued;
 }
 
 bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(TaskQueue* queue, const TimeTicks& now) {
@@ -168,32 +174,38 @@ bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(TaskQueue* queue, const Time
   std::size_t shard_index = GetShardIndex(queue);
   Shard& shard = shards_[shard_index];
 
-  AutoLock lock(shard.lock);
-  if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
-    return false;
+  bool enqueued = false;
+  {
+    AutoLock lock(shard.lock);
+    if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
+      return false;
+    }
+
+    auto it = shard.states.find(queue);
+    if (it == shard.states.end()) {
+      return false;
+    }
+
+    QueueState& state = it->second;
+    if (state.in_flight) {
+      state.reenqueue_requested = true;
+      return false;
+    }
+
+    if (state.queued) {
+      return false;
+    }
+
+    (void)queue->PromoteReadyDelayedTasks(now);
+    if (queue->HasImmediateWork()) {
+      enqueued = EnqueueLocked(queue, shard_index);
+    }
   }
 
-  auto it = shard.states.find(queue);
-  if (it == shard.states.end()) {
-    return false;
+  if (enqueued) {
+    NotifyWorkAvailable();
   }
-
-  QueueState& state = it->second;
-  if (state.in_flight) {
-    state.reenqueue_requested = true;
-    return false;
-  }
-
-  if (state.queued) {
-    return false;
-  }
-
-  (void)queue->PromoteReadyDelayedTasks(now);
-  if (!queue->HasImmediateWork()) {
-    return false;
-  }
-
-  return EnqueueLocked(queue, shard_index);
+  return enqueued;
 }
 
 void PooledTaskSource::OnTaskQueueProcessed(TaskQueue* queue) {
@@ -204,29 +216,34 @@ void PooledTaskSource::OnTaskQueueProcessed(TaskQueue* queue) {
   std::size_t shard_index = GetShardIndex(queue);
   Shard& shard = shards_[shard_index];
 
-  AutoLock lock(shard.lock);
-  auto it = shard.states.find(queue);
-  if (it == shard.states.end()) {
-    return;
-  }
+  bool needs_signal = false;
+  {
+    AutoLock lock(shard.lock);
+    auto it = shard.states.find(queue);
+    if (it == shard.states.end()) {
+      return;
+    }
 
-  QueueState& state = it->second;
-  state.in_flight = false;
+    QueueState& state = it->second;
+    state.in_flight = false;
 
-  if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
-    state.queued = false;
+    if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
+      state.queued = false;
+      state.reenqueue_requested = false;
+      shard.states.erase(it);
+      return;
+    }
+
+    const bool should_reenqueue = state.reenqueue_requested || queue->HasImmediateWork();
     state.reenqueue_requested = false;
-    shard.states.erase(it);
-    return;
+    if (should_reenqueue && !state.queued) {
+      needs_signal = EnqueueLocked(queue, shard_index);
+    }
   }
 
-  const bool should_reenqueue = state.reenqueue_requested || queue->HasImmediateWork();
-  state.reenqueue_requested = false;
-  if (!should_reenqueue || state.queued) {
-    return;
+  if (needs_signal) {
+    NotifyWorkAvailable();
   }
-
-  (void)EnqueueLocked(queue, shard_index);
 }
 
 void PooledTaskSource::Shutdown() {
@@ -270,11 +287,15 @@ bool PooledTaskSource::EnqueueLocked(TaskQueue* queue, std::size_t shard_index) 
   shard.heap.push(std::move(entry));
   state.queued = true;
 
-  // Signal the wait CV to wake up GetNextTaskQueue
+  // Caller is responsible for calling NotifyWorkAvailable() after
+  // releasing shard.lock to avoid the signal-under-lock anti-pattern.
+  return true;
+}
+
+void PooledTaskSource::NotifyWorkAvailable() {
   AutoLock wait_lock(wait_lock_);
   wake_generation_.fetch_add(1, std::memory_order_release);
   wait_cv_.Signal();
-  return true;
 }
 
   void PooledTaskSource::NotifyTaskPosted() {
