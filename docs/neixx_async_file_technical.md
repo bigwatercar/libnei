@@ -400,7 +400,7 @@ LOG(ERROR) << "AsyncFile read failed: code=" << static_cast<int>(error.code)
 - I/O 引擎：`ReadFile` / `WriteFile` + `OVERLAPPED` + IOCP 完成端口
 - 取消语义：`CloseOnIoThread` 调用 `CancelIoEx` 取消所有进行中的 IOCP 操作，然后 swap 走 `pending_operations_`、`active_io_`、`pending_io_` 并统一以 `ERROR_OPERATION_ABORTED` 回调
 - 排队模型：`pending_operations_` 是 FIFO 队列，`active_io_` 是当前正在 IOCP 中的操作，`pending_io_` 按 `OVERLAPPED*` 索引
-- 内联完成：若 `ReadFile`/`WriteFile` 同步完成，通过 `PostTask` 异步化（或 PostTask 失败时直接回调）
+- 内联完成：若 `ReadFile`/`WriteFile` 同步完成，通过 `PostTask` 异步化。若 PostTask 失败（仅在 IO 线程任务队列关闭时发生），则调用 `CloseOnIoThread()` 统一清理所有排队操作，避免 `IssueNextChunkOnIoThread` ↔ `OnChunkCompletedOnIoThread` 之间的无界递归回退链
 
 **诊断计数器** (`StageCounters`)：
 
@@ -409,7 +409,7 @@ LOG(ERROR) << "AsyncFile read failed: code=" << static_cast<int>(error.code)
 | `open_reached` / `read_reached` / `write_reached` | 回调到达次数 |
 | `iocp_completed` | IOCP 完成通知次数 |
 | `context_hit` / `context_miss` | IOCP 完成时 context 命中/丢失 |
-| `callback_post_failed` | PostTask 失败次数（应始终为 0） |
+| `callback_post_failed` | PostTask 失败次数（正常运行时为 0；仅在 IO 线程关闭时可能触发 `CloseOnIoThread` 回退路径） |
 | `read_post_seq` / `read_exec_seq` | 读取回调投递/执行序列号（检测乱序） |
 
 ## 6. 线程模型
