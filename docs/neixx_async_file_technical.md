@@ -8,10 +8,10 @@
 
 本文档基于：
 
-- `modules/neixx/io/include/neixx/io/async_file.h`
-- `modules/neixx/io/src/async_file_posix.h` / `async_file_posix.cpp`
-- `modules/neixx/io/src/async_file_win.h` / `async_file_win.cpp`
-- `modules/neixx/io/src/internal/async_file_error_code.h`
+- `modules/neixx/io/include/neixx/io/async_file.h`（公开 API）
+- `modules/neixx/io/src/async_file_posix.h` / `async_file_posix.cpp`（POSIX 内部实现）
+- `modules/neixx/io/src/async_file_win.h` / `async_file_win.cpp`（Windows 内部实现）
+- `modules/neixx/io/src/internal/async_file_error_code.h`（错误码归一化，内部）
 
 ## 2. 模块定位
 
@@ -36,23 +36,19 @@
 #include <neixx/io/io_buffer.h>
 #include <neixx/task/task_runner.h>
 
-// 方式一：工厂方法（推荐，自动选择平台实现）
 auto io_runner = io_thread.GetTaskRunner();
 auto file = nei::AsyncFile::Create(io_runner);
-
-// 方式二：直接构造（需要平台条件编译）
-#if defined(_WIN32)
-auto file = std::make_shared<nei::AsyncFileWin>(io_runner);
-#else
-auto file = std::make_shared<nei::AsyncFilePosix>(io_runner);
-#endif
 ```
+
+`Create()` 是唯一的公开构造方式，返回 `std::unique_ptr<AsyncFile>`，内部自动选择
+平台实现（Windows → `AsyncFileWin`，POSIX → `AsyncFilePosix`）。
+平台实现类位于 `src/` 目录下，不属于公开 API，用户代码不应直接引用。
 
 **关键约束**：
 
 - `io_task_runner` 必须绑定到一个 `MessagePumpType::IO` 类型的线程
-- 文件对象本身不是线程安全的引用计数对象，推荐用 `std::shared_ptr` 管理
-- 对象不可拷贝，仅支持移动
+- `Create()` 返回 `std::unique_ptr<AsyncFile>`，对象不可拷贝，仅支持移动
+- 异步回调保证在 IO 线程上触发，不会在调用线程或后台线程上同步返回
 
 ### 3.2 打开文件
 
@@ -492,9 +488,9 @@ file->WriteAsync(buf, size, offset, callback);
 
 ## 8. 参考文献
 
-- [modules/neixx/io/include/neixx/io/async_file.h](../modules/neixx/io/include/neixx/io/async_file.h) — 公共 API 定义
-- [modules/neixx/io/src/async_file_posix.cpp](../modules/neixx/io/src/async_file_posix.cpp) — POSIX 实现
-- [modules/neixx/io/src/async_file_win.cpp](../modules/neixx/io/src/async_file_win.cpp) — Windows 实现
-- [modules/neixx/io/src/internal/async_file_error_code.h](../modules/neixx/io/src/internal/async_file_error_code.h) — 错误归一化
+- [modules/neixx/io/include/neixx/io/async_file.h](../modules/neixx/io/include/neixx/io/async_file.h) — 公开 API
+- [modules/neixx/io/src/async_file_posix.cpp](../modules/neixx/io/src/async_file_posix.cpp) — POSIX 内部实现
+- [modules/neixx/io/src/async_file_win.cpp](../modules/neixx/io/src/async_file_win.cpp) — Windows 内部实现
+- [modules/neixx/io/src/internal/async_file_error_code.h](../modules/neixx/io/src/internal/async_file_error_code.h) — 错误归一化（内部）
 - [modules/neixx/io/include/neixx/io/io_buffer.h](../modules/neixx/io/include/neixx/io/io_buffer.h) — IOBuffer 定义
 - [modules/neixx/io/include/neixx/io/async_line_reader.h](../modules/neixx/io/include/neixx/io/async_line_reader.h) — 异步行读取器
