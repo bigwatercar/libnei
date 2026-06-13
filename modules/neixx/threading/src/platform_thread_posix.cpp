@@ -121,6 +121,11 @@ bool PlatformThread::Join(Handle *handle) {
   if (handle == nullptr || handle->impl_ == nullptr || !handle->impl_->joinable) {
     return false;
   }
+
+  // Self-join is a guaranteed deadlock (the thread would wait on itself).
+  // Crash immediately with a clear message rather than hanging forever.
+  CHECK(!pthread_equal(handle->impl_->native_handle, pthread_self()));
+
   const int join_result = pthread_join(handle->impl_->native_handle, nullptr);
   DCHECK_EQ(join_result, 0);
   handle->impl_.reset();
