@@ -86,7 +86,7 @@ bool PlatformThread::CreateWithType(std::size_t stack_size,
     return false;
   }
 
-  auto *start_state = new nei::StartState();
+  auto start_state = std::make_unique<nei::StartState>();
   start_state->delegate = delegate;
   start_state->thread_type = thread_type;
   unsigned thread_id = 0;
@@ -94,13 +94,16 @@ bool PlatformThread::CreateWithType(std::size_t stack_size,
       nullptr,
       static_cast<unsigned>(stack_size),
       &ThreadEntry,
-      start_state,
+      start_state.get(),
       0,
       &thread_id);
   if (native_handle == 0) {
-    delete start_state;
     return false;
   }
+
+  // Ownership transferred to the new thread; ThreadEntry takes
+  // responsibility via std::unique_ptr.
+  (void)start_state.release();
 
   handle->impl_ = std::make_unique<Handle::Impl>();
   handle->impl_->native_handle = reinterpret_cast<HANDLE>(native_handle);

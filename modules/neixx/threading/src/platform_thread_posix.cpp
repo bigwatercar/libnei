@@ -76,16 +76,19 @@ bool PlatformThread::CreateWithType(std::size_t stack_size,
     (void)pthread_attr_setstacksize(&attr, requested_stack);
   }
 
-  auto *start_state = new nei::StartState();
+  auto start_state = std::make_unique<nei::StartState>();
   start_state->delegate = delegate;
   start_state->thread_type = thread_type;
   pthread_t native_handle{};
-  const int create_result = pthread_create(&native_handle, &attr, &ThreadEntry, start_state);
+  const int create_result = pthread_create(&native_handle, &attr, &ThreadEntry, start_state.get());
   (void)pthread_attr_destroy(&attr);
   if (create_result != 0) {
-    delete start_state;
     return false;
   }
+
+  // Ownership transferred to the new thread; ThreadEntry takes
+  // responsibility via std::unique_ptr.
+  (void)start_state.release();
 
   handle->impl_ = std::make_unique<Handle::Impl>();
   handle->impl_->native_handle = native_handle;
