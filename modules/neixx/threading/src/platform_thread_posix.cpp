@@ -39,11 +39,24 @@ void *ThreadEntry(void *param) {
 namespace nei {
 
 PlatformThread::PlatformThreadId PlatformThread::CurrentId() {
-  pthread_t self = pthread_self();
-  PlatformThread::PlatformThreadId id = 0;
-  const std::size_t copy_size = sizeof(self) < sizeof(id) ? sizeof(self) : sizeof(id);
-  std::memcpy(&id, &self, copy_size);
-  return id;
+#if defined(__linux__)
+  // Linux: use the kernel TID (LWP ID).  This is globally unique within the
+  // process, avoids the opaque pthread_t problem, and matches the value
+  // visible under /proc/self/task/.
+  return static_cast<PlatformThreadId>(::syscall(SYS_gettid));
+#elif defined(__APPLE__)
+  // macOS / iOS: pthread_threadid_np returns a unique integral thread id.
+  uint64_t tid = 0;
+  (void)pthread_threadid_np(pthread_self(), &tid);
+  return static_cast<PlatformThreadId>(tid);
+#elif defined(__FreeBSD__)
+  return static_cast<PlatformThreadId>(pthread_getthreadid_np());
+#else
+  // POSIX fallback: reinterpret_cast preserves the full width of pthread_t
+  // (better than memcpy which may truncate), but on platforms where pthread_t
+  // is a pointer, users should prefer a platform-specific implementation.
+  return reinterpret_cast<PlatformThreadId>(pthread_self());
+#endif
 }
 
 void PlatformThread::YieldCurrentThread() {
