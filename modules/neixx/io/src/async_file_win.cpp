@@ -157,7 +157,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       DCHECK(false);
       return;
     }
-    io_task_runner_->PostTask(
+    OpenCallback post_failure_callback = callback;
+    const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
         [weak_this = weak_factory_.GetWeakPtr(), path, mode, disposition,
          background_runner, callback = std::move(callback)]() mutable {
@@ -167,6 +168,10 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
           weak_this->OpenAsyncOnIoThread(path, mode, disposition, background_runner,
                                          std::move(callback));
         });
+    if (!posted && post_failure_callback) {
+      post_failure_callback(false, internal::NormalizeAsyncFileError(
+                                      static_cast<std::uint32_t>(ERROR_BUSY)));
+    }
   }
 
   void ReadAsync(scoped_refptr<IOBuffer> buf,
@@ -189,7 +194,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     op.buffer = std::move(buf);
     op.read_callback = std::move(callback);
 
-    io_task_runner_->PostTask(
+    ReadCallback post_failure_callback = op.read_callback;
+    const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
         [weak_this = weak_factory_.GetWeakPtr(), op = std::move(op)]() mutable {
           if (!weak_this) {
@@ -197,6 +203,11 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
           }
           weak_this->EnqueueOperationOnIoThread(std::move(op));
         });
+    if (!posted) {
+      post_failure_callback(false, 0,
+                            internal::NormalizeAsyncFileError(
+                                static_cast<std::uint32_t>(ERROR_BUSY)));
+    }
   }
 
   void WriteAsync(scoped_refptr<IOBuffer> buf,
@@ -219,7 +230,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     op.buffer = std::move(buf);
     op.write_callback = std::move(callback);
 
-    io_task_runner_->PostTask(
+    WriteCallback post_failure_callback = op.write_callback;
+    const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
         [weak_this = weak_factory_.GetWeakPtr(), op = std::move(op)]() mutable {
           if (!weak_this) {
@@ -227,19 +239,27 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
           }
           weak_this->EnqueueOperationOnIoThread(std::move(op));
         });
+    if (!posted) {
+      post_failure_callback(false, 0,
+                            internal::NormalizeAsyncFileError(
+                                static_cast<std::uint32_t>(ERROR_BUSY)));
+    }
   }
 
   void Close() {
     if (!io_task_runner_) {
       return;
     }
-    io_task_runner_->PostTask(
+    const bool posted = io_task_runner_->PostTask(
         FROM_HERE, [weak_this = weak_factory_.GetWeakPtr()]() {
           if (!weak_this) {
             return;
           }
           weak_this->CloseOnIoThread();
         });
+    if (!posted) {
+      CloseOnIoThread();
+    }
   }
 
   bool is_open() const {
@@ -544,7 +564,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
     if (ok) {
       // Inline completion is normalized into an async IO-sequence task.
-      io_task_runner_->PostTask(
+      const bool posted = io_task_runner_->PostTask(
           FROM_HERE,
           [weak_this = weak_factory_.GetWeakPtr(),
            ov = &context->overlapped,
@@ -555,6 +575,11 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
             weak_this->OnChunkCompletedOnIoThread(
                 ov, transferred, static_cast<std::uint32_t>(ERROR_SUCCESS));
           });
+      if (!posted) {
+        OnChunkCompletedOnIoThread(
+            &context->overlapped, transferred_now,
+            static_cast<std::uint32_t>(ERROR_SUCCESS));
+      }
       return;
     }
 
@@ -637,14 +662,17 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     }
 
     // The next chunk is always launched in a fresh posted task.
-    io_task_runner_->PostTask(
+    const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
-        [weak_this = weak_factory_.GetWeakPtr(), context = std::move(context)]() mutable {
+        [weak_this = weak_factory_.GetWeakPtr(), context]() mutable {
           if (!weak_this) {
             return;
           }
           weak_this->IssueNextChunkOnIoThread(std::move(context));
         });
+    if (!posted) {
+      IssueNextChunkOnIoThread(std::move(context));
+    }
   }
 
   void OnIoSignalOnIoThread(NativeIOHandle handle) {
@@ -801,81 +829,40 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   void PostOpenCallback(OpenCallback callback,
                         bool success,
                         std::uint32_t error_code) {
-    if (!callback || !io_task_runner_) {
+    // All call sites are on the IO thread; deliver directly to avoid
+    // redundant re-posting that delays close-race callback completion.
+    if (!callback) {
       return;
     }
-    base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr();
-    const bool posted = io_task_runner_->PostTask(
-        FROM_HERE,
-        [weak_this, callback = std::move(callback), success,
-         error_code]() mutable {
-          if (!weak_this) {
-            g_callback_weak_dropped.fetch_add(1, std::memory_order_relaxed);
-            return;
-          }
-          g_open_reached.fetch_add(1, std::memory_order_relaxed);
-          callback(success, internal::NormalizeAsyncFileError(error_code));
-        });
-    if (!posted) {
-      g_callback_post_failed.fetch_add(1, std::memory_order_relaxed);
-    }
+    g_open_reached.fetch_add(1, std::memory_order_relaxed);
+    callback(success, internal::NormalizeAsyncFileError(error_code));
   }
 
   void PostReadCallback(ReadCallback callback,
                         bool success,
                         std::size_t bytes_read,
                         std::uint32_t error_code) {
-    if (!callback || !io_task_runner_) {
+    // All call sites are on the IO thread; deliver directly.
+    if (!callback) {
       return;
     }
     g_read_posted.fetch_add(1, std::memory_order_relaxed);
-    const std::uint64_t read_post_seq =
-        g_read_post_seq.fetch_add(1, std::memory_order_relaxed) + 1;
-    base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr();
-    const bool posted = io_task_runner_->PostTask(
-        FROM_HERE,
-        [weak_this, callback = std::move(callback), success,
-         bytes_read, error_code, read_post_seq]() mutable {
-          if (!weak_this) {
-            g_callback_weak_dropped.fetch_add(1, std::memory_order_relaxed);
-            return;
-          }
-          g_read_exec_seq.store(read_post_seq, std::memory_order_relaxed);
-          g_read_reached.fetch_add(1, std::memory_order_relaxed);
-          callback(success, bytes_read,
-                   internal::NormalizeAsyncFileError(error_code));
-        });
-    if (!posted) {
-      g_callback_post_failed.fetch_add(1, std::memory_order_relaxed);
-    }
+    g_read_reached.fetch_add(1, std::memory_order_relaxed);
+    callback(success, bytes_read,
+             internal::NormalizeAsyncFileError(error_code));
   }
 
   void PostWriteCallback(WriteCallback callback,
                          bool success,
                          std::size_t bytes_written,
                          std::uint32_t error_code) {
-    if (!callback || !io_task_runner_) {
+    // All call sites are on the IO thread; deliver directly.
+    if (!callback) {
       return;
     }
-    const std::uint64_t write_post_seq =
-        g_write_post_seq.fetch_add(1, std::memory_order_relaxed) + 1;
-    base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr();
-    const bool posted = io_task_runner_->PostTask(
-        FROM_HERE,
-        [weak_this, callback = std::move(callback), success, bytes_written,
-         error_code, write_post_seq]() mutable {
-          if (!weak_this) {
-            g_callback_weak_dropped.fetch_add(1, std::memory_order_relaxed);
-            return;
-          }
-          g_write_exec_seq.store(write_post_seq, std::memory_order_relaxed);
-          g_write_reached.fetch_add(1, std::memory_order_relaxed);
-          callback(success, bytes_written,
-                   internal::NormalizeAsyncFileError(error_code));
-        });
-    if (!posted) {
-      g_callback_post_failed.fetch_add(1, std::memory_order_relaxed);
-    }
+    g_write_reached.fetch_add(1, std::memory_order_relaxed);
+    callback(success, bytes_written,
+             internal::NormalizeAsyncFileError(error_code));
   }
 
   static void FillOverlappedOffset(OVERLAPPED* overlapped,

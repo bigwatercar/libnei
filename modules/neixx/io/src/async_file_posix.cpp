@@ -9,7 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <unordered_set>
+#include <unordered_map>
 #include <utility>
 
 #include <fcntl.h>
@@ -35,7 +35,9 @@ using WeakPtrFactory = nei::WeakPtrFactory<T>;
 
 namespace {
 
-constexpr std::size_t kMaxChunkBytes = static_cast<std::size_t>(0x7FFFFFFF);
+// Keep POSIX file I/O chunked so close_requested_ can preempt long in-flight
+// operations between chunks on the single background worker thread.
+constexpr std::size_t kMaxChunkBytes = 64U * 1024U;
 
 int ToOpenFlags(AsyncFile::OpenMode mode, AsyncFile::OpenDisposition disposition) {
   int access_flags = O_RDONLY;
@@ -143,7 +145,8 @@ class AsyncFilePosix::Impl final {
       return;
     }
 
-    io_task_runner_->PostTask(
+    OpenCallback post_failure_callback = callback;
+    const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
         [weak_this = weak_factory_.GetWeakPtr(), path, mode, disposition,
          background_runner, callback = std::move(callback)]() mutable {
@@ -154,6 +157,12 @@ class AsyncFilePosix::Impl final {
                                          background_runner,
                                          std::move(callback));
         });
+    if (!posted) {
+      if (post_failure_callback) {
+        post_failure_callback(false, internal::NormalizeAsyncFileError(
+                                       static_cast<std::uint32_t>(EBUSY)));
+      }
+    }
   }
 
   void ReadAsync(scoped_refptr<IOBuffer> buf,
@@ -178,7 +187,8 @@ class AsyncFilePosix::Impl final {
       return;
     }
 
-    io_task_runner_->PostTask(
+    ReadCallback post_failure_callback = callback;
+    const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
         [weak_this = weak_factory_.GetWeakPtr(), buf = std::move(buf),
          bytes_to_read, offset, callback = std::move(callback)]() mutable {
@@ -188,6 +198,11 @@ class AsyncFilePosix::Impl final {
           weak_this->StartReadOnIoThread(std::move(buf), bytes_to_read, offset,
                                          std::move(callback));
         });
+    if (!posted) {
+      post_failure_callback(false, 0,
+                            internal::NormalizeAsyncFileError(
+                                static_cast<std::uint32_t>(EBUSY)));
+    }
   }
 
   void WriteAsync(scoped_refptr<IOBuffer> buf,
@@ -212,7 +227,8 @@ class AsyncFilePosix::Impl final {
       return;
     }
 
-    io_task_runner_->PostTask(
+    WriteCallback post_failure_callback = callback;
+    const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
         [weak_this = weak_factory_.GetWeakPtr(), buf = std::move(buf),
          bytes_to_write, offset, callback = std::move(callback)]() mutable {
@@ -222,6 +238,11 @@ class AsyncFilePosix::Impl final {
           weak_this->StartWriteOnIoThread(std::move(buf), bytes_to_write,
                                           offset, std::move(callback));
         });
+    if (!posted) {
+      post_failure_callback(false, 0,
+                            internal::NormalizeAsyncFileError(
+                                static_cast<std::uint32_t>(EBUSY)));
+    }
   }
 
   void Close() {
@@ -231,13 +252,16 @@ class AsyncFilePosix::Impl final {
     if (!io_task_runner_) {
       return;
     }
-    io_task_runner_->PostTask(
+    const bool posted = io_task_runner_->PostTask(
         FROM_HERE, [weak_this = weak_factory_.GetWeakPtr()]() {
           if (!weak_this) {
             return;
           }
           weak_this->CloseOnIoThread();
         });
+    if (!posted) {
+      CloseOnIoThread();
+    }
   }
 
   bool is_open() const {
@@ -313,7 +337,7 @@ class AsyncFilePosix::Impl final {
             return;
           }
 
-          io_runner_snapshot->PostTask(
+          const bool posted_back = io_runner_snapshot->PostTask(
               FROM_HERE,
               [weak_this, open_request_id, opened_fd, open_error]() mutable {
                 if (!weak_this) {
@@ -325,6 +349,9 @@ class AsyncFilePosix::Impl final {
                 weak_this->OnOpenCompletedOnIoThread(open_request_id, opened_fd,
                                                      open_error);
               });
+          if (!posted_back && opened_fd >= 0) {
+            (void)::close(opened_fd);
+          }
         });
 
     if (!posted) {
@@ -394,7 +421,7 @@ class AsyncFilePosix::Impl final {
       return;
     }
 
-    auto context = std::make_unique<IOContext>(IOContext::Type::kRead);
+    auto context = std::make_shared<IOContext>(IOContext::Type::kRead);
     context->buffer = std::move(buf);
     context->base_offset = offset;
     context->total_bytes = bytes_to_read;
@@ -409,7 +436,7 @@ class AsyncFilePosix::Impl final {
     int fd_snapshot = -1;
     scoped_refptr<TaskRunner> background_runner_snapshot;
     std::uint32_t start_error = 0;
-    if (!RegisterActiveContextOnIoThread(context.get(), &fd_snapshot,
+    if (!RegisterActiveContextOnIoThread(context, &fd_snapshot,
                                          &background_runner_snapshot,
                                          &start_error)) {
       ReadCallback failed = std::move(context->read_callback);
@@ -431,7 +458,7 @@ class AsyncFilePosix::Impl final {
       return;
     }
 
-    auto context = std::make_unique<IOContext>(IOContext::Type::kWrite);
+    auto context = std::make_shared<IOContext>(IOContext::Type::kWrite);
     context->buffer = std::move(buf);
     context->base_offset = offset;
     context->total_bytes = bytes_to_write;
@@ -451,7 +478,7 @@ class AsyncFilePosix::Impl final {
     int fd_snapshot = -1;
     scoped_refptr<TaskRunner> background_runner_snapshot;
     std::uint32_t start_error = 0;
-    if (!RegisterActiveContextOnIoThread(context.get(), &fd_snapshot,
+    if (!RegisterActiveContextOnIoThread(context, &fd_snapshot,
                                          &background_runner_snapshot,
                                          &start_error)) {
       WriteCallback failed = std::move(context->write_callback);
@@ -463,7 +490,7 @@ class AsyncFilePosix::Impl final {
                               std::move(background_runner_snapshot));
   }
 
-  bool RegisterActiveContextOnIoThread(IOContext* context,
+  bool RegisterActiveContextOnIoThread(const std::shared_ptr<IOContext>& context,
                                        int* fd_snapshot,
                                        scoped_refptr<TaskRunner>* background_runner,
                                        std::uint32_t* error_code) {
@@ -480,7 +507,7 @@ class AsyncFilePosix::Impl final {
 
     *fd_snapshot = fd_;
     *background_runner = background_runner_;
-    active_ios_.insert(context);
+    active_ios_[context.get()] = context;
     *error_code = 0;
     return true;
   }
@@ -489,7 +516,7 @@ class AsyncFilePosix::Impl final {
     return close_requested_.load(std::memory_order_acquire);
   }
 
-  void DispatchChunkToBackground(std::unique_ptr<IOContext> context,
+  void DispatchChunkToBackground(std::shared_ptr<IOContext> context,
                                  int fd_snapshot,
                                  scoped_refptr<TaskRunner> background_runner) {
     if (!context || !background_runner || !io_task_runner_) {
@@ -590,14 +617,17 @@ class AsyncFilePosix::Impl final {
             return;
           }
 
-          io_runner_snapshot->PostTask(
+          const bool posted_back = io_runner_snapshot->PostTask(
               FROM_HERE,
-              [weak_this, context = std::move(context), result]() mutable {
+              [weak_this, context, result]() mutable {
                 if (!weak_this) {
                   return;
                 }
                 weak_this->OnChunkCompletedOnIoThread(std::move(context), result);
               });
+          if (!posted_back && weak_this) {
+            weak_this->OnChunkCompletedOnIoThread(std::move(context), result);
+          }
         });
 
     if (!posted) {
@@ -608,6 +638,12 @@ class AsyncFilePosix::Impl final {
   }
 
   void OnChunkCompletedOnIoThread(std::unique_ptr<IOContext> context,
+                                  const ChunkResult& result) {
+    OnChunkCompletedOnIoThread(std::shared_ptr<IOContext>(std::move(context)),
+                               result);
+  }
+
+  void OnChunkCompletedOnIoThread(std::shared_ptr<IOContext> context,
                                   const ChunkResult& result) {
     if (!context) {
       return;
@@ -656,7 +692,7 @@ class AsyncFilePosix::Impl final {
       if (state_ != State::kConnected || fd_ < 0 || !background_runner_) {
         // Fall through to error callback outside lock.
       } else {
-        active_ios_.insert(context.get());
+        active_ios_[context.get()] = context;
         fd_snapshot = fd_;
         background_runner_snapshot = background_runner_;
         io_task_runner_->PostTask(
@@ -679,12 +715,20 @@ class AsyncFilePosix::Impl final {
   }
 
   void SucceedReadContext(std::unique_ptr<IOContext> context) {
+    SucceedReadContext(std::shared_ptr<IOContext>(std::move(context)));
+  }
+
+  void SucceedReadContext(std::shared_ptr<IOContext> context) {
     DCHECK(context);
     ReadCallback callback = std::move(context->read_callback);
     PostReadCallback(std::move(callback), true, context->transferred_bytes, 0);
   }
 
   void SucceedContext(std::unique_ptr<IOContext> context) {
+    SucceedContext(std::shared_ptr<IOContext>(std::move(context)));
+  }
+
+  void SucceedContext(std::shared_ptr<IOContext> context) {
     DCHECK(context);
     if (context->type == IOContext::Type::kRead) {
       SucceedReadContext(std::move(context));
@@ -696,6 +740,10 @@ class AsyncFilePosix::Impl final {
   }
 
   void FailContext(std::unique_ptr<IOContext> context, std::uint32_t error_code) {
+    FailContext(std::shared_ptr<IOContext>(std::move(context)), error_code);
+  }
+
+  void FailContext(std::shared_ptr<IOContext> context, std::uint32_t error_code) {
     DCHECK(context);
     if (context->type == IOContext::Type::kRead) {
       ReadCallback callback = std::move(context->read_callback);
@@ -713,6 +761,7 @@ class AsyncFilePosix::Impl final {
     OpenCallback open_callback;
     int fd_to_close = -1;
     scoped_refptr<TaskRunner> background_runner_snapshot;
+    std::unordered_map<IOContext*, std::shared_ptr<IOContext>> active_contexts;
     {
       std::lock_guard<std::mutex> lock(lock_);
       if (state_ == State::kDisconnected && fd_ < 0) {
@@ -725,12 +774,17 @@ class AsyncFilePosix::Impl final {
       fd_to_close = fd_;
       fd_ = -1;
       background_runner_snapshot = background_runner_;
+      active_contexts.swap(active_ios_);
       state_ = State::kDisconnected;
     }
 
     if (open_callback) {
       PostOpenCallback(std::move(open_callback), false,
                        static_cast<std::uint32_t>(ECANCELED));
+    }
+
+    for (auto& entry : active_contexts) {
+      FailContext(std::move(entry.second), static_cast<std::uint32_t>(ECANCELED));
     }
 
     if (fd_to_close >= 0) {
@@ -741,59 +795,32 @@ class AsyncFilePosix::Impl final {
   void PostOpenCallback(OpenCallback callback,
                         bool success,
                         std::uint32_t error_code) {
-    if (!callback || !io_task_runner_) {
+    if (!callback) {
       return;
     }
-    base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr();
-    io_task_runner_->PostTask(
-        FROM_HERE,
-        [weak_this, callback = std::move(callback), success,
-         error_code]() mutable {
-          if (!weak_this) {
-            return;
-          }
-          callback(success, internal::NormalizeAsyncFileError(error_code));
-        });
+    callback(success, internal::NormalizeAsyncFileError(error_code));
   }
 
   void PostReadCallback(ReadCallback callback,
                         bool success,
                         std::size_t bytes_read,
                         std::uint32_t error_code) {
-    if (!callback || !io_task_runner_) {
+    if (!callback) {
       return;
     }
-    base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr();
-    io_task_runner_->PostTask(
-        FROM_HERE,
-        [weak_this, callback = std::move(callback), success,
-         bytes_read, error_code]() mutable {
-          if (!weak_this) {
-            return;
-          }
-          callback(success, bytes_read,
-                   internal::NormalizeAsyncFileError(error_code));
-        });
+    callback(success, bytes_read,
+             internal::NormalizeAsyncFileError(error_code));
   }
 
   void PostWriteCallback(WriteCallback callback,
                          bool success,
                          std::size_t bytes_written,
                          std::uint32_t error_code) {
-    if (!callback || !io_task_runner_) {
+    if (!callback) {
       return;
     }
-    base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr();
-    io_task_runner_->PostTask(
-        FROM_HERE,
-        [weak_this, callback = std::move(callback), success,
-         bytes_written, error_code]() mutable {
-          if (!weak_this) {
-            return;
-          }
-              callback(success, bytes_written,
-               internal::NormalizeAsyncFileError(error_code));
-        });
+    callback(success, bytes_written,
+             internal::NormalizeAsyncFileError(error_code));
   }
 
   void CloseFdOnBackground(int fd_to_close,
@@ -821,7 +848,7 @@ class AsyncFilePosix::Impl final {
   std::uint64_t open_request_id_ = 0;
   scoped_refptr<TaskRunner> background_runner_;
   OpenCallback pending_open_callback_;
-  std::unordered_set<IOContext*> active_ios_;
+  std::unordered_map<IOContext*, std::shared_ptr<IOContext>> active_ios_;
   std::atomic<bool> close_requested_{false};
   base::WeakPtrFactory<Impl> weak_factory_{this};
 };
