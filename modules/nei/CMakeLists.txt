@@ -13,7 +13,7 @@ endif()
 
 if(NOT WIN32)
   find_package(Threads REQUIRED)
-  target_link_libraries(nei PUBLIC Threads::Threads)
+  target_link_libraries(nei PUBLIC Threads::Threads PRIVATE m)
 endif()
 
 if(BUILD_SHARED_LIBS)
