@@ -455,6 +455,11 @@ void MessagePumpForIO::Run(Delegate* delegate) {
     }
 
     impl_->DrainPendingWakeups(delegate);
+    // DrainPendingWakeups may have consumed the only eventfd wake-up
+    // without processing tasks (should_run_task=false).  Always try
+    // DoWork to catch pending tasks, otherwise the pump may block
+    // forever in WaitAndDispatch below.
+    (void)delegate->DoWork();
     if (!impl_->IsRunLoopActive(run_depth)) {
       break;
     }
