@@ -3,6 +3,7 @@
 #include <memory>
 #include <utility>
 
+#include <nei/debug/check.h>
 #include <neixx/common/location.h>
 #include <neixx/task/message_loop/message_pump_default.h>
 #include <neixx/task/message_loop/message_pump_io.h>
@@ -91,6 +92,10 @@ void Thread::Stop() {
     started_ = false;
     runner = task_runner_;
   }
+
+  // Self-join is guaranteed to deadlock: the calling thread would wait on
+  // itself. Catch this programmer error early in debug builds.
+  DCHECK_NE(GetThreadId(), PlatformThread::CurrentId());
 
   if (runner) {
     runner->PostTask(FROM_HERE, []() {
