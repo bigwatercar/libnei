@@ -5,6 +5,8 @@
 
 #include <limits>
 
+#include <string>
+
 #include <nei/macros/nei_export.h>
 #include <neixx/common/time.h>
 #include <neixx/process/child_process.h>
@@ -17,6 +19,20 @@ struct ElevatedProcessOptions {
   bool inherit_console = false;
   TimeDelta wait_timeout =
       TimeDelta::FromMicroseconds(std::numeric_limits<long long>::max());
+};
+
+/// Options for ShellExecute.
+struct NEI_API ShellExecuteOptions {
+  /// The operation to perform.  Default "open" uses the system-default
+  /// verb for the file type.
+  /// Common values: "open", "edit", "print", "explore", "runas".
+  std::string operation = "open";
+  /// Optional parameters passed to the handler application.
+  std::string parameters;
+  /// Optional working directory.  Empty = current directory.
+  std::string working_dir;
+  /// Whether to show the application window.
+  bool show_window = true;
 };
 
 class NEI_API ProcessUtil {
@@ -46,6 +62,22 @@ class NEI_API ProcessUtil {
       const CommandLine& command_line,
       const ProcessLaunchOptions& options = ProcessLaunchOptions{},
       TimeDelta wait_timeout = TimeDelta::Max());
+
+  /// Open a file, document, or URL using the OS shell's default handler.
+  ///
+  /// On Windows this wraps ShellExecuteExW, on POSIX it spawns xdg-open
+  /// (with automatic fallback to open / gio / gnome-open).
+  ///
+  /// This is a fire-and-forget operation: it returns after asking the
+  /// shell to open the target and does not wait for the handler to exit.
+  ///
+  /// @param path_or_url  A file path, document, URL, or directory to open.
+  /// @param options      Operation verb, parameters, working directory,
+  ///                     and window visibility.
+  /// @return kRunning on success, kFailedToStart if the shell call fails.
+  static ProcessExitInfo ShellExecute(
+      const std::string& path_or_url,
+      const ShellExecuteOptions& options = {});
 };
 
 }  // namespace nei

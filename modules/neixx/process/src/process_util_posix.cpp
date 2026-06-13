@@ -279,6 +279,44 @@ ProcessExitInfo ProcessUtil::Launch(
   return WaitWithTimeout(pid, wait_timeout);
 }
 
+ProcessExitInfo ProcessUtil::ShellExecute(
+    const std::string& path_or_url,
+    const ShellExecuteOptions& options) {
+  (void)options;  // POSIX openers don't support operation/parameters natively.
+
+  pid_t pid = fork();
+  if (pid < 0) {
+    return {ProcessState::kFailedToStart, -1};
+  }
+
+  if (pid == 0) {
+    // Detach from parent stdio.
+    int devnull = open("/dev/null", O_RDWR);
+    if (devnull >= 0) {
+      (void)dup2(devnull, STDIN_FILENO);
+      (void)dup2(devnull, STDOUT_FILENO);
+      (void)dup2(devnull, STDERR_FILENO);
+      (void)close(devnull);
+    }
+
+    // Try common openers in order.
+    const char* path = path_or_url.c_str();
+    execlp("xdg-open", "xdg-open", path, nullptr);
+    // macOS fallback.
+    execlp("open", "open", path, nullptr);
+    // GNOME / KDE / generic fallbacks.
+    execlp("gio", "gio", "open", path, nullptr);
+    execlp("gnome-open", "gnome-open", path, nullptr);
+    execlp("kde-open", "kde-open", path, nullptr);
+    _exit(127);
+  }
+
+  // Reap the intermediate child (the actual opener forks and detaches).
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+  return {ProcessState::kRunning, -1};
+}
+
 }  // namespace nei
 
 #endif  // !defined(_WIN32)

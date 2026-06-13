@@ -287,6 +287,42 @@ ProcessExitInfo ProcessUtil::Launch(
   return info;
 }
 
+ProcessExitInfo ProcessUtil::ShellExecute(
+    const std::string& path_or_url,
+    const ShellExecuteOptions& options) {
+  ProcessExitInfo info;
+
+  const std::wstring wpath  = ToWString(UTF8ToUTF16(path_or_url));
+  const std::wstring wop    = ToWString(UTF8ToUTF16(options.operation));
+  const std::wstring wparams = options.parameters.empty()
+      ? std::wstring()
+      : ToWString(UTF8ToUTF16(options.parameters));
+  const std::wstring wdir   = options.working_dir.empty()
+      ? std::wstring()
+      : ToWString(UTF8ToUTF16(options.working_dir));
+
+  SHELLEXECUTEINFOW sei{};
+  sei.cbSize = sizeof(sei);
+  sei.fMask  = SEE_MASK_FLAG_NO_UI;
+  sei.lpVerb = wop.c_str();
+  sei.lpFile = wpath.c_str();
+  sei.lpParameters = options.parameters.empty() ? nullptr : wparams.c_str();
+  sei.lpDirectory  = options.working_dir.empty()  ? nullptr : wdir.c_str();
+  sei.nShow  = options.show_window ? SW_SHOWNORMAL : SW_HIDE;
+
+  if (!ShellExecuteExW(&sei)) {
+    info.state = ProcessState::kFailedToStart;
+    return info;
+  }
+
+  if (sei.hProcess != nullptr && sei.hProcess != INVALID_HANDLE_VALUE) {
+    CloseHandle(sei.hProcess);
+  }
+
+  info.state = ProcessState::kRunning;
+  return info;
+}
+
 }  // namespace nei
 
 #endif  // defined(_WIN32)
