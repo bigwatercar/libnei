@@ -1,9 +1,30 @@
 #include <neixx/io/io_buffer.h>
 
 #include <algorithm>
+#include <mutex>
 #include <utility>
 
 #include <nei/debug/check.h>
+
+// ---------------------------------------------------------------------------
+// LeakySingletonTraits specialization for IOBufferPool
+// ---------------------------------------------------------------------------
+//
+// Overrides the default Leaky behavior (pure no-op Delete) to call
+// PurgeMemory(), which drains all cached 4K/64K blocks but keeps
+// the IOBufferPool shell alive.  This is the Chromium "Leaky LazyInstance"
+// pattern: release internal resources, never delete the singleton itself.
+//
+// Defined here (not in the header) because it depends on the full definition
+// of IOBufferPool, which is only available in this translation unit.
+template <>
+void nei::LeakySingletonTraits<nei::IOBufferPool>::Delete(nei::IOBufferPool* x) {
+  if (x) {
+    x->PurgeMemory();
+    // Intentionally do NOT delete x — the shell stays alive to prevent
+    // use-after-free crashes from background threads during shutdown.
+  }
+}
 
 namespace nei {
 
@@ -107,8 +128,17 @@ void DrainableIOBuffer::RefreshDataPointer() {
 }
 
 IOBufferPool& IOBufferPool::GetInstance() {
-  static IOBufferPool pool;
-  return pool;
+  // Delegate to the Singleton template with LeakySingletonTraits.
+  //
+  // The specialized LeakySingletonTraits<IOBufferPool>::Delete() (defined
+  // above) calls PurgeMemory() to drain cached 4K/64K blocks at exit,
+  // while intentionally leaking the pool shell itself.
+  //
+  // The Singleton template handles:
+  //   - Double-Checked Locking with std::atomic acquire-release barriers
+  //   - AtExitManager callback registration
+  //   - CHECK_MSG if AtExitManager is missing
+  return *Singleton<IOBufferPool, LeakySingletonTraits<IOBufferPool>>::GetInstance();
 }
 
 scoped_refptr<IOBufferWithSize> IOBufferPool::AcquireBuffer(std::size_t size) {
@@ -153,7 +183,7 @@ void IOBufferPool::SetBucketLimitForTesting(std::size_t bucket_size,
   }
 }
 
-void IOBufferPool::ClearForTesting() {
+void IOBufferPool::PurgeMemory() {
   std::lock_guard<std::mutex> lock(lock_);
   for (Bucket& bucket : buckets_) {
     bucket.free_blocks.clear();

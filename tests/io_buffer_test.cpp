@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include <nei/debug/check.h>
+#include <neixx/common/at_exit.h>
 #include <neixx/io/io_buffer.h>
 
 namespace nei {
@@ -73,7 +74,7 @@ TEST(IOBufferTest, DrainableIOBufferConsumeAllMovesToEnd) {
 
 TEST(IOBufferTest, IOBufferPoolNormalizesHotBucketSizes) {
   IOBufferPool& pool = IOBufferPool::GetInstance();
-  pool.ClearForTesting();
+  pool.PurgeMemory();
 
   scoped_refptr<IOBufferWithSize> b1 = pool.AcquireBuffer(1);
   scoped_refptr<IOBufferWithSize> b4k = pool.AcquireBuffer(4096);
@@ -96,7 +97,7 @@ TEST(IOBufferTest, IOBufferPoolNormalizesHotBucketSizes) {
 
 TEST(IOBufferTest, IOBufferPoolReusesReleased4KBuffer) {
   IOBufferPool& pool = IOBufferPool::GetInstance();
-  pool.ClearForTesting();
+  pool.PurgeMemory();
   pool.SetBucketLimitForTesting(4096u, 8u);
 
   char* first_ptr = nullptr;

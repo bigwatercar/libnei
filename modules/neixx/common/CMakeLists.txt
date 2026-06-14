@@ -1,8 +1,11 @@
 target_sources(
   neixx
-  PRIVATE include/neixx/common/location.h
+  PRIVATE include/neixx/common/at_exit.h
+          include/neixx/common/location.h
+          include/neixx/common/singleton.h
           include/neixx/common/time.h
           include/neixx/common/time_source.h
+          src/at_exit.cpp
           src/location.cpp
           src/time.cpp
           src/time_source.cpp

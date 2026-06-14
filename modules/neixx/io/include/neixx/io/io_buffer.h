@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <nei/macros/nei_export.h>
+#include <neixx/common/singleton.h>
 #include <neixx/memory/ref_counted.h>
 
 namespace nei {
@@ -139,7 +140,7 @@ class NEI_API IOBufferPool {
   // Test hooks for deterministic pool behavior verification.
   void SetBucketLimitForTesting(std::size_t bucket_size,
                                 std::size_t max_cached_blocks);
-  void ClearForTesting();
+  void PurgeMemory();
 
   IOBufferPool(const IOBufferPool&) = delete;
   IOBufferPool& operator=(const IOBufferPool&) = delete;
@@ -153,6 +154,11 @@ class NEI_API IOBufferPool {
 
   IOBufferPool();
   ~IOBufferPool();
+
+  // Grant the LeakySingletonTraits specialization access to the private
+  // constructor so it can perform `new IOBufferPool()` and, at exit,
+  // call PurgeMemory() to drain cached blocks without deleting the shell.
+  friend struct LeakySingletonTraits<IOBufferPool>;
 
   static void RecycleStorageThunk(void* context,
                                   std::size_t block_size,

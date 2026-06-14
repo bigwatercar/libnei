@@ -28,6 +28,9 @@ target_link_libraries(stream_reader_writer_demo PRIVATE nei::all)
 add_executable(nei_demo nei_demo.cpp)
 target_link_libraries(nei_demo PRIVATE nei::all)
 
+add_executable(at_exit_demo at_exit_demo.cpp)
+target_link_libraries(at_exit_demo PRIVATE nei::all)
+
 add_executable(elevated_process_demo elevated_process_demo.cpp)
 target_link_libraries(elevated_process_demo PRIVATE nei::all)
 
@@ -52,4 +55,5 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_copy_runtime_dlls(async_file_demo)
   nei_copy_runtime_dlls(stream_reader_writer_demo)
   nei_copy_runtime_dlls(nei_demo)
+  nei_copy_runtime_dlls(at_exit_demo)
 endif()
