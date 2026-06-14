@@ -2,12 +2,14 @@ set(NEIXX_IO_SOURCES
   include/neixx/io/async_file.h
   include/neixx/io/async_line_reader.h
   include/neixx/io/async_stream.h
+  include/neixx/io/buffer_stream.h
   include/neixx/io/file_stream_adapters.h
   include/neixx/io/io_buffer.h
   include/neixx/io/stream_reader.h
   include/neixx/io/stream_writer.h
   src/async_file.cpp
   src/async_line_reader.cpp
+  src/buffer_stream.cpp
   src/file_stream_adapters.cpp
   src/internal/async_file_error_code.h
   src/internal/pipe_stream_factory_internal.h
