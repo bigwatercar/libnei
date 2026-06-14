@@ -31,6 +31,7 @@ add_executable(
   stream_reader_writer_test.cpp
   io_buffer_test.cpp
   base64_test.cpp
+  buffer_stream_test.cpp
   checksum_hash_test.cpp
   check_macro_test.cpp
   child_process_test.cpp
