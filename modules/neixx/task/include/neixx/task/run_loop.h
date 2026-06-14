@@ -33,24 +33,39 @@ class NEI_API RunLoop final {
   RunLoop& operator=(RunLoop&&) = delete;
 
   // Runs the message loop on the current thread.
-  // Entering a nested Run() will exit and return immediately if another
-  // RunLoop or SequenceManager::Run() is already running on this thread.
-  // Attempting to Run() the same RunLoop instance a second time before the
-  // first Run() returns will trigger a DCHECK failure.
+  //
+  // Nesting: a nested message loop is created by constructing a second
+  // RunLoop on the stack and calling Run() on it.  Quit() on the inner
+  // RunLoop exits ONLY the innermost Run(); the outer loop continues
+  // running normally.  The underlying MessagePump tracks nesting depth
+  // (run_depth_ / quit_run_depth_) so Quit affects only the correct level.
+  //
+  // A single RunLoop instance must never be re-entered (i.e., calling
+  // Run() again before the previous Run() returned).  This is enforced
+  // by a hard CHECK in all build configurations.
   void Run();
 
   // Quits the most recent (innermost) Run() started on the current thread.
-  // If no Run() is active, or if called from a different thread, this will
-  // trigger a DCHECK failure.
+  //
+  // Thread safety: Quit() may be called from any thread.  The underlying
+  // MessagePump uses internal locking and a wake-up event to safely
+  // signal the target thread.  However, when called from a different
+  // thread, the caller must ensure the RunLoop outlives the cross-thread
+  // invocation (Chromium-style Unretained convention).
   void Quit();
 
   // Returns a closure that will call Quit() when invoked.
-  // Useful for binding as a callback from other threads or async operations.
   //
-  // NOTE: The returned closure captures a raw pointer to this RunLoop
-  // (Chromium-style Unretained convention). The caller must ensure the
-  // RunLoop outlives the closure. In typical stack-allocated usage this
-  // is trivially satisfied because Run() blocks until Quit() is called.
+  // The returned closure captures a raw pointer to this RunLoop
+  // (Chromium-style Unretained convention).  The caller MUST ensure the
+  // RunLoop outlives the closure.  In the typical stack-allocated pattern
+  // (Run() blocks until Quit()), this is trivially satisfied.
+  //
+  // Cross-thread usage: QuitClosure() may be posted to another thread.
+  // When invoked on the remote thread, it calls Quit(), which acquires
+  // the pump's internal lock, sets the quit flag, and signals the pump's
+  // wake-up event.  The target thread then wakes up and exits the
+  // innermost Run() safely.
   OnceClosure QuitClosure();
 
  private:

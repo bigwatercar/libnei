@@ -335,8 +335,14 @@ class SequenceManager::Impl {
   bool BindToCurrentThread() {
     SequenceManagerThreadState* state = EnsureSequenceManagerThreadState();
     if (state->manager != nullptr && state->manager != owner_) {
-      DCHECK(false);
-      return false;
+      // A different SequenceManager is already bound to this thread.
+      // This is a fatal programming error in all builds — continuing
+      // would cause the second manager to silently never pump tasks,
+      // making the thread appear hung.
+      CHECK_MSG(false,
+                "SequenceManager: thread already bound to a different "
+                "SequenceManager.  Only one SequenceManager may be active "
+                "per thread at a time.");
     }
 
     state->manager = owner_;
