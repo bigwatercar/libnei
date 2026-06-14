@@ -58,18 +58,28 @@ class TaskQueue::Impl {
 
       const bool was_empty = !HasImmediateTasksLocked();
 
+      // Insertion maintains FIFO order sorted by sequence_num.
+      //
+      // Fast path (O(1)): the vast majority of tasks have monotonically
+      // increasing sequence numbers and append at the back.
+      //
+      // Slow path (O(n)): out-of-order sequence_num requires a
+      // binary search (std::upper_bound, O(log n)) followed by a deque
+      // insert (O(n) element shift).  This path only triggers when tasks
+      // are posted with pre-assigned sequence numbers from different
+      // producers that don't coordinate ordering — rare in practice.
       if (immediate_fifo_queue_.empty() ||
           task.sequence_num >= immediate_fifo_queue_.back().sequence_num) {
-        immediate_fifo_queue_.push_back(std::move(task));
+        immediate_fifo_queue_.push_back(std::move(task));         // O(1)
       } else {
-        const auto insert_it = std::upper_bound(
+        const auto insert_it = std::upper_bound(                  // O(log n)
             immediate_fifo_queue_.begin(),
             immediate_fifo_queue_.end(),
             task.sequence_num,
             [](std::int64_t sequence_num, const Task& queued_task) {
               return sequence_num < queued_task.sequence_num;
             });
-        immediate_fifo_queue_.insert(insert_it, std::move(task));
+        immediate_fifo_queue_.insert(insert_it, std::move(task)); // O(n)
       }
 
       if (was_empty && on_task_posted_callback_) {
