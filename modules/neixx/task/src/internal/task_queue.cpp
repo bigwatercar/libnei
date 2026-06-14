@@ -15,6 +15,13 @@ namespace {
 
 using TaskMinHeap = std::priority_queue<Task, std::vector<Task>, std::greater<Task>>;
 
+// Pop and return the top element from a std::priority_queue.
+//
+// std::priority_queue::top() returns a const reference, but we need to
+// move the element out to avoid copying the OnceCallback (which is
+// move-only).  The const_cast is safe here because we immediately pop()
+// afterwards, removing the element from the heap before any other access
+// can observe the moved-from state.
 Task PopTop(TaskMinHeap* queue) {
   Task task = std::move(const_cast<Task&>(queue->top()));
   queue->pop();

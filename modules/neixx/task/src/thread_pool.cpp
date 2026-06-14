@@ -29,6 +29,11 @@ namespace nei {
 namespace {
 
 constexpr std::size_t kDefaultWorkerCount = 4;
+// Compensation-worker ceiling multiplier.  When a worker enters a blocking
+// call (ScopedBlockingCall), the pool may spawn a temporary replacement
+// worker to maintain throughput.  The total number of workers is capped at
+// initial_workers * kMaxBlockingMultiplier so compensation never grows
+// unboundedly.  A 2x multiplier matches Chromium's default.
 constexpr std::size_t kMaxBlockingMultiplier = 2;
 // Per-fetch batch size. Keep modest to avoid giant stack buffers while still
 // amortizing queue-lock and dequeue overhead.
@@ -375,11 +380,6 @@ class ThreadPool::Impl {
       const std::int64_t count = task_source_.GetTotalTaskCount();
       if (count >= kBackpressureWarningThreshold
           && !backpressure_warning_emitted_.exchange(true, std::memory_order_relaxed)) {
-        std::fprintf(stderr,
-                     "[ThreadPool] Backpressure: %lld pending tasks (threshold=%lld). Producer may be outpacing consumers.\n",
-                     static_cast<long long>(count),
-                     static_cast<long long>(kBackpressureWarningThreshold));
-        std::fflush(stderr);
         NEI_LOG_WARN(
             "[ThreadPool] Backpressure: %lld pending tasks "
             "(threshold=%lld). Producer may be outpacing consumers.",

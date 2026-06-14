@@ -19,7 +19,13 @@ namespace {
 // Larger batch reduces message-pump round trips and improves throughput for
 // task-heavy single-thread runners while preserving bounded fairness.
 constexpr std::size_t kMaxTasksPerDoWork = 64;
+// Batch size for the single-queue fast path. 256 amortises lock overhead
+// across many tasks while keeping the stack-allocated batch array small.
 constexpr std::size_t kSingleQueueTakeBatchSize = 256;
+// Hard ceiling for the single-queue fast path per DoWork invocation.
+// 4096 is chosen to be large enough that a saturated producer never
+// starves other message-pump phases (delayed/idle work), while still
+// allowing high-throughput batch processing when the queue is hot.
 constexpr std::size_t kSingleQueueMaxTasksPerDoWork = 4096;
 std::atomic<bool> g_single_queue_fast_path_enabled{true};
 
@@ -530,6 +536,13 @@ class SequenceManager::Impl {
   std::unique_ptr<MessagePump> pump_;
   std::vector<std::unique_ptr<internal::TaskQueue>> queues_;
   std::vector<std::unique_ptr<internal::TaskQueue>> shutdown_queues_;
+  // Snapshot of raw queue pointers for lock-free read access from DoWork
+  // and DoDelayedWork.  Rebuilt under lock_ when queues are added/removed.
+  //
+  // Lifetime: shared_ptr ensures the vector outlives any inflight reader
+  // even after Shutdown() swaps queues_ into shutdown_queues_.  The raw
+  // TaskQueue* pointers inside the view remain valid because Shutdown()
+  // keeps queue objects alive in shutdown_queues_ until Impl destruction.
   std::shared_ptr<const std::vector<internal::TaskQueue*>> queues_view_ =
       std::make_shared<std::vector<internal::TaskQueue*>>();
   std::vector<internal::TaskQueue*> user_blocking_priority_queues_;

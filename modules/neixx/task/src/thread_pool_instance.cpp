@@ -3,6 +3,8 @@
 #include <cassert>
 #include <utility>
 
+#include <nei/debug/check.h>
+
 namespace nei {
 namespace {
 
@@ -62,8 +64,7 @@ void PostTask(const Location& from_here, OnceClosure task) {
 void PostTask(const Location& from_here, OnceClosure task,
               const TaskTraits& traits) {
   ThreadPoolInstance* instance = ThreadPoolInstance::Get();
-  assert(instance &&
-         "PostTask() called before ThreadPoolInstance is initialized.");
+  DCHECK(instance != nullptr);
   if (instance == nullptr) {
     return;
   }

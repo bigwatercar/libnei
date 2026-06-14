@@ -14,6 +14,9 @@ std::atomic<std::int64_t> g_delayed_overflow_fallback_count{0};
 
 }  // namespace
 
+// Concrete TaskRunner that owns a WeakPtr to a TaskQueue.  All PostTask
+// variants delegate to the queue through the weak pointer; if the queue
+// has been shut down the post is silently dropped.
 class TaskRunnerImpl final : public TaskRunner {
  public:
   TaskRunnerImpl(WeakPtr<internal::TaskQueue> task_queue, const TaskTraits& traits)

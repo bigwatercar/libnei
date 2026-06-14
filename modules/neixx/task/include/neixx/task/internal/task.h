@@ -26,10 +26,14 @@ struct Task {
   // Ordering is intentionally based only on delayed_run_time and sequence_num.
   // This keeps queue ordering deterministic and independent from task payload.
   //
-  // Strict-weak-ordering guarantee: within a single TaskQueue's delayed heap,
-  // sequence_num is monotonically increasing (starting from 1), so no two
-  // tasks share the same (delayed_run_time, sequence_num) pair. The ordering
-  // is therefore a valid strict weak ordering for std::priority_queue.
+  // Strict-weak-ordering (SWO) guarantee:
+  //   Within a single TaskQueue's delayed heap, sequence_num is monotonically
+  //   increasing (starting from 1), so no two tasks share the same
+  //   (delayed_run_time, sequence_num) pair.  The ordering is therefore a
+  //   valid SWO for std::priority_queue.
+  //
+  //   Cross-queue comparisons are NOT meaningful — the heap is per-queue,
+  //   so operator> is only used within a single TaskQueue's delayed_incoming_queue_.
   bool operator>(const Task& other) const {
     if (delayed_run_time != other.delayed_run_time) {
       return delayed_run_time > other.delayed_run_time;
