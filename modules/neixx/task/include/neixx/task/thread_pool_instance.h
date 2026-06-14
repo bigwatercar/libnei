@@ -14,24 +14,20 @@ namespace nei {
 
 /// Chromium-style global ThreadPool singleton.
 ///
+/// Destruction ordering (AtExitManager integration):
+///   ThreadPoolInstance registers its cleanup callback FIRST, so it runs LAST
+///   in LIFO order.  This guarantees that all other AtExit-managed singletons
+///   (e.g. ProcessService) have already drained their pending work before the
+///   thread pool's workers are joined.
+///
 /// Typical usage:
-///   // At program start (default params):
-///   nei::ThreadPoolInstance::CreateAndStartWithDefaultParams();
-///
-///   // At program start (custom params):
-///   nei::ThreadPoolInstance::InitParams params;
-///   params.max_num_workers = 8;
-///   params.worker_thread_type = nei::ThreadType::BACKGROUND;
-///   params.enable_single_queue_fast_path = false;  // for testing
-///   nei::ThreadPoolInstance::CreateAndStart(params);
-///
-///   // Anywhere afterwards:
-///   nei::PostTask(FROM_HERE, []() { DoWork(); });
-///   auto runner = nei::CreateSequencedTaskRunner(
-///       nei::TaskTraits(nei::MayBlock()));
-///
-///   // At program shutdown:
-///   nei::ThreadPoolInstance::Shutdown();
+///   int main() {
+///     nei::AtExitManager at_exit;                // 1. First stack object
+///     nei::ThreadPoolInstance::CreateAndStart(    // 2. Register pool + AtExit cleanup
+///         nei::ThreadPoolInstance::InitParams{});
+///     // ... application logic ...
+///     return 0;                                   // 3. ~AtExitManager drains all cleanups LIFO
+///   }
 class NEI_API ThreadPoolInstance final {
  public:
   /// Convenience alias: the same struct as ThreadPool::InitParams.
@@ -49,7 +45,10 @@ class NEI_API ThreadPoolInstance final {
   /// Equivalent to CreateAndStart(InitParams{}).
   static void CreateAndStartWithDefaultParams();
 
-  /// Drains pending tasks, shuts down, and destroys the global singleton.
+  /// Optional early-shutdown path.  Under normal operation, the AtExitManager
+  /// callback handles cleanup automatically.  Call this only if the pool must
+  /// be drained before the end of main() (e.g. before sandboxing).  The pool's
+  /// Shutdown() is idempotent, so double-drain via AtExit + manual is safe.
   static void Shutdown();
 
   /// Creates a sequenced TaskRunner on the global pool.

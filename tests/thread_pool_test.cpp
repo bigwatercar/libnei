@@ -495,12 +495,12 @@ TEST_F(ThreadPoolInstanceTest, GetReturnsNonNullAfterInit) {
   EXPECT_NE(ThreadPoolInstance::Get(), nullptr);
 }
 
-TEST_F(ThreadPoolInstanceTest, GetReturnsNullAfterShutdown) {
-  // TearDown will call Shutdown; verify it by calling it early and checking.
+TEST_F(ThreadPoolInstanceTest, GetReturnsNonNullAfterShutdown) {
+  // Leaky Singleton pattern: Shutdown() drains workers but keeps the shell
+  // alive.  Get() still returns a valid pointer — only the pool's internal
+  // threads have been joined.  The OS reclaims the shell at process exit.
   ThreadPoolInstance::Shutdown();
-  EXPECT_EQ(ThreadPoolInstance::Get(), nullptr);
-  // Re-init so TearDown's Shutdown is a harmless no-op.
-  ThreadPoolInstance::CreateAndStartWithDefaultParams();
+  EXPECT_NE(ThreadPoolInstance::Get(), nullptr);
 }
 
 TEST_F(ThreadPoolInstanceTest, GlobalPostTaskExecutesTask) {
