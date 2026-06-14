@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,10 @@ namespace nei {
 //
 // Thread-safety: all methods must be called on the same thread.
 // The underlying data may be owned (copy) or borrowed (raw pointer).
+//
+// PIMPL: all state is hidden behind an opaque Impl pointer so that
+// internal data layout changes do not break ABI or require recompilation
+// of callers.
 
 class NEI_API BufferInputStream final : public AsyncInputStream {
  public:
@@ -68,22 +73,14 @@ class NEI_API BufferInputStream final : public AsyncInputStream {
   void Close() override;
 
   // Returns the total number of bytes available.
-  std::size_t size() const { return len_; }
+  std::size_t size() const;
 
   // Returns the number of bytes remaining from the current cursor.
   std::size_t remaining() const;
 
  private:
-  // Owned storage (populated by the owning constructors).
-  std::vector<std::uint8_t> owned_data_;
-  scoped_refptr<IOBuffer> owned_buf_;
-
-  // View of the active data source.
-  const std::uint8_t* data_ = nullptr;
-  std::size_t len_ = 0;
-  std::size_t cursor_ = 0;
-
-  bool closed_ = false;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 }  // namespace nei

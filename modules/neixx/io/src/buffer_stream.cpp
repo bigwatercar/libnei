@@ -1,5 +1,5 @@
 // ===========================================================================
-// BufferInputStream implementation
+// BufferInputStream implementation (PIMPL)
 // ===========================================================================
 
 #include <neixx/io/buffer_stream.h>
@@ -12,26 +12,43 @@
 
 namespace nei {
 
+struct BufferInputStream::Impl {
+  // Owned storage (populated by the owning constructors).
+  std::vector<std::uint8_t> owned_data;
+  scoped_refptr<IOBuffer> owned_buf;
+
+  // View of the active data source.
+  const std::uint8_t* data = nullptr;
+  std::size_t len = 0;
+  std::size_t cursor = 0;
+
+  bool closed = false;
+};
+
 // ---- Owning constructors --------------------------------------------------
 
 BufferInputStream::BufferInputStream(std::vector<std::uint8_t> data)
-    : owned_data_(std::move(data)),
-      data_(owned_data_.data()),
-      len_(owned_data_.size()) {
+    : impl_(std::make_unique<Impl>()) {
+  impl_->owned_data = std::move(data);
+  impl_->data = impl_->owned_data.data();
+  impl_->len = impl_->owned_data.size();
 }
 
 BufferInputStream::BufferInputStream(std::string data)
-    : owned_data_(data.begin(), data.end()),
-      data_(owned_data_.data()),
-      len_(owned_data_.size()) {
+    : impl_(std::make_unique<Impl>()) {
+  impl_->owned_data.assign(data.begin(), data.end());
+  impl_->data = impl_->owned_data.data();
+  impl_->len = impl_->owned_data.size();
 }
 
 // ---- Borrowing constructors -----------------------------------------------
 
 BufferInputStream::BufferInputStream(const std::uint8_t* data,
                                      std::size_t len)
-    : data_(data), len_(len) {
-  DCHECK(data_ != nullptr || len == 0);
+    : impl_(std::make_unique<Impl>()) {
+  DCHECK(data != nullptr || len == 0);
+  impl_->data = data;
+  impl_->len = len;
 }
 
 BufferInputStream::BufferInputStream(const char* data, std::size_t len)
@@ -40,10 +57,12 @@ BufferInputStream::BufferInputStream(const char* data, std::size_t len)
 
 BufferInputStream::BufferInputStream(scoped_refptr<IOBuffer> buf,
                                      std::size_t len)
-    : owned_buf_(std::move(buf)),
-      data_(reinterpret_cast<const std::uint8_t*>(owned_buf_->data())),
-      len_(len) {
-  DCHECK(data_ != nullptr || len == 0);
+    : impl_(std::make_unique<Impl>()) {
+  impl_->owned_buf = std::move(buf);
+  impl_->data =
+      reinterpret_cast<const std::uint8_t*>(impl_->owned_buf->data());
+  impl_->len = len;
+  DCHECK(impl_->data != nullptr || len == 0);
 }
 
 BufferInputStream::~BufferInputStream() {
@@ -55,36 +74,39 @@ BufferInputStream::~BufferInputStream() {
 void BufferInputStream::ReadAsync(scoped_refptr<IOBuffer> buf,
                                   std::size_t buf_len,
                                   IOReadCallback callback) {
-  if (closed_) {
+  if (impl_->closed) {
     if (callback) callback(false, 0);
     return;
   }
 
   const std::size_t avail = remaining();
   if (avail == 0) {
-    // EOF — data already exhausted.
     if (callback) callback(false, 0);
     return;
   }
 
   const std::size_t to_copy = std::min(avail, buf_len);
-  std::memcpy(buf->data(), data_ + cursor_, to_copy);
-  cursor_ += to_copy;
+  std::memcpy(buf->data(), impl_->data + impl_->cursor, to_copy);
+  impl_->cursor += to_copy;
 
   if (callback) callback(true, to_copy);
 }
 
 void BufferInputStream::Close() {
-  closed_ = true;
-  owned_data_.clear();
-  owned_buf_.reset();
-  data_ = nullptr;
-  len_ = 0;
-  cursor_ = 0;
+  impl_->closed = true;
+  impl_->owned_data.clear();
+  impl_->owned_buf.reset();
+  impl_->data = nullptr;
+  impl_->len = 0;
+  impl_->cursor = 0;
+}
+
+std::size_t BufferInputStream::size() const {
+  return impl_->len;
 }
 
 std::size_t BufferInputStream::remaining() const {
-  return (cursor_ < len_) ? (len_ - cursor_) : 0;
+  return (impl_->cursor < impl_->len) ? (impl_->len - impl_->cursor) : 0;
 }
 
 }  // namespace nei
