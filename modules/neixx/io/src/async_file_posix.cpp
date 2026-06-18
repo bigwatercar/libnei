@@ -245,22 +245,25 @@ class AsyncFilePosix::Impl final {
     }
   }
 
-  void Close() {
+  void Close(CloseCallback callback) {
     // Publish close intent first so concurrent callers stop enqueueing work.
     close_requested_.store(true, std::memory_order_release);
 
     if (!io_task_runner_) {
+      if (callback) callback();
       return;
     }
     const bool posted = io_task_runner_->PostTask(
-        FROM_HERE, [weak_this = weak_factory_.GetWeakPtr()]() {
+        FROM_HERE, [weak_this = weak_factory_.GetWeakPtr(),
+                    callback = std::move(callback)]() mutable {
           if (!weak_this) {
+            if (callback) callback();
             return;
           }
-          weak_this->CloseOnIoThread();
+          weak_this->CloseOnIoThread(std::move(callback));
         });
     if (!posted) {
-      CloseOnIoThread();
+      CloseOnIoThread(std::move(callback));
     }
   }
 
@@ -757,7 +760,7 @@ class AsyncFilePosix::Impl final {
     PostWriteCallback(std::move(callback), false, bytes, error_code);
   }
 
-  void CloseOnIoThread() {
+  void CloseOnIoThread(CloseCallback close_callback = nullptr) {
     OpenCallback open_callback;
     int fd_to_close = -1;
     scoped_refptr<TaskRunner> background_runner_snapshot;
@@ -765,6 +768,7 @@ class AsyncFilePosix::Impl final {
     {
       std::lock_guard<std::mutex> lock(lock_);
       if (state_ == State::kDisconnected && fd_ < 0) {
+        if (close_callback) close_callback();
         return;
       }
 
@@ -789,6 +793,10 @@ class AsyncFilePosix::Impl final {
 
     if (fd_to_close >= 0) {
       CloseFdOnBackground(fd_to_close, std::move(background_runner_snapshot));
+    }
+
+    if (close_callback) {
+      close_callback();
     }
   }
 
@@ -905,8 +913,8 @@ void AsyncFilePosix::WriteAsync(scoped_refptr<IOBuffer> buf,
                     std::move(callback));
 }
 
-void AsyncFilePosix::Close() {
-  impl_->Close();
+void AsyncFilePosix::Close(CloseCallback callback) {
+  impl_->Close(std::move(callback));
 }
 
 bool AsyncFilePosix::is_open() const {

@@ -128,7 +128,9 @@ BenchEntry BenchWrite(nei::AsyncFile& file,
 
   all.Wait();
   const auto t1 = Clock::now();
-  file.Close();
+  nei::WaitableEvent close_ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+  file.Close([&]() { close_ev.Signal(); });
+  close_ev.Wait();
 
   BenchEntry e;
   e.label = "sequential-write";
@@ -185,7 +187,9 @@ BenchEntry BenchRead(nei::AsyncFile& file,
 
   all.Wait();
   const auto t1 = Clock::now();
-  file.Close();
+  nei::WaitableEvent close_ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+  file.Close([&]() { close_ev.Signal(); });
+  close_ev.Wait();
 
   BenchEntry e;
   e.label = "sequential-read";
@@ -226,7 +230,7 @@ int main() {
       4 * 1024, 16 * 1024, 64 * 1024, 256 * 1024,
       1 * 1024 * 1024, 4 * 1024 * 1024};
 #else
-  // POSIX: skip 4KB/16KB — the single background thread serializes
+  // POSIX: skip 4KB/16KB �?the single background thread serializes
   // all I/O, making 16384+ tiny ops impractically slow on WSL.
   const std::vector<std::size_t> kChunks = {
       64 * 1024, 256 * 1024, 1 * 1024 * 1024, 4 * 1024 * 1024};

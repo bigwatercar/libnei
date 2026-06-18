@@ -83,6 +83,10 @@ class NEI_API AsyncFile {
   using WriteCallback =
       std::function<void(bool success, std::size_t bytes_written,
                          Error error)>;
+  // Fire-once callback after the close sequence fully drains.
+  // Called on the IO thread when the underlying handle is closed and
+  // all in-flight operations have been delivered their final error.
+  using CloseCallback = std::function<void()>;
 
   virtual ~AsyncFile() = default;
 
@@ -102,7 +106,12 @@ class NEI_API AsyncFile {
                           std::uint64_t offset,
                           WriteCallback callback) = 0;
 
-  virtual void Close() = 0;
+  // Initiate the close sequence.  The callback fires exactly once on
+  // the IO thread after the handle is closed and all in-flight I/O
+  // operations have been finalized.  Pass nullptr if no callback is
+  // needed.
+  virtual void Close(CloseCallback callback) = 0;
+
   virtual bool is_open() const = 0;
 };
 

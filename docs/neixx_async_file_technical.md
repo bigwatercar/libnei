@@ -138,27 +138,53 @@ file->ReadAsync(
 ### 3.4 关闭与生命周期
 
 ```cpp
-// 异步关闭（推荐）
-file->Close();  // 取消所有进行中的 I/O，回调将收到 kCanceled
+// CloseCallback 在 IO 线程上触发，保证所有在途 I/O 已排空
+using CloseCallback = std::function<void()>;
+
+// 异步关闭（必须提供回调）
+file->Close([]() {
+    // 此时：
+    //   1. 所有在途 I/O 操作已收到最终回调
+    //   2. 底层文件句柄已关闭
+    //   3. 可安全析构 AsyncFile 对象
+    close_done.Signal();
+});
 
 // 检查文件状态
 if (file->is_open()) {
-    // 文件仍处于打开状态
+    // 文件仍处于打开状态（Close 尚未完成）
 }
 ```
 
 **Close 语义**：
 
-- `Close()` 是**异步非阻塞**的——它设置关闭标志并投递关闭任务到 IO runner
-- 所有在途操作会收到 `ErrorCode::kCanceled` 回调
+- `Close(CloseCallback)` 是**异步非阻塞**的，投递关闭任务到 IO runner 后立即返回
+- 回调在 **IO 线程**上触发，保证此时所有 in-flight 操作已排空、句柄已关闭
+- 调用者**必须**在 Close 回调中（或回调触发后）才能析构 `AsyncFile` 对象
+- 析构函数包含 `DCHECK` 断言，在 Debug 模式下检测未关闭就析构的错误用法
 - `Close()` 后不应再发起新的读写操作（会立即收到 `kCanceled`）
-- 文件对象析构时会自动调用 `Close()`，并通过 `DeleteSoon` 安全释放实现
 
-**生命周期绑定**：
+**Windows IOCP 关闭细节**：
+
+Windows 实现采用 **IOCP 回调排空** 策略保证 OVERLAPPED 内存安全：
+1. `CancelIoEx` 发起异步取消（不等待）
+2. IOCP 完成回调逐个排空 `pending_io_`，每个 OVERLAPPED 仅在内核完成写入后才释放
+3. 最后一个 IOCP 回调触发 `CloseCallback`，此时 `state_ == kDisconnected`
+4. PostTask 失败时回退到同步排空路径（`GetOverlappedResult` 等待内核完成）
+
+**生命周期契约**：
 
 ```cpp
-// 文件对象存活期间，IO runner 和 background runner 都必须存活
-// 推荐在业务对象的析构顺序中保证 io_thread 最后停止
+// ✅ 正确：先 Close，在回调中析构
+file->Close([&]() { file.reset(); });
+
+// ✅ 正确：Close 后等待完成再析构
+file->Close([&]() { close_done.Signal(); });
+close_done.Wait();  // 阻塞等待
+file.reset();        // 安全析构
+
+// ❌ 错误：未 Close 直接析构 → Debug 下 DCHECK 触发
+// ❌ 错误：Close 后立即析构（回调尚未触发）→ DCHECK 触发
 ```
 
 ### 3.5 回调线程
@@ -272,8 +298,10 @@ file->ReadAsync(rbuf, payload.size(), 0,
     });
 read_done.Wait();
 
-// 6. 关闭
-file->Close();
+// 6. 关闭（回调在 IO 线程触发，之后可安全析构）
+nei::WaitableEvent close_done;
+file->Close([&]() { close_done.Signal(); });
+close_done.Wait();
 
 // 7. 清理（线程最后停止）
 bg_thread.Stop();
@@ -394,9 +422,11 @@ LOG(ERROR) << "AsyncFile read failed: code=" << static_cast<int>(error.code)
 **关键特性**：
 
 - I/O 引擎：`ReadFile` / `WriteFile` + `OVERLAPPED` + IOCP 完成端口
-- 取消语义：`CloseOnIoThread` 调用 `CancelIoEx` 取消所有进行中的 IOCP 操作，然后 swap 走 `pending_operations_`、`active_io_`、`pending_io_` 并统一以 `ERROR_OPERATION_ABORTED` 回调
+- 取消语义：`CloseOnIoThread` 调用 `CancelIoEx` 标记取消，但**不立即释放 OVERLAPPED 内存**。IOCP 完成回调通过 `OnIOCompleted` → `OnChunkCompletedOnIoThread` 逐个排空 `pending_io_`，仅在 IOCP 确认内核已完成写入后才释放内存并触发用户回调
+- 排空完成判定：`MaybeCompleteCloseOnIoThread` 在 `pending_io_.empty()` 时关闭句柄、停止监听、触发 `CloseCallback`
+- 同步兜底：若 PostTask 失败（消息泵关闭），回退到 `ForceSyncCloseOnIoThread` 路径，通过 `GetOverlappedResult(..., TRUE)` 同步等待每个 OVERLAPPED 完成
 - 排队模型：`pending_operations_` 是 FIFO 队列，`active_io_` 是当前正在 IOCP 中的操作，`pending_io_` 按 `OVERLAPPED*` 索引
-- 内联完成：若 `ReadFile`/`WriteFile` 同步完成，通过 `PostTask` 异步化。若 PostTask 失败（仅在 IO 线程任务队列关闭时发生），则调用 `CloseOnIoThread()` 统一清理所有排队操作，避免 `IssueNextChunkOnIoThread` ↔ `OnChunkCompletedOnIoThread` 之间的无界递归回退链
+- 内联完成：若 `ReadFile`/`WriteFile` 同步完成，通过 `PostTask` 异步化
 
 **诊断计数器** (`StageCounters`)：
 
@@ -405,7 +435,7 @@ LOG(ERROR) << "AsyncFile read failed: code=" << static_cast<int>(error.code)
 | `open_reached` / `read_reached` / `write_reached` | 回调到达次数 |
 | `iocp_completed` | IOCP 完成通知次数 |
 | `context_hit` / `context_miss` | IOCP 完成时 context 命中/丢失 |
-| `callback_post_failed` | PostTask 失败次数（正常运行时为 0；仅在 IO 线程关闭时可能触发 `CloseOnIoThread` 回退路径） |
+| `callback_post_failed` | PostTask 失败次数（正常运行时为 0；仅在 IO 线程关闭时可能触发同步排空回退路径） |
 | `read_post_seq` / `read_exec_seq` | 读取回调投递/执行序列号（检测乱序） |
 
 ## 6. 线程模型
@@ -428,17 +458,21 @@ LOG(ERROR) << "AsyncFile read failed: code=" << static_cast<int>(error.code)
 1. **IO 线程必须存活**：所有读写和回调依赖 IO runner。在文件对象析构前 IO 线程不能停止
 2. **后台线程必须存活**：POSIX 的 `open`/`pread`/`pwrite`/`close` 在后台线程上执行。Windows 上 `open` 也在后台线程上执行（避免同步 `CreateFile` 阻塞 IO 线程）
 3. **回调线程一致**：所有用户回调始终在 IO 线程上触发，不会在调用线程或后台线程上同步返回
-4. **Close 后不操作**：`Close()` 设置关闭标志后，后续的 `ReadAsync`/`WriteAsync` 会立即返回 `kCanceled`
+4. **Close 回调触发后安全析构**：`CloseCallback` 在 IO 线程触发且 `state_ == kDisconnected`，此时可安全析构文件对象
+5. **Close 后不操作**：`Close()` 设置关闭标志后，后续的 `ReadAsync`/`WriteAsync` 会立即返回 `kCanceled`
 
 ## 7. 最佳实践
 
 ### 7.1 线程生命周期
 
 ```cpp
-// ✅ 正确：先停止文件，再停止线程
-file->Close();          // 1. 关闭文件
-io_thread.Stop();       // 2. 停止 IO 线程
-bg_thread.Stop();       // 3. 停止后台线程
+// ✅ 正确：Close 回调中安全析构
+nei::WaitableEvent close_done;
+file->Close([&]() { close_done.Signal(); });
+close_done.Wait();           // 等待 Close 排空完成
+file.reset();                 // 安全析构
+io_thread.Stop();             // 停止 IO 线程
+bg_thread.Stop();             // 停止后台线程
 ```
 
 ### 7.2 大 I/O 操作
@@ -466,7 +500,8 @@ if (error.code == ErrorCode::kNotFound) { ... }
 ### 7.4 Close Race 处理
 
 ```cpp
-// Close 可能在任意时刻与读写并发发生，回调需要处理 kCanceled：
+// Close 可能在任意时刻与读写并发发生。
+// 读写回调需要处理 kCanceled，Close 回调用于确认排空完成：
 file->ReadAsync(buf, size, offset,
     [](bool success, std::size_t n, nei::AsyncFile::Error error) {
         if (error.code == nei::AsyncFile::ErrorCode::kCanceled) {
@@ -475,6 +510,12 @@ file->ReadAsync(buf, size, offset,
         }
         // ... 处理正常完成或错误
     });
+
+// Close 回调触发时所有读写回调已执行完毕
+file->Close([&]() {
+    // 安全析构或释放资源
+    close_done.Signal();
+});
 ```
 
 ### 7.5 避免 inline 回调假设

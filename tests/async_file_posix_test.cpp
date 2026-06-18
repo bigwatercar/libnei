@@ -163,9 +163,7 @@ TEST_F(AsyncFilePosixTest, OpenFailureRollsBackAndAllowsRetry) {
   EXPECT_TRUE(second_ok.load(std::memory_order_acquire));
   EXPECT_TRUE(file->is_open());
 
-  file->Close();
-  io_runner_->PostTask(FROM_HERE, [&]() { close_barrier.Signal(); });
-  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->Close([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 }
 
 TEST_F(AsyncFilePosixTest, PositionalConcurrentWritesAndReadbackAreStable) {
@@ -264,9 +262,7 @@ TEST_F(AsyncFilePosixTest, PositionalConcurrentWritesAndReadbackAreStable) {
   ASSERT_TRUE(std::equal(payload_b.begin(), payload_b.end(),
                          read_back.begin() + static_cast<std::ptrdiff_t>(offset_b)));
 
-  file->Close();
-  io_runner_->PostTask(FROM_HERE, [&]() { close_barrier.Signal(); });
-  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->Close([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 }
 
 TEST_F(AsyncFilePosixTest, AppendModeAppendsIgnoringCallerOffset) {
@@ -322,9 +318,7 @@ TEST_F(AsyncFilePosixTest, AppendModeAppendsIgnoringCallerOffset) {
   ASSERT_TRUE(write2_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(write2_ok.load(std::memory_order_acquire));
 
-  file->Close();
-  io_runner_->PostTask(FROM_HERE, [&]() { close_barrier.Signal(); });
-  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->Close([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 
   auto reader = std::make_shared<AsyncFilePosix>(io_runner_);
   reader->OpenAsync(path.string(), AsyncFile::OpenMode::kReadOnly,
@@ -402,9 +396,7 @@ TEST_F(AsyncFilePosixTest, ReadPastEndReturnsPartialDataAsSuccess) {
   ASSERT_TRUE(read_ok.load(std::memory_order_acquire));
   ASSERT_EQ(out, payload);
 
-  file->Close();
-  io_runner_->PostTask(FROM_HERE, [&]() { close_barrier.Signal(); });
-  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->Close([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 }
 
 TEST_F(AsyncFilePosixTest, LargeOffsetRandomAccessBeyond2GBWorks) {
@@ -457,9 +449,7 @@ TEST_F(AsyncFilePosixTest, LargeOffsetRandomAccessBeyond2GBWorks) {
   ASSERT_TRUE(read_ok.load(std::memory_order_acquire));
   ASSERT_EQ(out, payload);
 
-  file->Close();
-  io_runner_->PostTask(FROM_HERE, [&]() { close_barrier.Signal(); });
-  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->Close([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 }
 
 TEST_F(AsyncFilePosixStressTest, HighConcurrencyMixedReadWriteChain) {
@@ -550,9 +540,7 @@ TEST_F(AsyncFilePosixStressTest, HighConcurrencyMixedReadWriteChain) {
 
   ASSERT_TRUE(all_done.TimedWait(std::chrono::seconds(60)));
 
-  file->Close();
-  io_runner_->PostTask(FROM_HERE, [&]() { close_barrier.Signal(); });
-  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->Close([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 }
 
 TEST_F(AsyncFilePosixStressTest, CloseRaceCancelsInFlightOperationsWithoutHang) {
@@ -663,8 +651,7 @@ TEST_F(AsyncFilePosixStressTest, CloseRaceCancelsInFlightOperationsWithoutHang) 
 
   std::thread closer([&]() {
     std::this_thread::sleep_for(std::chrono::milliseconds(3));
-    file->Close();
-    close_issued.Signal();
+    file->Close([&]() { close_issued.Signal(); });
   });
 
   for (auto& t : producers) {
@@ -738,8 +725,7 @@ TEST_F(AsyncFilePosixStressTest, CallbacksAlwaysFireOnIoThread) {
               }
               if (!open_success || !open_error.ok()) {
                 ok.store(false, std::memory_order_release);
-                file->Close();
-                done.Signal();
+                file->Close([&]() { done.Signal(); });
                 return;
               }
 
@@ -759,8 +745,7 @@ TEST_F(AsyncFilePosixStressTest, CallbacksAlwaysFireOnIoThread) {
                     if (!write_success || !write_error.ok() ||
                         bytes_written != payload.size()) {
                       ok.store(false, std::memory_order_release);
-                      file->Close();
-                      done.Signal();
+                      file->Close([&]() { done.Signal(); });
                       return;
                     }
 
@@ -782,14 +767,12 @@ TEST_F(AsyncFilePosixStressTest, CallbacksAlwaysFireOnIoThread) {
                               data != payload) {
                             ok.store(false, std::memory_order_release);
                           }
-                          file->Close();
-                          done.Signal();
+                          file->Close([&]() { done.Signal(); });
                         });
 
                     if (!read_accepted) {
                       ok.store(false, std::memory_order_release);
-                      file->Close();
-                      done.Signal();
+                      file->Close([&]() { done.Signal(); });
                       return;
                     }
                     // With PostReadCallback the read callback must not fire
@@ -802,8 +785,7 @@ TEST_F(AsyncFilePosixStressTest, CallbacksAlwaysFireOnIoThread) {
 
               if (!write_accepted) {
                 ok.store(false, std::memory_order_release);
-                file->Close();
-                done.Signal();
+                file->Close([&]() { done.Signal(); });
                 return;
               }
               // Write callback must not fire inline.

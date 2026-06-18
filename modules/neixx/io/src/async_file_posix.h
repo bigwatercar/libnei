@@ -41,7 +41,7 @@ class NEI_API AsyncFilePosix final : public AsyncFile {
                   std::uint64_t offset,
                   WriteCallback callback) override;
 
-  void Close() override;
+  void Close(CloseCallback callback) override;
   bool is_open() const override;
 
  private:

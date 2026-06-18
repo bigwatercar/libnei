@@ -143,7 +143,12 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   }
 
   ~Impl() override {
-    CloseOnIoThread();
+    // Close() must have been called and completed before destruction.
+    // The caller is responsible for ensuring all I/O is finished and
+    // Close() has drained to kDisconnected before destroying AsyncFileWin.
+    DCHECK(state_ == State::kDisconnected);
+    DCHECK(file_handle_ == INVALID_HANDLE_VALUE);
+    DCHECK(pending_io_.empty());
   }
 
   scoped_refptr<TaskRunner> io_task_runner() const { return io_task_runner_; }
@@ -246,19 +251,22 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     }
   }
 
-  void Close() {
+  void Close(CloseCallback callback) {
     if (!io_task_runner_) {
+      if (callback) callback();
       return;
     }
     const bool posted = io_task_runner_->PostTask(
-        FROM_HERE, [weak_this = weak_factory_.GetWeakPtr()]() {
+        FROM_HERE, [weak_this = weak_factory_.GetWeakPtr(),
+                    callback = std::move(callback)]() mutable {
           if (!weak_this) {
+            if (callback) callback();
             return;
           }
-          weak_this->CloseOnIoThread();
+          weak_this->CloseOnIoThread(false, std::move(callback));
         });
     if (!posted) {
-      CloseOnIoThread();
+      CloseOnIoThread(true, std::move(callback));
     }
   }
 
@@ -285,7 +293,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     {
       std::lock_guard<std::mutex> lock(lock_);
       file_snapshot = file_handle_;
-      if (state_ != State::kConnected || file_snapshot == INVALID_HANDLE_VALUE ||
+      if ((state_ != State::kConnected && state_ != State::kClosing) ||
+          file_snapshot == INVALID_HANDLE_VALUE ||
           reinterpret_cast<HANDLE>(handle) != file_snapshot) {
         return;
       }
@@ -576,12 +585,26 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
                 ov, transferred, static_cast<std::uint32_t>(ERROR_SUCCESS));
           });
       if (!posted) {
-        // Task queue is shutting down; close gracefully.  This avoids
-        // unbounded recursion that would result from chaining
-        // OnChunkCompletedOnIoThread → MaybeStartNextOperationOnIoThread
-        // → IssueNextChunkOnIoThread synchronously on every PostTask
-        // failure (see OnChunkCompletedOnIoThread fallback below).
-        CloseOnIoThread();
+        // Task queue is shutting down.  The inline-completed context is
+        // still registered in pending_io_; remove and finalize it now,
+        // then force a synchronous drain for remaining state.  No IOCP
+        // completion will arrive because the I/O already completed
+        // synchronously.
+        std::shared_ptr<IOContext> removed;
+        {
+          std::lock_guard<std::mutex> lock(lock_);
+          auto it = pending_io_.find(&context->overlapped);
+          if (it != pending_io_.end()) {
+            removed = std::move(it->second);
+            pending_io_.erase(it);
+          }
+        }
+        if (removed) {
+          FinalizeOperationOnIoThread(std::move(removed),
+                                      static_cast<std::uint32_t>(ERROR_SUCCESS),
+                                      transferred_now, true, true);
+        }
+        CloseOnIoThread(true);
       }
       return;
     }
@@ -675,14 +698,13 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
         });
     if (!posted) {
       // Task queue is shutting down.  Finalize the current (partially-
-      // completed) context inline, then close gracefully.  This avoids
-      // unbounded recursion while ensuring no callback is lost.
-      // (context was already erased from pending_io_ above, so
-      // CloseOnIoThread won't see it.)
+      // completed) context inline, then force a synchronous close for
+      // remaining state since the pump can no longer deliver IOCP
+      // completions.
       FinalizeOperationOnIoThread(std::move(context),
                                   static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED),
                                   0, false, true);
-      CloseOnIoThread();
+      CloseOnIoThread(true);
     }
   }
 
@@ -692,7 +714,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     {
       std::lock_guard<std::mutex> lock(lock_);
       file_snapshot = file_handle_;
-      if (state_ != State::kConnected || file_snapshot == INVALID_HANDLE_VALUE ||
+      if ((state_ != State::kConnected && state_ != State::kClosing) ||
+          file_snapshot == INVALID_HANDLE_VALUE ||
           reinterpret_cast<HANDLE>(handle) != file_snapshot ||
           pending_io_.empty()) {
         return;
@@ -754,9 +777,119 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     }
 
     MaybeStartNextOperationOnIoThread();
+    MaybeCompleteCloseOnIoThread();
   }
 
-  void CloseOnIoThread() {
+  void MaybeCompleteCloseOnIoThread() {
+    HANDLE to_close = INVALID_HANDLE_VALUE;
+    bool should_finalize = false;
+
+    {
+      std::lock_guard<std::mutex> lock(lock_);
+      if (state_ != State::kClosing) {
+        return;
+      }
+
+      // Only finalize the close when no kernel I/O is outstanding.
+      // pending_io_ is the canonical set of contexts that the kernel
+      // may still write to.
+      if (pending_io_.empty()) {
+        to_close = file_handle_;
+        file_handle_ = INVALID_HANDLE_VALUE;
+        should_finalize = true;
+      }
+    }
+
+    if (should_finalize) {
+      controller_.StopWatching();
+      if (to_close != INVALID_HANDLE_VALUE) {
+        (void)::CloseHandle(to_close);
+      }
+      {
+        std::lock_guard<std::mutex> lock(lock_);
+        state_ = State::kDisconnected;
+      }
+      FireCloseCallback();
+    }
+  }
+
+  void FireCloseCallback() {
+    CloseCallback cb;
+    std::swap(cb, pending_close_callback_);
+    if (cb) cb();
+  }
+
+  void CloseOnIoThread(bool force_sync_drain = false,
+                       CloseCallback callback = nullptr) {
+    if (callback) {
+      pending_close_callback_ = std::move(callback);
+    }
+    if (force_sync_drain) {
+      ForceSyncCloseOnIoThread();
+      return;
+    }
+
+    OpenCallback open_callback;
+    std::deque<PendingOperation> queued;
+
+    {
+      std::lock_guard<std::mutex> lock(lock_);
+      if (state_ == State::kDisconnected && file_handle_ == INVALID_HANDLE_VALUE) {
+        return;
+      }
+
+      // Guard against re-entrancy from PostTask failure fallback paths.
+      if (state_ == State::kClosing) {
+        return;
+      }
+
+      state_ = State::kClosing;
+      ++open_request_id_;
+      open_callback = std::move(pending_open_callback_);
+      queued.swap(pending_operations_);
+      // IMPORTANT: Do NOT swap pending_io_ or active_io_ here.
+      // Contexts with outstanding kernel I/O MUST remain registered
+      // in pending_io_ until the IOCP completion callback releases
+      // them.  CancelIoEx is asynchronous; the kernel may still
+      // write to OVERLAPPED addresses after it returns.
+      if (file_handle_ != INVALID_HANDLE_VALUE) {
+        (void)::CancelIoEx(file_handle_, nullptr);
+      }
+      // Keep file_handle_ valid so OnIOCompleted can match arriving
+      // IOCP completion packets for the cancelled operations.
+      // Keep controller_ watching for the same reason.
+      open_mode_ = OpenMode::kReadWrite;
+    }
+
+    // Fire callbacks for queued operations that were never issued to the
+    // kernel.  These PendingOperation objects own no OVERLAPPED, so it is
+    // always safe to destroy them immediately.
+    if (open_callback) {
+      PostOpenCallback(std::move(open_callback), false,
+                       static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
+    }
+
+    for (auto& op : queued) {
+      if (op.type == IOContext::Type::kRead) {
+        PostReadCallback(std::move(op.read_callback), false, 0,
+                         static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
+      } else {
+        PostWriteCallback(std::move(op.write_callback), false, 0,
+                          static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
+      }
+    }
+
+    // pending_io_ and active_io_ are intentionally left in place.
+    // IOCP completions (or pending PostTasks) will drain them and
+    // call MaybeCompleteCloseOnIoThread() via FinalizeOperationOnIoThread.
+    MaybeCompleteCloseOnIoThread();
+  }
+
+  void ForceSyncCloseOnIoThread() {
+    // Emergency path: the task queue is shutting down and we must drain
+    // synchronously.  GetOverlappedResult with bWait=TRUE waits for the
+    // kernel to finish writing to each OVERLAPPED and dequeues the
+    // result from the IOCP.
     OpenCallback open_callback;
     std::deque<PendingOperation> queued;
     std::shared_ptr<IOContext> active;
@@ -781,6 +914,18 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       }
       file_handle_ = INVALID_HANDLE_VALUE;
       open_mode_ = OpenMode::kReadWrite;
+    }
+
+    // Synchronously drain every outstanding OVERLAPPED completion before
+    // freeing any IOContext memory.
+    if (to_close != INVALID_HANDLE_VALUE) {
+      for (auto& item : pending) {
+        if (item.second) {
+          DWORD transferred = 0;
+          (void)::GetOverlappedResult(to_close, &item.second->overlapped,
+                                      &transferred, TRUE);
+        }
+      }
     }
 
     controller_.StopWatching();
@@ -835,6 +980,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       std::lock_guard<std::mutex> lock(lock_);
       state_ = State::kDisconnected;
     }
+    FireCloseCallback();
   }
 
   void PostOpenCallback(OpenCallback callback,
@@ -891,6 +1037,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   OpenMode pending_open_mode_ = OpenMode::kReadWrite;
   std::uint64_t open_request_id_ = 0;
   OpenCallback pending_open_callback_;
+  CloseCallback pending_close_callback_;
   MessagePumpForIO::FdWatchController controller_;
   std::deque<PendingOperation> pending_operations_;
   std::shared_ptr<IOContext> active_io_;
@@ -992,8 +1139,8 @@ AsyncFileWin::StageCounters AsyncFileWin::GetStageCountersForTesting() {
   return out;
 }
 
-void AsyncFileWin::Close() {
-  impl_->Close();
+void AsyncFileWin::Close(CloseCallback callback) {
+  impl_->Close(std::move(callback));
 }
 
 bool AsyncFileWin::is_open() const {

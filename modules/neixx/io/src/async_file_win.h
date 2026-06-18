@@ -61,7 +61,7 @@ class NEI_API AsyncFileWin final : public AsyncFile {
   static void ResetStageCountersForTesting();
   static StageCounters GetStageCountersForTesting();
 
-  void Close() override;
+  void Close(CloseCallback callback) override;
   bool is_open() const override;
 
  private:

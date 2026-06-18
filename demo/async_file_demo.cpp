@@ -83,7 +83,9 @@ bool RunDemo(nei::AsyncFile& file,
 
   if (!write_done.TimedWait(std::chrono::seconds(10))) {
     std::cerr << "[demo] Timed out waiting for WriteAsync." << std::endl;
-    file.Close();
+    nei::WaitableEvent close_ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+    file.Close([&]() { close_ev.Signal(); });
+    close_ev.Wait();
     return false;
   }
   if (!write_ok.load(std::memory_order_acquire) ||
@@ -92,7 +94,9 @@ bool RunDemo(nei::AsyncFile& file,
               << write_error.load(std::memory_order_acquire)
               << ", bytes_written="
               << bytes_written.load(std::memory_order_acquire) << std::endl;
-    file.Close();
+    nei::WaitableEvent close_ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+    file.Close([&]() { close_ev.Signal(); });
+    close_ev.Wait();
     return false;
   }
   std::cout << "[demo] Wrote " << bytes_written.load(std::memory_order_acquire)
@@ -119,7 +123,9 @@ bool RunDemo(nei::AsyncFile& file,
 
   if (!read_done.TimedWait(std::chrono::seconds(10))) {
     std::cerr << "[demo] Timed out waiting for ReadAsync." << std::endl;
-    file.Close();
+    nei::WaitableEvent close_ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+    file.Close([&]() { close_ev.Signal(); });
+    close_ev.Wait();
     return false;
   }
   const std::size_t read_size = bytes_read.load(std::memory_order_acquire);
@@ -128,13 +134,17 @@ bool RunDemo(nei::AsyncFile& file,
     std::cerr << "[demo] ReadAsync failed, error="
               << read_error.load(std::memory_order_acquire)
               << ", size=" << read_size << std::endl;
-    file.Close();
+    nei::WaitableEvent close_ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+    file.Close([&]() { close_ev.Signal(); });
+    close_ev.Wait();
     return false;
   }
 
   std::cout << "[demo] Read back: " << read_text << std::endl;
 
-  file.Close();
+  nei::WaitableEvent close_ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+  file.Close([&]() { close_ev.Signal(); });
+  close_ev.Wait();
   return true;
 }
 

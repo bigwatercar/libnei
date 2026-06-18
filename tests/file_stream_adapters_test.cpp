@@ -83,9 +83,7 @@ TEST(FileInputStreamAdapterTest, BridgesAsyncFileAndAsyncLineReader) {
   ASSERT_TRUE(write_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(write_ok.load(std::memory_order_acquire));
 
-  writer_file->Close();
-  io_runner->PostTask(FROM_HERE, [&]() { write_close_barrier.Signal(); });
-  ASSERT_TRUE(write_close_barrier.TimedWait(std::chrono::seconds(10)));
+  writer_file->Close([&]() { write_close_barrier.Signal(); });  ASSERT_TRUE(write_close_barrier.TimedWait(std::chrono::seconds(10)));
 
   auto reader_file = AsyncFile::Create(io_runner);
   ASSERT_TRUE(reader_file);
