@@ -916,6 +916,105 @@ TEST(AsyncFileWinTest, FileReadParsesLinesWithAsyncLineReader) {
   (void)std::filesystem::remove(path, ec);
 }
 
+TEST(AsyncFileWinTest, RaiiDestructionDoesNotHangAndDataIsFlushed) {
+  Thread io_thread("async-file-raii-io");
+  Thread::Options io_options;
+  io_options.message_pump_type = MessagePumpType::IO;
+  ASSERT_TRUE(io_thread.StartWithOptions(io_options));
+
+  Thread background_thread("async-file-raii-bg");
+  ASSERT_TRUE(background_thread.Start());
+
+  scoped_refptr<TaskRunner> io_runner = io_thread.GetTaskRunner();
+  scoped_refptr<TaskRunner> bg_runner = background_thread.GetTaskRunner();
+  ASSERT_TRUE(io_runner);
+  ASSERT_TRUE(bg_runner);
+
+  const std::filesystem::path path = MakeTempFilePath("raii_destruct");
+  const std::string path_utf8 = path.u8string();
+  const std::vector<std::uint8_t> payload = MakePayload(4096, 0xAB);
+
+  // Scope block: create, open, write, then release — RAII destruction.
+  {
+    auto file = std::make_shared<AsyncFileWin>(io_runner);
+    ASSERT_TRUE(file);
+
+    WaitableEvent open_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+    std::atomic<bool> open_ok{false};
+    file->OpenAsync(path_utf8, AsyncFile::OpenMode::kReadWrite,
+                    AsyncFile::OpenDisposition::kCreateAlways, bg_runner,
+                    [&](bool success, AsyncFile::Error error) {
+                      open_ok.store(success && error.ok(),
+                                    std::memory_order_release);
+                      open_done.Signal();
+                    });
+    ASSERT_TRUE(open_done.TimedWait(std::chrono::seconds(10)));
+    ASSERT_TRUE(open_ok.load(std::memory_order_acquire));
+
+    WaitableEvent write_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+    std::atomic<bool> write_ok{false};
+    auto buf = MakeRefCounted<IOBufferWithSize>(payload.size());
+    std::memcpy(buf->data(), payload.data(), payload.size());
+    const bool accepted = IssueWrite(
+        file, 0, payload,
+        [&](bool success, std::size_t wrote, AsyncFile::Error error) {
+          write_ok.store(success && error.ok() && wrote == payload.size(),
+                         std::memory_order_release);
+          write_done.Signal();
+        });
+    ASSERT_TRUE(accepted);
+    ASSERT_TRUE(write_done.TimedWait(std::chrono::seconds(10)));
+    ASSERT_TRUE(write_ok.load(std::memory_order_acquire));
+
+    // file.reset() happens here — must not hang or crash.
+  }
+
+  // Let the IO thread process the orphan's CancelAndSelfDestruct task.
+  WaitableEvent settle(WaitableEvent::ResetPolicy::kAutomatic, false);
+  io_runner->PostTask(FROM_HERE, [&]() { settle.Signal(); });
+  ASSERT_TRUE(settle.TimedWait(std::chrono::seconds(10)));
+
+  // Verify data was persisted.
+  auto reader = std::make_shared<AsyncFileWin>(io_runner);
+  WaitableEvent read_open_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent read_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent read_close_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::atomic<bool> read_open_ok{false};
+  std::atomic<bool> read_ok{false};
+
+  reader->OpenAsync(path_utf8, AsyncFile::OpenMode::kReadOnly,
+                    AsyncFile::OpenDisposition::kOpenExisting, bg_runner,
+                    [&](bool success, AsyncFile::Error error) {
+                      read_open_ok.store(success && error.ok(),
+                                         std::memory_order_release);
+                      read_open_done.Signal();
+                    });
+  ASSERT_TRUE(read_open_done.TimedWait(std::chrono::seconds(10)));
+  ASSERT_TRUE(read_open_ok.load(std::memory_order_acquire));
+
+  auto rbuf = scoped_refptr<IOBuffer>(new IOBufferWithSize(payload.size()));
+  reader->ReadAsync(rbuf, payload.size(), 0,
+                    [&](bool success, std::size_t n, AsyncFile::Error error) {
+                      read_ok.store(success && error.ok() && n == payload.size(),
+                                    std::memory_order_release);
+                      read_done.Signal();
+                    });
+  ASSERT_TRUE(read_done.TimedWait(std::chrono::seconds(10)));
+  ASSERT_TRUE(read_ok.load(std::memory_order_acquire));
+
+  std::vector<std::uint8_t> read_back(payload.size());
+  std::memcpy(read_back.data(), rbuf->data(), payload.size());
+  EXPECT_EQ(read_back, payload);
+
+  reader->Close([&]() { read_close_done.Signal(); });
+  ASSERT_TRUE(read_close_done.TimedWait(std::chrono::seconds(10)));
+
+  background_thread.Stop();
+  io_thread.Stop();
+  std::error_code ec;
+  (void)std::filesystem::remove(path, ec);
+}
+
 }  // namespace
 }  // namespace nei
 

@@ -822,11 +822,17 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       std::lock_guard<std::mutex> lock(lock_);
       if (state_ == State::kDisconnected &&
           file_handle_ == INVALID_HANDLE_VALUE) {
-        delete this;
-        return;
+        // Must self-destruct outside the lock to avoid mutex
+        // destruction-while-owned diagnostics.
+      } else {
+        // Will initiate async close below.
+        goto initiate;
       }
     }
+    delete this;
+    return;
 
+  initiate:
     // Initiate async close.  If already kClosing, returns immediately
     // and the in-progress drain will self-destruct via
     // MaybeCompleteCloseOnIoThread.  If kConnected, does CancelIoEx +
