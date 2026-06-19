@@ -102,6 +102,7 @@ struct WeakPtrThreadSafe<AsyncFileWin::Impl> : std::true_type {};
 
 class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
  public:
+  friend class AsyncFileWin;
   enum class State {
     kDisconnected,
     kOpening,
@@ -142,14 +143,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     DCHECK(io_task_runner_);
   }
 
-  ~Impl() override {
-    // Close() must have been called and completed before destruction.
-    // The caller is responsible for ensuring all I/O is finished and
-    // Close() has drained to kDisconnected before destroying AsyncFileWin.
-    DCHECK(state_ == State::kDisconnected);
-    DCHECK(file_handle_ == INVALID_HANDLE_VALUE);
-    DCHECK(pending_io_.empty());
-  }
+  ~Impl() override = default;
 
   scoped_refptr<TaskRunner> io_task_runner() const { return io_task_runner_; }
 
@@ -810,7 +804,37 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
         state_ = State::kDisconnected;
       }
       FireCloseCallback();
+      if (is_orphaned_) {
+        delete this;
+      }
     }
+  }
+
+  void CancelAndSelfDestruct(bool force_sync = false) {
+    is_orphaned_ = true;
+
+    if (force_sync) {
+      ForceSyncCloseOnIoThread();
+      return;
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(lock_);
+      if (state_ == State::kDisconnected &&
+          file_handle_ == INVALID_HANDLE_VALUE) {
+        delete this;
+        return;
+      }
+    }
+
+    // Initiate async close.  If already kClosing, returns immediately
+    // and the in-progress drain will self-destruct via
+    // MaybeCompleteCloseOnIoThread.  If kConnected, does CancelIoEx +
+    // queued callbacks + MaybeCompleteCloseOnIoThread.
+    CloseOnIoThread(false, nullptr);
+
+    // If MaybeCompleteCloseOnIoThread self-deleted, we won't reach here.
+    // If we're still alive, IOCP drain is pending.
   }
 
   void FireCloseCallback() {
@@ -981,6 +1005,9 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       state_ = State::kDisconnected;
     }
     FireCloseCallback();
+    if (is_orphaned_) {
+      delete this;
+    }
   }
 
   void PostOpenCallback(OpenCallback callback,
@@ -1038,6 +1065,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   std::uint64_t open_request_id_ = 0;
   OpenCallback pending_open_callback_;
   CloseCallback pending_close_callback_;
+  bool is_orphaned_ = false;
   MessagePumpForIO::FdWatchController controller_;
   std::deque<PendingOperation> pending_operations_;
   std::shared_ptr<IOContext> active_io_;
@@ -1071,9 +1099,13 @@ AsyncFileWin::~AsyncFileWin() {
   }
 
   Impl* raw_impl = impl_.release();
-  io_runner->PostTask(FROM_HERE, [raw_impl]() {
-    delete raw_impl;
+  const bool posted = io_runner->PostTask(FROM_HERE, [raw_impl]() {
+    raw_impl->CancelAndSelfDestruct();
   });
+  if (!posted) {
+    // IO thread is dead; force synchronous cleanup on calling thread.
+    raw_impl->CancelAndSelfDestruct(true);
+  }
 }
 
 void AsyncFileWin::OpenAsync(const std::string& path,
