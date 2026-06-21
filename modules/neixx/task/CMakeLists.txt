@@ -15,6 +15,7 @@
   include/neixx/task/run_loop.h
   include/neixx/task/sequence_manager.h
   include/neixx/task/task_runner.h
+  include/neixx/task/bind_post_task.h
   include/neixx/task/task_traits.h
   include/neixx/task/thread_pool.h
   include/neixx/task/thread_task_runner_handle.h
