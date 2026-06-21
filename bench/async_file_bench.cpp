@@ -129,7 +129,7 @@ BenchEntry BenchWrite(nei::AsyncFile& file,
   all.Wait();
   const auto t1 = Clock::now();
   nei::WaitableEvent close_ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
-  file.Close([&]() { close_ev.Signal(); });
+  file.CloseAsync([&]() { close_ev.Signal(); });
   close_ev.Wait();
 
   BenchEntry e;
@@ -188,7 +188,7 @@ BenchEntry BenchRead(nei::AsyncFile& file,
   all.Wait();
   const auto t1 = Clock::now();
   nei::WaitableEvent close_ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
-  file.Close([&]() { close_ev.Signal(); });
+  file.CloseAsync([&]() { close_ev.Signal(); });
   close_ev.Wait();
 
   BenchEntry e;

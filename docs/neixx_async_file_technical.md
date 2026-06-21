@@ -142,7 +142,7 @@ file->ReadAsync(
 using CloseCallback = std::function<void()>;
 
 // 异步关闭（必须提供回调）
-file->Close([]() {
+file->CloseAsync([]() {
     // 此时：
     //   1. 所有在途 I/O 操作已收到最终回调
     //   2. 底层文件句柄已关闭
@@ -158,7 +158,7 @@ if (file->is_open()) {
 
 **Close 语义**：
 
-- `Close(CloseCallback)` 是**异步非阻塞**的，投递关闭任务到 IO runner 后立即返回
+- `CloseAsync(CloseCallback)` 是**异步非阻塞**的，投递关闭任务到 IO runner 后立即返回
 - 回调在 **IO 线程**上触发，保证此时所有 in-flight 操作已排空、句柄已关闭
 - 调用者**必须**在 Close 回调中（或回调触发后）才能析构 `AsyncFile` 对象
 - 析构函数包含 `DCHECK` 断言，在 Debug 模式下检测未关闭就析构的错误用法
@@ -176,10 +176,10 @@ Windows 实现采用 **IOCP 回调排空** 策略保证 OVERLAPPED 内存安全�
 
 ```cpp
 // ✅ 正确：先 Close，在回调中析构
-file->Close([&]() { file.reset(); });
+file->CloseAsync([&]() { file.reset(); });
 
 // ✅ 正确：Close 后等待完成再析构
-file->Close([&]() { close_done.Signal(); });
+file->CloseAsync([&]() { close_done.Signal(); });
 close_done.Wait();  // 阻塞等待
 file.reset();        // 安全析构
 
@@ -300,7 +300,7 @@ read_done.Wait();
 
 // 6. 关闭（回调在 IO 线程触发，之后可安全析构）
 nei::WaitableEvent close_done;
-file->Close([&]() { close_done.Signal(); });
+file->CloseAsync([&]() { close_done.Signal(); });
 close_done.Wait();
 
 // 7. 清理（线程最后停止）
@@ -468,7 +468,7 @@ LOG(ERROR) << "AsyncFile read failed: code=" << static_cast<int>(error.code)
 ```cpp
 // ✅ 正确：Close 回调中安全析构
 nei::WaitableEvent close_done;
-file->Close([&]() { close_done.Signal(); });
+file->CloseAsync([&]() { close_done.Signal(); });
 close_done.Wait();           // 等待 Close 排空完成
 file.reset();                 // 安全析构
 io_thread.Stop();             // 停止 IO 线程
@@ -512,7 +512,7 @@ file->ReadAsync(buf, size, offset,
     });
 
 // Close 回调触发时所有读写回调已执行完毕
-file->Close([&]() {
+file->CloseAsync([&]() {
     // 安全析构或释放资源
     close_done.Signal();
 });

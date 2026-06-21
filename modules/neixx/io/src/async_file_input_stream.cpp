@@ -106,7 +106,7 @@ void AsyncFileInputStream::Close() {
   }
 
   if (file) {
-    file->Close(nullptr);
+    file->CloseAsync(nullptr);
   }
 }
 

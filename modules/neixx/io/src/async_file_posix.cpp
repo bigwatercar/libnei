@@ -250,7 +250,7 @@ class AsyncFilePosix::Impl final {
     }
   }
 
-  void Close(CloseCallback callback) {
+  void CloseAsync(CloseCallback callback) {
     // Publish close intent first so concurrent callers stop enqueueing work.
     close_requested_.store(true, std::memory_order_release);
 
@@ -937,8 +937,8 @@ void AsyncFilePosix::WriteAsync(scoped_refptr<IOBuffer> buf,
                     std::move(callback));
 }
 
-void AsyncFilePosix::Close(CloseCallback callback) {
-  impl_->Close(std::move(callback));
+void AsyncFilePosix::CloseAsync(CloseCallback callback) {
+  impl_->CloseAsync(std::move(callback));
 }
 
 bool AsyncFilePosix::is_open() const {

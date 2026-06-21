@@ -250,7 +250,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     }
   }
 
-  void Close(CloseCallback callback) {
+  void CloseAsync(CloseCallback callback) {
     if (!io_task_runner_) {
       if (callback) callback();
       return;
@@ -1194,8 +1194,8 @@ AsyncFileWin::StageCounters AsyncFileWin::GetStageCountersForTesting() {
   return out;
 }
 
-void AsyncFileWin::Close(CloseCallback callback) {
-  impl_->Close(std::move(callback));
+void AsyncFileWin::CloseAsync(CloseCallback callback) {
+  impl_->CloseAsync(std::move(callback));
 }
 
 bool AsyncFileWin::is_open() const {

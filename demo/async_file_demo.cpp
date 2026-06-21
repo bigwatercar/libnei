@@ -84,7 +84,7 @@ bool RunDemo(nei::AsyncFile& file,
   if (!write_done.TimedWait(std::chrono::seconds(10))) {
     std::cerr << "[demo] Timed out waiting for WriteAsync." << std::endl;
     nei::WaitableEvent close_ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
-    file.Close([&]() { close_ev.Signal(); });
+    file.CloseAsync([&]() { close_ev.Signal(); });
     close_ev.Wait();
     return false;
   }
@@ -95,7 +95,7 @@ bool RunDemo(nei::AsyncFile& file,
               << ", bytes_written="
               << bytes_written.load(std::memory_order_acquire) << std::endl;
     nei::WaitableEvent close_ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
-    file.Close([&]() { close_ev.Signal(); });
+    file.CloseAsync([&]() { close_ev.Signal(); });
     close_ev.Wait();
     return false;
   }
@@ -124,7 +124,7 @@ bool RunDemo(nei::AsyncFile& file,
   if (!read_done.TimedWait(std::chrono::seconds(10))) {
     std::cerr << "[demo] Timed out waiting for ReadAsync." << std::endl;
     nei::WaitableEvent close_ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
-    file.Close([&]() { close_ev.Signal(); });
+    file.CloseAsync([&]() { close_ev.Signal(); });
     close_ev.Wait();
     return false;
   }
@@ -135,7 +135,7 @@ bool RunDemo(nei::AsyncFile& file,
               << read_error.load(std::memory_order_acquire)
               << ", size=" << read_size << std::endl;
     nei::WaitableEvent close_ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
-    file.Close([&]() { close_ev.Signal(); });
+    file.CloseAsync([&]() { close_ev.Signal(); });
     close_ev.Wait();
     return false;
   }
@@ -143,7 +143,7 @@ bool RunDemo(nei::AsyncFile& file,
   std::cout << "[demo] Read back: " << read_text << std::endl;
 
   nei::WaitableEvent close_ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
-  file.Close([&]() { close_ev.Signal(); });
+  file.CloseAsync([&]() { close_ev.Signal(); });
   close_ev.Wait();
   return true;
 }

@@ -260,7 +260,7 @@ TEST(AsyncFileWinTest, LargeReadWriteCallbackDeterminismOnIoThread) {
           }
           if (!open_success || !open_error.ok()) {
             ok.store(false, std::memory_order_release);
-            file->Close([&]() { done.Signal(); });
+            file->CloseAsync([&]() { done.Signal(); });
             return;
           }
 
@@ -279,7 +279,7 @@ TEST(AsyncFileWinTest, LargeReadWriteCallbackDeterminismOnIoThread) {
                 if (!write_success || !write_error.ok() ||
                     bytes_written != payload.size()) {
                   ok.store(false, std::memory_order_release);
-                  file->Close([&]() { done.Signal(); });
+                  file->CloseAsync([&]() { done.Signal(); });
                   return;
                 }
 
@@ -300,12 +300,12 @@ TEST(AsyncFileWinTest, LargeReadWriteCallbackDeterminismOnIoThread) {
                           data != payload) {
                         ok.store(false, std::memory_order_release);
                       }
-                      file->Close([&]() { done.Signal(); });
+                      file->CloseAsync([&]() { done.Signal(); });
                     });
 
                 if (!read_accepted) {
                   ok.store(false, std::memory_order_release);
-                  file->Close([&]() { done.Signal(); });
+                  file->CloseAsync([&]() { done.Signal(); });
                   return;
                 }
                 if (read_called->load(std::memory_order_acquire)) {
@@ -316,7 +316,7 @@ TEST(AsyncFileWinTest, LargeReadWriteCallbackDeterminismOnIoThread) {
 
           if (!write_accepted) {
             ok.store(false, std::memory_order_release);
-            file->Close([&]() { done.Signal(); });
+            file->CloseAsync([&]() { done.Signal(); });
             return;
           }
           if (write_called->load(std::memory_order_acquire)) {
@@ -427,14 +427,14 @@ TEST(AsyncFileWinTest, RepeatedStressMaintainsCallbackThreadDeterminism) {
           }
           if (!open_success || !open_error.ok()) {
             ok.store(false, std::memory_order_release);
-            file->Close([&]() { done.Signal(); });
+            file->CloseAsync([&]() { done.Signal(); });
             return;
           }
 
           auto run_round = std::make_shared<std::function<void(int)>>();
           *run_round = [&, file, run_round](int round) mutable {
             if (round >= kRounds) {
-              file->Close([&]() { done.Signal(); });
+              file->CloseAsync([&]() { done.Signal(); });
               return;
             }
 
@@ -457,7 +457,7 @@ TEST(AsyncFileWinTest, RepeatedStressMaintainsCallbackThreadDeterminism) {
                   if (!write_success || !write_error.ok() ||
                       bytes_written != expected.size()) {
                     ok.store(false, std::memory_order_release);
-                    file->Close([&]() { done.Signal(); });
+                    file->CloseAsync([&]() { done.Signal(); });
                     return;
                   }
 
@@ -478,7 +478,7 @@ TEST(AsyncFileWinTest, RepeatedStressMaintainsCallbackThreadDeterminism) {
                         if (!read_success || !read_error.ok() ||
                             data != expected) {
                           ok.store(false, std::memory_order_release);
-                          file->Close([&]() { done.Signal(); });
+                          file->CloseAsync([&]() { done.Signal(); });
                           return;
                         }
                         (*run_round)(round + 1);
@@ -486,7 +486,7 @@ TEST(AsyncFileWinTest, RepeatedStressMaintainsCallbackThreadDeterminism) {
 
                   if (!read_accepted) {
                     ok.store(false, std::memory_order_release);
-                    file->Close([&]() { done.Signal(); });
+                    file->CloseAsync([&]() { done.Signal(); });
                     return;
                   }
                   if (read_called->load(std::memory_order_acquire)) {
@@ -497,7 +497,7 @@ TEST(AsyncFileWinTest, RepeatedStressMaintainsCallbackThreadDeterminism) {
 
             if (!write_accepted) {
               ok.store(false, std::memory_order_release);
-              file->Close([&]() { done.Signal(); });
+              file->CloseAsync([&]() { done.Signal(); });
               return;
             }
             if (write_called->load(std::memory_order_acquire)) {
@@ -635,7 +635,7 @@ TEST(AsyncFileWinTest, AppendModeAppendsIgnoringCallerOffsetInOrder) {
   ASSERT_TRUE(write2_ok.load(std::memory_order_acquire));
   ASSERT_EQ(write2_bytes.load(std::memory_order_acquire), payload2.size());
 
-  file->Close([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->CloseAsync([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 
   auto reader = std::make_shared<AsyncFileWin>(io_runner);
   WaitableEvent read_open_done(WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -675,7 +675,7 @@ TEST(AsyncFileWinTest, AppendModeAppendsIgnoringCallerOffsetInOrder) {
   ASSERT_TRUE(std::equal(payload2.begin(), payload2.end(),
                          all_data.begin() + static_cast<std::ptrdiff_t>(payload1.size())));
 
-  reader->Close([&]() { read_close_barrier.Signal(); });  ASSERT_TRUE(read_close_barrier.TimedWait(std::chrono::seconds(10)));
+  reader->CloseAsync([&]() { read_close_barrier.Signal(); });  ASSERT_TRUE(read_close_barrier.TimedWait(std::chrono::seconds(10)));
 
   background_thread.Stop();
   io_thread.Stop();
@@ -762,7 +762,7 @@ TEST(AsyncFileWinTest, ConcurrentAppendPreservesWholeWriteBlocks) {
   ASSERT_TRUE(writes_done.TimedWait(std::chrono::seconds(20)));
   ASSERT_TRUE(callbacks_ok.load(std::memory_order_acquire));
 
-  file->Close([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->CloseAsync([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 
   auto reader = std::make_shared<AsyncFileWin>(io_runner);
   WaitableEvent read_open_done(WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -815,7 +815,7 @@ TEST(AsyncFileWinTest, ConcurrentAppendPreservesWholeWriteBlocks) {
     EXPECT_EQ(block_counts[static_cast<std::size_t>(i)], kRoundsPerWriter);
   }
 
-  reader->Close([&]() { read_close_barrier.Signal(); });  ASSERT_TRUE(read_close_barrier.TimedWait(std::chrono::seconds(10)));
+  reader->CloseAsync([&]() { read_close_barrier.Signal(); });  ASSERT_TRUE(read_close_barrier.TimedWait(std::chrono::seconds(10)));
 
   background_thread.Stop();
   io_thread.Stop();
@@ -871,7 +871,7 @@ TEST(AsyncFileWinTest, FileReadParsesLinesWithAsyncLineReader) {
   ASSERT_TRUE(write_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(write_ok.load(std::memory_order_acquire));
 
-  writer->Close([&]() { write_close_barrier.Signal(); });  ASSERT_TRUE(write_close_barrier.TimedWait(std::chrono::seconds(10)));
+  writer->CloseAsync([&]() { write_close_barrier.Signal(); });  ASSERT_TRUE(write_close_barrier.TimedWait(std::chrono::seconds(10)));
 
   auto reader_file = std::make_shared<AsyncFileWin>(io_runner);
   WaitableEvent read_open_done(WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -908,7 +908,7 @@ TEST(AsyncFileWinTest, FileReadParsesLinesWithAsyncLineReader) {
   EXPECT_EQ(lines[3], "last_line");
 
   input_stream.Close();
-  reader_file->Close([&]() { read_close_barrier.Signal(); });  ASSERT_TRUE(read_close_barrier.TimedWait(std::chrono::seconds(10)));
+  reader_file->CloseAsync([&]() { read_close_barrier.Signal(); });  ASSERT_TRUE(read_close_barrier.TimedWait(std::chrono::seconds(10)));
 
   background_thread.Stop();
   io_thread.Stop();
@@ -1006,7 +1006,7 @@ TEST(AsyncFileWinTest, RaiiDestructionDoesNotHangAndDataIsFlushed) {
   std::memcpy(read_back.data(), rbuf->data(), payload.size());
   EXPECT_EQ(read_back, payload);
 
-  reader->Close([&]() { read_close_done.Signal(); });
+  reader->CloseAsync([&]() { read_close_done.Signal(); });
   ASSERT_TRUE(read_close_done.TimedWait(std::chrono::seconds(10)));
 
   background_thread.Stop();

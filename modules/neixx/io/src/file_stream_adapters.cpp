@@ -146,7 +146,7 @@ void FileInputStreamAdapter::CloseOnTarget() {
   }
   closed_ = true;
   if (file_) {
-    file_->Close(nullptr);
+    file_->CloseAsync(nullptr);
   }
 }
 
@@ -286,7 +286,7 @@ void FileOutputStreamAdapter::CloseOnTarget() {
   }
   closed_ = true;
   if (file_) {
-    file_->Close(nullptr);
+    file_->CloseAsync(nullptr);
   }
 }
 

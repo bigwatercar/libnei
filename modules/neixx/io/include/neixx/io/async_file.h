@@ -110,7 +110,7 @@ class NEI_API AsyncFile {
   // the IO thread after the handle is closed and all in-flight I/O
   // operations have been finalized.  Pass nullptr if no callback is
   // needed.
-  virtual void Close(CloseCallback callback) = 0;
+  virtual void CloseAsync(CloseCallback callback) = 0;
 
   virtual bool is_open() const = 0;
 };
