@@ -157,6 +157,11 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
   explicit PosixChildProcessCore(ChildProcessListener* listener)
       : listener_(listener) {}
 
+ private:
+  DECLARE_SEQUENCE_CHECKER(io_sequence_checker_);
+
+ public:
+
   ~PosixChildProcessCore() { Cleanup(); }
 
   bool Terminate(int /*exit_code*/, bool force) {
@@ -202,6 +207,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 
   bool Launch(const CommandLine& command_line,
               const ProcessLaunchOptions& options) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
     {
       std::lock_guard<std::mutex> lock(state_lock_);
       if (state_ == ProcessState::kRunning) {
@@ -836,7 +842,12 @@ class ChildProcessPlatformImpl final
       public internal::ChildProcessImplBase<ChildProcessPlatformImpl> {
  public:
   explicit ChildProcessPlatformImpl(scoped_refptr<ProcessService> process_service)
-      : Base(std::move(process_service)) {}
+      : Base(std::move(process_service)) {
+    // PlatformImpl is constructed on the caller's thread, but all
+    // *OnIoThread methods execute on the IO thread. Detach now so the
+    // first IO-thread call lazily rebinds.
+    DETACH_FROM_SEQUENCE(io_sequence_checker_);
+  }
 
   ~ChildProcessPlatformImpl() override { Base::Shutdown(); }
 
@@ -869,6 +880,7 @@ class ChildProcessPlatformImpl final
   bool LaunchOnIoThread(const CommandLine& command_line,
                        const ProcessLaunchOptions& options,
                        const scoped_refptr<TaskRunner>& io_runner) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
     stdout_proxy_->ResetBinding();
     stderr_proxy_->ResetBinding();
     stdin_proxy_->ResetBinding();
@@ -888,10 +900,12 @@ class ChildProcessPlatformImpl final
   }
 
   bool TerminateOnIoThread(int exit_code, bool force) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
     return core_ != nullptr && core_->Terminate(exit_code, force);
   }
 
   void ShutdownOnIoThread() {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
     stdout_proxy_->ResetBinding();
     stderr_proxy_->ResetBinding();
     stdin_proxy_->ResetBinding();
@@ -899,7 +913,8 @@ class ChildProcessPlatformImpl final
   }
 
  private:
-    using Base = internal::ChildProcessImplBase<ChildProcessPlatformImpl>;
+  DECLARE_SEQUENCE_CHECKER(io_sequence_checker_);
+  using Base = internal::ChildProcessImplBase<ChildProcessPlatformImpl>;
   std::unique_ptr<PosixChildProcessCore> core_;
 };
 

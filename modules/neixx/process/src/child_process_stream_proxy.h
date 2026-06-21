@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <neixx/common/sequence_checker.h>
 #include <neixx/io/async_stream.h>
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/weak_ptr.h>
@@ -84,6 +85,8 @@ class AsyncInputStreamProxy final : public AsyncInputStream {
   // operator bool() on a WeakPtr checks an atomic flag and is safe from any
   // thread; only operator->() / operator*() enforce thread affinity.
   WeakPtrFactory<AsyncInputStreamProxy> weak_factory_{this};
+
+  DECLARE_SEQUENCE_CHECKER(io_sequence_checker_);
 };
 
 // ---------------------------------------------------------------------------
@@ -113,6 +116,8 @@ class AsyncOutputStreamProxy final : public AsyncOutputStream {
   std::atomic<AsyncOutputStream*> target_{nullptr};
   scoped_refptr<TaskRunner> io_task_runner_;
   std::atomic<bool> closed_{false};
+
+  DECLARE_SEQUENCE_CHECKER(io_sequence_checker_);
 };
 
 }  // namespace internal

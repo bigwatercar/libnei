@@ -20,6 +20,7 @@
 
 #include <neixx/command_line/command_line.h>
 #include <neixx/common/location.h>
+#include <neixx/common/sequence_checker.h>
 #include <internal/pipe_stream_factory_internal.h>
 #include <neixx/strings/utf_string_conversions.h>
 #include <neixx/synchronization/waitable_event.h>
@@ -174,6 +175,11 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
       : listener_(listener),
         dispatch_state_(std::make_shared<DispatchState>()) {}
 
+ private:
+  DECLARE_SEQUENCE_CHECKER(io_sequence_checker_);
+
+ public:
+
   ~WinChildProcessCore() { Cleanup(); }
 
   bool Terminate(int exit_code, bool force) {
@@ -209,6 +215,7 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
 
   bool Launch(const CommandLine& command_line,
               const ProcessLaunchOptions& options) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
     Cleanup();
 
     MessagePumpForIO* pump = MessagePumpForIO::Current();
@@ -897,7 +904,12 @@ class ChildProcessPlatformImpl final
       public internal::ChildProcessImplBase<ChildProcessPlatformImpl> {
  public:
   explicit ChildProcessPlatformImpl(scoped_refptr<ProcessService> process_service)
-      : Base(std::move(process_service)) {}
+      : Base(std::move(process_service)) {
+    // PlatformImpl is constructed on the caller's thread, but all
+    // *OnIoThread methods execute on the IO thread. Detach now so the
+    // first IO-thread call lazily rebinds.
+    DETACH_FROM_SEQUENCE(io_sequence_checker_);
+  }
 
   ~ChildProcessPlatformImpl() override { Base::Shutdown(); }
 
@@ -930,6 +942,7 @@ class ChildProcessPlatformImpl final
   bool LaunchOnIoThread(const CommandLine& command_line,
                        const ProcessLaunchOptions& options,
                        const scoped_refptr<TaskRunner>& io_runner) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
     stdout_proxy_->ResetBinding();
     stderr_proxy_->ResetBinding();
     stdin_proxy_->ResetBinding();
@@ -949,10 +962,12 @@ class ChildProcessPlatformImpl final
   }
 
   bool TerminateOnIoThread(int exit_code, bool force) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
     return core_ != nullptr && core_->Terminate(exit_code, force);
   }
 
   void ShutdownOnIoThread() {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
     stdout_proxy_->ResetBinding();
     stderr_proxy_->ResetBinding();
     stdin_proxy_->ResetBinding();
@@ -960,7 +975,8 @@ class ChildProcessPlatformImpl final
   }
 
  private:
-    using Base = internal::ChildProcessImplBase<ChildProcessPlatformImpl>;
+  DECLARE_SEQUENCE_CHECKER(io_sequence_checker_);
+  using Base = internal::ChildProcessImplBase<ChildProcessPlatformImpl>;
   std::unique_ptr<WinChildProcessCore> core_;
 };
 

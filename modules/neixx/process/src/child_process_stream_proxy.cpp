@@ -4,6 +4,7 @@
 
 #include <nei/debug/check.h>
 #include <neixx/common/location.h>
+#include <neixx/common/sequence_checker.h>
 
 // Stream proxies capture WeakPtr in lambdas that hop between IO thread and
 // caller's thread.  The proxy uses atomics for its mutable state, so WeakPtr
@@ -45,7 +46,12 @@ namespace internal {
 //      A DrainableIOBuffer may be layered on top by callers that need virtual
 //      slice semantics over the returned bytes.
 
-AsyncInputStreamProxy::AsyncInputStreamProxy() = default;
+AsyncInputStreamProxy::AsyncInputStreamProxy() {
+  // Proxy is constructed on the caller's thread (typically via
+  // ChildProcessImplBase ctor), but Bind/ResetBinding execute on the
+  // IO thread. Detach now so the first Bind() call lazily rebinds.
+  DETACH_FROM_SEQUENCE(io_sequence_checker_);
+}
 
 AsyncInputStreamProxy::~AsyncInputStreamProxy() {
   Close();
@@ -54,6 +60,7 @@ AsyncInputStreamProxy::~AsyncInputStreamProxy() {
 void AsyncInputStreamProxy::Bind(AsyncInputStream* target,
                                  scoped_refptr<TaskRunner> io_task_runner) {
   // Precondition: called from the IO thread, before any ReadAsync.
+  DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
   DCHECK(target != nullptr);
   DCHECK(io_task_runner.get() != nullptr);
 
@@ -63,7 +70,7 @@ void AsyncInputStreamProxy::Bind(AsyncInputStream* target,
 }
 
 void AsyncInputStreamProxy::ResetBinding() {
-  // Precondition: called from the IO thread, after process exit signalled.
+  // Precondition: called from the IO thread, after process exit signalled.  DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);  DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
   target_.store(nullptr, std::memory_order_release);
   io_task_runner_.reset();
   target_task_runner_.reset();
@@ -190,7 +197,9 @@ void AsyncInputStreamProxy::Close() {
 //   - On completion, the callback fires on the IO thread (no second hop
 //     because write callers typically don't care which sequence they land on).
 
-AsyncOutputStreamProxy::AsyncOutputStreamProxy() = default;
+AsyncOutputStreamProxy::AsyncOutputStreamProxy() {
+  DETACH_FROM_SEQUENCE(io_sequence_checker_);
+}
 
 AsyncOutputStreamProxy::~AsyncOutputStreamProxy() {
   Close();
@@ -206,6 +215,7 @@ void AsyncOutputStreamProxy::Bind(AsyncOutputStream* target,
 }
 
 void AsyncOutputStreamProxy::ResetBinding() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
   target_.store(nullptr, std::memory_order_release);
   io_task_runner_.reset();
 }
