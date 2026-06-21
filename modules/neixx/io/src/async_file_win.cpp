@@ -1031,10 +1031,12 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     }
   }
 
+  void PostOpenCallback(OpenCallback callback,
+                        bool success,
+                        std::uint32_t error_code) {
     // Called from IO thread normally, but also from non-IO-thread close/error
     // fallback paths (CloseOnIoThread with force_sync, CancelAndSelfDestruct).
     // Therefore no DCHECK_CALLED_ON_VALID_THREAD here.
-    // redundant re-posting that delays close-race callback completion.
     if (!callback) {
       return;
     }
