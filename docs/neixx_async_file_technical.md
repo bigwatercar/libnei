@@ -152,17 +152,17 @@ file->CloseAsync([]() {
 
 // 检查文件状态
 if (file->is_open()) {
-    // 文件仍处于打开状态（Close 尚未完成）
+    // 文件仍处于打开状态（CloseAsync 尚未完成）
 }
 ```
 
-**Close 语义**：
+**CloseAsync 语义**：
 
 - `CloseAsync(CloseCallback)` 是**异步非阻塞**的，投递关闭任务到 IO runner 后立即返回
 - 回调在 **IO 线程**上触发，保证此时所有 in-flight 操作已排空、句柄已关闭
-- 调用者**必须**在 Close 回调中（或回调触发后）才能析构 `AsyncFile` 对象
+- 调用者**必须**在 CloseAsync 回调中（或回调触发后）才能析构 `AsyncFile` 对象
 - 析构函数包含 `DCHECK` 断言，在 Debug 模式下检测未关闭就析构的错误用法
-- `Close()` 后不应再发起新的读写操作（会立即收到 `kCanceled`）
+- `CloseAsync()` 后不应再发起新的读写操作（会立即收到 `kCanceled`）
 
 **Windows IOCP 关闭细节**：
 
@@ -175,16 +175,16 @@ Windows 实现采用 **IOCP 回调排空** 策略保证 OVERLAPPED 内存安全�
 **生命周期契约**：
 
 ```cpp
-// ✅ 正确：先 Close，在回调中析构
+// ✅ 正确：先 CloseAsync，在回调中析构
 file->CloseAsync([&]() { file.reset(); });
 
-// ✅ 正确：Close 后等待完成再析构
+// ✅ 正确：CloseAsync 后等待完成再析构
 file->CloseAsync([&]() { close_done.Signal(); });
 close_done.Wait();  // 阻塞等待
 file.reset();        // 安全析构
 
-// ❌ 错误：未 Close 直接析构 → Debug 下 DCHECK 触发
-// ❌ 错误：Close 后立即析构（回调尚未触发）→ DCHECK 触发
+// ❌ 错误：未 CloseAsync 直接析构 → Debug 下 DCHECK 触发
+// ❌ 错误：CloseAsync 后立即析构（回调尚未触发）→ DCHECK 触发
 ```
 
 ### 3.5 回调线程
@@ -392,7 +392,7 @@ LOG(ERROR) << "AsyncFile read failed: code=" << static_cast<int>(error.code)
 
 - I/O 引擎：同步 `pread(2)` / `pwrite(2)` 在后台线程上执行
 - 分块策略：`kMaxChunkBytes = 64KB`，大操作自动分块，使 close 可以在分块间隙介入
-- 取消语义：Close 路径 swap 走全部在途 context 并统一 `FailContext(ECANCELED)`，确保 close 返回后无回调遗漏
+- 取消语义：CloseAsync 路径 swap 走全部在途 context 并统一 `FailContext(ECANCELED)`，确保 close 返回后无回调遗漏
 - 上下文管理：`active_ios_` 使用 `shared_ptr<IOContext>` 持有在途操作，close 可安全取走所有权
 
 **线程**：
@@ -401,7 +401,7 @@ LOG(ERROR) << "AsyncFile read failed: code=" << static_cast<int>(error.code)
 |---|---|---|
 | IO 线程 | `io_task_runner` | 调度、回调派发、状态管理 |
 | 后台线程 | `background_runner` | 执行 `open` / `pread` / `pwrite` / `close` |
-| 调用线程 | 任意 | 发起 `ReadAsync` / `WriteAsync` / `Close` |
+| 调用线程 | 任意 | 发起 `ReadAsync` / `WriteAsync` / `CloseAsync` |
 
 ### 5.2 Windows (`AsyncFileWin`)
 
@@ -447,7 +447,7 @@ LOG(ERROR) << "AsyncFile read failed: code=" << static_cast<int>(error.code)
 │                 │                  │  Type::IO)    │                  │  Type::DEFAULT) │
 │ - ReadAsync()   │                  │               │                  │                 │
 │ - WriteAsync()  │                  │ - 状态管理    │                  │ - open()        │
-│ - Close()       │                  │ - 分块调度    │                  │ - pread/pwrite  │
+│ - CloseAsync()       │                  │ - 分块调度    │                  │ - pread/pwrite  │
 │                 │                  │ - 回调派发    │                  │ - close()       │
 └─────────────────┘     callback      └──────────────┘     callback      └─────────────────┘
                          (在 IO 线程)                     (在后台线程)
@@ -458,18 +458,18 @@ LOG(ERROR) << "AsyncFile read failed: code=" << static_cast<int>(error.code)
 1. **IO 线程必须存活**：所有读写和回调依赖 IO runner。在文件对象析构前 IO 线程不能停止
 2. **后台线程必须存活**：POSIX 的 `open`/`pread`/`pwrite`/`close` 在后台线程上执行。Windows 上 `open` 也在后台线程上执行（避免同步 `CreateFile` 阻塞 IO 线程）
 3. **回调线程一致**：所有用户回调始终在 IO 线程上触发，不会在调用线程或后台线程上同步返回
-4. **Close 回调触发后安全析构**：`CloseCallback` 在 IO 线程触发且 `state_ == kDisconnected`，此时可安全析构文件对象
-5. **Close 后不操作**：`Close()` 设置关闭标志后，后续的 `ReadAsync`/`WriteAsync` 会立即返回 `kCanceled`
+4. **CloseAsync 回调触发后安全析构**：`CloseCallback` 在 IO 线程触发且 `state_ == kDisconnected`，此时可安全析构文件对象
+5. **CloseAsync 后不操作**：`CloseAsync()` 设置关闭标志后，后续的 `ReadAsync`/`WriteAsync` 会立即返回 `kCanceled`
 
 ## 7. 最佳实践
 
 ### 7.1 线程生命周期
 
 ```cpp
-// ✅ 正确：Close 回调中安全析构
+// ✅ 正确：CloseAsync 回调中安全析构
 nei::WaitableEvent close_done;
 file->CloseAsync([&]() { close_done.Signal(); });
-close_done.Wait();           // 等待 Close 排空完成
+close_done.Wait();           // 等待 CloseAsync 排空完成
 file.reset();                 // 安全析构
 io_thread.Stop();             // 停止 IO 线程
 bg_thread.Stop();             // 停止后台线程
@@ -497,11 +497,11 @@ if (error.native_code == ERROR_FILE_NOT_FOUND) { ... }
 if (error.code == ErrorCode::kNotFound) { ... }
 ```
 
-### 7.4 Close Race 处理
+### 7.4 CloseAsync Race 处理
 
 ```cpp
-// Close 可能在任意时刻与读写并发发生。
-// 读写回调需要处理 kCanceled，Close 回调用于确认排空完成：
+// CloseAsync 可能在任意时刻与读写并发发生。
+// 读写回调需要处理 kCanceled，CloseAsync 回调用于确认排空完成：
 file->ReadAsync(buf, size, offset,
     [](bool success, std::size_t n, nei::AsyncFile::Error error) {
         if (error.code == nei::AsyncFile::ErrorCode::kCanceled) {
@@ -511,7 +511,7 @@ file->ReadAsync(buf, size, offset,
         // ... 处理正常完成或错误
     });
 
-// Close 回调触发时所有读写回调已执行完毕
+// CloseAsync 回调触发时所有读写回调已执行完毕
 file->CloseAsync([&]() {
     // 安全析构或释放资源
     close_done.Signal();
