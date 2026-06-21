@@ -19,6 +19,7 @@
 
 #include <nei/debug/check.h>
 #include <neixx/common/location.h>
+#include <neixx/common/thread_checker.h>
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/strings/utf_string_conversions.h>
@@ -141,6 +142,10 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   explicit Impl(scoped_refptr<TaskRunner> io_task_runner)
       : io_task_runner_(std::move(io_task_runner)) {
     DCHECK(io_task_runner_);
+    // Impl is constructed on the calling thread, but all *OnIoThread methods
+    // execute on the IO thread. Detach now so the first call from the IO
+    // thread lazily rebinds the checker to the correct physical thread.
+    DETACH_FROM_THREAD(io_thread_checker_);
   }
 
   ~Impl() override = default;
@@ -305,6 +310,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
                            OpenDisposition disposition,
                            const scoped_refptr<TaskRunner>& background_runner,
                            OpenCallback callback) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     if (!background_runner) {
       PostOpenCallback(std::move(callback), false,
                        static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER));
@@ -367,6 +373,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   void OnOpenCompletedOnIoThread(std::uint64_t open_id,
                                  HANDLE opened,
                                  DWORD open_error) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     OpenCallback callback;
 
     MessagePumpForIO* pump = MessagePumpForIO::Current();
@@ -437,6 +444,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   }
 
   void EnqueueOperationOnIoThread(PendingOperation op) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     if (!op.buffer) {
       if (op.type == IOContext::Type::kRead) {
         PostReadCallback(std::move(op.read_callback), false, 0,
@@ -468,6 +476,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   }
 
   void MaybeStartNextOperationOnIoThread() {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     std::shared_ptr<IOContext> context;
     std::uint32_t start_error = static_cast<std::uint32_t>(ERROR_SUCCESS);
     {
@@ -515,6 +524,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   }
 
   void IssueNextChunkOnIoThread(std::shared_ptr<IOContext> context) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     if (!context) {
       return;
     }
@@ -625,6 +635,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   void OnChunkCompletedOnIoThread(OVERLAPPED* overlapped,
                                   DWORD bytes_transferred,
                                   std::uint32_t error_code) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     std::shared_ptr<IOContext> context;
     {
       std::lock_guard<std::mutex> lock(lock_);
@@ -703,6 +714,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   }
 
   void OnIoSignalOnIoThread(NativeIOHandle handle) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     std::shared_ptr<IOContext> context;
     HANDLE file_snapshot = INVALID_HANDLE_VALUE;
     {
@@ -740,6 +752,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
                                    DWORD last_chunk_bytes,
                                    bool success,
                                    bool clear_active_slot) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     if (!context) {
       return;
     }
@@ -775,6 +788,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   }
 
   void MaybeCompleteCloseOnIoThread() {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     HANDLE to_close = INVALID_HANDLE_VALUE;
     bool should_finalize = false;
 
@@ -844,6 +858,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   }
 
   void FireCloseCallback() {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     CloseCallback cb;
     std::swap(cb, pending_close_callback_);
     if (cb) cb();
@@ -1016,10 +1031,9 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     }
   }
 
-  void PostOpenCallback(OpenCallback callback,
-                        bool success,
-                        std::uint32_t error_code) {
-    // All call sites are on the IO thread; deliver directly to avoid
+    // Called from IO thread normally, but also from non-IO-thread close/error
+    // fallback paths (CloseOnIoThread with force_sync, CancelAndSelfDestruct).
+    // Therefore no DCHECK_CALLED_ON_VALID_THREAD here.
     // redundant re-posting that delays close-race callback completion.
     if (!callback) {
       return;
@@ -1032,7 +1046,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
                         bool success,
                         std::size_t bytes_read,
                         std::uint32_t error_code) {
-    // All call sites are on the IO thread; deliver directly.
+    // Called from IO thread normally, but also from non-IO-thread close/error
+    // fallback paths. No DCHECK here.
     if (!callback) {
       return;
     }
@@ -1046,7 +1061,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
                          bool success,
                          std::size_t bytes_written,
                          std::uint32_t error_code) {
-    // All call sites are on the IO thread; deliver directly.
+    // Called from IO thread normally, but also from non-IO-thread close/error
+    // fallback paths. No DCHECK here.
     if (!callback) {
       return;
     }
@@ -1076,6 +1092,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   std::deque<PendingOperation> pending_operations_;
   std::shared_ptr<IOContext> active_io_;
   std::unordered_map<OVERLAPPED*, std::shared_ptr<IOContext>> pending_io_;
+  DECLARE_THREAD_CHECKER(io_thread_checker_);
   base::WeakPtrFactory<Impl> weak_factory_{this};
 };
 

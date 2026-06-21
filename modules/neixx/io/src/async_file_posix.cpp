@@ -19,6 +19,7 @@
 
 #include <nei/debug/check.h>
 #include <neixx/common/location.h>
+#include <neixx/common/thread_checker.h>
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/task/task_runner.h>
@@ -124,6 +125,10 @@ class AsyncFilePosix::Impl final {
   explicit Impl(scoped_refptr<TaskRunner> io_task_runner)
       : io_task_runner_(std::move(io_task_runner)) {
     DCHECK(io_task_runner_);
+    // Impl is constructed on the calling thread, but all *OnIoThread methods
+    // execute on the IO thread. Detach now so the first call from the IO
+    // thread lazily rebinds the checker to the correct physical thread.
+    DETACH_FROM_THREAD(io_thread_checker_);
   }
 
   ~Impl() {
@@ -278,6 +283,7 @@ class AsyncFilePosix::Impl final {
                            OpenDisposition disposition,
                            const scoped_refptr<TaskRunner>& background_runner,
                            OpenCallback callback) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     if (!background_runner) {
       PostOpenCallback(std::move(callback), false,
                        static_cast<std::uint32_t>(EINVAL));
@@ -376,6 +382,7 @@ class AsyncFilePosix::Impl final {
   void OnOpenCompletedOnIoThread(std::uint64_t open_request_id,
                                  int opened_fd,
                                  int open_error) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     OpenCallback callback;
     scoped_refptr<TaskRunner> background_runner_snapshot;
     {
@@ -418,6 +425,7 @@ class AsyncFilePosix::Impl final {
                            std::size_t bytes_to_read,
                            std::uint64_t offset,
                            ReadCallback callback) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     if (!buf) {
       PostReadCallback(std::move(callback), false, 0,
                        static_cast<std::uint32_t>(EINVAL));
@@ -455,6 +463,7 @@ class AsyncFilePosix::Impl final {
                             std::size_t bytes_to_write,
                             std::uint64_t offset,
                             WriteCallback callback) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     if (!buf) {
       PostWriteCallback(std::move(callback), false, 0,
                         static_cast<std::uint32_t>(EINVAL));
@@ -497,6 +506,7 @@ class AsyncFilePosix::Impl final {
                                        int* fd_snapshot,
                                        scoped_refptr<TaskRunner>* background_runner,
                                        std::uint32_t* error_code) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     DCHECK(context != nullptr);
     DCHECK(fd_snapshot != nullptr);
     DCHECK(background_runner != nullptr);
@@ -522,6 +532,7 @@ class AsyncFilePosix::Impl final {
   void DispatchChunkToBackground(std::shared_ptr<IOContext> context,
                                  int fd_snapshot,
                                  scoped_refptr<TaskRunner> background_runner) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     if (!context || !background_runner || !io_task_runner_) {
       return;
     }
@@ -642,12 +653,14 @@ class AsyncFilePosix::Impl final {
 
   void OnChunkCompletedOnIoThread(std::unique_ptr<IOContext> context,
                                   const ChunkResult& result) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     OnChunkCompletedOnIoThread(std::shared_ptr<IOContext>(std::move(context)),
                                result);
   }
 
   void OnChunkCompletedOnIoThread(std::shared_ptr<IOContext> context,
                                   const ChunkResult& result) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     if (!context) {
       return;
     }
@@ -728,10 +741,12 @@ class AsyncFilePosix::Impl final {
   }
 
   void SucceedContext(std::unique_ptr<IOContext> context) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     SucceedContext(std::shared_ptr<IOContext>(std::move(context)));
   }
 
   void SucceedContext(std::shared_ptr<IOContext> context) {
+    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     DCHECK(context);
     if (context->type == IOContext::Type::kRead) {
       SucceedReadContext(std::move(context));
@@ -743,6 +758,8 @@ class AsyncFilePosix::Impl final {
   }
 
   void FailContext(std::unique_ptr<IOContext> context, std::uint32_t error_code) {
+    // Called from IO thread normally, but also from CloseOnIoThread on
+    // arbitrary thread. No DCHECK here.
     FailContext(std::shared_ptr<IOContext>(std::move(context)), error_code);
   }
 
@@ -803,6 +820,8 @@ class AsyncFilePosix::Impl final {
   void PostOpenCallback(OpenCallback callback,
                         bool success,
                         std::uint32_t error_code) {
+    // Called from IO thread normally, but also from ~Impl() / Close() error
+    // fallback paths on arbitrary thread. No DCHECK here.
     if (!callback) {
       return;
     }
@@ -813,6 +832,8 @@ class AsyncFilePosix::Impl final {
                         bool success,
                         std::size_t bytes_read,
                         std::uint32_t error_code) {
+    // Called from IO thread normally, but also from ~Impl() / Close() error
+    // fallback paths on arbitrary thread. No DCHECK here.
     if (!callback) {
       return;
     }
@@ -824,6 +845,8 @@ class AsyncFilePosix::Impl final {
                          bool success,
                          std::size_t bytes_written,
                          std::uint32_t error_code) {
+    // Called from IO thread normally, but also from ~Impl() / Close() error
+    // fallback paths on arbitrary thread. No DCHECK here.
     if (!callback) {
       return;
     }
@@ -857,6 +880,7 @@ class AsyncFilePosix::Impl final {
   scoped_refptr<TaskRunner> background_runner_;
   OpenCallback pending_open_callback_;
   std::unordered_map<IOContext*, std::shared_ptr<IOContext>> active_ios_;
+  DECLARE_THREAD_CHECKER(io_thread_checker_);
   std::atomic<bool> close_requested_{false};
   base::WeakPtrFactory<Impl> weak_factory_{this};
 };
