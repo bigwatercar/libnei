@@ -2,7 +2,9 @@ target_sources(
   neixx
   PRIVATE include/neixx/common/at_exit.h
           include/neixx/common/location.h
+          include/neixx/common/sequence_checker.h
           include/neixx/common/singleton.h
+          include/neixx/common/thread_checker.h
           include/neixx/common/time.h
           include/neixx/common/time_source.h
           src/at_exit.cpp
