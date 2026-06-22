@@ -1,16 +1,15 @@
 /**
- * NEI vs spdlog - aligned micro-benchmark scaffold.
+ * NEI vs {fmt} vs spdlog - three-way micro-benchmark scaffold.
  *
  * Methodology (read before interpreting numbers):
- * - Memory: both libraries enqueue asynchronously; sink does only an atomic increment (no I/O, no
+ * - Memory: all libraries enqueue asynchronously; sink does only an atomic increment (no I/O, no
  *   full string retention). Timings include producer loop + flush that drains the async pipeline.
- * - File (async): both sides use async file logging; benchmark deletes target files before each run so
+ * - File (async): all sides use async file logging; benchmark deletes target files before each run so
  *   results are not skewed by append growth.
- * - File (per-call delivery): both sides use async logger + flush after each log call, so each iteration
- *   includes per-call delivery pressure on the async pipeline.
  * - Single-threaded producer; not a multi-writer contention test.
- * - spdlog uses fmt-style "{}" formatting; NEI uses printf-style "%" formatting - work split
- *   between caller formatting vs binary serialization differs by design.
+ * - NEI C printf: uses nei_llog with "%"-style formatting (serialization done by producer).
+ * - NEI {fmt} literal: uses fmt::format + nei_llog_literal (pre-formatted payload).
+ * - spdlog: uses "{}"-style formatting (fmt-based).
  */
 
 #include <atomic>
@@ -29,6 +28,8 @@
 #include <spdlog/sinks/base_sink.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/spdlog.h>
+
+#include <fmt/format.h>
 
 #include "nei/log/log.h"
 
@@ -487,8 +488,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  std::cout << "NEI vs spdlog - aligned benchmark scaffold\n";
-  std::cout << "==========================================\n";
+  std::cout << "NEI vs {fmt} vs spdlog - three-way benchmark\n";
+  std::cout << "=================================================\n";
   std::cout << "Output dir: " << out_dir << "\n";
   std::cout << "Memory:     " << kMemoryIters << " iters; sink = atomic++ only; time includes flush.\n";
   std::cout << "File async: " << kFileIters << " iters; async + file sink; both sides delete old files before run.\n";
@@ -515,6 +516,17 @@ int main(int argc, char **argv) {
 
   {
     const auto result = time_nei_memory_ms(
+          [] {
+            auto msg = fmt::format("test message {}", "test");
+            nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench",
+                             msg.data(), msg.size());
+          },
+          kMemoryIters);
+    print_stats("[NEI]  {fmt} literal simple", kMemoryIters, result.micros, result.stats);
+  }
+
+  {
+    const auto result = time_nei_memory_ms(
                   [] {
                     nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
                              NEI_L_INFO,
@@ -537,6 +549,17 @@ int main(int argc, char **argv) {
                     log->info("number={}, string={}, float={:.2f}", 42, "hello", 3.14);
                   },
                   kMemoryIters));
+
+  {
+    const auto result = time_nei_memory_ms(
+                  [] {
+                    auto msg = fmt::format("number={}, string={}, float={:.2f}", 42, "hello", 3.14);
+                    nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench",
+                                     msg.data(), msg.size());
+                  },
+                  kMemoryIters);
+    print_stats("[NEI]  {fmt} literal multi", kMemoryIters, result.micros, result.stats);
+  }
 
   {
     /**
@@ -661,6 +684,25 @@ int main(int argc, char **argv) {
         spd_multi);
     print_stats("[spdlog] file multi", kFileIters, us);
     print_file_size(spd_multi);
+  }
+
+  const std::string nei_fmt_multi = out_file(out_dir, "nei_cmp_fmt_multi.log");
+
+  {
+    const auto result = time_nei_file_ms(
+        [] {
+          auto msg = fmt::format("number={}, string={}, float={:.2f}", 42, "hello", 3.14);
+          nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench",
+                           msg.data(), msg.size());
+        },
+        kFileIters,
+        nei_fmt_multi.c_str());
+    if (result.micros < 0) {
+      std::cout << "[NEI] file {fmt} literal multi: failed to create sink\n\n";
+    } else {
+      print_stats("[NEI] file {fmt} literal multi", kFileIters, result.micros, result.stats);
+      print_file_size(nei_fmt_multi);
+    }
   }
 
   const std::string nei_lit = out_file(out_dir, "nei_cmp_literal.log");

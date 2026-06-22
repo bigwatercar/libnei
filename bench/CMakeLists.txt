@@ -1,7 +1,31 @@
 include(FetchContent)
 
+option(NEI_BENCHMARK_FMT
+       "Build log_bench with {fmt} for C vs fmt formatting comparison" ON
+)
 add_executable(log_bench log_bench.cpp)
 target_link_libraries(log_bench PRIVATE nei::all)
+if(NEI_BENCHMARK_FMT)
+  FetchContent_Declare(
+    fmt URL https://github.com/fmtlib/fmt/archive/refs/tags/11.1.3.zip
+               DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
+  set(FMT_INSTALL
+      OFF
+      CACHE BOOL "" FORCE
+  )
+  set(FMT_TEST
+      OFF
+      CACHE BOOL "" FORCE
+  )
+  set(FMT_DOC
+      OFF
+      CACHE BOOL "" FORCE
+  )
+  FetchContent_MakeAvailable(fmt)
+  target_link_libraries(log_bench PRIVATE fmt::fmt)
+  target_compile_definitions(log_bench PRIVATE NEI_BENCH_HAS_FMT=1)
+endif()
 
 add_executable(string_append_bench string_append_bench.cpp)
 target_link_libraries(string_append_bench PRIVATE nei::all)
@@ -44,7 +68,7 @@ if(NEI_BENCHMARK_SPDLOG)
   FetchContent_MakeAvailable(spdlog)
 
   add_executable(log_bench_compare log_bench_compare.cpp)
-  target_link_libraries(log_bench_compare PRIVATE nei::all spdlog::spdlog)
+  target_link_libraries(log_bench_compare PRIVATE nei::all spdlog::spdlog fmt::fmt)
 
   if(BUILD_TESTING AND NEI_ENABLE_LONG_BENCH_TESTS)
     add_test(NAME LogBenchCompareLong COMMAND log_bench_compare)

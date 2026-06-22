@@ -20,6 +20,10 @@
 
 #include "nei/log/log.h"
 
+#if NEI_BENCH_HAS_FMT
+  #include <fmt/format.h>
+#endif
+
 namespace {
 struct LogCollector {
   std::mutex mu;
@@ -355,6 +359,69 @@ int main(int argc, char **argv) {
     static const char body[] = "verbose literal body";
     nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", body, sizeof(body) - 1U);
   });
+
+#if NEI_BENCH_HAS_FMT
+  // ── C printf vs {fmt} formatting comparison ────────────────────────────
+  std::cout << "C printf vs {fmt} Formatting Comparison (Memory)\n";
+  std::cout << "================================================\n\n";
+
+  // Level-based: nei_llog (C printf) vs fmt::format + nei_llog_literal
+  run_log_benchmark("Log Info (C printf)", []() {
+    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
+             "number=%d, string=%s, float=%.2f", 42, "hello", 3.14);
+  });
+
+  run_log_benchmark("Log Info ({fmt} literal)", []() {
+    auto msg = fmt::format("number={}, string={}, float={:.2f}", 42, "hello", 3.14);
+    nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
+                     msg.data(), msg.size());
+  });
+
+  // Simple format string (less overhead skew)
+  run_log_benchmark("Log Info simple (C printf)", []() {
+    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
+             "test message %s", "test");
+  });
+
+  run_log_benchmark("Log Info simple ({fmt} literal)", []() {
+    auto msg = fmt::format("test message {}", "test");
+    nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
+                     msg.data(), msg.size());
+  });
+
+  // Verbose: nei_vlog (C printf) vs fmt::format + nei_vlog_literal
+  run_vlog_benchmark("Log Verbose (C printf)", []() {
+    nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark",
+             "verbose number=%d, string=%s", 42, "verbose");
+  });
+
+  run_vlog_benchmark("Log Verbose ({fmt} literal)", []() {
+    auto msg = fmt::format("verbose number={}, string={}", 42, "verbose");
+    nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark",
+                     msg.data(), msg.size());
+  });
+
+  // File-based comparison
+  std::cout << "C printf vs {fmt} Formatting Comparison (File)\n";
+  std::cout << "===============================================\n\n";
+
+  run_file_log_benchmark(
+      "File Log Info (C printf)",
+      []() {
+        nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
+                 "number=%d, string=%s, float=%.2f", 42, "hello", 3.14);
+      },
+      join_path(out_dir, "log_bench_c_printf.log"));
+
+  run_file_log_benchmark(
+      "File Log Info ({fmt} literal)",
+      []() {
+        auto msg = fmt::format("number={}, string={}, float={:.2f}", 42, "hello", 3.14);
+        nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
+                         msg.data(), msg.size());
+      },
+      join_path(out_dir, "log_bench_fmt_literal.log"));
+#endif // NEI_BENCH_HAS_FMT
 
   std::cout << "File-based Log Performance Benchmark (SSD)\n";
   std::cout << "=========================================\n\n";
