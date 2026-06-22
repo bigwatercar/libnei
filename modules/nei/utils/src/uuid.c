@@ -1,65 +1,12 @@
 #include <nei/utils/uuid.h>
-
-#include <stddef.h>
-#include <time.h>
-
-#if defined(_WIN32)
-#include <Windows.h>
-#include <bcrypt.h>
-#else
-#include <fcntl.h>
-#include <unistd.h>
-#endif
-
-static int nei_uuid_fill_random(uint8_t *out, size_t len) {
-#if defined(_WIN32)
-  if (BCryptGenRandom(NULL, out, (ULONG)len, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0) {
-    return NEI_UUID_OK_STRONG;
-  }
-#else
-  int fd = open("/dev/urandom", O_RDONLY);
-  if (fd >= 0) {
-    size_t done = 0U;
-    while (done < len) {
-      const ssize_t n = read(fd, out + done, len - done);
-      if (n <= 0) {
-        close(fd);
-        fd = -1;
-        break;
-      }
-      done += (size_t)n;
-    }
-    if (fd >= 0) {
-      close(fd);
-      return NEI_UUID_OK_STRONG;
-    }
-  }
-#endif
-
-  {
-    /* Fallback when OS entropy is unavailable. */
-    static uint64_t s_degraded_counter = 0ULL;
-    const uint64_t counter = ++s_degraded_counter;
-    uint64_t x = (uint64_t)time(NULL) ^ (uint64_t)clock() ^ (uintptr_t)out ^ ((uint64_t)len << 32U) ^ counter;
-    size_t i;
-    for (i = 0U; i < len; ++i) {
-      x ^= x >> 12U;
-      x ^= x << 25U;
-      x ^= x >> 27U;
-      x *= 2685821657736338717ULL;
-      out[i] = (uint8_t)(x & 0xFFU);
-    }
-  }
-
-  return NEI_UUID_OK_DEGRADED;
-}
+#include <nei/utils/random.h>
 
 int nei_uuid4_generate(uint8_t out_uuid[NEI_UUID_BINARY_SIZE]) {
   int rc;
   if (out_uuid == NULL) {
     return NEI_UUID_ERR_INVALID_ARG;
   }
-  rc = nei_uuid_fill_random(out_uuid, NEI_UUID_BINARY_SIZE);
+  rc = nei_random_buffer(out_uuid, NEI_UUID_BINARY_SIZE);
 
   out_uuid[6] = (uint8_t)((out_uuid[6] & 0x0FU) | 0x40U); /* version 4 */
   out_uuid[8] = (uint8_t)((out_uuid[8] & 0x3FU) | 0x80U); /* RFC 4122 variant */
