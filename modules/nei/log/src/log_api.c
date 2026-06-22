@@ -44,6 +44,26 @@ static nei_log_config_handle_t s_crash_config_handle = NEI_LOG_INVALID_CONFIG_HA
 static volatile sig_atomic_t s_in_crash_handler = 0;
 
 #if defined(_WIN32)
+
+/* Forward declarations for the Windows crash-handler helpers. */
+static int  _nei_log_win_printf(char *out, size_t out_cap, const char *fmt, ...);
+static void _nei_log_format_windows_stack_line(char *out, size_t out_cap, unsigned frame_index, void *frame);
+static LONG WINAPI _nei_log_unhandled_exception_filter(PEXCEPTION_POINTERS ex_info);
+
+/* Defined first so that even if the debug-help functions above fail to
+ * compile on older SDKs, the install entry-point is still available for
+ * the forward-reference in nei_log_install_crash_handler(). */
+static int _nei_log_install_crash_handler_impl(void) {
+  if (s_crash_handler_installed) {
+    return 0;
+  }
+  SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+  (void)SymInitialize(GetCurrentProcess(), NULL, TRUE);
+  (void)SetUnhandledExceptionFilter(_nei_log_unhandled_exception_filter);
+  s_crash_handler_installed = 1;
+  return 0;
+}
+
 static int _nei_log_win_printf(char *out, size_t out_cap, const char *fmt, ...) {
   va_list args;
   HRESULT hr;
@@ -98,7 +118,7 @@ static void _nei_log_format_windows_stack_line(char *out, size_t out_cap, unsign
   out[written] = '\0';
 }
 
-static LONG WINAPI _nei_log_unhandled_exception_filter(EXCEPTION_POINTERS *exception_info) {
+static LONG WINAPI _nei_log_unhandled_exception_filter(PEXCEPTION_POINTERS ex_info) {
   char line_buf[256];
   int line_len;
   void *frames[64];
@@ -107,12 +127,12 @@ static LONG WINAPI _nei_log_unhandled_exception_filter(EXCEPTION_POINTERS *excep
 
   s_in_crash_handler = 1;
 
-  if (exception_info != NULL && exception_info->ExceptionRecord != NULL) {
+  if (ex_info != NULL && ex_info->ExceptionRecord != NULL) {
     line_len = _nei_log_win_printf(line_buf,
                                    sizeof(line_buf),
                                    "[nei][crash] unhandled exception code=0x%08lX addr=%p",
-                                   (unsigned long)exception_info->ExceptionRecord->ExceptionCode,
-                                   exception_info->ExceptionRecord->ExceptionAddress);
+                                   (unsigned long)ex_info->ExceptionRecord->ExceptionCode,
+                                   ex_info->ExceptionRecord->ExceptionAddress);
   } else {
     line_len = _nei_log_win_printf(line_buf, sizeof(line_buf), "[nei][crash] unhandled exception");
   }
@@ -139,16 +159,6 @@ static LONG WINAPI _nei_log_unhandled_exception_filter(EXCEPTION_POINTERS *excep
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
-static int _nei_log_install_crash_handler_impl(void) {
-  if (s_crash_handler_installed) {
-    return 0;
-  }
-  SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
-  (void)SymInitialize(GetCurrentProcess(), NULL, TRUE);
-  (void)SetUnhandledExceptionFilter(_nei_log_unhandled_exception_filter);
-  s_crash_handler_installed = 1;
-  return 0;
-}
 #else
 static void _nei_log_posix_signal_handler(int sig) {
   char line_buf[256];
