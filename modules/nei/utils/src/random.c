@@ -18,6 +18,8 @@
  * fallback PRNG.
  * --------------------------------------------------------------------------- */
 static int nei_random_fill_bytes(void *out, size_t len) {
+  static uint64_t s_degraded_counter = 0ULL;
+
 #if defined(_WIN32)
   if (BCryptGenRandom(NULL, (PUCHAR)out, (ULONG)len,
                       BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0) {
@@ -45,7 +47,6 @@ static int nei_random_fill_bytes(void *out, size_t len) {
 
   /* Fallback: xorshift64* PRNG seeded with time + clock + pointer + counter. */
   {
-    static uint64_t s_degraded_counter = 0ULL;
     const uint64_t counter = ++s_degraded_counter;
     uint64_t x = (uint64_t)time(NULL) ^ (uint64_t)clock() ^ (uintptr_t)out ^
                  ((uint64_t)len << 32U) ^ counter;

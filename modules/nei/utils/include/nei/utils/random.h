@@ -5,6 +5,7 @@
 #include <nei/macros/nei_export.h>
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
