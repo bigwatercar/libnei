@@ -40,12 +40,12 @@ void PathService::RegisterProvider(PathProvider provider, int key_start,
   GetImpl().RegisterProvider(provider, key_start, key_end);
 }
 
-std::optional<std::filesystem::path> PathService::Get(int key) {
-  return GetImpl().Get(key);
+std::optional<std::filesystem::path> PathService::Get(PathKeys key) {
+  return GetImpl().Get(static_cast<int>(key));
 }
 
-void PathService::Override(int key, const std::filesystem::path &path) {
-  GetImpl().Override(key, path);
+void PathService::Override(PathKeys key, const std::filesystem::path &path) {
+  GetImpl().Override(static_cast<int>(key), path);
 }
 
 // =============================================================================

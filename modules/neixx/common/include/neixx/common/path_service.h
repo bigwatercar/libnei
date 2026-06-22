@@ -136,7 +136,7 @@ public:
    * @return The resolved path on success, or @c std::nullopt if no provider
    *         can handle the key or the path is unavailable on this platform.
    */
-  static std::optional<std::filesystem::path> Get(int key);
+  static std::optional<std::filesystem::path> Get(PathKeys key);
 
   /**
    * @brief Override the resolved value for a given key (intended for
@@ -149,7 +149,7 @@ public:
    * @param key   Path key to override.
    * @param path  New value for the key.
    */
-  static void Override(int key, const std::filesystem::path &path);
+  static void Override(PathKeys key, const std::filesystem::path &path);
 
   /** @brief Explicit destructor (required for Pimpl with @c unique_ptr). */
   ~PathService();
