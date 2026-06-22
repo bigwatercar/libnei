@@ -63,7 +63,7 @@ class TraceEventScope final {
     const std::int64_t duration_us = end_us - start_us_;
 
     TraceLog::GetInstance().AddEvent(
-        TraceEvent(category_, name_, thread_id_, start_us_, duration_us));
+        TraceEvent{category_, name_, thread_id_, start_us_, duration_us});
   }
 
   TraceEventScope(const TraceEventScope&) = delete;

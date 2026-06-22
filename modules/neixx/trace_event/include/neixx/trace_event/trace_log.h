@@ -38,26 +38,32 @@ namespace nei {
 // =============================================================================
 //
 // 使用 ph: 'X' (Complete Event) 格式, 包含开始时间戳和持续时间。
-// 相比 ph: 'B'/'E' 对, 单条 'X' 记录将 JSON 体积减少约 40%,
-// 且 chrome://tracing 原生支持嵌套层级火焰图渲染。
+// ★ 零拷贝设计: category 和 name 直接存储 TRACE_EVENT0 宏传入的
+//   字符串字面量指针。这些字面量位于可执行文件的只读数据段 (.rodata),
+//   生命周期与进程等长, 永不为悬垂指针。无需 strncpy。
 // =============================================================================
 struct NEI_API TraceEvent {
-  const char* category = nullptr;   // 事件类别 (TRACE_EVENT0 的第一个参数)
-  const char* name = nullptr;       // 事件名称   (TRACE_EVENT0 的第二个参数)
-  std::uint64_t thread_id = 0;      // 线程 ID (PlatformThread::CurrentId())
-  std::int64_t  timestamp_us = 0;   // 开始时间戳 (微秒, TimeTicks)
-  std::int64_t  duration_us = 0;    // 持续时间   (微秒)
+  const char*   category = nullptr;   // 字符串字面量指针 (.rodata)
+  const char*   name = nullptr;       // 字符串字面量指针 (.rodata)
+  std::uint64_t thread_id = 0;        // PlatformThread::CurrentId()
+  std::int64_t  timestamp_us = 0;     // 开始时间戳 (微秒)
+  std::int64_t  duration_us = 0;      // 持续时间   (微秒)
+};
 
-  // 预分配空间: 少量字符串拷贝存储, 避免 JSON 输出时再分配
-  static constexpr std::size_t kCategoryStorage = 32;
-  static constexpr std::size_t kNameStorage = 64;
-  char category_storage[kCategoryStorage] = {};
-  char name_storage[kNameStorage] = {};
+// =============================================================================
+// ThreadTraceBuffer — 每线程私有的带锁事件缓冲区
+// =============================================================================
+//
+// 每个工作线程持有一个独立的 ThreadTraceBuffer。
+// - 正常写入: 线程独占访问, mutex 无竞争 (同类线程不会同时写)
+// - Flush:    主线程对每个 buffer 加锁 → 提取事件 → 清空 → 解锁
+//   彻底消除 "主线程遍历 + 工作线程 push_back" 的并发修改 UB。
+// =============================================================================
+struct ThreadTraceBuffer {
+  std::mutex              mutex;
+  std::vector<TraceEvent> events;
 
-  TraceEvent() = default;
-
-  TraceEvent(const char* cat, const char* name,
-             std::uint64_t tid, std::int64_t ts_us, std::int64_t dur_us);
+  ThreadTraceBuffer() { events.reserve(256); }
 };
 
 // =============================================================================
@@ -79,40 +85,42 @@ class NEI_API TraceLog final {
   // 将已收集的所有线程事件输出为 chrome://tracing 兼容的 JSON 数组。
   // 输出格式: [{"name":"...","cat":"...","ph":"X","ts":...,"dur":...,"pid":0,"tid":...}, ...]
   //
-  // 收集过程:
-  //   1. 遍历注册表中所有活跃线程的 TraceBuffer
-  //   2. 将每个 Buffer 中的事件归集到统一列表
-  //   3. 按时间戳排序 (chrome://tracing 不强制排序, 但有利于阅读)
-  //   4. 输出为 JSON
+  // 收集过程 (线程安全):
+  //   1. 对注册表中每个 ThreadTraceBuffer 加锁
+  //   2. 提取事件到临时列表
+  //   3. 清空 Buffer, 解锁
+  //   4. 按时间戳排序
+  //   5. 输出为 JSON
   //
-  // 注意: Flush 时暂停收集新的 Trace 事件 (acquire 全局锁),
-  //        防止 Buffer 在遍历过程中被并发修改。
+  // 注意: 不依赖 g_trace_enabled 标志来防止并发修改 —— 改为对每个
+  //       Buffer 加锁提取, 彻底消除 "一边读一边写" 的数据竞争。
   void Flush(std::ostream& out);
 
   // 清除所有已收集的事件数据 (不改变 enabled 状态)
   void Clear();
 
-  // 注册当前线程的 TraceBuffer, 返回指向该 Buffer 的指针。
-  // 内部使用: TRACE_EVENT0 宏在首次打点时自动调用。
-  // 同一线程多次调用是幂等的。
-  std::vector<TraceEvent>* RegisterCurrentThread();
+  // 注册当前线程的 Buffer 到全局注册表, 返回裸指针。
+  // 首次打点时自动调用; 同一线程多次调用是幂等的。
+  ThreadTraceBuffer* RegisterCurrentThread();
 
   // 写入一条事件到当前线程的 Buffer。
-  // 内部使用: TraceEventScope 析构时调用。
-  // 仅当 g_trace_enabled 为 true 且 Buffer 有效时才写入。
   void AddEvent(TraceEvent event);
 
   TraceLog(const TraceLog&) = delete;
   TraceLog& operator=(const TraceLog&) = delete;
 
+  // 将 Buffer 加入/移出全局注册表 (由 TLS 机制调用)
+  void RegisterBuffer(std::unique_ptr<ThreadTraceBuffer> buf);
+  void UnregisterBuffer(ThreadTraceBuffer* buf);
+
  private:
   TraceLog() = default;
   ~TraceLog() = default;
 
-  // 各线程 Buffer 的轻量级注册表。
-  // 使用 mutex 保护 (仅在 SetEnabled/Flush 时加锁, 不在热路径上)
-  mutable std::mutex registry_lock_;
-  std::vector<std::vector<TraceEvent>*> thread_buffers_;
+  // 全局注册表: TraceLog 拥有所有 Buffer 内存。
+  // 线程通过裸指针访问 (指针在 TraceLog 存活期间始终有效)。
+  mutable std::mutex                              registry_lock_;
+  std::vector<std::unique_ptr<ThreadTraceBuffer>> thread_buffers_;
 };
 
 // =============================================================================
