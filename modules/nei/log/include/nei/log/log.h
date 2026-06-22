@@ -816,6 +816,77 @@ NEI_API int nei_log_rollback_unpublished_slot_for_test(uint64_t reserved_pos);
   } while (0)
 
 /**
+ * @brief Log a level-based message with a pre-formatted literal string (convenience macro)
+ * @param level @ref nei_log_level_e value
+ * @param message Pre-formatted message bytes
+ * @param length Message length in bytes
+ */
+#define NEI_LOG_LITERAL(level, message, length)                                                                        \
+  nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, level, __FILE__, __LINE__, NEI_FUNC, message, length)
+
+/**
+ * @brief Conditionally log a level-based message with a pre-formatted literal string (convenience macro)
+ * @param condition Expression evaluated once; log is emitted when non-zero
+ * @param level @ref nei_log_level_e value
+ * @param message Pre-formatted message bytes
+ * @param length Message length in bytes
+ */
+#define NEI_LOG_LITERAL_IF(condition, level, message, length)                                                          \
+  do {                                                                                                                 \
+    if (condition) {                                                                                                   \
+      NEI_LOG_LITERAL(level, message, length);                                                                         \
+    }                                                                                                                  \
+  } while (0)
+
+/**
+ * @brief Log a level-based message with a pre-formatted literal string to a specific config (convenience macro)
+ * @param config_handle @ref nei_log_config_handle_t target config handle
+ * @param level @ref nei_log_level_e value
+ * @param message Pre-formatted message bytes
+ * @param length Message length in bytes
+ */
+#define NEI_LOG_LITERAL_C(config_handle, level, message, length)                                                       \
+  nei_llog_literal(config_handle, level, __FILE__, __LINE__, NEI_FUNC, message, length)
+
+/**
+ * @brief Conditionally log a level-based message with a pre-formatted literal string to a specific config (convenience macro)
+ * @param condition Expression evaluated once; log is emitted when non-zero
+ * @param config_handle @ref nei_log_config_handle_t target config handle
+ * @param level @ref nei_log_level_e value
+ * @param message Pre-formatted message bytes
+ * @param length Message length in bytes
+ */
+#define NEI_LOG_LITERAL_C_IF(condition, config_handle, level, message, length)                                         \
+  do {                                                                                                                 \
+    if (condition) {                                                                                                   \
+      NEI_LOG_LITERAL_C(config_handle, level, message, length);                                                        \
+    }                                                                                                                  \
+  } while (0)
+
+/**
+ * @brief Log a VERBOSE message with a pre-formatted literal string (convenience macro)
+ * @param verbose Verbose sub-level (for finer-grained verbose output)
+ * @param message Pre-formatted message bytes
+ * @param length Message length in bytes
+ */
+#define NEI_LOG_VERBOSE_LITERAL(verbose, message, length)                                                              \
+  nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, verbose, __FILE__, __LINE__, NEI_FUNC, message, length)
+
+/**
+ * @brief Conditionally log a verbose message with a pre-formatted literal string (convenience macro)
+ * @param condition Expression evaluated once; log is emitted when non-zero
+ * @param verbose Verbose sub-level (for finer-grained verbose output)
+ * @param message Pre-formatted message bytes
+ * @param length Message length in bytes
+ */
+#define NEI_LOG_VERBOSE_LITERAL_IF(condition, verbose, message, length)                                                \
+  do {                                                                                                                 \
+    if (condition) {                                                                                                   \
+      nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, verbose, __FILE__, __LINE__, NEI_FUNC, message, length);         \
+    }                                                                                                                  \
+  } while (0)
+
+/**
  * @brief Log a TRACE message (convenience macro)
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
@@ -911,8 +982,16 @@ NEI_API int nei_log_rollback_unpublished_slot_for_test(uint64_t reserved_pos);
 #define NEI_LOG_C(config_handle, level, fmt, ...) ((void)(config_handle), (void)(level))
 #define NEI_LOG_C_IF(condition, config_handle, level, fmt, ...)                                                        \
   ((void)(condition), (void)(config_handle), (void)(level))
-#define NEI_LOG_VERBOSE(verbose, fmt, ...) void(0)
+#define NEI_LOG_VERBOSE(verbose, fmt, ...) ((void)(verbose))
 #define NEI_LOG_VERBOSE_IF(condition, verbose, fmt, ...) ((void)(condition))
+#define NEI_LOG_LITERAL(level, message, length) ((void)(level), (void)(message), (void)(length))
+#define NEI_LOG_LITERAL_IF(condition, level, message, length) ((void)(condition))
+#define NEI_LOG_LITERAL_C(config_handle, level, message, length)                                                       \
+  ((void)(config_handle), (void)(level), (void)(message), (void)(length))
+#define NEI_LOG_LITERAL_C_IF(condition, config_handle, level, message, length)                                         \
+  ((void)(condition), (void)(config_handle), (void)(level))
+#define NEI_LOG_VERBOSE_LITERAL(verbose, message, length) ((void)(verbose), (void)(message), (void)(length))
+#define NEI_LOG_VERBOSE_LITERAL_IF(condition, verbose, message, length) ((void)(condition))
 #define NEI_LOG_TRACE(fmt, ...) NEI_LOG(NEI_L_TRACE, fmt, ##__VA_ARGS__)
 #define NEI_LOG_TRACE_IF(condition, fmt, ...) ((void)(condition))
 #define NEI_LOG_DEBUG(fmt, ...) NEI_LOG(NEI_L_DEBUG, fmt, ##__VA_ARGS__)
