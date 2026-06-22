@@ -2,6 +2,7 @@
 
 #include <pthread.h>
 #include <sys/resource.h>
+#include <limits.h>
 #if defined(__linux__)
 #include <sys/syscall.h>
 #include <unistd.h>

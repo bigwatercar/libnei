@@ -18,7 +18,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-include(CTest)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
@@ -30,6 +29,11 @@ option(NEI_ENABLE_LONG_BENCH_TESTS
        "Enable long-running benchmark tests in CTest" OFF
 )
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+
+if(NEI_BUILD_TESTS)
+  include(CTest)
+endif()
+
 set(NEI_LOG_RING_SLOTS
     "256"
     CACHE STRING "Log MPSC ring slots (power of two)"
