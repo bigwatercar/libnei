@@ -1,5 +1,6 @@
 #include <neixx/task/sequence_manager.h>
 
+#include <algorithm>
 #include <memory>
 #include <atomic>
 #include <utility>
