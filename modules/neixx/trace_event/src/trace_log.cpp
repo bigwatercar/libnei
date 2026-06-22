@@ -66,9 +66,22 @@ ThreadTraceBuffer* GetOrCreateThreadBuffer() {
 // TraceLog
 // =============================================================================
 
+// LeakySingletonTraits 特化: 关机时清理内部 Buffer 数据, 但不 delete 外壳。
+// 这防止残存后台线程在 main() 结束后访问已析构的 TraceLog 导致段错误。
+template <>
+struct LeakySingletonTraits<TraceLog> {
+  static TraceLog* New() { return new TraceLog(); }
+  static void Delete(TraceLog* log) {
+    // 清理内部资源 (释放线程 Buffer 和事件数据)
+    log->Clear();
+    // 故意不 delete log: 外壳内存由 OS 在进程退出时回收。
+    // 若此处在 log 上调用 delete, 后续残存线程访问 GetInstance()
+    // 将触发 use-after-free 崩溃。
+  }
+};
+
 TraceLog& TraceLog::GetInstance() {
-  static TraceLog instance;
-  return instance;
+  return *Singleton<TraceLog, LeakySingletonTraits<TraceLog>>::GetInstance();
 }
 
 void TraceLog::SetEnabled(bool enabled) {

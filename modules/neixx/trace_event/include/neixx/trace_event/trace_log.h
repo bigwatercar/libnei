@@ -29,6 +29,7 @@
 #include <vector>
 
 #include <nei/macros/nei_export.h>
+#include <neixx/common/singleton.h>
 #include <neixx/common/time.h>
 
 namespace nei {
@@ -71,7 +72,11 @@ struct ThreadTraceBuffer {
 // =============================================================================
 class NEI_API TraceLog final {
  public:
-  // 获取全局单例 (线程安全, C++11 6.7/4)
+  // 获取全局单例。
+  // 使用 LeakySingletonTraits 防止关机崩溃 (Crash-on-Shutdown):
+  //   main() 结束后, 若残存后台线程仍在打点 TRACE_EVENT0,
+  //   访问已析构的 mutex 会导致段错误。Leaky 策略保证实例
+  //   内存永不释放, 仅通过 AtExit 回调清理内部 Buffer 数据。
   static TraceLog& GetInstance();
 
   // 开启/关闭全局 Trace 收集。
@@ -114,6 +119,9 @@ class NEI_API TraceLog final {
   void UnregisterBuffer(ThreadTraceBuffer* buf);
 
  private:
+  friend class Singleton<TraceLog, LeakySingletonTraits<TraceLog>>;
+  friend struct LeakySingletonTraits<TraceLog>;
+
   TraceLog() = default;
   ~TraceLog() = default;
 
