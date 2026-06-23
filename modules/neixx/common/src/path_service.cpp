@@ -6,19 +6,25 @@
 #include <neixx/common/path_service.h>
 #include "path_service_impl.h"
 
+#include <neixx/common/singleton.h>
+
 #include <climits>
 
 namespace nei {
 
 // =============================================================================
-// Meyers Singleton — thread-safe lazy initialization (C++11 guarantees).
-// Avoids the static-initialisation-order fiasco.
+// Singleton — using the project-wide Singleton infra with Leaky traits.
+// PathService is a system-level facility that may be queried during shutdown
+// (e.g. crash handler wants to resolve a dump path); Leaky prevents
+// use-after-free when cleanup order is indeterminate.
 // =============================================================================
 namespace {
 
+using PathServiceImplSingleton =
+    Singleton<PathService::Impl, LeakySingletonTraits<PathService::Impl>>;
+
 PathService::Impl &GetImpl() {
-  static PathService::Impl impl;
-  return impl;
+  return *PathServiceImplSingleton::GetInstance();
 }
 
 }  // namespace
