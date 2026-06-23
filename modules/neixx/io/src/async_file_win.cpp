@@ -25,6 +25,7 @@
 #include <neixx/strings/utf_string_conversions.h>
 #include <neixx/task/message_loop/message_pump_io.h>
 #include <neixx/task/task_runner.h>
+#include <neixx/trace_event/trace_event.h>
 #include <internal/async_file_error_code.h>
 
 namespace nei {
@@ -251,6 +252,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   }
 
   void CloseAsync(CloseCallback callback) {
+    TRACE_EVENT0("nei.io", "AsyncFileWin::Close");
     if (!io_task_runner_) {
       if (callback) callback();
       return;
@@ -287,6 +289,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
                      std::uint32_t bytes_transferred,
                      std::uint32_t error_code) override {
     g_iocp_completed.fetch_add(1, std::memory_order_relaxed);
+    TRACE_EVENT0("nei.io", "AsyncFileWin::OnIOCompleted");
 
     HANDLE file_snapshot = INVALID_HANDLE_VALUE;
     {
@@ -311,6 +314,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
                            const scoped_refptr<TaskRunner>& background_runner,
                            OpenCallback callback) {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
+    TRACE_EVENT0("nei.io", "AsyncFileWin::Open");
     if (!background_runner) {
       PostOpenCallback(std::move(callback), false,
                        static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER));
@@ -445,6 +449,10 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
   void EnqueueOperationOnIoThread(PendingOperation op) {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
+    TRACE_EVENT0("nei.io",
+                 op.type == IOContext::Type::kRead
+                     ? "AsyncFileWin::Read"
+                     : "AsyncFileWin::Write");
     if (!op.buffer) {
       if (op.type == IOContext::Type::kRead) {
         PostReadCallback(std::move(op.read_callback), false, 0,
@@ -525,6 +533,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
   void IssueNextChunkOnIoThread(std::shared_ptr<IOContext> context) {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
+    TRACE_EVENT0("nei.io", "AsyncFileWin::IssueChunk");
     if (!context) {
       return;
     }
@@ -789,6 +798,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
   void MaybeCompleteCloseOnIoThread() {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
+    TRACE_EVENT0("nei.io", "AsyncFileWin::CloseComplete");
     HANDLE to_close = INVALID_HANDLE_VALUE;
     bool should_finalize = false;
 

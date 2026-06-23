@@ -23,7 +23,9 @@
 #include <neixx/task/scoped_blocking_call.h>
 #include <neixx/task/sequence_manager.h>
 #include <neixx/task/task_observer.h>
+#include <neixx/task/task_traits.h>
 #include <neixx/threading/platform_thread.h>
+#include <neixx/trace_event/trace_event.h>
 
 namespace nei {
 namespace {
@@ -169,6 +171,8 @@ class WorkerThread final : public PlatformThread::Delegate {
   }
 
   void ThreadMain() override {
+    TRACE_EVENT_BEGIN("nei.scheduling", "WorkerThread");
+
     if (!name_.empty()) {
       PlatformThread::SetCurrentThreadName(name_);
     }
@@ -196,6 +200,7 @@ class WorkerThread final : public PlatformThread::Delegate {
         // Either Shutdown() was called or the idle reclaim timeout elapsed.
         // Restore to baseline before exiting so that OS resources are
         // released in a clean state.
+        TRACE_EVENT_END("nei.scheduling", "WorkerThread");
         RestoreBaseline();
         internal::SetCurrentBlockingCallback(nullptr);
         exit_event_.Signal();
@@ -249,6 +254,8 @@ class WorkerThread final : public PlatformThread::Delegate {
           // ----------------------------------------------------------------
 
           internal::RecordTaskExecutionStarted(task);
+
+          TRACE_EVENT0("nei.scheduling", "ThreadPool::RunTask");
 
           TaskObserver* observer =
               task_observer_ ? task_observer_->load(std::memory_order_acquire)

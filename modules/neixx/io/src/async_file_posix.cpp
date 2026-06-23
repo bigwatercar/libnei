@@ -23,6 +23,7 @@
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/task/task_runner.h>
+#include <neixx/trace_event/trace_event.h>
 #include <internal/async_file_error_code.h>
 
 namespace nei {
@@ -284,6 +285,7 @@ class AsyncFilePosix::Impl final {
                            const scoped_refptr<TaskRunner>& background_runner,
                            OpenCallback callback) {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
+    TRACE_EVENT0("nei.io", "AsyncFilePosix::Open");
     if (!background_runner) {
       PostOpenCallback(std::move(callback), false,
                        static_cast<std::uint32_t>(EINVAL));
@@ -426,6 +428,7 @@ class AsyncFilePosix::Impl final {
                            std::uint64_t offset,
                            ReadCallback callback) {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
+    TRACE_EVENT0("nei.io", "AsyncFilePosix::Read");
     if (!buf) {
       PostReadCallback(std::move(callback), false, 0,
                        static_cast<std::uint32_t>(EINVAL));
@@ -464,6 +467,7 @@ class AsyncFilePosix::Impl final {
                             std::uint64_t offset,
                             WriteCallback callback) {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
+    TRACE_EVENT0("nei.io", "AsyncFilePosix::Write");
     if (!buf) {
       PostWriteCallback(std::move(callback), false, 0,
                         static_cast<std::uint32_t>(EINVAL));
@@ -778,6 +782,7 @@ class AsyncFilePosix::Impl final {
   }
 
   void CloseOnIoThread(CloseCallback close_callback = nullptr) {
+    TRACE_EVENT0("nei.io", "AsyncFilePosix::Close");
     OpenCallback open_callback;
     int fd_to_close = -1;
     scoped_refptr<TaskRunner> background_runner_snapshot;

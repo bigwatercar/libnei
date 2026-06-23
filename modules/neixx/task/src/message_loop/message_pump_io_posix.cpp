@@ -22,6 +22,7 @@
 #include <neixx/synchronization/lock.h>
 #include <neixx/threading/platform_thread.h>
 #include <neixx/threading/thread_local_storage.h>
+#include <neixx/trace_event/trace_event.h>
 
 namespace nei {
 namespace {
@@ -441,19 +442,28 @@ void MessagePumpForIO::Run(Delegate* delegate) {
   const int run_depth = impl_->EnterRunLoopAndGetDepth(current_thread_id);
 
   while (impl_->IsRunLoopActive(run_depth)) {
-    if (delegate->DoWork()) {
-      continue;
+    {
+      TRACE_EVENT0("nei.message_pump", "MessagePumpForIO::DoWork");
+      if (delegate->DoWork()) {
+        continue;
+      }
     }
 
     Delegate::NextWorkInfo next_work_info;
-    if (delegate->DoDelayedWork(&next_work_info)) {
-      impl_->UpdateDelayedWorkFromDelegate(next_work_info);
-      continue;
+    {
+      TRACE_EVENT0("nei.message_pump", "MessagePumpForIO::DoDelayedWork");
+      if (delegate->DoDelayedWork(&next_work_info)) {
+        impl_->UpdateDelayedWorkFromDelegate(next_work_info);
+        continue;
+      }
     }
     impl_->UpdateDelayedWorkFromDelegate(next_work_info);
 
-    if (delegate->DoIdleWork()) {
-      continue;
+    {
+      TRACE_EVENT0("nei.message_pump", "MessagePumpForIO::DoIdleWork");
+      if (delegate->DoIdleWork()) {
+        continue;
+      }
     }
 
     if (!impl_->IsRunLoopActive(run_depth)) {

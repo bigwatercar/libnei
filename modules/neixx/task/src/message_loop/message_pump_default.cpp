@@ -7,6 +7,7 @@
 #include <neixx/synchronization/lock.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/threading/platform_thread.h>
+#include <neixx/trace_event/trace_event.h>
 
 namespace nei {
 
@@ -162,23 +163,32 @@ void MessagePumpDefault::Run(Delegate* delegate) {
   while (impl_->IsRunLoopActive(run_depth)) {
     // Run immediate work first. If tasks were executed, continue draining
     // without sleeping to maximize throughput.
-    if (delegate->DoWork()) {
-      continue;
+    {
+      TRACE_EVENT0("nei.message_pump", "MessagePumpDefault::DoWork");
+      if (delegate->DoWork()) {
+        continue;
+      }
     }
 
     // Delegate can return both delayed-work execution result and the next
     // delayed deadline. This allows pump-side wait calculations to reuse
     // delegate-side scheduling knowledge and reduce extra clock queries.
     Delegate::NextWorkInfo next_work_info;
-    if (delegate->DoDelayedWork(&next_work_info)) {
-      impl_->UpdateDelayedWorkFromDelegate(next_work_info);
-      continue;
+    {
+      TRACE_EVENT0("nei.message_pump", "MessagePumpDefault::DoDelayedWork");
+      if (delegate->DoDelayedWork(&next_work_info)) {
+        impl_->UpdateDelayedWorkFromDelegate(next_work_info);
+        continue;
+      }
     }
     impl_->UpdateDelayedWorkFromDelegate(next_work_info);
 
     // Run optional idle work when no immediate or delayed tasks are runnable.
-    if (delegate->DoIdleWork()) {
-      continue;
+    {
+      TRACE_EVENT0("nei.message_pump", "MessagePumpDefault::DoIdleWork");
+      if (delegate->DoIdleWork()) {
+        continue;
+      }
     }
 
     if (!impl_->IsRunLoopActive(run_depth)) {

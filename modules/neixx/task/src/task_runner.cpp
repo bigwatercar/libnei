@@ -6,6 +6,7 @@
 
 #include <neixx/task/internal/task_tracing.h>
 #include <neixx/task/internal/task_queue.h>
+#include <neixx/trace_event/trace_event.h>
 
 namespace nei {
 namespace {
@@ -40,6 +41,7 @@ class TaskRunnerImpl final : public TaskRunner {
                         const TaskTraits& traits,
                         OnceClosure task,
                         TimeDelta delay) {
+    TRACE_EVENT0("nei.scheduling", "TaskRunner::PostTask");
     internal::TaskQueue* queue = task_queue_.get();
     if (queue == nullptr) {
       internal::RecordWeakPtrExpiredPost();

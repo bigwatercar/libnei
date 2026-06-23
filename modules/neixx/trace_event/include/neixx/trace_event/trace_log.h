@@ -38,17 +38,22 @@ namespace nei {
 // TraceEvent — 单条 Trace 事件记录
 // =============================================================================
 //
-// 使用 ph: 'X' (Complete Event) 格式, 包含开始时间戳和持续时间。
-// ★ 零拷贝设计: category 和 name 直接存储 TRACE_EVENT0 宏传入的
-//   字符串字面量指针。这些字面量位于可执行文件的只读数据段 (.rodata),
-//   生命周期与进程等长, 永不为悬垂指针。无需 strncpy。
+// 支持 chrome://tracing 的四种事件阶段 (phase):
+//   'X' — Complete Event  (TRACE_EVENT0),        带 duration_us
+//   'B' — Begin Event     (TRACE_EVENT_BEGIN),    duration_us = 0
+//   'E' — End Event       (TRACE_EVENT_END),      duration_us = 0
+//   'I' — Instant Event   (TRACE_EVENT_INSTANT),  duration_us = 0
+//
+// ★ 零拷贝设计: category 和 name 直接存储宏传入的字符串字面量指针。
+//   这些字面量位于可执行文件的只读数据段 (.rodata), 生命周期与进程等长。
 // =============================================================================
 struct NEI_API TraceEvent {
   const char*   category = nullptr;   // 字符串字面量指针 (.rodata)
   const char*   name = nullptr;       // 字符串字面量指针 (.rodata)
+  char          phase = 'X';          // 事件阶段: 'X' / 'B' / 'E' / 'I'
   std::uint64_t thread_id = 0;        // PlatformThread::CurrentId()
-  std::int64_t  timestamp_us = 0;     // 开始时间戳 (微秒)
-  std::int64_t  duration_us = 0;      // 持续时间   (微秒)
+  std::int64_t  timestamp_us = 0;     // 时间戳 (微秒)
+  std::int64_t  duration_us = 0;      // 持续时间 (微秒), 仅 ph:'X' 有效
 };
 
 // =============================================================================

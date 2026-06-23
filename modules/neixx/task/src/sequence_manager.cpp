@@ -10,6 +10,7 @@
 #include <neixx/synchronization/lock.h>
 #include <neixx/task/internal/task.h>
 #include <neixx/task/internal/task_queue.h>
+#include <neixx/trace_event/trace_event.h>
 #include <neixx/task/internal/task_tracing.h>
 #include <neixx/task/message_loop/message_pump_default.h>
 #include <neixx/threading/thread_local_storage.h>
@@ -266,6 +267,7 @@ class SequenceManager::Impl {
           if (tracing_enabled) {
             internal::RecordTaskExecutionStarted(task, batch_now);
           }
+          TRACE_EVENT0("nei.scheduling", "SequenceManager::RunTask");
           std::move(task.task).Run();
           if (tracing_enabled) {
             internal::RecordTaskExecutionCompleted();
@@ -289,6 +291,7 @@ class SequenceManager::Impl {
       if (tracing_enabled) {
         internal::RecordTaskExecutionStarted(task);
       }
+      TRACE_EVENT0("nei.scheduling", "SequenceManager::RunTask");
       std::move(task.task).Run();
       if (tracing_enabled) {
         internal::RecordTaskExecutionCompleted();

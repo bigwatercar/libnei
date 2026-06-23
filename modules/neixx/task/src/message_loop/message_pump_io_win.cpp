@@ -18,6 +18,7 @@
 #include <neixx/synchronization/lock.h>
 #include <neixx/threading/platform_thread.h>
 #include <neixx/threading/thread_local_storage.h>
+#include <neixx/trace_event/trace_event.h>
 
 namespace nei {
 namespace {
@@ -419,20 +420,29 @@ void MessagePumpForIO::Run(Delegate* delegate) {
 
   while (impl_->IsRunLoopActive(run_depth)) {
     g_do_work_calls.fetch_add(1, std::memory_order_relaxed);
-    if (delegate->DoWork()) {
-      g_do_work_consumed.fetch_add(1, std::memory_order_relaxed);
-      continue;
+    {
+      TRACE_EVENT0("nei.message_pump", "MessagePumpForIO::DoWork");
+      if (delegate->DoWork()) {
+        g_do_work_consumed.fetch_add(1, std::memory_order_relaxed);
+        continue;
+      }
     }
 
     Delegate::NextWorkInfo next_work_info;
-    if (delegate->DoDelayedWork(&next_work_info)) {
-      impl_->UpdateDelayedWorkFromDelegate(next_work_info);
-      continue;
+    {
+      TRACE_EVENT0("nei.message_pump", "MessagePumpForIO::DoDelayedWork");
+      if (delegate->DoDelayedWork(&next_work_info)) {
+        impl_->UpdateDelayedWorkFromDelegate(next_work_info);
+        continue;
+      }
     }
     impl_->UpdateDelayedWorkFromDelegate(next_work_info);
 
-    if (delegate->DoIdleWork()) {
-      continue;
+    {
+      TRACE_EVENT0("nei.message_pump", "MessagePumpForIO::DoIdleWork");
+      if (delegate->DoIdleWork()) {
+        continue;
+      }
     }
 
     if (!impl_->IsRunLoopActive(run_depth)) {

@@ -150,16 +150,30 @@ void TraceLog::Flush(std::ostream& out) {
               return a.timestamp_us < b.timestamp_us;
             });
 
-  // 输出 JSON 数组
+  // 输出 JSON 数组 (按 phase 输出不同字段)
+  //   'X' (Complete):  ph, ts, dur
+  //   'B' (Begin):     ph, ts
+  //   'E' (End):       ph, ts
+  //   'I' (Instant):   ph, ts, s="t"
   out << "[\n";
   for (std::size_t i = 0; i < all_events.size(); ++i) {
     const TraceEvent& e = all_events[i];
     out << "{\"name\":\"" << e.name
         << "\",\"cat\":\"" << e.category
-        << "\",\"ph\":\"X\""
-        << ",\"ts\":" << e.timestamp_us
-        << ",\"dur\":" << e.duration_us
-        << ",\"pid\":0"
+        << "\",\"ph\":\"" << e.phase << "\"";
+
+    out << ",\"ts\":" << e.timestamp_us;
+
+    if (e.phase == 'X') {
+      // Complete Event: 包含持续时间
+      out << ",\"dur\":" << e.duration_us;
+    } else if (e.phase == 'I') {
+      // Instant Event: 标记为线程级 (scope: thread)
+      out << ",\"s\":\"t\"";
+    }
+    // B / E 事件: 无额外字段
+
+    out << ",\"pid\":0"
         << ",\"tid\":" << e.thread_id
         << "}";
     if (i + 1 < all_events.size()) out << ",\n";
@@ -179,12 +193,12 @@ void TraceLog::Clear() {
 }
 
 // =============================================================================
-// TraceEventScope 辅助
+// internal::GetCurrentThreadId
 // =============================================================================
 
 namespace internal {
 
-std::uint64_t TraceEventScope::GetCurrentThreadId() {
+std::uint64_t GetCurrentThreadId() {
   return static_cast<std::uint64_t>(PlatformThread::CurrentId());
 }
 

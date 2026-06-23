@@ -29,6 +29,7 @@ option(NEI_ENABLE_LONG_BENCH_TESTS
        "Enable long-running benchmark tests in CTest" OFF
 )
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+option(NEI_ENABLE_TRACE_EVENTS "Enable trace event instrumentation" ON)
 
 if(NEI_BUILD_TESTS)
   include(CTest)
