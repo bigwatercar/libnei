@@ -474,7 +474,10 @@ NEI_API nei_log_default_file_sink_options_st nei_log_default_file_sink_options(v
 /**
  * @brief Create a built-in file sink.
  *
- * @param[in] filename Output file path (opened in append-binary mode).
+ * @param[in] filename_utf8 Output file path in UTF-8 encoding.
+ *            Opened in append-binary mode.  On Windows the path is
+ *            internally converted to UTF-16 before calling @c _wfsopen;
+ *            on POSIX systems it is passed directly to @c fopen.
  * @param[in] options Sink options. Pass NULL to use all built-in defaults
  *            (flush_interval=256, file_buffer_bytes=1 MiB, write_batch_bytes=64 KiB,
  *            rotation disabled). Use @ref nei_log_default_file_sink_options as a
@@ -492,7 +495,7 @@ NEI_API nei_log_default_file_sink_options_st nei_log_default_file_sink_options(v
  * `filename.1`, older backups are shifted up by one index, and the oldest file
  * beyond @c max_backup_files is removed.
  */
-NEI_API nei_log_sink_st *nei_log_create_default_file_sink(const char *filename,
+NEI_API nei_log_sink_st *nei_log_create_default_file_sink(const char *filename_utf8,
                                                           const nei_log_default_file_sink_options_st *options);
 
 /**

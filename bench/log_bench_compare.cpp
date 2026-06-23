@@ -31,6 +31,10 @@
 
 #include <fmt/format.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "nei/log/log.h"
 
 #ifdef _WIN32
@@ -113,15 +117,23 @@ bool ensure_out_dir(const std::string &out_dir) {
     return false;
   }
 #ifdef _WIN32
-  if (_mkdir(out_dir.c_str()) == 0 || errno == EEXIST) {
-    return true;
-  }
+  /* out_dir is UTF-8; convert to UTF-16 for CreateDirectoryW. */
+  const int wlen = MultiByteToWideChar(CP_UTF8, 0, out_dir.c_str(), -1, NULL, 0);
+  if (wlen <= 0) return false;
+  wchar_t *wdir = (wchar_t *)malloc((size_t)wlen * sizeof(wchar_t));
+  if (wdir == NULL) return false;
+  MultiByteToWideChar(CP_UTF8, 0, out_dir.c_str(), -1, wdir, wlen);
+  const BOOL ok = CreateDirectoryW(wdir, NULL);
+  const DWORD err = GetLastError();
+  free(wdir);
+  if (ok || err == ERROR_ALREADY_EXISTS) return true;
+  return false;
 #else
   if (mkdir(out_dir.c_str(), 0755) == 0 || errno == EEXIST) {
     return true;
   }
-#endif
   return false;
+#endif
 }
 
 std::string out_file(const std::string &out_dir, const char *name) {
@@ -482,7 +494,31 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+#ifdef _WIN32
+  /* argv[1] is in the system ANSI code page on Windows MSVC.
+   * Convert to UTF-8 so _nei_log_create_default_file_sink receives a
+   * properly encoded path. */
+  const int wlen = MultiByteToWideChar(CP_ACP, 0, argv[1], -1, NULL, 0);
+  std::string out_dir;
+  if (wlen > 0) {
+    wchar_t *wbuf = (wchar_t *)malloc((size_t)wlen * sizeof(wchar_t));
+    if (wbuf != NULL) {
+      MultiByteToWideChar(CP_ACP, 0, argv[1], -1, wbuf, wlen);
+      const int u8len = WideCharToMultiByte(CP_UTF8, 0, wbuf, wlen, NULL, 0, NULL, NULL);
+      if (u8len > 0) {
+        out_dir.resize((size_t)u8len - 1U, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, wbuf, wlen, &out_dir[0], u8len, NULL, NULL);
+      }
+      free(wbuf);
+    }
+  }
+  if (out_dir.empty()) {
+    /* Fallback: assume ASCII-only path (ACP = UTF-8 for ASCII subset). */
+    out_dir = argv[1];
+  }
+#else
   const std::string out_dir = argv[1];
+#endif
   if (!ensure_out_dir(out_dir)) {
     std::cerr << "Failed to create output dir: " << out_dir << "\n";
     return 1;

@@ -72,15 +72,65 @@ static int _nei_log_file_writev_all_fd(int fd, const char *message, size_t lengt
 }
 #endif
 
-static FILE *_nei_log_open_default_file_sink_file(const char *filename) {
+#if defined(_WIN32)
+/* ── UTF-8 file-system helpers for Windows ──────────────────────────── */
+
+static wchar_t *_nei_log_utf8_to_utf16(const char *utf8) {
+  const int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
+  if (wlen <= 0) return NULL;
+  wchar_t *wbuf = (wchar_t *)malloc((size_t)wlen * sizeof(wchar_t));
+  if (wbuf == NULL) return NULL;
+  if (MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wbuf, wlen) != wlen) {
+    free(wbuf);
+    return NULL;
+  }
+  return wbuf;
+}
+
+static int _nei_log_remove_utf8(const char *path_utf8) {
+  wchar_t *w = _nei_log_utf8_to_utf16(path_utf8);
+  if (w == NULL) return -1;
+  const BOOL ok = DeleteFileW(w);
+  /* Also try RemoveDirectoryW in case path points to a directory. */
+  if (!ok) (void)RemoveDirectoryW(w);
+  free(w);
+  return ok ? 0 : -1;
+}
+
+static int _nei_log_rename_utf8(const char *old_utf8, const char *new_utf8) {
+  wchar_t *wo = _nei_log_utf8_to_utf16(old_utf8);
+  wchar_t *wn = _nei_log_utf8_to_utf16(new_utf8);
+  if (wo == NULL || wn == NULL) {
+    free(wo);
+    free(wn);
+    return -1;
+  }
+  const BOOL ok = MoveFileW(wo, wn);
+  free(wo);
+  free(wn);
+  return ok ? 0 : -1;
+}
+#else
+#define _nei_log_remove_utf8(path)  remove(path)
+#define _nei_log_rename_utf8(old, new) rename(old, new)
+#endif
+
+static FILE *_nei_log_open_default_file_sink_file(const char *filename_utf8) {
   FILE *fp = NULL;
-  if (filename == NULL || filename[0] == '\0') {
+  if (filename_utf8 == NULL || filename_utf8[0] == '\0') {
     return NULL;
   }
 #if defined(_WIN32)
-  fp = _fsopen(filename, "ab", _SH_DENYWR);
+  {
+    wchar_t *wbuf = _nei_log_utf8_to_utf16(filename_utf8);
+    if (wbuf == NULL) {
+      return NULL;
+    }
+    fp = _wfsopen(wbuf, L"ab", _SH_DENYWR);
+    free(wbuf);
+  }
 #else
-  fp = fopen(filename, "ab");
+  fp = fopen(filename_utf8, "ab");
 #endif
   return fp;
 }
@@ -121,15 +171,15 @@ static char *_nei_log_file_sink_dup_filename(const char *filename) {
   return copy;
 }
 
-static int _nei_log_file_sink_build_rotated_path(const char *filename,
+static int _nei_log_file_sink_build_rotated_path(const char *filename_utf8,
                                                  uint32_t index,
                                                  char *out,
                                                  size_t out_cap) {
   int written;
-  if (filename == NULL || out == NULL || out_cap == 0U) {
+  if (filename_utf8 == NULL || out == NULL || out_cap == 0U) {
     return -1;
   }
-  written = snprintf(out, out_cap, "%s.%u", filename, (unsigned)index);
+  written = snprintf(out, out_cap, "%s.%u", filename_utf8, (unsigned)index);
   if (written < 0 || (size_t)written >= out_cap) {
     return -1;
   }
@@ -163,7 +213,7 @@ static int _nei_log_file_sink_rotate(nei_log_default_file_sink_ctx_st *ctx) {
   }
 
   if (_nei_log_file_sink_build_rotated_path(ctx->filename, ctx->max_backup_files, dst_path, path_cap) == 0) {
-    (void)remove(dst_path);
+    (void)_nei_log_remove_utf8(dst_path);
   }
 
   for (index = ctx->max_backup_files; index > 1U; --index) {
@@ -171,13 +221,13 @@ static int _nei_log_file_sink_rotate(nei_log_default_file_sink_ctx_st *ctx) {
         _nei_log_file_sink_build_rotated_path(ctx->filename, index, dst_path, path_cap) != 0) {
       continue;
     }
-    (void)remove(dst_path);
-    (void)rename(src_path, dst_path);
+    (void)_nei_log_remove_utf8(dst_path);
+    (void)_nei_log_rename_utf8(src_path, dst_path);
   }
 
   if (_nei_log_file_sink_build_rotated_path(ctx->filename, 1U, dst_path, path_cap) == 0) {
-    (void)remove(dst_path);
-    (void)rename(ctx->filename, dst_path);
+    (void)_nei_log_remove_utf8(dst_path);
+    (void)_nei_log_rename_utf8(ctx->filename, dst_path);
   }
 
   free(src_path);
@@ -491,7 +541,7 @@ nei_log_default_file_sink_options_st nei_log_default_file_sink_options(void) {
   return opts;
 }
 
-nei_log_sink_st *nei_log_create_default_file_sink(const char *filename,
+nei_log_sink_st *nei_log_create_default_file_sink(const char *filename_utf8,
                                                   const nei_log_default_file_sink_options_st *options) {
   nei_log_sink_st *sink = NULL;
   nei_log_default_file_sink_ctx_st *ctx = NULL;
@@ -502,7 +552,7 @@ nei_log_sink_st *nei_log_create_default_file_sink(const char *filename,
   size_t max_file_bytes = 0U;
   uint32_t max_backup_files = 0U;
 
-  if (filename == NULL || filename[0] == '\0') {
+  if (filename_utf8 == NULL || filename_utf8[0] == '\0') {
     return NULL;
   }
 
@@ -518,7 +568,7 @@ nei_log_sink_st *nei_log_create_default_file_sink(const char *filename,
     write_batch_bytes = _NEI_LOG_DEFAULT_WRITE_BATCH_BYTES;
   }
 
-  fp = _nei_log_open_default_file_sink_file(filename);
+  fp = _nei_log_open_default_file_sink_file(filename_utf8);
   if (fp == NULL) {
     return NULL;
   }
@@ -544,7 +594,7 @@ nei_log_sink_st *nei_log_create_default_file_sink(const char *filename,
   ctx->flush_counter = 0U;
   ctx->flush_interval = flush_interval; /* 0 means always fflush; default is 256. */
   ctx->file_buffer_bytes = file_buffer_bytes;
-  ctx->filename = _nei_log_file_sink_dup_filename(filename);
+  ctx->filename = _nei_log_file_sink_dup_filename(filename_utf8);
   ctx->max_backup_files = max_backup_files;
   ctx->write_batch_buf = NULL;
   ctx->current_size = _nei_log_file_sink_measure_size(fp);
