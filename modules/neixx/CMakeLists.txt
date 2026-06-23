@@ -9,7 +9,7 @@ if(WIN32)
   # Suppress C4251: needs to have dll-interface for use by clients
   # This warning is expected when exporting STL containers and template classes
   if(MSVC)
-    target_compile_options(neixx PRIVATE /wd4251)
+    target_compile_options(neixx PRIVATE /utf-8 /wd4251)
   endif()
 endif()
 

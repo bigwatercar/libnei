@@ -5,6 +5,9 @@ target_compile_features(nei PUBLIC c_std_99)
 
 if(WIN32)
   target_compile_definitions(nei PUBLIC NOMINMAX)
+  if(MSVC)
+    target_compile_options(nei PRIVATE /utf-8)
+  endif()
 endif()
 
 if(NOT WIN32)
