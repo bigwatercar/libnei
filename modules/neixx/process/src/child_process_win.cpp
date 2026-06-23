@@ -914,9 +914,8 @@ class ChildProcessPlatformImpl final
   ~ChildProcessPlatformImpl() override { Base::Shutdown(); }
 
   bool Launch(const CommandLine& command_line,
-              const ProcessLaunchOptions& options,
-              ChildProcessListener* listener) override {
-    return Base::Launch(command_line, options, listener);
+              const ProcessLaunchOptions& options) override {
+    return Base::Launch(command_line, options);
   }
 
   bool Terminate(int exit_code, bool force) override {
@@ -980,10 +979,10 @@ class ChildProcessPlatformImpl final
   std::unique_ptr<WinChildProcessCore> core_;
 };
 
-  std::unique_ptr<ChildProcess::Impl> ChildProcess::CreatePlatformImpl(
-      scoped_refptr<ProcessService> process_service) {
-    return std::make_unique<ChildProcessPlatformImpl>(std::move(process_service));
-  }
+std::unique_ptr<ChildProcess::Impl> CreatePlatformImpl(
+    scoped_refptr<ProcessService> process_service) {
+  return std::make_unique<ChildProcessPlatformImpl>(std::move(process_service));
+}
 
 }  // namespace nei
 

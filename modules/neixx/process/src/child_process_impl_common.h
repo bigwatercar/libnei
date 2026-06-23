@@ -30,9 +30,7 @@ class ChildProcessImplBase : public ChildProcessListener {
         stdin_proxy_(std::make_unique<AsyncOutputStreamProxy>()) {}
 
   bool Launch(const CommandLine& command_line,
-              const ProcessLaunchOptions& options,
-              ChildProcessListener* listener) {
-    SetExternalListener(listener);
+              const ProcessLaunchOptions& options) {
     if (process_service_.get() == nullptr) {
       process_service_ = ProcessService::GetDefault();
     }

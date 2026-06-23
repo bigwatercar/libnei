@@ -12,14 +12,17 @@ class ChildProcess::Impl {
   virtual ~Impl() = default;
 
   virtual bool Launch(const CommandLine& command_line,
-                      const ProcessLaunchOptions& options,
-                      ChildProcessListener* listener) = 0;
+                      const ProcessLaunchOptions& options) = 0;
   virtual bool Terminate(int exit_code, bool force) = 0;
   virtual void SetExternalListener(ChildProcessListener* listener) = 0;
   virtual AsyncInputStream* GetStdoutStream() const = 0;
   virtual AsyncInputStream* GetStderrStream() const = 0;
   virtual AsyncOutputStream* GetStdinStream() const = 0;
 };
+
+/// Creates a platform-specific ChildProcess::Impl instance.
+std::unique_ptr<ChildProcess::Impl> CreatePlatformImpl(
+    scoped_refptr<ProcessService> process_service);
 
 }  // namespace nei
 

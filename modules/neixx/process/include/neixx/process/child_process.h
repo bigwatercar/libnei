@@ -161,11 +161,7 @@ class NEI_API ChildProcess {
   AsyncOutputStream* GetStdinStream() const;
 
  private:
-  static std::unique_ptr<Impl> CreatePlatformImpl(
-      scoped_refptr<ProcessService> process_service);
-
   std::unique_ptr<Impl> impl_;
-  ChildProcessListener* listener_ = nullptr;
 };
 
 }  // namespace nei
