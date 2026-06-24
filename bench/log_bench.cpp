@@ -392,6 +392,54 @@ int main(int argc, char **argv) {
     nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", body, sizeof(body) - 1U);
   });
 
+  // ── Alternating format string benchmarks (cache miss simulation) ──────
+  // The log library caches format-plan per format string (TLS).  Using a
+  // single format string in a tight loop always hits the cache.  Real
+  // applications emit diverse format strings, so these benchmarks
+  // alternate between 2 or 3 different format strings to measure the
+  // true cost when the cache is cold or thrashing.
+  std::cout << "Alternating Format String Benchmarks (Memory)\n";
+  std::cout << "============================================\n\n";
+
+  // Level-based: alternate between two different format strings
+  run_log_benchmark("Log Info (alternating 2 fmts)", []() {
+    static int counter = 0;
+    if ((++counter) & 1) {
+      nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
+               "test message %s", "test");
+    } else {
+      nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
+               "another msg=%d, val=%s", 42, "hello");
+    }
+  });
+
+  run_log_benchmark("Log Info (alternating 3 fmts)", []() {
+    static int counter = 0;
+    int idx = (++counter) % 3;
+    if (idx == 0) {
+      nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
+               "test message %s", "test");
+    } else if (idx == 1) {
+      nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
+               "another msg=%d, val=%s", 42, "hello");
+    } else {
+      nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
+               "third fmt %d %d %d", 1, 2, 3);
+    }
+  });
+
+  // Verbose: alternate between two different format strings
+  run_vlog_benchmark("Log Verbose (alternating 2 fmts)", []() {
+    static int counter = 0;
+    if ((++counter) & 1) {
+      nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark",
+               "verbose message %s", "verbose");
+    } else {
+      nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark",
+               "verbose %d items", 42);
+    }
+  });
+
 #if NEI_BENCH_HAS_FMT
   // ── C printf vs {fmt} formatting comparison ────────────────────────────
   std::cout << "C printf vs {fmt} Formatting Comparison (Memory)\n";
@@ -502,6 +550,34 @@ int main(int argc, char **argv) {
         nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", "verbose message %s", "verbose");
       },
       join_path(out_dir, "log_bench_verbose.log"));
+
+  run_file_log_benchmark(
+      "File Log Info (alternating 2 fmts)",
+      []() {
+        static int counter = 0;
+        if ((++counter) & 1) {
+          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
+                   "test message %s", "test");
+        } else {
+          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
+                   "another msg=%d, val=%s", 42, "hello");
+        }
+      },
+      join_path(out_dir, "log_bench_alternating.log"));
+
+  run_file_log_benchmark(
+      "File Log Verbose (alternating 2 fmts)",
+      []() {
+        static int counter = 0;
+        if ((++counter) & 1) {
+          nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark",
+                   "verbose message %s", "verbose");
+        } else {
+          nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark",
+                   "verbose %d items", 42);
+        }
+      },
+      join_path(out_dir, "log_bench_verbose_alternating.log"));
 
   run_file_log_benchmark(
       "File Log Info (literal)",
