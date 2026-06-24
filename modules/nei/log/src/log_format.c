@@ -763,7 +763,9 @@ static const char *_nei_log_basename(const char *path) {
 }
 
 static int _nei_log_append_location_block(
-    const nei_log_event_header_st *header, int short_path, char *out, size_t out_cap, size_t *used) {
+    const nei_log_event_header_st *header, int short_path,
+    int location_without_function,
+    char *out, size_t out_cap, size_t *used) {
   if (header == NULL || out == NULL || used == NULL) {
     return -1;
   }
@@ -782,7 +784,7 @@ static int _nei_log_append_location_block(
     }
   }
 
-  if (header->func[0] != '\0') {
+  if (!location_without_function && header->func[0] != '\0') {
     if (header->file[0] != '\0') {
       if (_nei_log_append_char(out, out_cap, used, ' ') != 0)
         return -1;
@@ -810,6 +812,7 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
   int short_path;
   int log_location;
   int log_location_after_message;
+  int location_without_function;
   nei_log_timestamp_style_e ts_style;
 
   if (header == NULL || effective_config == NULL || payload == NULL || out == NULL || out_cap == 0U) {
@@ -819,6 +822,7 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
   short_path = effective_config->short_path;
   log_location = effective_config->log_location;
   log_location_after_message = effective_config->log_location_after_message;
+  location_without_function = effective_config->location_without_function;
   ts_style = effective_config->timestamp_style;
   out[0] = '\0';
   {
@@ -859,7 +863,7 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
       return -1;
   }
   if (log_location != 0 && log_location_after_message == 0) {
-    if (_nei_log_append_location_block(header, short_path, out, out_cap, &used) != 0)
+    if (_nei_log_append_location_block(header, short_path, location_without_function, out, out_cap, &used) != 0)
       return -1;
     if ((header->file[0] != '\0' || header->func[0] != '\0') && _nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
       return -1;
@@ -889,7 +893,7 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
         && (header->file[0] != '\0' || header->func[0] != '\0')) {
       if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
         return -1;
-      if (_nei_log_append_location_block(header, short_path, out, out_cap, &used) != 0)
+      if (_nei_log_append_location_block(header, short_path, location_without_function, out, out_cap, &used) != 0)
         return -1;
     }
     return 0;
@@ -908,7 +912,7 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
       if (log_location != 0 && log_location_after_message != 0 && (header->file[0] != '\0' || header->func[0] != '\0')) {
         if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
           return -1;
-        if (_nei_log_append_location_block(header, short_path, out, out_cap, &used) != 0)
+        if (_nei_log_append_location_block(header, short_path, location_without_function, out, out_cap, &used) != 0)
           return -1;
       }
       return 0;
@@ -920,7 +924,7 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
       if (log_location != 0 && log_location_after_message != 0 && (header->file[0] != '\0' || header->func[0] != '\0')) {
         if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
           return -1;
-        if (_nei_log_append_location_block(header, short_path, out, out_cap, &used) != 0)
+        if (_nei_log_append_location_block(header, short_path, location_without_function, out, out_cap, &used) != 0)
           return -1;
       }
       return 0;
@@ -1075,7 +1079,7 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
   if (log_location != 0 && log_location_after_message != 0 && (header->file[0] != '\0' || header->func[0] != '\0')) {
     if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
       return -1;
-    if (_nei_log_append_location_block(header, short_path, out, out_cap, &used) != 0)
+    if (_nei_log_append_location_block(header, short_path, location_without_function, out, out_cap, &used) != 0)
       return -1;
   }
   return 0;

@@ -194,6 +194,12 @@ typedef struct nei_log_perf_stats_st {
  * - @c immediate_crash_on_fatal: When non-zero, immediately crash (via null
  * pointer dereference) when a fatal-level log is emitted. This bypasses async
  * queue processing and provides immediate visibility of fatal conditions.
+ * - @c location_without_function: When non-zero and @ref log_location is
+ * enabled, omit the function signature from location text, so the output
+ * becomes @c "file:line" instead of @c "file:line func". This is useful when
+ * C++ decorated signatures (@c __FUNCSIG__ / @c __PRETTY_FUNCTION__) produce
+ * excessively long location prefixes. Default is @c 0 (include function
+ * signature).
  * - @c sinks: Registered sinks in array order. Dispatch stops at the first
  * NULL entry, or after @ref NEI_LOG_MAX_SINKS_OF_CONFIG non-NULL entries. Do
  * not place NULL between active sinks.
@@ -208,6 +214,8 @@ typedef struct nei_log_config_st {
   uint32_t log_location_after_message : 1;
   uint32_t log_thread_id : 1;
   uint32_t immediate_crash_on_fatal : 1;
+  uint32_t location_without_function : 1;
+  uint32_t reserved : 25;
   nei_log_sink_st *sinks[NEI_LOG_MAX_SINKS_OF_CONFIG];
 } nei_log_config_st;
 
