@@ -38,7 +38,7 @@ StreamReader::StreamReader(AsyncInputStream* stream)
 }
 
 StreamReader::~StreamReader() {
-  weak_factory_.InvalidateWeakPtrs();
+  weak_factory_.InvalidateWeakPtrs(FROM_HERE);
 }
 
 void StreamReader::ReadBytes(std::size_t bytes_to_read,
@@ -52,7 +52,7 @@ void StreamReader::ReadBytes(std::size_t bytes_to_read,
       IOBufferPool::GetInstance().AcquireBuffer(bytes_to_read);
   scoped_refptr<IOBuffer> base_buffer(sized_buffer.get());
 
-  auto weak_this = weak_factory_.GetWeakPtr();
+  auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
   scoped_refptr<TaskRunner> target_runner = target_task_runner_;
 
   // Thread trampoline contract:
@@ -112,7 +112,7 @@ void StreamReader::ReadString(std::size_t bytes_to_read,
       IOBufferPool::GetInstance().AcquireBuffer(bytes_to_read);
   scoped_refptr<IOBuffer> base_buffer(sized_buffer.get());
 
-  auto weak_this = weak_factory_.GetWeakPtr();
+  auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
   scoped_refptr<TaskRunner> target_runner = target_task_runner_;
 
   // Cross-thread interaction point (physical thread -> logic sequence):

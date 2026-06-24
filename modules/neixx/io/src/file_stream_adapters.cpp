@@ -43,13 +43,13 @@ FileInputStreamAdapter::~FileInputStreamAdapter() {
   // Invalidate all pending WeakPtr-gated callbacks to prevent post-destruction
   // UAF crashes when backend I/O operations complete after this adapter is
   // destroyed.
-  weak_factory_.InvalidateWeakPtrs();
+  weak_factory_.InvalidateWeakPtrs(FROM_HERE);
 }
 
 void FileInputStreamAdapter::ReadAsync(scoped_refptr<IOBuffer> buf,
                                        std::size_t buf_len,
                                        IOReadCallback callback) {
-  auto weak_this = weak_factory_.GetWeakPtr();
+  auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
   if (!weak_this || !target_task_runner_) {
     return;
   }
@@ -78,7 +78,7 @@ void FileInputStreamAdapter::ReadAsyncOnTarget(scoped_refptr<IOBuffer> buf,
   // Capture and consume logical read position only on target sequence.
   const std::uint64_t read_offset = position_;
 
-  auto weak_this = weak_factory_.GetWeakPtr();
+  auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
   scoped_refptr<TaskRunner> target_runner = target_task_runner_;
 
   file_->ReadAsync(
@@ -128,7 +128,7 @@ void FileInputStreamAdapter::ReadAsyncOnTarget(scoped_refptr<IOBuffer> buf,
 }
 
 void FileInputStreamAdapter::Close() {
-  auto weak_this = weak_factory_.GetWeakPtr();
+  auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
   if (!weak_this || !target_task_runner_) {
     return;
   }
@@ -174,13 +174,13 @@ FileOutputStreamAdapter::~FileOutputStreamAdapter() {
   // Invalidate all pending WeakPtr-gated callbacks to prevent post-destruction
   // UAF crashes when backend I/O operations complete after this adapter is
   // destroyed.
-  weak_factory_.InvalidateWeakPtrs();
+  weak_factory_.InvalidateWeakPtrs(FROM_HERE);
 }
 
 void FileOutputStreamAdapter::WriteAsync(scoped_refptr<IOBuffer> buf,
                                          std::size_t bytes_to_write,
                                          IOWriteCallback callback) {
-  auto weak_this = weak_factory_.GetWeakPtr();
+  auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
   if (!weak_this || !target_task_runner_) {
     return;
   }
@@ -229,7 +229,7 @@ void FileOutputStreamAdapter::WriteAsyncOnTarget(scoped_refptr<IOBuffer> buf,
   const std::uint64_t write_offset = position_;
   position_ += static_cast<std::uint64_t>(bytes_to_write);
 
-  auto weak_this = weak_factory_.GetWeakPtr();
+  auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
   scoped_refptr<TaskRunner> target_runner = target_task_runner_;
 
   // Dispatch the physical I/O to the backend at the pre-reserved offset.
@@ -268,7 +268,7 @@ void FileOutputStreamAdapter::WriteAsyncOnTarget(scoped_refptr<IOBuffer> buf,
 }
 
 void FileOutputStreamAdapter::Close() {
-  auto weak_this = weak_factory_.GetWeakPtr();
+  auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
   if (!weak_this || !target_task_runner_) {
     return;
   }

@@ -74,7 +74,7 @@ class NEI_API FileInputStreamAdapter final : public AsyncInputStream {
   bool closed_ = false;
 
   // WeakPtr factory for safe completion callback gating.
-  WeakPtrFactory<FileInputStreamAdapter> weak_factory_{this};
+  WeakPtrFactory<FileInputStreamAdapter> weak_factory_{this, FROM_HERE_MEMBER};
 };
 
 // ---------------------------------------------------------------------------
@@ -155,7 +155,7 @@ class NEI_API FileOutputStreamAdapter final : public AsyncOutputStream {
   bool closed_ = false;
 
   // WeakPtr factory for safe completion callback gating.
-  WeakPtrFactory<FileOutputStreamAdapter> weak_factory_{this};
+  WeakPtrFactory<FileOutputStreamAdapter> weak_factory_{this, FROM_HERE_MEMBER};
 };
 
 }  // namespace nei

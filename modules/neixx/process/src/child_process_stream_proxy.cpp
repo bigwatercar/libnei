@@ -103,7 +103,7 @@ void AsyncInputStreamProxy::ReadAsync(scoped_refptr<IOBuffer> buf,
 
   // Capture WeakPtr by value.  operator bool() is an atomic flag check and is
   // safe to evaluate from any thread (only operator->/* assert thread affinity).
-  auto weak_self = weak_factory_.GetWeakPtr();
+  auto weak_self = weak_factory_.GetWeakPtr(FROM_HERE);
 
   // -- Step 1: hop to IO thread ---------------------------------------------
   //
@@ -169,7 +169,7 @@ void AsyncInputStreamProxy::Close() {
 
   // Invalidate all WeakPtrs so any in-flight Step-4 trampoline tasks that
   // arrive after this point silently discard their callbacks.
-  weak_factory_.InvalidateWeakPtrs();
+  weak_factory_.InvalidateWeakPtrs(FROM_HERE);
 
   // Close the underlying stream on the IO thread.  The PostTask is FIFO with
   // respect to any earlier ReadAsync PostTasks, so close arrives after all

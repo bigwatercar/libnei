@@ -165,7 +165,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     OpenCallback post_failure_callback = callback;
     const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
-        [weak_this = weak_factory_.GetWeakPtr(), path, mode, disposition,
+        [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), path, mode, disposition,
          background_runner, callback = std::move(callback)]() mutable {
           if (!weak_this) {
             return;
@@ -202,7 +202,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     ReadCallback post_failure_callback = op.read_callback;
     const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
-        [weak_this = weak_factory_.GetWeakPtr(), op = std::move(op)]() mutable {
+        [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), op = std::move(op)]() mutable {
           if (!weak_this) {
             return;
           }
@@ -238,7 +238,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     WriteCallback post_failure_callback = op.write_callback;
     const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
-        [weak_this = weak_factory_.GetWeakPtr(), op = std::move(op)]() mutable {
+        [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), op = std::move(op)]() mutable {
           if (!weak_this) {
             return;
           }
@@ -258,7 +258,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       return;
     }
     const bool posted = io_task_runner_->PostTask(
-        FROM_HERE, [weak_this = weak_factory_.GetWeakPtr(),
+        FROM_HERE, [weak_this = weak_factory_.GetWeakPtr(FROM_HERE),
                     callback = std::move(callback)]() mutable {
           if (!weak_this) {
             if (callback) callback();
@@ -339,7 +339,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     const DWORD desired_access = ToWinAccess(mode);
     const DWORD disposition_dw = ToWinDisposition(disposition);
     scoped_refptr<TaskRunner> io_runner_snapshot = io_task_runner_;
-    base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr();
+    base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
 
     background_runner->PostTask(
         FROM_HERE,
@@ -588,7 +588,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       // Inline completion is normalized into an async IO-sequence task.
       const bool posted = io_task_runner_->PostTask(
           FROM_HERE,
-          [weak_this = weak_factory_.GetWeakPtr(),
+          [weak_this = weak_factory_.GetWeakPtr(FROM_HERE),
            ov = &context->overlapped,
            transferred = transferred_now]() {
             if (!weak_this) {
@@ -704,7 +704,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     // The next chunk is always launched in a fresh posted task.
     const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
-        [weak_this = weak_factory_.GetWeakPtr(), context]() mutable {
+        [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), context]() mutable {
           if (!weak_this) {
             return;
           }
@@ -1105,7 +1105,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   std::shared_ptr<IOContext> active_io_;
   std::unordered_map<OVERLAPPED*, std::shared_ptr<IOContext>> pending_io_;
   DECLARE_THREAD_CHECKER(io_thread_checker_);
-  base::WeakPtrFactory<Impl> weak_factory_{this};
+  base::WeakPtrFactory<Impl> weak_factory_{this, FROM_HERE_MEMBER};
 };
 
 AsyncFileWin::AsyncFileWin(scoped_refptr<TaskRunner> io_task_runner)

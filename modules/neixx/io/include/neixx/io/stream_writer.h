@@ -33,7 +33,7 @@ class NEI_API StreamWriter final {
  private:
   AsyncOutputStream* stream_ = nullptr;  // Non-owning.
   scoped_refptr<TaskRunner> target_task_runner_;
-  WeakPtrFactory<StreamWriter> weak_factory_{this};
+  WeakPtrFactory<StreamWriter> weak_factory_{this, FROM_HERE_MEMBER};
 };
 
 }  // namespace nei

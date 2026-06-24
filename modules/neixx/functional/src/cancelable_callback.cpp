@@ -58,14 +58,14 @@ private:
     }
 
     WeakPtr<State> GetWeakPtr() {
-      return weak_factory.GetWeakPtr();
+      return weak_factory.GetWeakPtr(FROM_HERE);
     }
 
     void Cancel() {
       is_cancelled.store(true, std::memory_order_release);
       std::lock_guard<std::mutex> lock(mutex);
       task = OnceCallback();
-      weak_factory.InvalidateWeakPtrs();
+      weak_factory.InvalidateWeakPtrs(FROM_HERE);
     }
 
     std::atomic<bool> is_cancelled{false};

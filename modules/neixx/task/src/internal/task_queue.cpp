@@ -37,7 +37,7 @@ bool IsShutdownBlockingTask(const Task& task) {
 class TaskQueue::Impl {
  public:
   explicit Impl(TaskQueue* owner, const TaskTraits& traits)
-      : traits_(traits), weak_factory_(owner) {}
+      : traits_(traits), weak_factory_(owner, FROM_HERE) {}
 
   bool HasImmediateTasksLocked() const {
     return !immediate_fifo_queue_.empty();
@@ -237,7 +237,7 @@ class TaskQueue::Impl {
 
       shut_down_ = true;
       reject_new_tasks_ = true;
-      weak_factory_.InvalidateWeakPtrs();
+      weak_factory_.InvalidateWeakPtrs(FROM_HERE);
       CancelNonShutdownBlockingTasksLockedImpl(&dropped_tasks);
     }
   }
@@ -265,7 +265,7 @@ class TaskQueue::Impl {
   }
 
   WeakPtr<TaskQueue> GetWeakPtr() {
-    return weak_factory_.GetWeakPtr();
+    return weak_factory_.GetWeakPtr(FROM_HERE);
   }
 
   void SetOnTaskPostedCallback(OnTaskPostedCallback callback) {

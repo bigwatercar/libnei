@@ -47,6 +47,7 @@ add_executable(
   platform_thread_test.cpp
   pipe_stream_win_test.cpp
   ref_counted_test.cpp
+  weak_ptr_test.cpp
   thread_test.cpp
   message_pump_test.cpp
   message_pump_io_current_test.cpp

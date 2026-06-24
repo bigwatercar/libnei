@@ -43,7 +43,7 @@ class NEI_API StreamReader final {
  private:
   AsyncInputStream* stream_ = nullptr;  // Non-owning.
   scoped_refptr<TaskRunner> target_task_runner_;
-  WeakPtrFactory<StreamReader> weak_factory_{this};
+  WeakPtrFactory<StreamReader> weak_factory_{this, FROM_HERE_MEMBER};
 };
 
 }  // namespace nei

@@ -84,7 +84,7 @@ class AsyncInputStreamProxy final : public AsyncInputStream {
   // The factory is bound to the thread that constructs the proxy (IO thread).
   // operator bool() on a WeakPtr checks an atomic flag and is safe from any
   // thread; only operator->() / operator*() enforce thread affinity.
-  WeakPtrFactory<AsyncInputStreamProxy> weak_factory_{this};
+  WeakPtrFactory<AsyncInputStreamProxy> weak_factory_{this, FROM_HERE_MEMBER};
 
   DECLARE_SEQUENCE_CHECKER(io_sequence_checker_);
 };

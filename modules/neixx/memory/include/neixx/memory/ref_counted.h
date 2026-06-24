@@ -111,6 +111,28 @@ public:
     }
   }
 
+#if !defined(NDEBUG)
+  // Returns true when exactly one reference remains.
+  // Only available in debug builds; used for diagnostics (e.g. WeakPtr
+  // outstanding-reference warnings).
+  bool HasOneRef() const {
+#if defined(_MSC_VER)
+    return ref_count_ == 1;
+#else
+    return ref_count_.load(std::memory_order_acquire) == 1;
+#endif
+  }
+
+  // Returns the current reference count (debug-only, for diagnostics).
+  int DebugRefCount() const {
+#if defined(_MSC_VER)
+    return static_cast<int>(ref_count_);
+#else
+    return ref_count_.load(std::memory_order_acquire);
+#endif
+  }
+#endif  // !defined(NDEBUG)
+
 protected:
   RefCountedThreadSafe() noexcept = default;
   ~RefCountedThreadSafe() = default;
@@ -136,6 +158,11 @@ public:
       delete static_cast<const T *>(this);
     }
   }
+
+#if !defined(NDEBUG)
+  bool HasOneRef() const { return ref_count_ == 1; }
+  int DebugRefCount() const { return ref_count_; }
+#endif
 
 protected:
   RefCounted() noexcept = default;

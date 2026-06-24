@@ -68,4 +68,10 @@ static_assert(sizeof(Location) == sizeof(const char *) * 2 + sizeof(std::int32_t
 
 #define FROM_HERE ::nei::Location::Current(__FILE__, __LINE__, __FUNCTION__)
 
+// FROM_HERE variant safe for default member initializers.
+// MSVC does not allow __FUNCTION__ outside a function body; this macro
+// substitutes an empty string for the function name so it can be used in
+// member declarations (e.g. WeakPtrFactory<Foo> weak_factory_{this, FROM_HERE_MEMBER}).
+#define FROM_HERE_MEMBER ::nei::Location::Current(__FILE__, __LINE__, "")
+
 #endif // NEI_COMMON_LOCATION_H

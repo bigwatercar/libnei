@@ -154,7 +154,7 @@ class AsyncFilePosix::Impl final {
     OpenCallback post_failure_callback = callback;
     const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
-        [weak_this = weak_factory_.GetWeakPtr(), path, mode, disposition,
+        [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), path, mode, disposition,
          background_runner, callback = std::move(callback)]() mutable {
           if (!weak_this) {
             return;
@@ -196,7 +196,7 @@ class AsyncFilePosix::Impl final {
     ReadCallback post_failure_callback = callback;
     const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
-        [weak_this = weak_factory_.GetWeakPtr(), buf = std::move(buf),
+        [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), buf = std::move(buf),
          bytes_to_read, offset, callback = std::move(callback)]() mutable {
           if (!weak_this) {
             return;
@@ -236,7 +236,7 @@ class AsyncFilePosix::Impl final {
     WriteCallback post_failure_callback = callback;
     const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
-        [weak_this = weak_factory_.GetWeakPtr(), buf = std::move(buf),
+        [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), buf = std::move(buf),
          bytes_to_write, offset, callback = std::move(callback)]() mutable {
           if (!weak_this) {
             return;
@@ -260,7 +260,7 @@ class AsyncFilePosix::Impl final {
       return;
     }
     const bool posted = io_task_runner_->PostTask(
-        FROM_HERE, [weak_this = weak_factory_.GetWeakPtr(),
+        FROM_HERE, [weak_this = weak_factory_.GetWeakPtr(FROM_HERE),
                     callback = std::move(callback)]() mutable {
           if (!weak_this) {
             if (callback) callback();
@@ -321,7 +321,7 @@ class AsyncFilePosix::Impl final {
         static_cast<mode_t>(S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH |
                             S_IWOTH);
 
-    base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr();
+    base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
     scoped_refptr<TaskRunner> io_runner_snapshot = io_task_runner_;
 
     const bool posted = background_runner->PostTask(
@@ -554,7 +554,7 @@ class AsyncFilePosix::Impl final {
     const std::size_t chunk_size = (std::min)(remaining, kMaxChunkBytes);
     context->last_chunk_size = chunk_size;
 
-    base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr();
+    base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
     scoped_refptr<TaskRunner> io_runner_snapshot = io_task_runner_;
 
     const bool posted = background_runner->PostTask(
@@ -717,7 +717,7 @@ class AsyncFilePosix::Impl final {
         background_runner_snapshot = background_runner_;
         io_task_runner_->PostTask(
             FROM_HERE,
-            [weak_this = weak_factory_.GetWeakPtr(),
+            [weak_this = weak_factory_.GetWeakPtr(FROM_HERE),
              context = std::move(context), fd_snapshot,
              background_runner_snapshot]() mutable {
               if (!weak_this) {
@@ -887,7 +887,7 @@ class AsyncFilePosix::Impl final {
   std::unordered_map<IOContext*, std::shared_ptr<IOContext>> active_ios_;
   DECLARE_THREAD_CHECKER(io_thread_checker_);
   std::atomic<bool> close_requested_{false};
-  base::WeakPtrFactory<Impl> weak_factory_{this};
+  base::WeakPtrFactory<Impl> weak_factory_{this, FROM_HERE_MEMBER};
 };
 
 AsyncFilePosix::AsyncFilePosix(scoped_refptr<TaskRunner> io_task_runner)

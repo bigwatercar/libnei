@@ -41,7 +41,7 @@ StreamWriter::StreamWriter(AsyncOutputStream* stream)
 }
 
 StreamWriter::~StreamWriter() {
-  weak_factory_.InvalidateWeakPtrs();
+  weak_factory_.InvalidateWeakPtrs(FROM_HERE);
 }
 
 void StreamWriter::WriteString(std::string_view text,
@@ -62,7 +62,7 @@ void StreamWriter::WriteString(std::string_view text,
   std::memcpy(sized_buffer->data(), text.data(), len);
   scoped_refptr<IOBuffer> base_buffer(sized_buffer.get());
 
-  auto weak_this = weak_factory_.GetWeakPtr();
+  auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
   scoped_refptr<TaskRunner> target_runner = target_task_runner_;
 
   // Self-contained request closure model:
