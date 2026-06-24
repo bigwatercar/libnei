@@ -2,6 +2,7 @@ target_sources(
   neixx
   PRIVATE include/neixx/common/at_exit.h
           include/neixx/common/location.h
+          include/neixx/common/no_destructor.h
           include/neixx/common/path_service.h
           include/neixx/common/sequence_checker.h
           include/neixx/common/singleton.h
