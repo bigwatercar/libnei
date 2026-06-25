@@ -77,10 +77,41 @@ NEI_API int nei_get_executable_dir(char *buf, size_t size);
 
 #ifdef __cplusplus
 }
+#endif
+
+#ifdef __cplusplus
 
 #include <string>
 #include <stdexcept>
 
+// When compiling with C++20 or later, these wrappers return std::u8string.
+// When compiling with C++17 or earlier, they return std::string, but the
+// string **always** contains UTF-8 encoded data regardless of the return type.
+
+#if __cplusplus >= 202002L
+
+inline std::u8string nei_get_executable_path() {
+  char buf[4096];
+  int len = nei_get_executable_path(buf, sizeof(buf));
+  if (len < 0) {
+    throw std::runtime_error("Failed to get executable path");
+  }
+  return std::u8string(reinterpret_cast<const char8_t *>(buf), (size_t)len);
+}
+
+inline std::u8string nei_get_executable_dir() {
+  char buf[4096];
+  int len = nei_get_executable_dir(buf, sizeof(buf));
+  if (len < 0) {
+    throw std::runtime_error("Failed to get executable directory");
+  }
+  return std::u8string(reinterpret_cast<const char8_t *>(buf), (size_t)len);
+}
+
+#else // __cplusplus < 202002L
+
+// NOTE: The returned std::string stores UTF-8 encoded bytes.
+// Callers should treat the content as UTF-8.
 inline std::string nei_get_executable_path() {
   char buf[4096];
   int len = nei_get_executable_path(buf, sizeof(buf));
@@ -90,6 +121,8 @@ inline std::string nei_get_executable_path() {
   return std::string(buf, (size_t)len);
 }
 
+// NOTE: The returned std::string stores UTF-8 encoded bytes.
+// Callers should treat the content as UTF-8.
 inline std::string nei_get_executable_dir() {
   char buf[4096];
   int len = nei_get_executable_dir(buf, sizeof(buf));
@@ -98,6 +131,8 @@ inline std::string nei_get_executable_dir() {
   }
   return std::string(buf, (size_t)len);
 }
+
+#endif // __cplusplus >= 202002L
 
 #endif
 
