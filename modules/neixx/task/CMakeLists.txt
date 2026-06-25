@@ -16,9 +16,11 @@
   include/neixx/task/sequence_manager.h
   include/neixx/task/task_runner.h
   include/neixx/task/bind_post_task.h
+  include/neixx/task/timer.h
   include/neixx/task/task_traits.h
   include/neixx/task/thread_pool.h
   include/neixx/task/thread_task_runner_handle.h
+  src/timer.cpp
   src/scoped_blocking_call.cpp
   src/internal/delayed_task_manager.cpp
   src/internal/pooled_task_source.cpp

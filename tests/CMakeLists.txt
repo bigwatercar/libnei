@@ -32,6 +32,7 @@ add_executable(
   io_buffer_test.cpp
   base64_test.cpp
   buffer_stream_test.cpp
+  cancelable_callback_test.cpp
   checksum_hash_test.cpp
   check_macro_test.cpp
   child_process_test.cpp
@@ -49,6 +50,7 @@ add_executable(
   ref_counted_test.cpp
   weak_ptr_test.cpp
   thread_test.cpp
+  timer_test.cpp
   message_pump_test.cpp
   message_pump_io_current_test.cpp
   message_pump_default_test.cpp

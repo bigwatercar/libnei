@@ -150,6 +150,8 @@ target_link_libraries(your_target PRIVATE nei::nei)
 | [线程与同步技术文档](docs/neixx_threading_technical.md) | 线程封装与同步原语 |
 | [WeakPtr 技术文档](docs/neixx_weak_ptr_technical.md) | 弱引用指针与安全异步回调 |
 | [Bind / PostTask 技术文档](docs/neixx_bind_post_task_technical.md) | 回调绑定与任务投递 |
+| [OneShotTimer / RepeatingTimer 技术文档](docs/neixx_timer_technical.md) | 高精度单次与周期定时器 |
+| [CancelableOnceClosure 技术文档](docs/neixx_cancelable_callback_technical.md) | 可取消一次性闭包，支持立即资源回收 |
 | [NoDestructor 技术文档](docs/neixx_no_destructor_technical.md) | 禁止析构的静态对象 |
 | [AtExitManager 技术文档](docs/neixx_at_exit_technical.md) | 退出时回调管理 |
 | [Thread / Sequence Checker 技术文档](docs/neixx_thread_sequence_checker_technical.md) | 线程安全检查器 |

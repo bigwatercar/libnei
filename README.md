@@ -150,6 +150,8 @@ Headers live under each module's `include/` directory with a unified prefix:
 | [Threading & Sync](docs/neixx_threading_technical.md) | Thread wrappers and synchronization primitives |
 | [WeakPtr](docs/neixx_weak_ptr_technical.md) | Weak pointers and safe async callbacks |
 | [Bind / PostTask](docs/neixx_bind_post_task_technical.md) | Callback binding and task posting |
+| [OneShotTimer / RepeatingTimer](docs/neixx_timer_technical.md) | High-precision one-shot and repeating timers |
+| [CancelableOnceClosure](docs/neixx_cancelable_callback_technical.md) | Cancelable one-shot closure with immediate resource reclamation |
 | [NoDestructor](docs/neixx_no_destructor_technical.md) | Non-destructible static objects |
 | [AtExitManager](docs/neixx_at_exit_technical.md) | At-exit callback management |
 | [Thread / Sequence Checker](docs/neixx_thread_sequence_checker_technical.md) | Thread safety checkers |
