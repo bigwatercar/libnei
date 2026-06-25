@@ -28,38 +28,14 @@ option(NEI_ENABLE_WARNINGS "Enable strict warnings" ON)
 option(NEI_ENABLE_LONG_BENCH_TESTS
        "Enable long-running benchmark tests in CTest" OFF
 )
+option(NEI_BUILD_NEIXX "Build neixx C++ components" ON)
+option(NEI_ENABLE_TRACE_EVENTS "Enable trace event instrumentation(C++ only)"
+       ON
+)
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
-option(NEI_ENABLE_TRACE_EVENTS "Enable trace event instrumentation" ON)
 
 if(NEI_BUILD_TESTS)
   include(CTest)
-endif()
-
-set(NEI_LOG_RING_SLOTS
-    "256"
-    CACHE STRING "Log MPSC ring slots (power of two)"
-)
-
-if(NOT NEI_LOG_RING_SLOTS MATCHES "^[0-9]+$")
-  message(
-    FATAL_ERROR
-      "NEI_LOG_RING_SLOTS must be a positive integer, got: ${NEI_LOG_RING_SLOTS}"
-  )
-endif()
-math(EXPR _nei_log_ring_slots_val "${NEI_LOG_RING_SLOTS}")
-if(_nei_log_ring_slots_val LESS 64)
-  message(
-    FATAL_ERROR "NEI_LOG_RING_SLOTS must be >= 64, got: ${NEI_LOG_RING_SLOTS}"
-  )
-endif()
-math(EXPR _nei_log_ring_slots_pow2_check
-     "${_nei_log_ring_slots_val} & (${_nei_log_ring_slots_val} - 1)"
-)
-if(NOT _nei_log_ring_slots_pow2_check EQUAL 0)
-  message(
-    FATAL_ERROR
-      "NEI_LOG_RING_SLOTS must be a power of two, got: ${NEI_LOG_RING_SLOTS}"
-  )
 endif()
 
 # Compatible with both single-config and multi-config generators.
@@ -87,13 +63,52 @@ if(NEI_ENABLE_WARNINGS)
   endif()
 endif()
 
-add_subdirectory(modules/nei)
-add_subdirectory(modules/neixx)
+# ============================================================================
+# nei library target (single DLL, C + optional C++ components)
+# ============================================================================
+add_library(nei)
+add_library(nei::nei ALIAS nei)
 
-add_library(nei_all INTERFACE)
-add_library(nei::all ALIAS nei_all)
-set_target_properties(nei_all PROPERTIES EXPORT_NAME all)
-target_link_libraries(nei_all INTERFACE nei neixx)
+# Platform definitions
+if(WIN32)
+  target_compile_definitions(nei PUBLIC NOMINMAX)
+  if(MSVC)
+    target_compile_options(nei PRIVATE /utf-8)
+  endif()
+endif()
+
+# Shared / static library configuration
+if(BUILD_SHARED_LIBS)
+  target_compile_definitions(nei PRIVATE NEI_EXPORTS)
+  if(NOT WIN32)
+    set_target_properties(
+      nei
+      PROPERTIES C_VISIBILITY_PRESET hidden
+                 CXX_VISIBILITY_PRESET hidden
+                 VISIBILITY_INLINES_HIDDEN YES
+    )
+  endif()
+else()
+  target_compile_definitions(nei PUBLIC NEI_STATIC)
+endif()
+
+# Non-Windows dependencies
+if(NOT WIN32)
+  find_package(Threads REQUIRED)
+  target_link_libraries(
+    nei
+    PUBLIC Threads::Threads
+    PRIVATE m
+  )
+endif()
+
+# ============================================================================
+
+add_subdirectory(modules/nei)
+
+if(NEI_BUILD_NEIXX)
+  add_subdirectory(modules/neixx)
+endif()
 
 if(NEI_BUILD_TESTS)
   add_subdirectory(tests)
@@ -108,7 +123,7 @@ if(NEI_BUILD_DEMOS)
 endif()
 
 install(
-  TARGETS nei neixx nei_all
+  TARGETS nei
   EXPORT neiTargets
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/$<CONFIG>
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/$<CONFIG>

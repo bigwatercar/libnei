@@ -1,38 +1,38 @@
 add_executable(log_demo log_demo.c)
-target_link_libraries(log_demo PRIVATE nei::all)
+target_link_libraries(log_demo PRIVATE nei::nei)
 
 add_executable(log_immediate_crash_demo log_immediate_crash_demo.c)
-target_link_libraries(log_immediate_crash_demo PRIVATE nei::all)
+target_link_libraries(log_immediate_crash_demo PRIVATE nei::nei)
 
 add_executable(string_util_demo string_util_demo.cpp)
-target_link_libraries(string_util_demo PRIVATE nei::all)
+target_link_libraries(string_util_demo PRIVATE nei::nei)
 
 add_executable(command_line_demo command_line_demo.cpp)
-target_link_libraries(command_line_demo PRIVATE nei::all)
+target_link_libraries(command_line_demo PRIVATE nei::nei)
 
 add_executable(flake_id_demo flake_id_demo.c)
-target_link_libraries(flake_id_demo PRIVATE nei::all)
+target_link_libraries(flake_id_demo PRIVATE nei::nei)
 
 add_executable(message_pump_io_demo message_pump_io_demo.cpp)
-target_link_libraries(message_pump_io_demo PRIVATE nei::all)
+target_link_libraries(message_pump_io_demo PRIVATE nei::nei)
 if(WIN32)
   target_link_libraries(message_pump_io_demo PRIVATE ws2_32)
 endif()
 
 add_executable(async_file_demo async_file_demo.cpp)
-target_link_libraries(async_file_demo PRIVATE nei::all)
+target_link_libraries(async_file_demo PRIVATE nei::nei)
 
 add_executable(stream_reader_writer_demo stream_reader_writer_demo.cpp)
-target_link_libraries(stream_reader_writer_demo PRIVATE nei::all)
+target_link_libraries(stream_reader_writer_demo PRIVATE nei::nei)
 
 add_executable(nei_demo nei_demo.cpp)
-target_link_libraries(nei_demo PRIVATE nei::all)
+target_link_libraries(nei_demo PRIVATE nei::nei)
 
 add_executable(at_exit_demo at_exit_demo.cpp)
-target_link_libraries(at_exit_demo PRIVATE nei::all)
+target_link_libraries(at_exit_demo PRIVATE nei::nei)
 
 add_executable(elevated_process_demo elevated_process_demo.cpp)
-target_link_libraries(elevated_process_demo PRIVATE nei::all)
+target_link_libraries(elevated_process_demo PRIVATE nei::nei)
 
 if(WIN32 AND BUILD_SHARED_LIBS)
   function(nei_copy_runtime_dlls target_name)

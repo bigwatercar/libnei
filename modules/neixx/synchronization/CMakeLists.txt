@@ -1,5 +1,5 @@
 target_sources(
-  neixx
+  nei
   PRIVATE include/neixx/synchronization/condition_variable.h
           include/neixx/synchronization/lock.h
           include/neixx/synchronization/waitable_event.h
@@ -9,7 +9,7 @@ target_sources(
 )
 
 target_include_directories(
-  neixx PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  nei PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 

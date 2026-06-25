@@ -1,5 +1,5 @@
 target_sources(
-  neixx
+  nei
   PRIVATE include/neixx/functional/bind.h
           include/neixx/functional/callback.h
           include/neixx/functional/callback_base.h
@@ -11,7 +11,7 @@ target_sources(
 )
 
 target_include_directories(
-  neixx PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  nei PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 

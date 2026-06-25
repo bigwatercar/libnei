@@ -70,7 +70,7 @@ add_executable(
   xdr_test.cpp
 )
 
-target_link_libraries(nei_tests PRIVATE nei::all GTest::gtest)
+target_link_libraries(nei_tests PRIVATE nei::nei GTest::gtest)
 target_include_directories(
   nei_tests PRIVATE ${PROJECT_SOURCE_DIR}/modules/neixx/io/src
 )
@@ -88,7 +88,7 @@ gtest_discover_tests(nei_tests DISCOVERY_MODE PRE_TEST)
 add_executable(
   ref_counted_compile_fail EXCLUDE_FROM_ALL ref_counted_compile_fail.cpp
 )
-target_link_libraries(ref_counted_compile_fail PRIVATE nei::all)
+target_link_libraries(ref_counted_compile_fail PRIVATE nei::nei)
 
 # MSVC + shared libs: put nei.dll and googletest DLLs next to nei_tests.exe (and
 # sync googletest DLLs to nei.dll's output dir) so gtest_discover_tests and

@@ -1,5 +1,5 @@
 target_sources(
-  neixx
+  nei
   PRIVATE include/neixx/strings/cjk_width.h
           include/neixx/strings/split_string.h
           include/neixx/strings/string_number_conversions.h
@@ -16,13 +16,13 @@ target_sources(
 )
 
 if(WIN32)
-  target_sources(neixx PRIVATE src/utf_string_conversions_win.cpp)
+  target_sources(nei PRIVATE src/utf_string_conversions_win.cpp)
 elseif(UNIX OR APPLE)
-  target_sources(neixx PRIVATE src/utf_string_conversions_posix.cpp)
+  target_sources(nei PRIVATE src/utf_string_conversions_posix.cpp)
 endif()
 
 target_include_directories(
-  neixx PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  nei PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 

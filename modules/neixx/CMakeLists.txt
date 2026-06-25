@@ -1,34 +1,18 @@
-add_library(neixx)
-add_library(nei::neixx ALIAS neixx)
+# neixx sources are merged into the nei target (single DLL).
+# This file only adds C++ compile requirements and subdirectories.
 
-target_compile_features(neixx PUBLIC cxx_std_17)
-target_link_libraries(neixx PUBLIC nei)
+# C++ standard (applies to all .cpp sources in this target)
+target_compile_features(nei PUBLIC cxx_std_17)
 
-if(WIN32)
-  target_compile_definitions(neixx PUBLIC NOMINMAX)
+if(WIN32 AND MSVC)
   # Suppress C4251: needs to have dll-interface for use by clients
   # This warning is expected when exporting STL containers and template classes
-  if(MSVC)
-    target_compile_options(neixx PRIVATE /utf-8 /wd4251)
-  endif()
+  target_compile_options(nei PRIVATE /wd4251)
 endif()
 
-if(BUILD_SHARED_LIBS)
-  target_compile_definitions(neixx PRIVATE NEI_EXPORTS)
-  if(NOT WIN32)
-    set_target_properties(
-      neixx
-      PROPERTIES C_VISIBILITY_PRESET hidden
-                 CXX_VISIBILITY_PRESET hidden
-                 VISIBILITY_INLINES_HIDDEN YES
-    )
-  endif()
-else()
-  target_compile_definitions(neixx PUBLIC NEI_STATIC)
-endif()
-
+# Trace event instrumentation (C++ component)
 if(NEI_ENABLE_TRACE_EVENTS)
-  target_compile_definitions(neixx PUBLIC NEI_ENABLE_TRACE_EVENTS)
+  target_compile_definitions(nei PUBLIC NEI_ENABLE_TRACE_EVENTS)
 endif()
 
 add_subdirectory(common)

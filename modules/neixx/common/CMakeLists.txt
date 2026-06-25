@@ -1,5 +1,5 @@
 target_sources(
-  neixx
+  nei
   PRIVATE include/neixx/common/at_exit.h
           include/neixx/common/location.h
           include/neixx/common/no_destructor.h
@@ -17,16 +17,16 @@ target_sources(
 )
 
 target_include_directories(
-  neixx PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  nei PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 if(WIN32)
-  target_sources(neixx PRIVATE src/path_service_win.cpp)
+  target_sources(nei PRIVATE src/path_service_win.cpp)
 elseif(APPLE)
-  target_sources(neixx PRIVATE src/path_service_mac.cpp)
+  target_sources(nei PRIVATE src/path_service_mac.cpp)
 elseif(UNIX)
-  target_sources(neixx PRIVATE src/path_service_linux.cpp)
+  target_sources(nei PRIVATE src/path_service_linux.cpp)
 endif()
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

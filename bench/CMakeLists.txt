@@ -4,7 +4,7 @@ option(NEI_BENCHMARK_FMT
        "Build log_bench with {fmt} for C vs fmt formatting comparison" ON
 )
 add_executable(log_bench log_bench.cpp)
-target_link_libraries(log_bench PRIVATE nei::all)
+target_link_libraries(log_bench PRIVATE nei::nei)
 if(NEI_BENCHMARK_FMT)
   FetchContent_Declare(
     fmt URL https://github.com/fmtlib/fmt/archive/refs/tags/11.1.3.zip
@@ -28,22 +28,22 @@ if(NEI_BENCHMARK_FMT)
 endif()
 
 add_executable(string_append_bench string_append_bench.cpp)
-target_link_libraries(string_append_bench PRIVATE nei::all)
+target_link_libraries(string_append_bench PRIVATE nei::nei)
 
 add_executable(flake_id_bench flake_id_bench.c)
-target_link_libraries(flake_id_bench PRIVATE nei::all)
+target_link_libraries(flake_id_bench PRIVATE nei::nei)
 
 add_executable(task_thread_bench task_thread_bench.cpp)
-target_link_libraries(task_thread_bench PRIVATE nei::all)
+target_link_libraries(task_thread_bench PRIVATE nei::nei)
 
 add_executable(task_threadpool_bench task_threadpool_bench.cpp)
-target_link_libraries(task_threadpool_bench PRIVATE nei::all)
+target_link_libraries(task_threadpool_bench PRIVATE nei::nei)
 
 add_executable(task_priority_perf_demo task_priority_perf_demo.cpp)
-target_link_libraries(task_priority_perf_demo PRIVATE nei::all)
+target_link_libraries(task_priority_perf_demo PRIVATE nei::nei)
 
 add_executable(async_file_bench async_file_bench.cpp)
-target_link_libraries(async_file_bench PRIVATE nei::all)
+target_link_libraries(async_file_bench PRIVATE nei::nei)
 
 option(NEI_BENCHMARK_SPDLOG
        "Build log_bench_compare (NEI vs spdlog, FetchContent spdlog)" ON
@@ -68,7 +68,7 @@ if(NEI_BENCHMARK_SPDLOG)
   FetchContent_MakeAvailable(spdlog)
 
   add_executable(log_bench_compare log_bench_compare.cpp)
-  target_link_libraries(log_bench_compare PRIVATE nei::all spdlog::spdlog fmt::fmt)
+  target_link_libraries(log_bench_compare PRIVATE nei::nei spdlog::spdlog fmt::fmt)
 
   if(BUILD_TESTING AND NEI_ENABLE_LONG_BENCH_TESTS)
     add_test(NAME LogBenchCompareLong COMMAND log_bench_compare)

@@ -21,15 +21,15 @@ else()
   )
 endif()
 
-target_sources(neixx PRIVATE ${NEIXX_PROCESS_SOURCES})
+target_sources(nei PRIVATE ${NEIXX_PROCESS_SOURCES})
 
 target_include_directories(
-  neixx PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  nei PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 if(WIN32)
-  target_link_libraries(neixx PRIVATE shell32)
+  target_link_libraries(nei PRIVATE shell32)
 endif()
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

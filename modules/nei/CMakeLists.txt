@@ -1,36 +1,36 @@
-add_library(nei)
-add_library(nei::nei ALIAS nei)
-
+# C standard (applies to all .c sources in this target)
 target_compile_features(nei PUBLIC c_std_99)
-
-if(WIN32)
-  target_compile_definitions(nei PUBLIC NOMINMAX)
-  if(MSVC)
-    target_compile_options(nei PRIVATE /utf-8)
-  endif()
-endif()
 
 if(NOT WIN32)
   target_link_options(nei INTERFACE -rdynamic)
 endif()
 
-if(NOT WIN32)
-  find_package(Threads REQUIRED)
-  target_link_libraries(nei PUBLIC Threads::Threads PRIVATE m)
-endif()
+# --- Log ring buffer configuration (C component) ---
+set(NEI_LOG_RING_SLOTS
+    "256"
+    CACHE STRING "Log MPSC ring slots (power of two)"
+)
 
-if(BUILD_SHARED_LIBS)
-  target_compile_definitions(nei PRIVATE NEI_EXPORTS)
-  if(NOT WIN32)
-    set_target_properties(
-      nei
-      PROPERTIES C_VISIBILITY_PRESET hidden
-                 CXX_VISIBILITY_PRESET hidden
-                 VISIBILITY_INLINES_HIDDEN YES
-    )
-  endif()
-else()
-  target_compile_definitions(nei PUBLIC NEI_STATIC)
+if(NOT NEI_LOG_RING_SLOTS MATCHES "^[0-9]+$")
+  message(
+    FATAL_ERROR
+      "NEI_LOG_RING_SLOTS must be a positive integer, got: ${NEI_LOG_RING_SLOTS}"
+  )
+endif()
+math(EXPR _nei_log_ring_slots_val "${NEI_LOG_RING_SLOTS}")
+if(_nei_log_ring_slots_val LESS 64)
+  message(
+    FATAL_ERROR "NEI_LOG_RING_SLOTS must be >= 64, got: ${NEI_LOG_RING_SLOTS}"
+  )
+endif()
+math(EXPR _nei_log_ring_slots_pow2_check
+     "${_nei_log_ring_slots_val} & (${_nei_log_ring_slots_val} - 1)"
+)
+if(NOT _nei_log_ring_slots_pow2_check EQUAL 0)
+  message(
+    FATAL_ERROR
+      "NEI_LOG_RING_SLOTS must be a power of two, got: ${NEI_LOG_RING_SLOTS}"
+  )
 endif()
 
 add_subdirectory(macros)

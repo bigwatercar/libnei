@@ -40,10 +40,10 @@ else()
   list(APPEND NEIXX_TASK_SOURCES src/message_loop/message_pump_io_posix.cpp)
 endif()
 
-target_sources(neixx PRIVATE ${NEIXX_TASK_SOURCES})
+target_sources(nei PRIVATE ${NEIXX_TASK_SOURCES})
 
 target_include_directories(
-  neixx PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  nei PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 

@@ -1,5 +1,5 @@
 target_sources(
-  neixx
+  nei
   PRIVATE include/neixx/memory/internal_flag.h
           include/neixx/memory/pass_key.h
           include/neixx/memory/ref_counted.h
@@ -9,7 +9,7 @@ target_sources(
 )
 
 target_include_directories(
-  neixx PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  nei PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
