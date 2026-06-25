@@ -1,193 +1,168 @@
 # LibNei (`nei`)
 
-A modular C/C++ library built with CMake. Sources live under `modules/`, but the build exposes a **single** installable target: **`nei`** (`nei::nei`).
+**English** | [中文](README_zh.md)
 
-- **C**: C99 is set in the root `CMakeLists.txt`; configure presets additionally set `CMAKE_C_STANDARD` to **11** (Ninja / VS presets).
-- **C++**: C++17 for tests and `modules/utils`.
-- **CMake**: 3.23 or newer.
+> A C/C++ infrastructure library inspired by Chromium base, distilling its battle-tested architectural patterns and component designs.
 
-## Modules
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Standard](https://img.shields.io/badge/C-99-blue.svg)](CMakeLists.txt)
+[![Standard](https://img.shields.io/badge/C++-17-blue.svg)](CMakeLists.txt)
+[![CMake](https://img.shields.io/badge/CMake-3.23%2B-green.svg)](CMakeLists.txt)
 
-| Module   | Role |
-| -------- | ---- |
-| `macros` | `NEI_API` / export macros (`nei/macros/nei_export.h`). |
-| `core`   | Endian helpers (`nei/core/endian.h`, platform-specific `.c`). |
-| `utils`  | C++ string utilities (`nei/utils/strings.h`). |
-| `xdr`    | XDR-style packing helpers (`nei/xdr/xdr.h`, `xdr.c`). |
-| `log`    | Async-oriented C logger (`nei/log/log.h`, `log.c`). |
-| `task`   | C++ async task framework (TaskRunner / SequencedTaskRunner / ThreadPool / WeakPtr / TaskEnvironment). |
+## ✨ Philosophy
 
-Include paths follow `include/nei/...` under each module; after install, use `#include <nei/log/log.h>` etc.
+Chromium's `//base` directory contains a wealth of meticulously designed cross-platform infrastructure — async task scheduling, threading models, callback systems, smart pointers, I/O abstractions, and more — proven by billions of users worldwide. However, these components are deeply coupled to Chromium's monolithic build system, making independent reuse difficult.
 
-## Documentation
+**LibNei** aims to re-implement the most valuable components from `chromium/base` in a modular, CMake-based fashion, so any C/C++ project can integrate them with ease.
 
-### Process
+This library is developed with the assistance of AI-powered coding assistants. Large language models accelerate routine implementation and help maintain consistency across modules. However, every line of code undergoes thorough human review: architectural decisions, API surface design, concurrency correctness, cross-platform behavior, and edge-case handling are all carefully scrutinized and refined by human developers. AI serves as a powerful productivity multiplier, but human judgment remains the ultimate gatekeeper of code quality, correctness, and stability.
 
-- Technical design: docs/neixx_process_technical.md
-- API usage examples: docs/neixx_process_api_examples.md
-- Quick reference: docs/neixx_process_quick_reference.md
+## 🧩 Components
 
-### Existing module docs
+### C Library (`nei` — C99)
 
-- docs/neixx_io_technical.md
-- docs/neixx_io_api_examples.md
-- docs/neixx_io_quick_reference.md
-- docs/neixx_async_file_error_model.md
-- docs/neixx_command_line_technical.md
-- docs/neixx_command_line_quick_reference.md
-- docs/neixx_task_module_technical.md
-- docs/neixx_strings_technical.md
+| Module | Description |
+|--------|-------------|
+| `log` | High-performance async logging with MPSC lock-free ring buffer, multiple sinks, and runtime configuration |
+| `core` | Endian conversion utilities (`endian.h`), cross-platform floating-point control |
+| `macros` | Export macros (`NEI_API`), platform detection, and common defines |
+| `debug` | Assertion and check macros (`CHECK` / `DCHECK` / `NOTREACHED`) |
+| `xdr` | XDR-style data serialization / deserialization |
+| `utils` | Cryptography & encoding: Base64, CRC32, MD5, SHA-1, SHA-256, UUID (RFC 4122 v4), cryptographically secure random, Flake ID |
+| `sys` | System information: retrieve current process executable path |
 
-## Layout
+### C++ Library (`neixx` — C++17, optionally enabled)
 
-```text
-libnei-src/
-  CMakeLists.txt
-  CMakePresets.json
-  cmake/
-  modules/
-    macros/include/nei/macros/
-    core/include/nei/core/     src/*.c
-    utils/include/nei/utils/   src/strings.cpp
-    xdr/include/nei/xdr/       src/xdr.c
-    log/include/nei/log/       src/log.c
-    task/include/neixx/task/     src/*.cpp
-  tests/
-    CMakeLists.txt
-    core_test.cpp
-    log_test.cpp
-    log_test2.c
-    task_environment_test.cpp
-    task_scheduler_test.cpp
-    xdr_test.cpp
-  demo/
-    CMakeLists.txt
-    task_thread_demo.cpp
-    task_location_delay_demo.cpp
-    task_priority_demo.cpp
-    task_shutdown_demo.cpp
-    task_may_block_demo.cpp
-    task_weak_ptr_demo.cpp
-  bench/
-    CMakeLists.txt
-    log_bench.cpp
-    log_bench_compare.cpp   # optional, see below
-```
+| Module | Description |
+|--------|-------------|
+| `task` | Async task framework: `TaskRunner`, `SequencedTaskRunner`, `ThreadPool` with priority scheduling, delayed tasks, shutdown policies, `ScopedBlockingCall` compensation workers |
+| `threading` | Cross-platform thread wrapper (`Thread` / `PlatformThread`), thread-local storage |
+| `synchronization` | `Lock`, `ConditionVariable`, `WaitableEvent` |
+| `memory` | `scoped_refptr` / `RefCounted` reference counting, `WeakPtr` / `WeakPtrFactory` (use-after-free-safe async callbacks) |
+| `functional` | Type-safe `Callback` / `Bind` / `CancelableCallback` |
+| `io` | `IOBuffer` buffer hierarchy, `StreamReader` / `StreamWriter`, async file I/O, `AsyncLineReader` |
+| `strings` | String utilities: `SplitString`, `StringPrintf`, UTF conversions, CJK width detection, text normalization |
+| `common` | `AtExitManager`, `NoDestructor`, `Singleton`, `TimeSource`, thread checkers (`SequenceChecker` / `ThreadChecker`) |
+| `command_line` | Command-line argument parsing |
+| `process` | Child process management, process utilities, privilege elevation |
+| `trace_event` | Lightweight trace event instrumentation (optional) |
+| `log` | C++ log header wrapper |
 
-## Task module status
+## 🚀 Quick Start
 
+### Prerequisites
 
-The `task` module has evolved into a production-oriented async execution layer inspired by Chromium base.
+- **CMake** ≥ 3.23
+- **C compiler**: C99 support
+- **C++ compiler**: C++17 support
+- **Build tool**: Ninja (recommended) or Visual Studio 2022 / GCC
 
-### Blocking region support (ScopedBlockingCall)
-
-- **ScopedBlockingCall**: RAII 工具类，用于标记当前线程进入/退出阻塞区，自动通知调度器（ThreadPool）进行补偿 worker 管理，提升并发任务在 I/O 等场景下的吞吐。
-- 支持嵌套调用，线程安全。
-- 典型用法：
-
-  ```cpp
-  {
-    ScopedBlockingCall blocking;
-    // ...执行阻塞操作...
-  } // 离开作用域自动恢复
-  ```
-
-- 观测API：
-  - `ThreadPool::ActiveBlockingCallCountForTesting()`：当前活跃阻塞区线程数
-  - `ThreadPool::SpawnedCompensationWorkersForTesting()`：已补偿 worker 数
-
-- 相关测试：
-  - `scoped_blocking_call_test.cpp`（单元/嵌套/补偿/计数）
-  - `scoped_blocking_call_shutdown_test.cpp`（高频阻塞、shutdown/race、取消等）
-  - `mixed_load_test.cpp`（集成/补偿/延迟/尾延迟等）
-
-### Architecture
-
-- API layer: `TaskRunner`, `Location`, `FROM_HERE` tracing helpers.
-- Logic layer: `SequencedTaskRunner` guarantees in-order execution without requiring user locks.
-- Scheduler layer: `ThreadPool` with delayed tasks, task priorities, and may-block compensation workers.
-- Safety layer: `WeakPtr` / `WeakPtrFactory` for use-after-free-safe async callbacks.
-
-### Implemented capabilities
-
-- Priority-aware scheduling: `USER_BLOCKING`, `USER_VISIBLE`, `BEST_EFFORT`.
-- Shutdown policies: `CONTINUE_ON_SHUTDOWN`, `SKIP_ON_SHUTDOWN`, `BLOCK_SHUTDOWN`.
-- Delayed task execution and source-location tracing via `TaskTracer`.
-- Configurable compensation spawn delay for may-block workloads (Chromium-style delayed backfill).
-- Injectable scheduler time source and `TaskEnvironment` for deterministic virtual-time tests.
-
-### Testing and demos
-
-
-- Automated tests include deterministic task-environment coverage, scheduler stress/race regression, and blocking region (ScopedBlockingCall) correctness/robustness：
-  - `TaskEnvironmentTest.*`
-  - `TaskSchedulerTest.*`
-  - `TaskWeakPtrTest.*`
-  - `TaskStressTest.*`
-  - `scoped_blocking_call_test.cpp`
-  - `scoped_blocking_call_shutdown_test.cpp`
-  - `mixed_load_test.cpp`
-
-- Demos remain available for exploratory runs:
-  - `task_thread_demo`, `task_location_delay_demo`, `task_priority_demo`, `task_shutdown_demo`, `task_may_block_demo`, `task_weak_ptr_demo`
-
-## CMake options
-
-| Option | Default | Meaning |
-| ------ | ------- | ------- |
-| `NEI_BUILD_TESTS` | `ON` | Build `tests/` (GoogleTest via FetchContent). |
-| `NEI_BUILD_BENCHMARKS` | `ON` | Build `bench/` benchmark targets. |
-| `NEI_BUILD_DEMOS` | `ON` | Build `demo/` demo targets. |
-| `NEI_ENABLE_WARNINGS` | `ON` | `/W4` (MSVC) or `-Wall -Wextra -Wpedantic` (others). |
-| `BUILD_SHARED_LIBS` | `ON` | Build shared libraries by default; set `OFF` for static-only. |
-| `NEI_BENCHMARK_SPDLOG` | `ON` | Build `log_bench_compare` (fetches **spdlog** via FetchContent). Set `OFF` to skip spdlog and that target. |
-
-The project sets `CMAKE_EXPORT_COMPILE_COMMANDS` so a `compile_commands.json` is generated for **clangd** / IDE use (path depends on your build directory).
-
-## Build with presets
-
-Configure and build (example: Windows, Ninja + MSVC):
+### Build
 
 ```bash
-cmake --preset windows-msvc-debug
-cmake --build --preset windows-msvc-debug
-ctest --preset windows-msvc-debug
+# Clone the repository
+git clone https://github.com/bigwatercar/libnei.git
+cd libnei
+
+# Configure (example: Windows VS2022 Debug Shared)
+cmake --preset windows-vs2022-debug-shared
+
+# Build
+cmake --build build/windows-vs2022-debug-shared --config Debug
+
+# Run tests (optional)
+cd build/windows-vs2022-debug-shared && ctest -C Debug
 ```
 
-Binary directory pattern: `build/<configure-preset-name>/` (see `CMakePresets.json`).
+### Preset Matrix
 
-**Preset matrix**
+| Platform | Generator | Debug | Release | Debug Shared | Release Shared |
+|----------|-----------|-------|---------|-------------|----------------|
+| Windows | Ninja (MSVC) | `windows-msvc-debug` | `windows-msvc-release` | `windows-msvc-debug-shared` | `windows-msvc-release-shared` |
+| Windows | Visual Studio 2022 | `windows-vs2022-debug` | `windows-vs2022-release` | `windows-vs2022-debug-shared` | `windows-vs2022-release-shared` |
+| Linux (WSL) | Ninja (GCC) | `linux-gcc-debug` | `linux-gcc-release` | `linux-gcc-debug-shared` | `linux-gcc-release-shared` |
 
-| Host | Generator | Static | Shared |
-| ---- | --------- | ------ | ------ |
-| Windows | Ninja (MSVC; **Ninja** must be on `PATH`) | `windows-msvc-debug`, `windows-msvc-release` | `windows-msvc-debug-shared`, `windows-msvc-release-shared` |
-| Windows | Visual Studio 2022 | `windows-vs2022-debug`, `windows-vs2022-release` | `windows-vs2022-debug-shared`, `windows-vs2022-release-shared` |
-| Linux | Ninja (GCC) | `linux-gcc-debug`, `linux-gcc-release` | `linux-gcc-debug-shared`, `linux-gcc-release-shared` |
+### CMake Options
 
-For each configure preset, a matching **build** and **test** preset exists with the same name.
+| Option | Default | Description |
+|--------|---------|-------------|
+| `NEI_BUILD_TESTS` | `ON` | Build tests (fetches GoogleTest via FetchContent) |
+| `NEI_BUILD_BENCHMARKS` | `ON` | Build benchmark targets |
+| `NEI_BUILD_DEMOS` | `ON` | Build demo programs |
+| `NEI_BUILD_NEIXX` | `ON` | Build C++ components (set `OFF` to build C-only) |
+| `NEI_ENABLE_TRACE_EVENTS` | `ON` | Enable trace event instrumentation |
+| `BUILD_SHARED_LIBS` | `ON` | Build shared library (`OFF` for static) |
+| `NEI_LOG_RING_SLOTS` | `256` | Log ring buffer slot count (must be power of two, ≥ 64) |
 
-**Tests and tools**
+## 📦 Integrating into Your Project
 
-- `nei_tests` — GoogleTest executable (`gtest_discover_tests`).
-- `log_test2` — small C smoke binary using the log API.
-- `log_bench` — log throughput helper (no spdlog).
-- `log_bench_compare` — built when `NEI_BENCHMARK_SPDLOG=ON` (compares against spdlog).
-
-## Install and consume
+### Option 1: Install and use `find_package`
 
 ```bash
-cmake --install build/<your-preset-dir> --prefix <install-prefix>
+# Install to a prefix directory
+cmake --install build/windows-vs2022-release-shared --prefix /path/to/install
 ```
 
-In another CMake project:
+In your `CMakeLists.txt`:
 
 ```cmake
 find_package(nei CONFIG REQUIRED)
 target_link_libraries(your_target PRIVATE nei::nei)
 ```
 
-When linking statically, `NEI_STATIC` is defined on consumers of `nei::nei` by the imported target (see `CMakeLists.txt`).
+### Option 2: As a subdirectory (FetchContent / add_subdirectory)
 
-## License
+```cmake
+include(FetchContent)
+FetchContent_Declare(
+  nei
+  GIT_REPOSITORY https://github.com/bigwatercar/libnei.git
+  GIT_TAG        main
+)
+FetchContent_MakeAvailable(nei)
 
-See [LICENSE](LICENSE).
+target_link_libraries(your_target PRIVATE nei::nei)
+```
+
+### Build Artifacts
+
+- **Shared library**: `nei.dll` (Windows) / `libnei.so` (Linux)
+- **Static library**: `nei.lib` (Windows) / `libnei.a` (Linux)
+- **CMake alias**: `nei::nei`
+- **Install namespace**: `nei::`
+
+Headers live under each module's `include/` directory with a unified prefix:
+
+```cpp
+#include <nei/log/log.h>           // C logging API
+#include <neixx/task/task_runner.h> // C++ task runner
+#include <neixx/memory/weak_ptr.h>  // WeakPtr
+```
+
+## 📖 Documentation
+
+| Document | Topic |
+|----------|-------|
+| [C Log Module](docs/nei_log_module_technical.md) | Async logging system design |
+| [Task Module](docs/neixx_task_module_technical.md) | Async task framework |
+| [IO Module](docs/neixx_io_technical.md) | Buffers, streams, async files |
+| [Async File](docs/neixx_async_file_technical.md) | Async file I/O implementation |
+| [Threading & Sync](docs/neixx_threading_technical.md) | Thread wrappers and synchronization primitives |
+| [WeakPtr](docs/neixx_weak_ptr_technical.md) | Weak pointers and safe async callbacks |
+| [Bind / PostTask](docs/neixx_bind_post_task_technical.md) | Callback binding and task posting |
+| [NoDestructor](docs/neixx_no_destructor_technical.md) | Non-destructible static objects |
+| [AtExitManager](docs/neixx_at_exit_technical.md) | At-exit callback management |
+| [Thread / Sequence Checker](docs/neixx_thread_sequence_checker_technical.md) | Thread safety checkers |
+| [String Utilities](docs/neixx_strings_technical.md) | String processing |
+| [Command Line](docs/neixx_command_line_technical.md) | Command-line argument parsing |
+| [Command Line Quick Ref](docs/neixx_command_line_quick_reference.md) | Command-line API reference |
+| [Child Process](docs/neixx_child_process_technical.md) | Child process management |
+| [Windows 7 Compatibility](docs/windows7_compatibility.md) | Win7 compatibility notes |
+
+## 📄 License
+
+This project is open-sourced under the [MIT License](LICENSE).
+
+---
+
+© 2026 bigwatercar
