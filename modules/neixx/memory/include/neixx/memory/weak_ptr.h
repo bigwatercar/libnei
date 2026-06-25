@@ -59,7 +59,15 @@ public:
 
   // Returns a WeakPtr without source-location tracking.
   // Prefer the Location overload for better UAF diagnostics.
+  //
+  // ★ Lazy re-creation: if the factory has been invalidated (flag_ is null),
+  //   a new InternalFlag is created automatically.  This allows the factory
+  //   to be reused after InvalidateWeakPtrs() — essential for timers and
+  //   other components that stop/restart their weak references.
   WeakPtr<T> GetWeakPtr() const {
+    if (!flag_) {
+      flag_ = MakeRefCounted<InternalFlag>();
+    }
     return WeakPtr<T>(ptr_, flag_, bound_thread_);
   }
 
@@ -67,6 +75,9 @@ public:
   // |from_here| is typically FROM_HERE and records where GetWeakPtr()
   // was called, so that diagnostics can pinpoint the exact binding site.
   WeakPtr<T> GetWeakPtr(const Location &from_here) const {
+    if (!flag_) {
+      flag_ = MakeRefCounted<InternalFlag>();
+    }
     return WeakPtr<T>(ptr_, flag_, bound_thread_, from_here,
 #if !defined(NDEBUG)
                       factory_created_from_here_
@@ -111,7 +122,7 @@ private:
   }
 
   T *ptr_;
-  scoped_refptr<InternalFlag> flag_;
+  mutable scoped_refptr<InternalFlag> flag_;
   std::thread::id bound_thread_;
 #if !defined(NDEBUG)
   Location factory_created_from_here_;
