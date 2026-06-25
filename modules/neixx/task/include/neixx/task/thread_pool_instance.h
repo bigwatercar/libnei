@@ -65,21 +65,6 @@ class NEI_API ThreadPoolInstance final {
   ThreadPool pool_;
 };
 
-// ---------------------------------------------------------------------------
-// Global convenience wrappers - require ThreadPoolInstance to be alive.
-// ---------------------------------------------------------------------------
-
-/// Posts a fire-and-forget task to the global pool with default traits.
-NEI_API void PostTask(const Location& from_here, OnceClosure task);
-
-/// Posts a fire-and-forget task with explicit traits (priority, may_block...).
-NEI_API void PostTask(const Location& from_here, OnceClosure task,
-                      const TaskTraits& traits);
-
-/// Returns a sequenced TaskRunner from the global pool.
-NEI_API scoped_refptr<TaskRunner> CreateSequencedTaskRunner(
-    const TaskTraits& traits = TaskTraits());
-
 }  // namespace nei
 
 #endif  // NEIXX_TASK_THREAD_POOL_INSTANCE_H_

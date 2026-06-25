@@ -503,44 +503,6 @@ TEST_F(ThreadPoolInstanceTest, GetReturnsNonNullAfterShutdown) {
   EXPECT_NE(ThreadPoolInstance::Get(), nullptr);
 }
 
-TEST_F(ThreadPoolInstanceTest, GlobalPostTaskExecutesTask) {
-  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-  std::atomic<bool> ran{false};
-
-  nei::PostTask(FROM_HERE, [&ran, &done]() {
-    ran.store(true);
-    done.Signal();
-  });
-
-  ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(2000)));
-  EXPECT_TRUE(ran.load());
-}
-
-TEST_F(ThreadPoolInstanceTest, GlobalCreateSequencedTaskRunnerReturnsRunner) {
-  scoped_refptr<TaskRunner> runner = nei::CreateSequencedTaskRunner();
-  ASSERT_TRUE(runner);
-
-  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-  runner->PostTask(FROM_HERE, [&done]() { done.Signal(); });
-  ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(2000)));
-}
-
-TEST_F(ThreadPoolInstanceTest, GlobalPostTaskWithMayBlockTraits) {
-  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-  std::atomic<bool> ran{false};
-
-  const TaskTraits may_block_traits(MayBlock());
-  nei::PostTask(FROM_HERE,
-                [&ran, &done]() {
-                  ran.store(true);
-                  done.Signal();
-                },
-                may_block_traits);
-
-  ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(2000)));
-  EXPECT_TRUE(ran.load());
-}
-
 // ============================================================================
 // may_block compensation and ScopedBlockingCall tests
 // ============================================================================

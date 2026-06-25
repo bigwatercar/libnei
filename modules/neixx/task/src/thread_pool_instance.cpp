@@ -79,31 +79,4 @@ scoped_refptr<TaskRunner> ThreadPoolInstance::CreateSequencedTaskRunner(
   return pool_.CreateSequencedTaskRunner(traits);
 }
 
-// ---------------------------------------------------------------------------
-// Global convenience wrappers
-// ---------------------------------------------------------------------------
-
-void PostTask(const Location& from_here, OnceClosure task) {
-  PostTask(from_here, std::move(task), TaskTraits{});
-}
-
-void PostTask(const Location& from_here, OnceClosure task,
-              const TaskTraits& traits) {
-  ThreadPoolInstance* instance = ThreadPoolInstance::Get();
-  DCHECK(instance != nullptr);
-  if (instance == nullptr) {
-    return;
-  }
-  scoped_refptr<TaskRunner> runner = instance->CreateSequencedTaskRunner(traits);
-  if (runner) {
-    runner->PostTask(from_here, std::move(task));
-  }
-}
-
-scoped_refptr<TaskRunner> CreateSequencedTaskRunner(const TaskTraits& traits) {
-  ThreadPoolInstance* instance = ThreadPoolInstance::Get();
-  DCHECK(instance != nullptr);
-  return instance ? instance->CreateSequencedTaskRunner(traits) : nullptr;
-}
-
 }  // namespace nei
