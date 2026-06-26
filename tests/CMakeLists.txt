@@ -35,6 +35,7 @@ add_executable(
   cancelable_callback_test.cpp
   checksum_hash_test.cpp
   check_macro_test.cpp
+  core_time_test.cpp
   child_process_test.cpp
   cjk_width_test.cpp
   condition_variable_test.cpp
