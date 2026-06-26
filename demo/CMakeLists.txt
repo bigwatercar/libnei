@@ -34,6 +34,9 @@ target_link_libraries(at_exit_demo PRIVATE nei::nei)
 add_executable(elevated_process_demo elevated_process_demo.cpp)
 target_link_libraries(elevated_process_demo PRIVATE nei::nei)
 
+add_executable(memory_monitor_demo memory_monitor_demo.cpp)
+target_link_libraries(memory_monitor_demo PRIVATE nei::nei)
+
 if(WIN32 AND BUILD_SHARED_LIBS)
   function(nei_copy_runtime_dlls target_name)
     add_custom_command(
