@@ -4,7 +4,6 @@ target_sources(
           include/nei/utils/crc32.h
           include/nei/utils/flake_id.h
           include/nei/utils/md5.h
-          include/nei/utils/random.h
           include/nei/utils/sha1.h
           include/nei/utils/sha256.h
           include/nei/utils/uuid.h
@@ -12,7 +11,6 @@ target_sources(
           src/crc32.c
           src/flake_id.c
           src/md5.c
-          src/random.c
           src/sha1.c
           src/sha256.c
           src/uuid.c

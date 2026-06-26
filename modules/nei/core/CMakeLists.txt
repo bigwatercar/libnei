@@ -3,8 +3,9 @@ target_sources(
   PRIVATE include/nei/core/endian.h include/nei/core/float_ctrl.h
           include/nei/core/encoding.h include/nei/core/file_util.h
           include/nei/core/path_util.h include/nei/core/time.h
+          include/nei/core/random.h
   PRIVATE src/endian.c src/float_ctrl.c src/encoding.c src/file_util.c
-          src/path_util.c src/time.c
+          src/path_util.c src/time.c src/random.c
 )
 
 if(WIN32)
