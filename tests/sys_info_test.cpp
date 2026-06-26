@@ -250,6 +250,22 @@ TEST(SysProcessInfo, NullBufferReturnsError) {
     EXPECT_LT(nei_get_current_directory(nullptr, 4096), 0);
 }
 
+TEST(SysProcessInfo, GetProcessMemoryInfoReturnsValid) {
+    nei_process_memory_info_st info;
+    int ret = nei_get_process_memory_info(&info);
+    ASSERT_EQ(ret, 0);
+    EXPECT_GT(info.virtual_bytes, 0u) << "Virtual memory should be > 0";
+    EXPECT_GT(info.resident_bytes, 0u) << "Resident memory should be > 0";
+    EXPECT_GE(info.peak_virtual_bytes, info.virtual_bytes)
+        << "Peak virtual >= current";
+    EXPECT_GE(info.peak_resident_bytes, info.resident_bytes)
+        << "Peak resident >= current";
+}
+
+TEST(SysProcessInfo, GetProcessMemoryInfoNullReturnsError) {
+    EXPECT_LT(nei_get_process_memory_info(nullptr), 0);
+}
+
 /* C++ wrappers */
 TEST(SysProcessInfo, CppWrappersCompile) {
     int64_t pid = nei_get_pid();

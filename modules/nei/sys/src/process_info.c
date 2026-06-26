@@ -8,9 +8,11 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <psapi.h>
 #include <tlhelp32.h>
 #elif defined(__APPLE__)
 #include <mach-o/dyld.h>
+#include <mach/mach.h>
 #include <sys/sysctl.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -362,4 +364,74 @@ int nei_get_executable_dir(char *buf, size_t size) {
     memcpy(buf, src, dir_len);
     buf[dir_len] = '\0';
     return (int)dir_len;
+}
+
+/* =========================================================================
+ * Process memory information
+ * ========================================================================= */
+
+int nei_get_process_memory_info(nei_process_memory_info_st *info) {
+    if (info == NULL) {
+        return -1;
+    }
+
+#ifdef _WIN32
+    {
+        PROCESS_MEMORY_COUNTERS_EX pmc;
+        pmc.cb = sizeof(pmc);
+        if (!GetProcessMemoryInfo(GetCurrentProcess(),
+                                  (PROCESS_MEMORY_COUNTERS *)&pmc,
+                                  sizeof(pmc))) {
+            return -1;
+        }
+        info->virtual_bytes     = pmc.PrivateUsage;
+        info->resident_bytes    = pmc.WorkingSetSize;
+        info->peak_virtual_bytes = pmc.PeakPagefileUsage;
+        info->peak_resident_bytes = pmc.PeakWorkingSetSize;
+        return 0;
+    }
+#elif defined(__APPLE__)
+    {
+        /* Resident + peak resident via task_info. */
+        struct task_basic_info_64 tbi;
+        mach_msg_type_number_t count = TASK_BASIC_INFO_64_COUNT;
+        if (task_info(mach_task_self(), TASK_BASIC_INFO_64,
+                      (task_info_t)&tbi, &count) != KERN_SUCCESS) {
+            return -1;
+        }
+        info->resident_bytes      = tbi.resident_size;
+        info->peak_resident_bytes = tbi.resident_size_max;
+        info->virtual_bytes       = tbi.virtual_size;
+
+        /* Peak virtual size is not directly available on macOS.
+         * Use virtual_size as an approximation. */
+        info->peak_virtual_bytes  = tbi.virtual_size;
+        return 0;
+    }
+#else
+    {
+        /* Linux: parse /proc/self/status. */
+        FILE *f = fopen("/proc/self/status", "r");
+        if (f == NULL) {
+            return -1;
+        }
+
+        memset(info, 0, sizeof(*info));
+        char line[256];
+        while (fgets(line, sizeof(line), f) != NULL) {
+            uint64_t kb = 0;
+            if (sscanf(line, "VmPeak: %lu kB", &kb) == 1) {
+                info->peak_virtual_bytes = kb * 1024ULL;
+            } else if (sscanf(line, "VmSize: %lu kB", &kb) == 1) {
+                info->virtual_bytes = kb * 1024ULL;
+            } else if (sscanf(line, "VmHWM: %lu kB", &kb) == 1) {
+                info->peak_resident_bytes = kb * 1024ULL;
+            } else if (sscanf(line, "VmRSS: %lu kB", &kb) == 1) {
+                info->resident_bytes = kb * 1024ULL;
+            }
+        }
+        fclose(f);
+        return 0;
+    }
+#endif
 }

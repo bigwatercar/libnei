@@ -11,6 +11,32 @@
 extern "C" {
 #endif
 
+/* =========================================================================
+ * Process memory information
+ * ========================================================================= */
+
+/**
+ * @brief Memory usage information for the current process.
+ */
+typedef struct nei_process_memory_info_st {
+    /** Total virtual address space in bytes. */
+    uint64_t virtual_bytes;
+    /** Physical memory currently in use (working set / RSS) in bytes. */
+    uint64_t resident_bytes;
+    /** Peak virtual address space ever used, in bytes. */
+    uint64_t peak_virtual_bytes;
+    /** Peak physical memory ever used, in bytes. */
+    uint64_t peak_resident_bytes;
+} nei_process_memory_info_st;
+
+/**
+ * @brief Get memory usage information for the current process.
+ *
+ * @param info Output structure (must not be NULL).
+ * @return 0 on success, or a negative value on error.
+ */
+NEI_API int nei_get_process_memory_info(nei_process_memory_info_st *info);
+
 /**
  * @brief Get the current process ID (PID).
  *
