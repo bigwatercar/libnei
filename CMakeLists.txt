@@ -11,10 +11,16 @@ project(
 # required).
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_C_STANDARD 99)
+# C/C++ standard defaults (overridable via -DCMAKE_C_STANDARD=... etc.)
+if(NOT CMAKE_C_STANDARD)
+  set(CMAKE_C_STANDARD 11)
+endif()
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
-set(CMAKE_CXX_STANDARD 17)
+
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -74,6 +80,12 @@ if(WIN32)
   target_compile_definitions(nei PUBLIC NOMINMAX)
   if(MSVC)
     target_compile_options(nei PRIVATE /utf-8)
+    # /Zc:__cplusplus — MSVC reports 199711L by default even under
+    # /std:c++17.  This flag makes __cplusplus reflect the actual standard
+    # version (e.g. 201703L for C++17).  Applied at the top-level nei
+    # target so that C++ wrapper sources in the pure-C nei module also
+    # get correct feature-detection macros.
+    target_compile_options(nei PUBLIC /Zc:__cplusplus)
   endif()
 endif()
 
