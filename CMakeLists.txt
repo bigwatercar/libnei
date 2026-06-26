@@ -44,21 +44,13 @@ if(NEI_BUILD_TESTS)
   include(CTest)
 endif()
 
-# Compatible with both single-config and multi-config generators.
-set(NEI_SUPPORTED_CONFIGS Debug Release RelWithDebInfo MinSizeRel)
-if(CMAKE_CONFIGURATION_TYPES)
-  set(CMAKE_CONFIGURATION_TYPES
-      "${NEI_SUPPORTED_CONFIGS}"
-      CACHE STRING "Available build configurations" FORCE
+# Set default build type to Debug if no configuration is specified (single-config generators)
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+  message(WARNING "No build type specified, defaulting to Debug")
+  set(CMAKE_BUILD_TYPE
+      Debug
+      CACHE STRING "Build type" FORCE
   )
-else()
-  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS ${NEI_SUPPORTED_CONFIGS})
-  if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE
-        Debug
-        CACHE STRING "Build type" FORCE
-    )
-  endif()
 endif()
 
 if(NEI_ENABLE_WARNINGS)
