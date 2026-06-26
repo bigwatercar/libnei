@@ -43,6 +43,11 @@ template <typename CharT>
 bool StartsWithT(std::basic_string_view<CharT> input,
                  std::basic_string_view<CharT> prefix,
                  CompareCase compare_case) {
+#if __cplusplus >= 202002L
+  if (compare_case == CompareCase::kSensitive) {
+    return input.starts_with(prefix);
+  }
+#endif
   if (prefix.size() > input.size()) {
     return false;
   }
@@ -58,6 +63,11 @@ template <typename CharT>
 bool EndsWithT(std::basic_string_view<CharT> input,
                std::basic_string_view<CharT> suffix,
                CompareCase compare_case) {
+#if __cplusplus >= 202002L
+  if (compare_case == CompareCase::kSensitive) {
+    return input.ends_with(suffix);
+  }
+#endif
   if (suffix.size() > input.size()) {
     return false;
   }
@@ -179,6 +189,30 @@ bool StringAppendV(std::string *dest, const char *format, va_list args) {
   return true;
 }
 
+template <typename CharT>
+int CompareT(std::basic_string_view<CharT> lhs,
+             std::basic_string_view<CharT> rhs,
+             CompareCase compare_case) {
+  const std::size_t min_len = lhs.size() < rhs.size() ? lhs.size() : rhs.size();
+  for (std::size_t i = 0; i < min_len; ++i) {
+    const CharT lc = (compare_case == CompareCase::kInsensitiveASCII) ? ToLowerASCIIChar(lhs[i]) : lhs[i];
+    const CharT rc = (compare_case == CompareCase::kInsensitiveASCII) ? ToLowerASCIIChar(rhs[i]) : rhs[i];
+    if (lc < rc) {
+      return -1;
+    }
+    if (lc > rc) {
+      return 1;
+    }
+  }
+  if (lhs.size() < rhs.size()) {
+    return -1;
+  }
+  if (lhs.size() > rhs.size()) {
+    return 1;
+  }
+  return 0;
+}
+
 } // namespace
 
 bool StartsWith(std::string_view input, std::string_view prefix, CompareCase compare_case) {
@@ -188,6 +222,11 @@ bool StartsWith(std::string_view input, std::string_view prefix, CompareCase com
 bool StartsWith(std::u16string_view input, std::u16string_view prefix, CompareCase compare_case) {
   return StartsWithT<char16_t>(input, prefix, compare_case);
 }
+#if __cplusplus >= 202002L
+bool StartsWith(std::u8string_view input, std::u8string_view prefix, CompareCase compare_case) {
+  return StartsWithT<char8_t>(input, prefix, compare_case);
+}
+#endif
 
 bool EndsWith(std::string_view input, std::string_view suffix, CompareCase compare_case) {
   return EndsWithT<char>(input, suffix, compare_case);
@@ -196,6 +235,24 @@ bool EndsWith(std::string_view input, std::string_view suffix, CompareCase compa
 bool EndsWith(std::u16string_view input, std::u16string_view suffix, CompareCase compare_case) {
   return EndsWithT<char16_t>(input, suffix, compare_case);
 }
+#if __cplusplus >= 202002L
+bool EndsWith(std::u8string_view input, std::u8string_view suffix, CompareCase compare_case) {
+  return EndsWithT<char8_t>(input, suffix, compare_case);
+}
+#endif
+
+int Compare(std::string_view lhs, std::string_view rhs, CompareCase compare_case) {
+  return CompareT<char>(lhs, rhs, compare_case);
+}
+
+int Compare(std::u16string_view lhs, std::u16string_view rhs, CompareCase compare_case) {
+  return CompareT<char16_t>(lhs, rhs, compare_case);
+}
+#if __cplusplus >= 202002L
+int Compare(std::u8string_view lhs, std::u8string_view rhs, CompareCase compare_case) {
+  return CompareT<char8_t>(lhs, rhs, compare_case);
+}
+#endif
 
 std::string TrimWhitespace(std::string_view input, TrimPositions positions) {
   return TrimWhitespaceT<char>(input, positions);
@@ -204,6 +261,11 @@ std::string TrimWhitespace(std::string_view input, TrimPositions positions) {
 std::u16string TrimWhitespace(std::u16string_view input, TrimPositions positions) {
   return TrimWhitespaceT<char16_t>(input, positions);
 }
+#if __cplusplus >= 202002L
+std::u8string TrimWhitespace(std::u8string_view input, TrimPositions positions) {
+  return TrimWhitespaceT<char8_t>(input, positions);
+}
+#endif
 
 std::string StringPrintf(const char *format, ...) {
   va_list args;
@@ -231,6 +293,11 @@ std::string ToLowerASCII(std::string_view input) {
 std::u16string ToLowerASCII(std::u16string_view input) {
   return ToLowerASCIIT<char16_t>(input);
 }
+#if __cplusplus >= 202002L
+std::u8string ToLowerASCII(std::u8string_view input) {
+  return ToLowerASCIIT<char8_t>(input);
+}
+#endif
 
 std::string ToUpperASCII(std::string_view input) {
   return ToUpperASCIIT<char>(input);
@@ -239,6 +306,11 @@ std::string ToUpperASCII(std::string_view input) {
 std::u16string ToUpperASCII(std::u16string_view input) {
   return ToUpperASCIIT<char16_t>(input);
 }
+#if __cplusplus >= 202002L
+std::u8string ToUpperASCII(std::u8string_view input) {
+  return ToUpperASCIIT<char8_t>(input);
+}
+#endif
 
 std::string TruncateUTF8(std::string_view input, std::size_t byte_limit) {
   if (byte_limit >= input.size()) {
@@ -275,5 +347,13 @@ std::string TruncateUTF8(std::string_view input, std::size_t byte_limit) {
 
   return std::string(input.substr(0, last_boundary));
 }
+
+#if __cplusplus >= 202002L
+std::u8string TruncateUTF8(std::u8string_view input, std::size_t byte_limit) {
+  std::string tmp = TruncateUTF8(std::string_view(
+      reinterpret_cast<const char*>(input.data()), input.size()), byte_limit);
+  return std::u8string(reinterpret_cast<const char8_t*>(tmp.data()), tmp.size());
+}
+#endif
 
 } // namespace nei
