@@ -1,5 +1,7 @@
 #include <nei/utils/crc32.h>
 
+#include <nei/core/file_util.h>
+
 #include <stdio.h>
 
 static const uint32_t nei_crc32_table[256] = {
@@ -114,20 +116,10 @@ int nei_crc32_file_sum(const char *file_path, uint32_t *out_checksum) {
     return -1;
   }
 
-#if defined(_WIN32)
-  {
-    errno_t err;
-    err = fopen_s(&fp, file_path, "rb");
-    if (err != 0) {
-      return -1;
-    }
-  }
-#else
-  fp = fopen(file_path, "rb");
+  fp = nei_fopen_utf8(file_path, "rb");
   if (fp == NULL) {
     return -1;
   }
-#endif
 
   nei_crc32_init(&ctx);
   for (;;) {

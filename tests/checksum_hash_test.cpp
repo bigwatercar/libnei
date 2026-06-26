@@ -76,9 +76,9 @@ TEST(UtilsCrc32Test, IncrementalAndFileHelpersWork) {
   EXPECT_STREQ(hex.data(), "352441c2");
 
   WriteFileAll(path, input);
-  EXPECT_EQ(nei_crc32_file_sum(path.string().c_str(), &checksum), 0);
+  EXPECT_EQ(nei_crc32_file_sum(path.u8string().c_str(), &checksum), 0);
   EXPECT_EQ(checksum, 0x352441C2U);
-  EXPECT_EQ(nei_crc32_file_sum_hex(path.string().c_str(), hex.data()), 0);
+  EXPECT_EQ(nei_crc32_file_sum_hex(path.u8string().c_str(), hex.data()), 0);
   EXPECT_STREQ(hex.data(), "352441c2");
   std::filesystem::remove(path);
 }
@@ -127,7 +127,7 @@ TEST(UtilsSha256Test, IncrementalAndFileHelpersWork) {
   EXPECT_STREQ(hex.data(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 
   WriteFileAll(path, input);
-  EXPECT_EQ(nei_sha256_file_sum_hex(path.string().c_str(), hex.data()), 0);
+  EXPECT_EQ(nei_sha256_file_sum_hex(path.u8string().c_str(), hex.data()), 0);
   EXPECT_STREQ(hex.data(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
   std::filesystem::remove(path);
 }

@@ -1,7 +1,8 @@
 target_sources(
   nei
   PRIVATE include/nei/core/endian.h include/nei/core/float_ctrl.h
-  PRIVATE src/endian.c src/float_ctrl.c
+          include/nei/core/encoding.h include/nei/core/file_util.h
+  PRIVATE src/endian.c src/float_ctrl.c src/encoding.c src/file_util.c
 )
 
 if(WIN32)

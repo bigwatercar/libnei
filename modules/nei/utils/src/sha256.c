@@ -1,5 +1,7 @@
 #include <nei/utils/sha256.h>
 
+#include <nei/core/file_util.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -209,20 +211,10 @@ int nei_sha256_file_sum(const char *file_path, uint8_t out_digest[NEI_SHA256_DIG
     return -1;
   }
 
-#if defined(_WIN32)
-  {
-    errno_t err;
-    err = fopen_s(&fp, file_path, "rb");
-    if (err != 0) {
-      return -1;
-    }
-  }
-#else
-  fp = fopen(file_path, "rb");
+  fp = nei_fopen_utf8(file_path, "rb");
   if (fp == NULL) {
     return -1;
   }
-#endif
 
   nei_sha256_init(&ctx);
   for (;;) {
