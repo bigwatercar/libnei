@@ -8,6 +8,7 @@
 
 #include <nei/macros/nei_export.h>
 
+#include <stdint.h>
 #include <stdio.h>
 
 #ifdef __cplusplus
@@ -26,6 +27,44 @@ extern "C" {
  * @return @c FILE* on success, or @c NULL on failure.
  */
 NEI_API FILE *nei_fopen_utf8(const char *path, const char *mode);
+
+/**
+ * @brief Check whether a file or directory exists.
+ *
+ * @param path UTF-8 path (must not be NULL).
+ * @return Non-zero (true) if the path exists, 0 (false) otherwise.
+ */
+NEI_API int nei_file_exists(const char *path);
+
+/**
+ * @brief Get the size of a regular file in bytes.
+ *
+ * @param path     UTF-8 path (must not be NULL).
+ * @param out_size Receives the file size in bytes (must not be NULL).
+ * @return 0 on success, or a negative value on error (e.g. path is a
+ *         directory or does not exist).
+ */
+NEI_API int nei_file_size(const char *path, uint64_t *out_size);
+
+/**
+ * @brief Delete a file.
+ *
+ * @param path UTF-8 path (must not be NULL).
+ * @return 0 on success, or a negative value on error.
+ */
+NEI_API int nei_file_remove(const char *path);
+
+/**
+ * @brief Rename or move a file or directory.
+ *
+ * On Windows this uses @c _wrename which may fail when moving across
+ * different volumes.  Use OS-specific APIs for cross-volume moves.
+ *
+ * @param old_path UTF-8 path to the existing file (must not be NULL).
+ * @param new_path UTF-8 path to the new location (must not be NULL).
+ * @return 0 on success, or a negative value on error.
+ */
+NEI_API int nei_file_rename(const char *old_path, const char *new_path);
 
 #ifdef __cplusplus
 }
