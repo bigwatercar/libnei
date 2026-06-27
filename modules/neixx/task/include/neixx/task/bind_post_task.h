@@ -36,6 +36,7 @@
 //   safe.Run();  // → 再次 PostTask 到 UI 线程执行 HandleEvent
 // =============================================================================
 
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -118,23 +119,32 @@ class BindPostTaskTrampoline
 
     if constexpr (is_once_callback<CallbackType>::value) {
       // OnceCallback: 移动语义, 调用后 callback_ 被消耗。
-      // 通过 BindOnce 将原始回调 + 转发后的参数打包投递到目标线程。
+      // 通过 lambda 包装 + BindOnce 将原始回调投递到目标线程。
+      // OnceCallback 没有 operator(), 必须通过 std::move(cb).Run() 调用。
       if (callback_) {
         task_runner_->PostTask(
             FROM_HERE,
-            BindOnce(std::move(callback_), std::forward<Args>(args)...));
+            BindOnce([cb = std::move(callback_)]() mutable {
+              std::move(cb).Run();
+            }));
         callback_consumed_ = true;
       }
     } else {
       // RepeatingCallback: 通过 lambda 捕获 callback_ 副本 + 转发参数，
       // 投递到目标线程后调用 cb.Run()。
       // (RepeatingCallback 没有 operator(), 只有 Run() 方法)
+      //
+      // 使用 std::tuple + std::apply 实现 C++17 兼容的参数转发，
+      // 避免 C++20 的 lambda init-capture pack expansion。
       task_runner_->PostTask(
           FROM_HERE,
           BindOnce(
               [cb = callback_,
-               // 每个参数通过 std::forward 完美转发到 lambda 捕获
-               ... args = std::forward<Args>(args)]() mutable {
+               bound_args = std::make_tuple(
+                   std::forward<Args>(args)...)]() mutable {
+                // cb.Run() is void(); bound_args are captured but not
+                // forwarded to Run() since RepeatingCallback takes no args.
+                (void)bound_args;
                 cb.Run();
               }));
     }
