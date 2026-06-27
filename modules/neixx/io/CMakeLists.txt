@@ -12,7 +12,6 @@ set(NEIXX_IO_SOURCES
   src/buffer_stream.cpp
   src/file_stream_adapters.cpp
   src/internal/async_file_error_code.h
-  src/internal/pipe_stream_factory_internal.h
   src/io_buffer.cpp
   src/stream_reader.cpp
   src/stream_writer.cpp
@@ -22,13 +21,11 @@ if(WIN32)
   list(APPEND NEIXX_IO_SOURCES
     src/async_file_win.h
     src/async_file_win.cpp
-    src/pipe_stream_win.cpp
   )
 else()
   list(APPEND NEIXX_IO_SOURCES
     src/async_file_posix.h
     src/async_file_posix.cpp
-    src/pipe_stream_posix.cpp
   )
 endif()
 
