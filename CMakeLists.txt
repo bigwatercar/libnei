@@ -98,6 +98,9 @@ endif()
 
 # Non-Windows dependencies
 if(NOT WIN32)
+  # _POSIX_C_SOURCE=199309L is required for clock_gettime / struct timespec
+  # when compiling in strict C11 mode (otherwise GCC hides these POSIX types).
+  target_compile_definitions(nei PUBLIC _POSIX_C_SOURCE=199309L)
   find_package(Threads REQUIRED)
   target_link_libraries(
     nei
