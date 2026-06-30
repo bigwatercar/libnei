@@ -51,6 +51,7 @@ add_executable(
   ref_counted_test.cpp
   weak_ptr_test.cpp
   thread_test.cpp
+  simple_thread_test.cpp
   timer_test.cpp
   message_pump_test.cpp
   message_pump_io_current_test.cpp
