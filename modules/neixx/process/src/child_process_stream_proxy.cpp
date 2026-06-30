@@ -4,7 +4,7 @@
 
 #include <nei/debug/check.h>
 #include <neixx/common/location.h>
-#include <neixx/common/sequence_checker.h>
+#include <neixx/task/sequence_checker.h>
 
 // Stream proxies capture WeakPtr in lambdas that hop between IO thread and
 // caller's thread.  The proxy uses atomics for its mutable state, so WeakPtr

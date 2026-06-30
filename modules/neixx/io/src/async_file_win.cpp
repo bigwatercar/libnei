@@ -19,7 +19,7 @@
 
 #include <nei/debug/check.h>
 #include <neixx/common/location.h>
-#include <neixx/common/thread_checker.h>
+#include <neixx/task/thread_checker.h>
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/strings/utf_string_conversions.h>

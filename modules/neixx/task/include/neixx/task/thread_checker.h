@@ -1,7 +1,7 @@
 #pragma once
 
-#ifndef NEIXX_COMMON_THREAD_CHECKER_H_
-#define NEIXX_COMMON_THREAD_CHECKER_H_
+#ifndef NEIXX_TASK_THREAD_CHECKER_H_
+#define NEIXX_TASK_THREAD_CHECKER_H_
 
 // =============================================================================
 // ThreadChecker — 物理线程归属校验器 (Chromium-style)
@@ -192,4 +192,4 @@ class NEI_API ThreadChecker {
 
 #endif  // NEI_DCHECK_IS_ON
 
-#endif  // NEIXX_COMMON_THREAD_CHECKER_H_
+#endif  // NEIXX_TASK_THREAD_CHECKER_H_

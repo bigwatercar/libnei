@@ -1,7 +1,7 @@
 #pragma once
 
-#ifndef NEIXX_COMMON_SEQUENCE_CHECKER_H_
-#define NEIXX_COMMON_SEQUENCE_CHECKER_H_
+#ifndef NEIXX_TASK_SEQUENCE_CHECKER_H_
+#define NEIXX_TASK_SEQUENCE_CHECKER_H_
 
 // =============================================================================
 // SequenceChecker — 逻辑序列归属校验器 (Chromium-style)
@@ -50,7 +50,7 @@
 
 #include <nei/debug/check.h>
 #include <nei/macros/nei_export.h>
-#include <neixx/common/thread_checker.h>
+#include <neixx/task/thread_checker.h>
 #include <neixx/task/sequence_token.h>
 #include <neixx/threading/thread_local_storage.h>
 
@@ -269,6 +269,11 @@ class NEI_API SequenceChecker {
 // =============================================================================
 // 配套宏定义
 // =============================================================================
+//
+// 设计说明：这些宏是 SequenceChecker 的"唯一正确用法入口"。
+// 在 Release 模式下，宏展开为空操作，彻底消除 SequenceChecker 的运行时开销
+// 和内存占用。禁止直接使用 SequenceChecker 的成员方法 —— 这绕过了零开销保证。
+//
 
 #if NEI_DCHECK_IS_ON
 
@@ -276,12 +281,12 @@ class NEI_API SequenceChecker {
 // 用法：DECLARE_SEQUENCE_CHECKER(sequence_checker_);
 #define DECLARE_SEQUENCE_CHECKER(name) nei::SequenceChecker name
 
-// 断言当前执行上下文与 name 绑定的逻辑序列一致。
+// 断言当前执行序列与 name 绑定的序列一致。
 // 用法：DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 #define DCHECK_CALLED_ON_VALID_SEQUENCE(name) \
   DCHECK((name).CalledOnValidSequence())
 
-// 解除 name 的序列/线程绑定，允许下一次校验时惰性绑定到新上下文。
+// 解除 name 的序列绑定，允许下一次校验时惰性绑定到新序列。
 // 用法：DETACH_FROM_SEQUENCE(sequence_checker_);
 #define DETACH_FROM_SEQUENCE(name) (name).DetachFromSequence()
 
@@ -296,76 +301,4 @@ class NEI_API SequenceChecker {
 
 #endif  // NEI_DCHECK_IS_ON
 
-// =============================================================================
-// TLS 集成指引 — 在任务调度基础设施中设置 SequenceToken
-// =============================================================================
-//
-// 要启用 SequenceChecker 的"逻辑序列"维度校验，必须在任务执行路径中
-// 正确地设置和清除当前线程的 SequenceToken。以下是典型的集成点：
-//
-// 集成点 1: SequenceManager::DoWork (最优先的集成位置)
-// ---------------------------------------------------------------------------
-// 在 SequenceManager 从 TaskQueue 取出任务并执行时，该任务必然属于某个
-// 序列。此时应将 TaskQueue 的 SequenceToken 写入 TLS：
-//
-//   // sequence_manager.cpp 的 DoWork 方法中：
-//   void SequenceManager::DoWork() {
-//     Task task = DequeueNextTask();
-//     if (!task) return;
-//
-//     // ★ 关键：在执行任务前设置当前序列 token
-//     nei::internal::SetCurrentSequenceToken(owning_queue_->GetSequenceToken());
-//
-//     // 执行任务
-//     task.Run();
-//
-//     // ★ 关键：任务执行完毕后清除 token
-//     nei::internal::SetCurrentSequenceToken(nei::SequenceToken());
-//
-//     // 继续处理下一个任务（循环内重复上述设置/清除）
-//   }
-//
-// 集成点 2: WorkerThread::ThreadMain (兜底集成位置)
-// ---------------------------------------------------------------------------
-// 如果 WorkerThread 的运行循环不在 SequenceManager 内部，可以在更外层设置：
-//
-//   // worker_thread.cpp 的 ThreadMain 方法中：
-//   void WorkerThread::ThreadMain() {
-//     while (running_) {
-//       Task task = GetNextTask();
-//       if (!task) break;
-//
-//       nei::internal::SetCurrentSequenceToken(task.sequence_token);
-//       task.Run();
-//       nei::internal::SetCurrentSequenceToken(nei::SequenceToken());
-//     }
-//   }
-//
-// 重要注意事项：
-//   - 必须在 task.Run() 返回后清除 token，否则下一个非序列化任务
-//     会"继承"上一个任务的 token，导致 SequenceChecker 误判。
-//   - 设置/清除操作应在同一个线程上配对进行。
-//   - 若任务执行过程中抛出异常，应使用 RAII 守卫或在 catch 块中清除 token。
-//
-// RAII 守卫 (推荐方式，保证异常安全)：
-// ---------------------------------------------------------------------------
-// 可以定义一个简单的 RAII 类来自动管理 token 的作用域：
-//
-//   class ScopedSequenceToken {
-//    public:
-//     explicit ScopedSequenceToken(SequenceToken token) {
-//       nei::internal::SetCurrentSequenceToken(token);
-//     }
-//     ~ScopedSequenceToken() {
-//       nei::internal::SetCurrentSequenceToken(SequenceToken());
-//     }
-//     ScopedSequenceToken(const ScopedSequenceToken&) = delete;
-//     ScopedSequenceToken& operator=(const ScopedSequenceToken&) = delete;
-//   };
-//
-// 然后在 DoWork 中使用：
-//   ScopedSequenceToken guard(queue->GetSequenceToken());
-//   task.Run();
-// =============================================================================
-
-#endif  // NEIXX_COMMON_SEQUENCE_CHECKER_H_
+#endif  // NEIXX_TASK_SEQUENCE_CHECKER_H_

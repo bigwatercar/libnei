@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <neixx/common/sequence_checker.h>
+#include <neixx/task/sequence_checker.h>
 #include <neixx/io/async_stream.h>
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/weak_ptr.h>

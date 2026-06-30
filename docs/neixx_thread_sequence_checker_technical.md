@@ -2,13 +2,13 @@
 
 ## 1. 文档目标与范围
 
-本文档描述 `neixx/common` 中 `ThreadChecker` 与 `SequenceChecker` 两个线程安全校验器的
+本文档描述 `neixx/task` 中 `ThreadChecker` 与 `SequenceChecker` 两个线程安全校验器的
 设计目标、API 语义、使用范式、Release 模式零开销机制，以及配套 TLS 基础设施的集成方式。
 
 本文档基于：
 
-- `modules/neixx/common/include/neixx/common/thread_checker.h`
-- `modules/neixx/common/include/neixx/common/sequence_checker.h`
+- `modules/neixx/task/include/neixx/task/thread_checker.h`
+- `modules/neixx/task/include/neixx/task/sequence_checker.h`
 - `modules/neixx/threading/include/neixx/threading/platform_thread.h`（`PlatformThreadId`）
 - `modules/neixx/task/include/neixx/task/sequence_token.h`（`SequenceToken`）
 
@@ -119,7 +119,7 @@ CAS 争抢语义：`DetachFromThread()` 后，第一个调用 `CalledOnValidThre
 #### 示例 A：基本用法——保护成员函数
 
 ```cpp
-#include <neixx/common/thread_checker.h>
+#include <neixx/task/thread_checker.h>
 
 class NetworkMonitor {
 public:
@@ -149,7 +149,7 @@ private:
 #### 示例 B：线程迁移——构造后转移给另一线程
 
 ```cpp
-#include <neixx/common/thread_checker.h>
+#include <neixx/task/thread_checker.h>
 
 class AsyncResource {
 public:
@@ -265,7 +265,7 @@ public:
 #### 示例 D：保护 SequenceManager 管理的对象
 
 ```cpp
-#include <neixx/common/sequence_checker.h>
+#include <neixx/task/sequence_checker.h>
 
 class TaskQueue {
 public:

@@ -20,7 +20,7 @@
 
 #include <neixx/command_line/command_line.h>
 #include <neixx/common/location.h>
-#include <neixx/common/sequence_checker.h>
+#include <neixx/task/sequence_checker.h>
 #include <internal/pipe_stream_factory_internal.h>
 #include <neixx/strings/utf_string_conversions.h>
 #include <neixx/synchronization/waitable_event.h>

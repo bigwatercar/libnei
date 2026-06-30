@@ -12,7 +12,7 @@
 - `modules/neixx/task/include/neixx/task/task_runner.h`（`PostDelayedTask` 投递接口）
 - `modules/neixx/functional/include/neixx/functional/bind.h`（`BindOnce` WeakPtr 校验）
 - `modules/neixx/memory/include/neixx/memory/weak_ptr.h`（`WeakPtrFactory` / `InvalidateWeakPtrs`）
-- `modules/neixx/common/include/neixx/common/sequence_checker.h`（序列绑定校验）
+- `modules/neixx/task/include/neixx/task/sequence_checker.h`（序列绑定校验）
 
 ## 2. 模块定位
 

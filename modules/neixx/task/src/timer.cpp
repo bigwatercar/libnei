@@ -3,7 +3,7 @@
 #include <utility>
 
 #include <nei/debug/check.h>
-#include <neixx/common/sequence_checker.h>
+#include <neixx/task/sequence_checker.h>
 #include <neixx/functional/bind.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/task/task_runner.h>
