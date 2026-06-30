@@ -30,18 +30,46 @@ extern "C" {
 NEI_API int64_t nei_time_now_sec(void);
 
 /**
- * @brief Current Unix timestamp in milliseconds.
+ * @brief Current Unix timestamp in milliseconds (fast, ~ms resolution).
+ *
+ * Uses the lightest available system call.  On Windows this is a
+ * user-mode shared-memory read (~1-2 ns); on POSIX it is clock_gettime.
+ * The returned value advances in ~1-16 ms increments depending on the
+ * system timer resolution.  For sub-millisecond precision use
+ * nei_time_now_ms_hires().
  *
  * @return Milliseconds since Unix epoch, or negative on error.
  */
 NEI_API int64_t nei_time_now_ms(void);
 
 /**
- * @brief Current Unix timestamp in microseconds.
+ * @brief Current Unix timestamp in microseconds (fast, ~ms resolution).
  *
+ * @copydetails nei_time_now_ms()
  * @return Microseconds since Unix epoch, or negative on error.
  */
 NEI_API int64_t nei_time_now_us(void);
+
+/**
+ * @brief High-resolution Unix timestamp in milliseconds.
+ *
+ * Uses QPC-based anchoring to provide sub-millisecond precision.
+ * Slightly more expensive per call (~10-15 ns) but advances
+ * continuously rather than in timer ticks.  Prefer this when
+ * generating IDs, measuring short intervals, or any scenario
+ * where coarse timer granularity would be visible.
+ *
+ * @return Milliseconds since Unix epoch, or negative on error.
+ */
+NEI_API int64_t nei_time_now_ms_hires(void);
+
+/**
+ * @brief High-resolution Unix timestamp in microseconds.
+ *
+ * @copydetails nei_time_now_ms_hires()
+ * @return Microseconds since Unix epoch, or negative on error.
+ */
+NEI_API int64_t nei_time_now_us_hires(void);
 
 /* =========================================================================
  * Monotonic time (for interval measurement)
