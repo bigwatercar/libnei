@@ -8,9 +8,11 @@
 
 #if defined(_WIN32)
 #include <Windows.h>
-#else
-#include <time.h>
 #endif
+
+#include <nei/core/time.h>
+
+#include "time_internal.h"
 
 #if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L) && !defined(__STDC_NO_ATOMICS__)
 #include <stdatomic.h>
@@ -44,84 +46,18 @@ typedef struct nei_flake_tls_state_st {
 
 static NEI_FLAKE_TLS nei_flake_tls_state_st s_tls = {0U, 0U, 0ULL, 0U};
 
-#if defined(_WIN32)
-
-static uint64_t nei_flake_wall_ms_win32(void) {
-  FILETIME ft;
-  ULARGE_INTEGER value;
-  const uint64_t kFileTimeToUnixEpoch100ns = 116444736000000000ULL;
-
-  GetSystemTimeAsFileTime(&ft);
-  value.LowPart = ft.dwLowDateTime;
-  value.HighPart = ft.dwHighDateTime;
-
-  if (value.QuadPart <= kFileTimeToUnixEpoch100ns) {
-    return 0ULL;
+/// Thin wrapper: calls the QPC-anchored fast path directly (bypassing the
+/// DLL-export thunk).  The anchor is initialized lazily in the per-thread
+/// TLS setup path above, so this hot path only does the QPC projection.
+static uint64_t nei_flake_now_ms(void) {
+  const int64_t us = nei_time_qpc_fast_us();
+  if (us >= 0) {
+    return (uint64_t)(us / 1000);
   }
-  return (value.QuadPart - kFileTimeToUnixEpoch100ns) / 10000ULL;
+  /* Fallback: QPC unavailable — use the regular wall clock. */
+  const int64_t ms = nei_time_now_ms();
+  return (ms >= 0) ? (uint64_t)ms : 0ULL;
 }
-
-static uint64_t nei_flake_unix_ms_now_impl(void) {
-  /*
-   * Windows 7 only has GetSystemTimeAsFileTime (coarser than Win8+ precise API).
-   * We anchor QueryPerformanceCounter (QPC) to wall time once, then use
-   * max(wall_ms, qpc_projected_ms) to keep millisecond ticks monotonic and
-   * resistant to coarse wall-clock granularity/regressions.
-   */
-  static volatile LONG s_qpc_state = 0; /* 0=uninit, 1=initing, 2=ready */
-  static LARGE_INTEGER s_qpc_freq;
-  static LARGE_INTEGER s_qpc_base;
-  static uint64_t s_wall_base_ms = 0ULL;
-
-  uint64_t wall_ms = nei_flake_wall_ms_win32();
-
-  if (s_qpc_state != 2) {
-    if (InterlockedCompareExchange(&s_qpc_state, 1, 0) == 0) {
-      LARGE_INTEGER freq;
-      LARGE_INTEGER now;
-      if (QueryPerformanceFrequency(&freq) != 0 && QueryPerformanceCounter(&now) != 0 && freq.QuadPart > 0) {
-        s_qpc_freq = freq;
-        s_qpc_base = now;
-        s_wall_base_ms = wall_ms;
-        InterlockedExchange(&s_qpc_state, 2);
-      } else {
-        InterlockedExchange(&s_qpc_state, 0);
-        return wall_ms;
-      }
-    } else {
-      while (s_qpc_state == 1) {
-        YieldProcessor();
-      }
-    }
-  }
-
-  if (s_qpc_state == 2) {
-    LARGE_INTEGER now;
-    if (QueryPerformanceCounter(&now) != 0) {
-      const uint64_t elapsed_counts = (now.QuadPart >= s_qpc_base.QuadPart)
-                                          ? (uint64_t)(now.QuadPart - s_qpc_base.QuadPart)
-                                          : 0ULL;
-      const uint64_t qpc_ms = s_wall_base_ms + (elapsed_counts * 1000ULL) / (uint64_t)s_qpc_freq.QuadPart;
-      if (qpc_ms > wall_ms) {
-        wall_ms = qpc_ms;
-      }
-    }
-  }
-
-  return wall_ms;
-}
-
-#else
-
-static uint64_t nei_flake_unix_ms_now_impl(void) {
-  struct timespec ts;
-  if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
-    return 0ULL;
-  }
-  return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000ULL);
-}
-
-#endif
 
 #if NEI_FLAKE_HAS_C11_ATOMICS
 static uint32_t nei_flake_next_thread_tag(void) {
@@ -140,10 +76,6 @@ static uint32_t nei_flake_next_thread_tag(void) {
 }
 #endif
 
-uint64_t nei_flake_unix_ms_now(void) {
-  return nei_flake_unix_ms_now_impl();
-}
-
 uint64_t nei_flake_next_id(void) {
   uint64_t now_ms;
   uint64_t ts_part;
@@ -154,9 +86,10 @@ uint64_t nei_flake_next_id(void) {
     s_tls.last_ms = 0ULL;
     s_tls.sequence = 0U;
     s_tls.initialized = 1U;
+    nei_time_qpc_ensure_anchor();  /* once per process, idempotent */
   }
 
-  now_ms = nei_flake_unix_ms_now_impl();
+  now_ms = nei_flake_now_ms();
   if (now_ms < NEI_FLAKE_EPOCH_MS) {
     now_ms = NEI_FLAKE_EPOCH_MS;
   }
@@ -168,7 +101,7 @@ uint64_t nei_flake_next_id(void) {
   if (now_ms == s_tls.last_ms) {
     if (s_tls.sequence >= (uint32_t)NEI_FLAKE_SEQUENCE_MASK) {
       do {
-        now_ms = nei_flake_unix_ms_now_impl();
+        now_ms = nei_flake_now_ms();
         if (now_ms < s_tls.last_ms) {
           now_ms = s_tls.last_ms;
         }

@@ -36,12 +36,6 @@ extern "C" {
  */
 NEI_API uint64_t nei_flake_next_id(void);
 
-/**
- * @brief Returns current wall-clock milliseconds since Unix epoch.
- * @return Unix time in milliseconds.
- */
-NEI_API uint64_t nei_flake_unix_ms_now(void);
-
 #ifdef __cplusplus
 }
 #endif

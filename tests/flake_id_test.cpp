@@ -7,6 +7,8 @@
 
 #include <nei/utils/flake_id.h>
 
+#include <nei/core/time.h>
+
 namespace {
 
 constexpr std::uint64_t kSequenceMask = NEI_FLAKE_SEQUENCE_MASK;
@@ -29,9 +31,9 @@ std::uint64_t ExtractUnixMs(std::uint64_t id) {
 } // namespace
 
 TEST(FlakeIdTest, EncodesExpectedBitFields) {
-  const std::uint64_t before_ms = nei_flake_unix_ms_now();
+  const std::uint64_t before_ms = static_cast<std::uint64_t>(nei_time_now_ms());
   const std::uint64_t id = nei_flake_next_id();
-  const std::uint64_t after_ms = nei_flake_unix_ms_now();
+  const std::uint64_t after_ms = static_cast<std::uint64_t>(nei_time_now_ms());
 
   const std::uint64_t extracted_ms = ExtractUnixMs(id);
   const std::uint64_t extracted_tag = ExtractThreadTag(id);
