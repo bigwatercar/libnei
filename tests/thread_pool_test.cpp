@@ -484,10 +484,11 @@ namespace {
 class ThreadPoolInstanceTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    ThreadPoolInstance::ResetForTesting();
     ThreadPoolInstance::CreateAndStartWithDefaultParams();
   }
   void TearDown() override {
-    ThreadPoolInstance::Shutdown();
+    ThreadPoolInstance::ResetForTesting();
   }
 };
 

@@ -74,6 +74,16 @@ void ThreadPoolInstance::Shutdown() {
   // Keep g_instance alive (Leaky) — do NOT delete or nullptr it.
 }
 
+// static
+void ThreadPoolInstance::ResetForTesting() {
+  if (g_instance) {
+    g_instance->pool_.Shutdown();
+    delete g_instance;
+    g_instance = nullptr;
+  }
+  g_shutdown_registered = false;
+}
+
 scoped_refptr<TaskRunner> ThreadPoolInstance::CreateSequencedTaskRunner(
     const TaskTraits& traits) {
   return pool_.CreateSequencedTaskRunner(traits);

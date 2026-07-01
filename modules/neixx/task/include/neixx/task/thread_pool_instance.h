@@ -51,6 +51,11 @@ class NEI_API ThreadPoolInstance final {
   /// Shutdown() is idempotent, so double-drain via AtExit + manual is safe.
   static void Shutdown();
 
+  /// Testing only: destroys the singleton and resets global state so
+  /// CreateAndStart() can be called again.  Must not be called while
+  /// tasks are still in flight.
+  static void ResetForTesting();
+
   /// Creates a sequenced TaskRunner on the global pool.
   scoped_refptr<TaskRunner> CreateSequencedTaskRunner(
       const TaskTraits& traits = TaskTraits());
