@@ -22,8 +22,8 @@
 #include <neixx/common/location.h>
 #include <neixx/common/platform_handle.h>
 #include <neixx/io/pipe_stream.h>
+#include <neixx/task/message_loop/message_pump_io.h>
 #include <neixx/task/sequence_checker.h>
-#include <internal/pipe_stream_factory_internal.h>
 #include <neixx/strings/utf_string_conversions.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/task_runner.h>

@@ -5,7 +5,6 @@ set(NEIXX_PROCESS_SOURCES
   src/child_process.cpp
   src/child_process_stream_proxy.h
   src/child_process_stream_proxy.cpp
-  src/internal/pipe_stream_factory_internal.h
 )
 
 if(WIN32)
@@ -13,14 +12,12 @@ if(WIN32)
     src/process_service.cpp
     src/child_process_win.cpp
     src/process_util_win.cpp
-    src/pipe_stream_win.cpp
   )
 else()
   list(APPEND NEIXX_PROCESS_SOURCES
     src/process_service.cpp
     src/child_process_posix.cpp
     src/process_util_posix.cpp
-    src/pipe_stream_posix.cpp
   )
 endif()
 

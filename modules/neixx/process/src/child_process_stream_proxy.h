@@ -19,7 +19,7 @@ namespace internal {
 // ---------------------------------------------------------------------------
 // AsyncInputStreamProxy
 //
-// Bridges an AsyncInputStream (e.g. WinPipeInputStream/PosixPipeInputStream)
+// Bridges an AsyncInputStream (e.g. PipeInputStream)
 // that lives on the IO thread to callers on any application sequence, with no
 // shared_ptr<State> and no std::mutex.
 //

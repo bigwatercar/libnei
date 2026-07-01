@@ -29,7 +29,7 @@
 #include <neixx/command_line/command_line.h>
 #include <neixx/common/platform_handle.h>
 #include <neixx/io/pipe_stream.h>
-#include <internal/pipe_stream_factory_internal.h>
+#include <neixx/task/message_loop/message_pump_io.h>
 #include "child_process_stream_proxy.h"
 #include <neixx/strings/utf_string_conversions.h>
 #include <neixx/synchronization/waitable_event.h>
