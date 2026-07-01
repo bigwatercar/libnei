@@ -113,10 +113,14 @@ class ChildProcessImplBase : public ChildProcessListener {
     }
 
     WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-    io_runner->PostTask(FROM_HERE, [&, this]() {
+    const bool posted = io_runner->PostTask(FROM_HERE, [&, this]() {
       shutdown_on_io();
       done.Signal();
     });
+    if (!posted) {
+      shutdown_on_io();
+      return;
+    }
     done.Wait();
   }
 

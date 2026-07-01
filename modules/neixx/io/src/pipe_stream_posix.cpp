@@ -237,6 +237,11 @@ class PipeInputStream::Impl final : public MessagePumpForIO::Watcher {
     read_in_flight_ = false;
     IOReadCallback cb = std::move(pending_cb_);
     pending_buf_.reset();
+    // Stop watching so the fd is unregistered from epoll.  Otherwise a
+    // pipe that has reached EOF keeps epoll_wait returning immediately,
+    // starving other fds on the same I/O thread (e.g. pidfd for child-
+    // process exit detection).
+    controller_.StopWatching();
     if (called_from_pump_) {
       TRACE_EVENT_INSTANT("nei.pipe_stream", "ReadDeliverDirect");
       if (cb) cb(success, bytes);
