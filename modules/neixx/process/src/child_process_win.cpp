@@ -20,6 +20,8 @@
 
 #include <neixx/command_line/command_line.h>
 #include <neixx/common/location.h>
+#include <neixx/common/platform_handle.h>
+#include <neixx/io/pipe_stream.h>
 #include <neixx/task/sequence_checker.h>
 #include <internal/pipe_stream_factory_internal.h>
 #include <neixx/strings/utf_string_conversions.h>
@@ -171,8 +173,10 @@ HANDLE OpenNullDevice(bool for_input) {
 
 class WinChildProcessCore final : public MessagePumpForIO::Watcher {
  public:
-  explicit WinChildProcessCore(ChildProcessListener* listener)
+  explicit WinChildProcessCore(ChildProcessListener* listener,
+                               scoped_refptr<TaskRunner> io_runner)
       : listener_(listener),
+        io_runner_(std::move(io_runner)),
         dispatch_state_(std::make_shared<DispatchState>()) {}
 
  private:
@@ -428,19 +432,28 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     CloseHandleSafe(&pi.hThread);
 
     if (options.stdin_config.type == StdIOType::PIPE) {
-      stdin_stream_ = CreatePipeOutputStream(
-          pump, reinterpret_cast<NativeIOHandle>(stdin_pipe.parent_handle));
+      auto stream = std::make_unique<PipeOutputStream>(io_runner_);
+      stream->BindPlatformHandle(
+          PlatformHandle::FromNativeHandle<DefaultHandleTraits>(
+              stdin_pipe.parent_handle));
       stdin_pipe.parent_handle = INVALID_HANDLE_VALUE;
+      stdin_stream_ = std::move(stream);
     }
     if (options.stdout_config.type == StdIOType::PIPE) {
-      stdout_stream_ = CreatePipeInputStream(
-          pump, reinterpret_cast<NativeIOHandle>(stdout_pipe.parent_handle));
+      auto stream = std::make_unique<PipeInputStream>(io_runner_);
+      stream->BindPlatformHandle(
+          PlatformHandle::FromNativeHandle<DefaultHandleTraits>(
+              stdout_pipe.parent_handle));
       stdout_pipe.parent_handle = INVALID_HANDLE_VALUE;
+      stdout_stream_ = std::move(stream);
     }
     if (options.stderr_config.type == StdIOType::PIPE) {
-      stderr_stream_ = CreatePipeInputStream(
-          pump, reinterpret_cast<NativeIOHandle>(stderr_pipe.parent_handle));
+      auto stream = std::make_unique<PipeInputStream>(io_runner_);
+      stream->BindPlatformHandle(
+          PlatformHandle::FromNativeHandle<DefaultHandleTraits>(
+              stderr_pipe.parent_handle));
       stderr_pipe.parent_handle = INVALID_HANDLE_VALUE;
+      stderr_stream_ = std::move(stream);
     }
 
     CleanupPipe(stdin_pipe);
@@ -895,6 +908,7 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
   std::unique_ptr<AsyncInputStream> stdout_stream_;
   std::unique_ptr<AsyncInputStream> stderr_stream_;
   std::unique_ptr<AsyncOutputStream> stdin_stream_;
+  scoped_refptr<TaskRunner> io_runner_;
 };
 
 }  // namespace
@@ -947,7 +961,7 @@ class ChildProcessPlatformImpl final
     stdin_proxy_->ResetBinding();
     core_.reset();
 
-    core_ = std::make_unique<WinChildProcessCore>(this);
+    core_ = std::make_unique<WinChildProcessCore>(this, io_runner);
     const bool ok = core_->Launch(command_line, options);
     if (ok) {
       if (core_->stdout_stream())
