@@ -143,7 +143,7 @@ class NEI_API TraceLog final {
 // TRACE_EVENT0 宏展开时第一步检查此标记。
 // 使用 memory_order_relaxed: 打点线程不需要精确同步, 仅需"最终一致性"。
 // 最坏情况: 关闭 Trace 后仍有极少量残留事件写入 → 直接丢弃, 无副作用。
-extern std::atomic<bool> g_trace_enabled;
+extern NEI_API std::atomic<bool> g_trace_enabled;
 
 }  // namespace nei
 
