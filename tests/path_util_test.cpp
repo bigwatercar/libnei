@@ -301,7 +301,7 @@ TEST(PathUtilTest, CreateDirSimple) {
     char base[256];
     nei_get_temp_dir(base, sizeof(base));
     char path[512];
-    snprintf(path, sizeof(path), "%snei_test_path_create_simple", base);
+    snprintf(path, sizeof(path), "%s/nei_test_path_create_simple", base);
 
     /* Clean up from previous runs. */
     nei_path_remove(path, 1);
@@ -318,13 +318,13 @@ TEST(PathUtilTest, CreateDirParents) {
     char base[256];
     nei_get_temp_dir(base, sizeof(base));
     char path[512];
-    snprintf(path, sizeof(path), "%snei_test_parents/a/b/c", base);
+    snprintf(path, sizeof(path), "%s/nei_test_parents/a/b/c", base);
 
     nei_path_remove(path, 1); /* clean up */
     /* Also clean intermediate dirs */
     {
         char p2[512];
-        snprintf(p2, sizeof(p2), "%snei_test_parents", base);
+        snprintf(p2, sizeof(p2), "%s/nei_test_parents", base);
         nei_path_remove(p2, 1);
     }
 
@@ -333,7 +333,7 @@ TEST(PathUtilTest, CreateDirParents) {
 
     /* Clean up from base. */
     char p2[512];
-    snprintf(p2, sizeof(p2), "%snei_test_parents", base);
+    snprintf(p2, sizeof(p2), "%s/nei_test_parents", base);
     EXPECT_EQ(nei_path_remove(p2, 1), 0);
     EXPECT_EQ(nei_path_exists(p2), 0);
 }
@@ -342,7 +342,7 @@ TEST(PathUtilTest, RemoveRecursive) {
     char base[256];
     nei_get_temp_dir(base, sizeof(base));
     char dir[512];
-    snprintf(dir, sizeof(dir), "%snei_test_remove_rec", base);
+    snprintf(dir, sizeof(dir), "%s/nei_test_remove_rec", base);
 
     nei_path_remove(dir, 1); /* clean up */
     ASSERT_EQ(nei_path_create_dir(dir, 1), 0);

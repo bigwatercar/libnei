@@ -31,6 +31,8 @@ int nei_get_hostname(char *buf, size_t size) {
 #else
     {
         if (gethostname(buf, size) != 0) {
+            /* gethostname may not null-terminate on ENAMETOOLONG. */
+            buf[size - 1] = '\0';
             return -1;
         }
         /*
@@ -148,6 +150,11 @@ int nei_get_temp_dir(char *buf, size_t size) {
         if (wlen == 0 || wlen > MAX_PATH) {
             return -1;
         }
+        /* GetTempPathW includes a trailing backslash; strip it. */
+        if (wlen > 0 && wbuf[wlen - 1] == L'\\') {
+            wbuf[wlen - 1] = L'\0';
+            --wlen;
+        }
         return nei_wstr_to_utf8(wbuf, (int)wlen, buf, size);
     }
 #else
@@ -157,12 +164,17 @@ int nei_get_temp_dir(char *buf, size_t size) {
             tmp = "/tmp";
         }
         size_t len = strlen(tmp);
+        /* Strip trailing slash if present (from TMPDIR env). */
+        if (len > 1 && tmp[len - 1] == '/') {
+            --len;
+        }
         if (len >= size) {
             memcpy(buf, tmp, size - 1);
             buf[size - 1] = '\0';
             return (int)len;
         }
-        memcpy(buf, tmp, len + 1);
+        memcpy(buf, tmp, len);
+        buf[len] = '\0';
         return (int)len;
     }
 #endif

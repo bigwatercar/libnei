@@ -20,8 +20,9 @@ static int wstr_to_mb_impl(UINT code_page, const wchar_t *src, int src_len,
         return -1;
     }
 
-    /* When src_len is -1 the returned count includes the null terminator. */
-    int out_len = (src_len < 0) ? (needed - 1) : needed;
+    /* WideCharToMultiByte includes the null terminator in needed.
+     * Return the byte count excluding it, as documented. */
+    int out_len = needed - 1;
 
     if (size == 0) {
         return out_len; /* no buffer to write to, report required size */

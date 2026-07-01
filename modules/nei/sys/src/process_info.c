@@ -154,7 +154,7 @@ int64_t nei_get_process_uptime_ms(void) {
             &starttime);
         fclose(f);
 
-        if (matched < 22) {
+        if (matched < 21) {
             return -1;
         }
 

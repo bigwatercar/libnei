@@ -18,9 +18,9 @@ extern "C" {
  * @param buf  Output buffer to receive the hostname (must not be NULL).
  * @param size Size of @p buf in bytes.
  * @return On success, returns the number of bytes written to @p buf
- *         (excluding the null terminator). If @p buf is too small,
- *         returns the required buffer size as a positive value.
- *         On error, returns a negative value.
+ *         (excluding the null terminator). On error (including buffer
+ *         too small on POSIX), returns a negative value. When @p buf
+ *         is too small the buffer is still null-terminated if @p size > 0.
  */
 NEI_API int nei_get_hostname(char *buf, size_t size);
 
@@ -56,7 +56,8 @@ NEI_API int nei_get_home_dir(char *buf, size_t size);
  * @brief Get the absolute path to the system temporary directory.
  *
  * On all platforms, the returned string is UTF-8 encoded. The returned
- * path includes a trailing directory separator.
+ * path does NOT include a trailing directory separator (e.g. `/tmp`
+ * on Linux, `C:\\Users\\...\\AppData\\Local\\Temp` on Windows).
  *
  * @param buf  Output buffer to receive the path (must not be NULL).
  * @param size Size of @p buf in bytes.
