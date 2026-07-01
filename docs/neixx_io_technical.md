@@ -15,9 +15,21 @@ implementation details, threading model, and best practices:
 
 - [docs/neixx_async_file_technical.md](docs/neixx_async_file_technical.md)
 
+## PipeStream
+
+The `PipeStream` subsystem provides cross-platform asynchronous pipe endpoint
+wrappers for byte-stream style IPC, child-process stdio bridging, and custom
+process-to-process protocols.
+
+Full documentation including API semantics, threading guarantees,
+cross-process usage guidance, platform differences, and demo references:
+
+- [docs/neixx_pipe_stream_technical.md](docs/neixx_pipe_stream_technical.md)
+
 ## References
 
 - [modules/neixx/io/include/neixx/io/async_file.h](../modules/neixx/io/include/neixx/io/async_file.h)
 - [modules/neixx/io/include/neixx/io/async_line_reader.h](../modules/neixx/io/include/neixx/io/async_line_reader.h)
 - [modules/neixx/io/include/neixx/io/io_buffer.h](../modules/neixx/io/include/neixx/io/io_buffer.h)
+- [modules/neixx/io/include/neixx/io/pipe_stream.h](../modules/neixx/io/include/neixx/io/pipe_stream.h)
 - [modules/neixx/io/src/internal/async_file_error_code.h](../modules/neixx/io/src/internal/async_file_error_code.h)

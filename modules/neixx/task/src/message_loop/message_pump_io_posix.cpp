@@ -193,12 +193,14 @@ class MessagePumpForIOState {
   }
 
   void DrainPendingWakeups(MessagePump::Delegate* delegate) {
+    TRACE_EVENT0("nei.message_pump", "DrainPendingWakeups");
     // 传入 should_run_task=false：仅排干 OS 层的 eventfd 信号，不触发
     // delegate->DoWork()，防止 DoWork 内部 PostTask 再次写 eventfd 导致死循环。
     while (DispatchOneBatch(delegate, 0, /*should_run_task=*/false)) {}
   }
 
   bool WaitAndDispatch(MessagePump::Delegate* delegate, int timeout_ms) {
+    TRACE_EVENT0("nei.message_pump", "WaitAndDispatch");
     return DispatchOneBatch(delegate, timeout_ms);
   }
 
@@ -256,6 +258,7 @@ class MessagePumpForIOState {
 
  private:
   void WakePump() {
+    TRACE_EVENT_INSTANT("nei.message_pump", "WakePump");
     if (event_fd_ < 0) {
       return;
     }
@@ -306,6 +309,7 @@ class MessagePumpForIOState {
       const epoll_event& event = events[static_cast<std::size_t>(i)];
       if (event.data.u64 == kWakeEventId) {
         (void)DrainWakeEvent();
+        TRACE_EVENT_INSTANT("nei.message_pump", "WakeEventDrained");
         ran_work_wakeup = true;
         any_event = true;
         continue;

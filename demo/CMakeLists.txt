@@ -37,6 +37,16 @@ target_link_libraries(elevated_process_demo PRIVATE nei::nei)
 add_executable(memory_monitor_demo memory_monitor_demo.cpp)
 target_link_libraries(memory_monitor_demo PRIVATE nei::nei)
 
+if(WIN32)
+  add_executable(pipe_stream_cross_process_win_demo
+                 pipe_stream_cross_process_win_demo.cpp)
+  target_link_libraries(pipe_stream_cross_process_win_demo PRIVATE nei::nei)
+elseif(UNIX)
+  add_executable(pipe_stream_cross_process_posix_demo
+                 pipe_stream_cross_process_posix_demo.cpp)
+  target_link_libraries(pipe_stream_cross_process_posix_demo PRIVATE nei::nei)
+endif()
+
 if(WIN32 AND BUILD_SHARED_LIBS)
   function(nei_copy_runtime_dlls target_name)
     add_custom_command(
@@ -59,4 +69,5 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_copy_runtime_dlls(stream_reader_writer_demo)
   nei_copy_runtime_dlls(nei_demo)
   nei_copy_runtime_dlls(at_exit_demo)
+  nei_copy_runtime_dlls(pipe_stream_cross_process_win_demo)
 endif()

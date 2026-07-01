@@ -45,6 +45,19 @@ target_link_libraries(task_priority_perf_demo PRIVATE nei::nei)
 add_executable(async_file_bench async_file_bench.cpp)
 target_link_libraries(async_file_bench PRIVATE nei::nei)
 
+add_executable(pipe_stream_bench pipe_stream_bench.cpp)
+target_link_libraries(pipe_stream_bench PRIVATE nei::nei)
+
+if(WIN32)
+  add_executable(pipe_stream_cross_process_bench
+                 pipe_stream_cross_process_bench_win.cpp)
+  target_link_libraries(pipe_stream_cross_process_bench PRIVATE nei::nei)
+elseif(UNIX)
+  add_executable(pipe_stream_cross_process_bench
+                 pipe_stream_cross_process_bench_posix.cpp)
+  target_link_libraries(pipe_stream_cross_process_bench PRIVATE nei::nei)
+endif()
+
 option(NEI_BENCHMARK_SPDLOG
        "Build log_bench_compare (NEI vs spdlog, FetchContent spdlog)" ON
 )
@@ -97,6 +110,8 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_copy_runtime_dlls(task_threadpool_bench)
   nei_copy_runtime_dlls(task_priority_perf_demo)
   nei_copy_runtime_dlls(async_file_bench)
+  nei_copy_runtime_dlls(pipe_stream_bench)
+  nei_copy_runtime_dlls(pipe_stream_cross_process_bench)
 
   if(NEI_BENCHMARK_SPDLOG AND TARGET log_bench_compare)
     nei_copy_runtime_dlls(log_bench_compare)
