@@ -3,6 +3,7 @@
 #include <neixx/io/pipe_stream.h>
 
 #include <cerrno>
+#include <deque>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -312,7 +313,8 @@ class PipeOutputStream::Impl final : public MessagePumpForIO::Watcher {
       return;
     }
     if (write_in_flight_) {
-      PostError(io_task_runner_, std::move(callback));
+      write_queue_.push_back(
+          PendingWrite{std::move(buf), buf_len, std::move(callback)});
       return;
     }
 
@@ -340,6 +342,14 @@ class PipeOutputStream::Impl final : public MessagePumpForIO::Watcher {
     if (fd_ >= 0) {
       close(fd_);
       fd_ = -1;
+    }
+
+    // Drain queued writes with error.
+    while (!write_queue_.empty()) {
+      auto& front = write_queue_.front();
+      if (front.callback)
+        PostError(io_task_runner_, std::move(front.callback));
+      write_queue_.pop_front();
     }
 
     if (pending_cb_) {
@@ -427,6 +437,23 @@ class PipeOutputStream::Impl final : public MessagePumpForIO::Watcher {
       TRACE_EVENT_INSTANT("nei.pipe_stream", "WriteDeliverPostTask");
       PostResult(io_task_runner_, std::move(cb), success, bytes);
     }
+    StartNextQueuedWrite();
+  }
+
+  void StartNextQueuedWrite() {
+    if (closed_ || write_in_flight_) return;
+    if (write_queue_.empty()) {
+      controller_.StopWatching();
+      return;
+    }
+    PendingWrite next = std::move(write_queue_.front());
+    write_queue_.pop_front();
+    pending_buf_ = std::move(next.buf);
+    pending_len_ = next.buf_len;
+    pending_cb_ = std::move(next.callback);
+    bytes_written_ = 0;
+    write_in_flight_ = true;
+    DrainWrite();
   }
 
   scoped_refptr<TaskRunner> io_task_runner_;
@@ -434,6 +461,13 @@ class PipeOutputStream::Impl final : public MessagePumpForIO::Watcher {
   bool closed_ = false;
   bool write_in_flight_ = false;
   bool called_from_pump_ = false;
+
+  struct PendingWrite {
+    scoped_refptr<IOBuffer> buf;
+    std::size_t buf_len = 0;
+    IOWriteCallback callback;
+  };
+  std::deque<PendingWrite> write_queue_;
 
   scoped_refptr<IOBuffer> pending_buf_;
   std::size_t pending_len_ = 0;

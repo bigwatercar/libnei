@@ -17,6 +17,8 @@
 #include <neixx/task/task_runner.h>
 #include <neixx/trace_event/trace_event.h>
 
+#include <deque>
+
 namespace nei {
 
 namespace {
@@ -99,6 +101,7 @@ struct ReadContext {
 struct WriteContext {
   OVERLAPPED overlapped = {};
   scoped_refptr<IOBuffer> buffer;
+  std::size_t buf_len = 0;
   AsyncOutputStream::IOWriteCallback callback;
   HANDLE io_event = nullptr;
 
@@ -378,12 +381,17 @@ class PipeOutputStream::Impl final
       return;
     }
     if (write_ctx_) {
-      PostError(io_task_runner_, std::move(callback));
+      auto queued = std::make_shared<WriteContext>();
+      queued->buffer = std::move(buf);
+      queued->buf_len = buf_len;
+      queued->callback = std::move(callback);
+      write_queue_.push_back(std::move(queued));
       return;
     }
 
     write_ctx_ = std::make_shared<WriteContext>();
     write_ctx_->buffer = std::move(buf);
+    write_ctx_->buf_len = buf_len;
     write_ctx_->callback = std::move(callback);
 
     IssueWrite(buf_len);
@@ -403,6 +411,14 @@ class PipeOutputStream::Impl final
         CloseHandle(handle_);
         handle_ = INVALID_HANDLE_VALUE;
       }
+    }
+
+    // Drain queued writes with error.
+    while (!write_queue_.empty()) {
+      auto ctx = std::move(write_queue_.front());
+      write_queue_.pop_front();
+      if (ctx->callback)
+        PostError(io_task_runner_, std::move(ctx->callback));
     }
 
     if (write_ctx_ && write_ctx_->callback) {
@@ -437,11 +453,22 @@ class PipeOutputStream::Impl final
 
     if (error_code != ERROR_SUCCESS) {
       if (ctx->callback) ctx->callback(false, 0u);
+      MaybeStartNextQueuedWrite();
       return;
     }
 
     if (ctx->callback)
       ctx->callback(true, static_cast<std::size_t>(bytes_transferred));
+
+    MaybeStartNextQueuedWrite();
+  }
+
+  void MaybeStartNextQueuedWrite() {
+    if (closed_) return;
+    if (write_queue_.empty()) return;
+    write_ctx_ = std::move(write_queue_.front());
+    write_queue_.pop_front();
+    IssueWrite(write_ctx_->buf_len);
   }
 
   void OnFileCanReadWithoutBlocking(NativeIOHandle) override {}
@@ -504,6 +531,8 @@ class PipeOutputStream::Impl final
 
   std::shared_ptr<WriteContext> write_ctx_;
   std::shared_ptr<WriteContext> orphaned_ctx_;
+
+  std::deque<std::shared_ptr<WriteContext>> write_queue_;
 
   MessagePumpForIO::FdWatchController controller_;
 
