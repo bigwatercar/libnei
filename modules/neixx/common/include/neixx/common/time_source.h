@@ -8,6 +8,9 @@
 
 namespace nei {
 
+template <typename T>
+class NoDestructor;
+
 class NEI_API TimeSource {
 public:
   virtual ~TimeSource();
@@ -24,6 +27,7 @@ public:
   TimeTicks Now() const override;
 
 private:
+  friend class NoDestructor<SystemTimeSource>;
   SystemTimeSource() = default;
 };
 
