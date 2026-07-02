@@ -5,13 +5,13 @@ target_sources(
           include/nei/core/path_util.h include/nei/core/time.h
           include/nei/core/random.h
   PRIVATE src/endian.c src/float_ctrl.c src/encoding.c src/file_util.c
-          src/path_util.c src/time.c src/random.c
+          src/path_util.c src/random.c
 )
 
 if(WIN32)
-  target_sources(nei PRIVATE src/endian_win.c src/file_util_win.c src/path_util_win.c)
+  target_sources(nei PRIVATE src/endian_win.c src/file_util_win.c src/path_util_win.c src/time_win.c)
 else()
-  target_sources(nei PRIVATE src/endian_posix.c src/file_util_posix.c src/path_util_posix.c)
+  target_sources(nei PRIVATE src/endian_posix.c src/file_util_posix.c src/path_util_posix.c src/time_posix.c)
 endif()
 
 target_include_directories(
