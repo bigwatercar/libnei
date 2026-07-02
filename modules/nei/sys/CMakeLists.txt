@@ -7,6 +7,7 @@ target_sources(
           include/nei/sys/host_info.h
           include/nei/sys/process_info.h
           include/nei/sys/disk_info.h
+          include/nei/sys/win/utils.h
 
           src/cpu_info.c
           src/memory_info.c
@@ -15,6 +16,11 @@ target_sources(
           src/process_info.c
           src/disk_info.c
 )
+
+if(WIN32)
+  target_sources(nei PRIVATE src/win/utils.c)
+  target_link_libraries(nei PRIVATE ole32)
+endif()
 
 target_include_directories(
   nei PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
