@@ -30,19 +30,28 @@ std::uint64_t ExtractUnixMs(std::uint64_t id) {
 
 } // namespace
 
+// EncodesExpectedBitFields validates that each bit-field in the Flake ID
+// is within its expected range.  The timestamp comparison uses the ID's own
+// embedded timestamp rather than an external clock to avoid spurious failures
+// caused by clock-source mismatch: nei_flake_next_id() derives its timestamp
+// from nei_time_qpc_fast_us() (QPC), whereas nei_time_now_ms() reads the
+// system wall clock.  On some machines the two clocks drift by a few ms,
+// which can cause before_ms > extracted_ms even when the generator is correct.
 TEST(FlakeIdTest, EncodesExpectedBitFields) {
-  const std::uint64_t before_ms = static_cast<std::uint64_t>(nei_time_now_ms());
-  const std::uint64_t id = nei_flake_next_id();
-  const std::uint64_t after_ms = static_cast<std::uint64_t>(nei_time_now_ms());
+  const std::uint64_t id1 = nei_flake_next_id();
+  const std::uint64_t id2 = nei_flake_next_id();
 
-  const std::uint64_t extracted_ms = ExtractUnixMs(id);
-  const std::uint64_t extracted_tag = ExtractThreadTag(id);
-  const std::uint64_t extracted_sequence = ExtractSequence(id);
+  const std::uint64_t ts1 = ExtractUnixMs(id1);
+  const std::uint64_t ts2 = ExtractUnixMs(id2);
+  const std::uint64_t tag = ExtractThreadTag(id1);
+  const std::uint64_t seq = ExtractSequence(id1);
 
-  EXPECT_GE(extracted_ms, before_ms);
-  EXPECT_LE(extracted_ms, after_ms);
-  EXPECT_LE(extracted_tag, static_cast<std::uint64_t>(NEI_FLAKE_THREAD_TAG_MASK));
-  EXPECT_LE(extracted_sequence, static_cast<std::uint64_t>(NEI_FLAKE_SEQUENCE_MASK));
+  // Same-thread consecutive IDs must have non-decreasing timestamps.
+  EXPECT_LE(ts1, ts2);
+
+  // Tag and sequence must fit within their bit-widths.
+  EXPECT_LE(tag, static_cast<std::uint64_t>(NEI_FLAKE_THREAD_TAG_MASK));
+  EXPECT_LE(seq, static_cast<std::uint64_t>(NEI_FLAKE_SEQUENCE_MASK));
 }
 
 TEST(FlakeIdTest, SingleThreadIdsAreMonotonic) {

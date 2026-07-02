@@ -42,6 +42,7 @@
 
 namespace nei {
 
+template <typename... Args>
 class OnceCallback;
 
 class NEI_API CancelableOnceClosure final {
@@ -50,7 +51,7 @@ class NEI_API CancelableOnceClosure final {
   CancelableOnceClosure();
 
   // Wraps |closure| into a cancelable closure.
-  explicit CancelableOnceClosure(OnceCallback closure);
+  explicit CancelableOnceClosure(OnceCallback<> closure);
 
   ~CancelableOnceClosure();
 
@@ -83,7 +84,7 @@ class NEI_API CancelableOnceClosure final {
   //
   // The underlying closure is consumed on the first invocation of any
   // callback returned by this method (or by Run()).
-  OnceCallback callback();
+  OnceCallback<> callback();
 
  private:
   class Impl;

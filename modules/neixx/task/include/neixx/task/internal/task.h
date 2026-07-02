@@ -15,7 +15,7 @@ namespace nei {
 namespace internal {
 
 struct Task {
-  OnceCallback task;
+  OnceCallback<> task;
   Location posted_from{"", 0, ""};
   TimeTicks enqueue_time;
   TimeTicks delayed_run_time;

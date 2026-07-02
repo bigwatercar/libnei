@@ -66,12 +66,18 @@ namespace nei {
 
 namespace internal {
 
-// 类型特征: 区分 OnceCallback 与 RepeatingCallback
+// 类型特征: 区分 OnceCallback<Args...> 与 RepeatingCallback<Args...>
 template <typename T>
 struct is_once_callback : std::false_type {};
 
-template <>
-struct is_once_callback<OnceCallback> : std::true_type {};
+template <typename... Args>
+struct is_once_callback<OnceCallback<Args...>> : std::true_type {};
+
+template <typename T>
+struct is_repeating_callback : std::false_type {};
+
+template <typename... Args>
+struct is_repeating_callback<RepeatingCallback<Args...>> : std::true_type {};
 
 // ---------------------------------------------------------------------------
 // BindPostTaskTrampoline — 无锁蹦床状态 (线程安全引用计数)
@@ -118,34 +124,40 @@ class BindPostTaskTrampoline
     }
 
     if constexpr (is_once_callback<CallbackType>::value) {
-      // OnceCallback: 移动语义, 调用后 callback_ 被消耗。
-      // 通过 lambda 包装 + BindOnce 将原始回调投递到目标线程。
-      // OnceCallback 没有 operator(), 必须通过 std::move(cb).Run() 调用。
+      // OnceCallback<Args...>: move to target runner with forwarded args.
       if (callback_) {
         task_runner_->PostTask(
             FROM_HERE,
-            BindOnce([cb = std::move(callback_)]() mutable {
-              std::move(cb).Run();
-            }));
+            BindOnce(
+                [cb = std::move(callback_),
+                 tup = std::make_tuple(
+                     std::forward<Args>(args)...)]() mutable {
+                  // Extract the callback and forward stored args to Run().
+                  auto local_cb = std::move(cb);
+                  std::apply(
+                      [&local_cb](auto&&... a) {
+                        std::move(local_cb).Run(
+                            std::forward<decltype(a)>(a)...);
+                      },
+                      std::move(tup));
+                }));
         callback_consumed_ = true;
       }
     } else {
-      // RepeatingCallback: 通过 lambda 捕获 callback_ 副本 + 转发参数，
-      // 投递到目标线程后调用 cb.Run()。
-      // (RepeatingCallback 没有 operator(), 只有 Run() 方法)
-      //
-      // 使用 std::tuple + std::apply 实现 C++17 兼容的参数转发，
-      // 避免 C++20 的 lambda init-capture pack expansion。
+      // RepeatingCallback<>: copy the callback, forward args via tuple.
       task_runner_->PostTask(
           FROM_HERE,
           BindOnce(
               [cb = callback_,
-               bound_args = std::make_tuple(
+               tup = std::make_tuple(
                    std::forward<Args>(args)...)]() mutable {
-                // cb.Run() is void(); bound_args are captured but not
-                // forwarded to Run() since RepeatingCallback takes no args.
-                (void)bound_args;
-                cb.Run();
+                std::apply(
+                    [&cb](auto&... a) {
+                      cb.Run();  // RepeatingCallback<> is void() only
+                      (void)std::initializer_list<int>{
+                          ((void)a, 0)...};  // suppress unused warnings
+                    },
+                    std::move(tup));
               }));
     }
   }
@@ -220,60 +232,44 @@ class BindPostTaskTrampoline
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// OnceCallback 版本
+// OnceCallback<Args...> — preserves the input signature.
+// Returns OnceCallback<Args...> so that calling Run(args...) on the returned
+// callback posts the original callback with those args to the target runner.
 //
-// 返回一个新的 OnceCallback。调用该回调时, 原始 callback 被 PostTask
-// 到 target_task_runner 执行。返回的回调本身可在任意线程调用和析构。
+// Usage:
+//   OnceCallback<> work = BindOnce(&DoWork);
+//   OnceCallback<> safe = BindPostTask(io_runner, std::move(work));
+//   std::move(safe).Run();  // DoWork runs on io_runner
 //
-// 参数透传: 外层的 generic lambda (auto&&... args) 捕获所有调用参数,
-// 通过 std::forward 完美转发至 Trampoline::Run(), 再由 BindOnce 打包
-// 投递到目标线程。对于当前仅支持 void() 闭包的环境, Args... 为空包。
-//
-// 用法:
-//   OnceCallback work = BindOnce(&DoWork);
-//   OnceCallback safe = BindPostTask(io_runner, std::move(work));
-//   std::move(safe).Run();  // DoWork 将在 io_runner 上执行
+//   OnceCallback<const AddressList&> cb = ...;
+//   OnceCallback<const AddressList&> safe = BindPostTask(runner, std::move(cb));
+//   std::move(safe).Run(addresses);  // cb(addresses) runs on runner
 // ---------------------------------------------------------------------------
-inline OnceCallback BindPostTask(scoped_refptr<TaskRunner> task_runner,
-                                  OnceCallback callback) {
+template <typename... Args>
+OnceCallback<Args...> BindPostTask(scoped_refptr<TaskRunner> task_runner,
+                                    OnceCallback<Args...> callback) {
   DCHECK(task_runner);
   auto trampoline =
-      scoped_refptr<internal::BindPostTaskTrampoline<OnceCallback>>(
-          new internal::BindPostTaskTrampoline<OnceCallback>(
-              std::move(task_runner), std::move(callback)));
+      MakeRefCounted<internal::BindPostTaskTrampoline<OnceCallback<Args...>>>(
+          std::move(task_runner), std::move(callback));
 
-  // generic lambda + std::forward 实现完美转发:
-  //   当前 void() 闭包环境下 args 为空包, 零额外开销;
-  //   将来支持带参回调时自动透传参数类型。
-  return BindOnce(
-      [trampoline = std::move(trampoline)](auto&&... args) mutable {
-        trampoline->Run(std::forward<decltype(args)>(args)...);
+  return OnceCallback<Args...>(
+      [trampoline = std::move(trampoline)](Args... args) mutable {
+        trampoline->Run(std::forward<Args>(args)...);
       });
 }
 
 // ---------------------------------------------------------------------------
-// RepeatingCallback 版本
-//
-// 返回一个新的 RepeatingCallback。每次调用该回调时, 原始 callback 的
-// 副本被 PostTask 到 target_task_runner 执行。返回的回调本身可在
-// 任意线程调用和析构。
-//
-// 参数透传: 同 OnceCallback 版本。
-//
-// 用法:
-//   RepeatingCallback handler = BindRepeating(&HandleEvent);
-//   RepeatingCallback safe = BindPostTask(ui_runner, handler);
-//   safe.Run();  // HandleEvent 将在 ui_runner 上执行
-//   safe.Run();  // 再次执行 (RepeatingCallback 可多次调用)
+// RepeatingCallback<> — void() only.  Parameterized RepeatingCallback will
+// be added when needed.
 // ---------------------------------------------------------------------------
-inline RepeatingCallback BindPostTask(
+inline RepeatingCallback<> BindPostTask(
     scoped_refptr<TaskRunner> task_runner,
-    RepeatingCallback callback) {
+    RepeatingCallback<> callback) {
   DCHECK(task_runner);
   auto trampoline =
-      scoped_refptr<internal::BindPostTaskTrampoline<RepeatingCallback>>(
-          new internal::BindPostTaskTrampoline<RepeatingCallback>(
-              std::move(task_runner), std::move(callback)));
+      MakeRefCounted<internal::BindPostTaskTrampoline<RepeatingCallback<>>>(
+          std::move(task_runner), std::move(callback));
 
   return BindRepeating(
       [trampoline](auto&&... args) {

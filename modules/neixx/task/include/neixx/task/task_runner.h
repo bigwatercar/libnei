@@ -14,8 +14,8 @@
 
 namespace nei {
 
-using OnceClosure = OnceCallback;
-using RepeatingClosure = RepeatingCallback;
+using OnceClosure = OnceCallback<>;
+using RepeatingClosure = RepeatingCallback<>;
 
 namespace internal {
 class TaskQueue;

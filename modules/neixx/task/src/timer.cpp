@@ -36,7 +36,7 @@ class OneShotTimer::Impl {
     weak_ptr_factory_.InvalidateWeakPtrs();
   }
 
-  void Start(const Location& from_here, TimeDelta delay, OnceCallback task) {
+  void Start(const Location& from_here, TimeDelta delay, OnceCallback<> task) {
     DCHECK(sequence_checker_.CalledOnValidSequence());
 
     if (!task_runner_) {
@@ -72,7 +72,7 @@ class OneShotTimer::Impl {
     weak_ptr_factory_.InvalidateWeakPtrs();
 
     // ★ 立即释放用户闭包资源（智能指针、大块内存等）
-    user_task_ = OnceCallback();
+    user_task_ = OnceCallback<>();
     is_running_ = false;
   }
 
@@ -101,7 +101,7 @@ class OneShotTimer::Impl {
 
     // ★ 锁外回调派发：将闭包转移到局部变量后执行，确保即使回调内部
     //   重入 Stop() / Start() 也不会访问已移动的 user_task_
-    OnceCallback task = std::move(user_task_);
+    OnceCallback<> task = std::move(user_task_);
     // user_task_ 此时为空
 
     if (task) {
@@ -112,7 +112,7 @@ class OneShotTimer::Impl {
   scoped_refptr<TaskRunner> task_runner_;
   SequenceChecker sequence_checker_;
   Location posted_from_;
-  OnceCallback user_task_;
+  OnceCallback<> user_task_;
   bool is_running_ = false;
 
   // ★★★ 必须为最后一个成员变量 ★★★
@@ -146,7 +146,7 @@ class RepeatingTimer::Impl {
     weak_ptr_factory_.InvalidateWeakPtrs();
   }
 
-  void Start(const Location& from_here, TimeDelta delay, RepeatingCallback task) {
+  void Start(const Location& from_here, TimeDelta delay, RepeatingCallback<> task) {
     DCHECK(sequence_checker_.CalledOnValidSequence());
 
     if (!task_runner_) {
@@ -171,7 +171,7 @@ class RepeatingTimer::Impl {
     DCHECK(sequence_checker_.CalledOnValidSequence());
 
     weak_ptr_factory_.InvalidateWeakPtrs();
-    user_task_ = RepeatingCallback();
+    user_task_ = RepeatingCallback<>();
     is_running_ = false;
   }
 
@@ -215,7 +215,7 @@ class RepeatingTimer::Impl {
     // 先拷贝到局部变量再执行，防止回调内调用 Stop() 导致 user_task_
     // 被销毁而 Run() 仍在访问闭包内存（use-after-destroy / SEH）。
     if (user_task_) {
-      RepeatingCallback task = user_task_;  // 拷贝 → 引用计数 +1（或 SBO copy）
+      RepeatingCallback<> task = user_task_;  // 拷贝 → 引用计数 +1（或 SBO copy）
       task.Run();  // 安全：即使 Stop() 销毁 user_task_，task 仍持有引用
     }
 
@@ -234,7 +234,7 @@ class RepeatingTimer::Impl {
   scoped_refptr<TaskRunner> task_runner_;
   SequenceChecker sequence_checker_;
   Location posted_from_;
-  RepeatingCallback user_task_;
+  RepeatingCallback<> user_task_;
   TimeDelta delay_;
   bool is_running_ = false;
 
@@ -255,7 +255,7 @@ OneShotTimer::~OneShotTimer() = default;
 
 void OneShotTimer::Start(const Location& from_here,
                          TimeDelta delay,
-                         OnceCallback task) {
+                         OnceCallback<> task) {
   impl_->Start(from_here, delay, std::move(task));
 }
 
@@ -284,7 +284,7 @@ RepeatingTimer::~RepeatingTimer() = default;
 
 void RepeatingTimer::Start(const Location& from_here,
                            TimeDelta delay,
-                           RepeatingCallback task) {
+                           RepeatingCallback<> task) {
   impl_->Start(from_here, delay, std::move(task));
 }
 

@@ -67,6 +67,7 @@ constexpr std::size_t kLargeBufSize  = 64 * 1024;   // 64 KiB
 bool CreateAsyncPipePair(PlatformHandle& read_handle,
                          PlatformHandle& write_handle,
                          bool overlapped_write = true) {
+  (void)overlapped_write;  // Only meaningful on Windows (FILE_FLAG_OVERLAPPED)
 #if defined(_WIN32)
   static std::atomic<unsigned long long> pipe_counter{0};
   const DWORD pid  = GetCurrentProcessId();
