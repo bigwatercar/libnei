@@ -56,8 +56,32 @@ static nei_time_qpc_anchor_st g_qpc_anchor = {0, 0, 0, 0};
 
 #define NEI_TIME_QPC_REANCHOR_INTERVAL_US 100000
 
+/* GetSystemTimePreciseAsFileTime (Win8+) — provides microsecond-precision
+ * wall-clock time directly, avoiding the need for QPC anchoring. */
+static VOID (WINAPI *g_pfn_GetSystemTimePreciseAsFileTime)(LPFILETIME) = NULL;
+static volatile LONG g_precise_detected = 0;
+
+static void nei_time_detect_precise_api(void) {
+    if (InterlockedCompareExchange(&g_precise_detected, 1, 0) == 0) {
+        HMODULE h = GetModuleHandleW(L"kernel32.dll");
+        if (h != NULL) {
+            g_pfn_GetSystemTimePreciseAsFileTime =
+                (VOID (WINAPI *)(LPFILETIME))
+                GetProcAddress(h, "GetSystemTimePreciseAsFileTime");
+        }
+    }
+}
+
 static void nei_time_qpc_init_anchor(void) {
     if (InterlockedCompareExchange(&g_qpc_anchor.state, 1, 0) == 0) {
+        nei_time_detect_precise_api();
+
+        if (g_pfn_GetSystemTimePreciseAsFileTime != NULL) {
+            /* Precise API available — no QPC anchoring needed. */
+            InterlockedExchange(&g_qpc_anchor.state, 2);
+            return;
+        }
+
         LARGE_INTEGER qpc = {0};
         FILETIME ft;
         GetSystemTimeAsFileTime(&ft);
@@ -80,6 +104,14 @@ static void nei_time_qpc_init_anchor(void) {
 }
 
 int64_t nei_time_qpc_fast_us(void) {
+    /* Win8+: use GetSystemTimePreciseAsFileTime directly — no QPC anchoring. */
+    if (g_pfn_GetSystemTimePreciseAsFileTime != NULL) {
+        FILETIME ft;
+        g_pfn_GetSystemTimePreciseAsFileTime(&ft);
+        return filetime_to_unix(ft.dwLowDateTime, ft.dwHighDateTime, 10ULL);
+    }
+
+    /* Fallback: QPC-anchored projection (Win7 / Server 2008 R2). */
     LARGE_INTEGER qpc;
     if (!QueryPerformanceCounter(&qpc)) {
         return -1;
