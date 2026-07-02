@@ -25,6 +25,7 @@ add_executable(
   nei_tests
   test_main.cpp
   file_stream_adapters_test.cpp
+  fs_util_test.cpp
   async_file_posix_test.cpp
   async_file_win_test.cpp
   async_line_reader_test.cpp

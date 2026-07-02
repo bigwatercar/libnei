@@ -8,6 +8,7 @@ target_sources(
           include/nei/sys/process_info.h
           include/nei/sys/disk_info.h
           include/nei/sys/win/utils.h
+          include/nei/sys/fs_util.h
 
           src/cpu_info.c
           src/memory_info.c
@@ -18,8 +19,10 @@ target_sources(
 )
 
 if(WIN32)
-  target_sources(nei PRIVATE src/win/utils.c)
+  target_sources(nei PRIVATE src/win/utils.c src/fs_util_win.c)
   target_link_libraries(nei PRIVATE ole32)
+else()
+  target_sources(nei PRIVATE src/fs_util_posix.c)
 endif()
 
 target_include_directories(
