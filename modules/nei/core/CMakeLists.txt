@@ -4,7 +4,7 @@ target_sources(
           include/nei/core/encoding.h include/nei/core/file_util.h
           include/nei/core/path_util.h include/nei/core/time.h
           include/nei/core/random.h
-  PRIVATE src/endian.c src/float_ctrl.c src/encoding.c src/file_util.c
+  PRIVATE src/endian.c src/float_ctrl.c src/encoding.c
           src/path_util.c src/random.c
 )
 
