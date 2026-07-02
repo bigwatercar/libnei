@@ -130,3 +130,75 @@ race.
 - Consider switching from level-triggered (default) to edge-triggered
   (`EPOLLET`) + oneshot (`EPOLLONESHOT`) for lower wakeup overhead.
   Requires careful re-arming logic in the read/write completion paths.
+
+---
+
+## OnceCallback Templatization — Background & Plan
+
+### Motivation
+
+The current `OnceCallback` in `neixx/functional/callback.h` is a **monomorphic**
+`void()` type-erased wrapper:
+
+```cpp
+class NEI_API OnceCallback : public CallbackBase {
+  void Run() &&;                               // void() only
+  template <typename F> OnceCallback(F&&);     // accepts any void() callable
+};
+```
+
+This is a deliberate simplification vs. Chromium's `base::OnceCallback<R(Args...)>`.
+The trade-off:
+
+| Aspect | Current (void()-only) | Target (templated) |
+|--------|----------------------|---------------------|
+| ABI stability | ✅ Excellent (single class, fixed layout) | ⚠️ Template instantiation per signature |
+| Expressiveness | ❌ Cannot type `OnceCallback<void(AddressList)>` | ✅ Full Chromium parity |
+| Move-only API | ❌ Forces `std::function` for parameterized callbacks | ✅ `OnceCallback` natively move-only |
+| DLL boundary | ✅ Single exported class | ⚠️ Each instantiation in caller's TU |
+
+### Impacted API
+
+- `neixx/net/host_resolver.h`: `ResolveCallback` currently `std::function` due to
+  the `void()` limitation. After templatization, it becomes:
+  ```cpp
+  using ResolveCallback = OnceCallback<void(const AddressList& addresses)>;
+  ```
+- All `BindOnce` / `BindPostTask` call sites automatically benefit from
+  move-only closure semantics.
+
+### Implementation Sketch
+
+1. **Template `OnceCallback<R(Args...)>`**
+   - `class OnceCallback` → `template <typename Sig> class OnceCallback`
+   - Common type-erased storage (SBO) stays; signature stored in vtable
+   - `Run(Args...) &&` dispatches via vtable
+   - Provide backward-compat alias: `using OnceClosure = OnceCallback<void()>;`
+
+2. **Update `BindOnce` / `BindPostTask`**
+   - `BindOnce(fn, args...)` → `OnceCallback<deduced_signature>`
+   - `BindPostTask(runner, cb)` preserves the signature through the trampoline
+
+3. **Update `RepeatingCallback`** similarly for parity
+
+4. **Migrate call sites** — search for `std::function` usages that should be
+   `OnceCallback`, replace.
+
+### Dependency
+
+- `neixx/functional/`: callback.h, callback_base.h, callback_internal.h, bind.h,
+  bind_post_task.h, cancelable_callback.h
+- `neixx/net/`: host_resolver.h (ResolveCallback type alias)
+- All modules that use callbacks with parameters
+
+### Risk
+
+- Template explosion (each `R(Args...)` combo = new instantiation)
+- ABI surface grows; shared library consumers must agree on instantiation set
+- Mitigation: use `extern template` for common signatures in `callback.cpp`
+
+### Decision
+
+**Approve for implementation.** OnceCallback templatization is the next
+architectural step toward full Chromium callback parity.  See commit
+`6483caa` for the net module that depends on this.
