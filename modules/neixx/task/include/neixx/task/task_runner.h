@@ -4,6 +4,7 @@
 #define NEIXX_TASK_TASK_RUNNER_H_
 
 #include <cstdint>
+#include <thread>
 
 #include <neixx/common/location.h>
 #include <neixx/common/time.h>
@@ -58,6 +59,11 @@ class NEI_API TaskRunner : public RefCountedThreadSafe<TaskRunner> {
 
   static scoped_refptr<TaskRunner> Create(internal::TaskQueue* task_queue,
                                           const TaskTraits& traits = TaskTraits());
+
+  // Returns true if the current thread is the thread this runner is bound
+  // to.  For IO thread runners, the bound thread is the one that owns the
+  // underlying MessagePumpForIO.  Default implementation returns false.
+  virtual bool BelongsToCurrentThread() const { return false; }
 
   // Observability helpers for delayed-overflow fallback path.
   // Intended for tests and diagnostics.

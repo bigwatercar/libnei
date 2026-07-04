@@ -21,7 +21,13 @@ std::atomic<std::int64_t> g_delayed_overflow_fallback_count{0};
 class TaskRunnerImpl final : public TaskRunner {
  public:
   TaskRunnerImpl(WeakPtr<internal::TaskQueue> task_queue, const TaskTraits& traits)
-      : TaskRunner(traits), task_queue_(std::move(task_queue)) {}
+      : TaskRunner(traits),
+        task_queue_(std::move(task_queue)),
+        bound_thread_id_(std::this_thread::get_id()) {}
+
+  bool BelongsToCurrentThread() const override {
+    return std::this_thread::get_id() == bound_thread_id_;
+  }
 
   bool PostTaskWithTraits(const Location& from_here,
                           const TaskTraits& traits,
@@ -98,6 +104,7 @@ class TaskRunnerImpl final : public TaskRunner {
   }
 
   WeakPtr<internal::TaskQueue> task_queue_;
+  std::thread::id bound_thread_id_;
 };
 
 bool TaskRunner::PostTask(const Location& from_here, OnceClosure task) {

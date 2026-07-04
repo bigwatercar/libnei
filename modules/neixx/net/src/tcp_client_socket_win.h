@@ -112,9 +112,6 @@ class TCPClientSocket::Impl final
   std::mutex mutex_;
 
   scoped_refptr<TaskRunner> io_runner_;
-  // Cached thread ID + flag for cross-thread trampoline detection.
-  std::thread::id io_thread_id_;
-  bool io_thread_bound_ = false;
 
   // Thread safety validation.
   DECLARE_THREAD_CHECKER(thread_checker_);
