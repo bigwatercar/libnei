@@ -54,6 +54,18 @@ if(WIN32)
   target_link_libraries(tcp_loopback_bench PRIVATE ws2_32)
 endif()
 
+add_executable(tcp_conn_stress_bench tcp_conn_stress_bench.cpp)
+target_link_libraries(tcp_conn_stress_bench PRIVATE nei::nei)
+if(WIN32)
+  target_link_libraries(tcp_conn_stress_bench PRIVATE ws2_32)
+endif()
+
+add_executable(tcp_rtt_bench tcp_rtt_bench.cpp)
+target_link_libraries(tcp_rtt_bench PRIVATE nei::nei)
+if(WIN32)
+  target_link_libraries(tcp_rtt_bench PRIVATE ws2_32)
+endif()
+
 if(WIN32)
   add_executable(pipe_stream_cross_process_bench
                  pipe_stream_cross_process_bench_win.cpp)
