@@ -6,6 +6,16 @@
 // Build: cmake --build build/linux-gcc-release-shared --target tcp_loopback_bench
 // Run:   ./build/linux-gcc-release-shared/bench/tcp_loopback_bench [total_MB]
 
+// winsock2.h must come before any header that might include windows.h.
+#if defined(_WIN32)
+#include <winsock2.h>
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -26,20 +36,13 @@
 #include <neixx/net/ip_end_point.h>
 #include <neixx/net/tcp_client_socket.h>
 #include <neixx/net/tcp_server_socket.h>
+#include <neixx/net/wsa_init.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
 #include <neixx/task/thread_pool_instance.h>
 #include <neixx/threading/thread.h>
 
-#if defined(_WIN32)
-#include <winsock2.h>
-#else
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
 
 namespace {
 
@@ -63,6 +66,7 @@ class IoThread {
 
 static uint16_t FindFreePort() {
 #if defined(_WIN32)
+  nei::net::EnsureWsa();
   SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (s == INVALID_SOCKET) return 0;
   struct sockaddr_in addr = {};
