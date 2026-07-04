@@ -78,14 +78,31 @@ TCPClientSocket::Impl::~Impl() {
 void TCPClientSocket::Impl::Close() {
   if (closed_.exchange(true)) return;
 
-  controller_.StopWatching();
-  if (socket_ != INVALID_SOCKET) {
-    closesocket(socket_);
-    socket_ = INVALID_SOCKET;
+  // Extract socket — physical cleanup must run on the IO thread to avoid
+  // racing with IOCP completion processing.
+  SOCKET s = socket_;
+  socket_ = INVALID_SOCKET;
+
+  if (io_thread_id_ != std::thread::id() &&
+      std::this_thread::get_id() != io_thread_id_) {
+    io_runner_->PostTask(
+        FROM_HERE,
+        BindOnce([](scoped_refptr<Impl> self, SOCKET s_to_close) {
+          self->DoCloseCleanup(s_to_close);
+        }, WrapRefCounted(this), s));
+  } else {
+    DoCloseCleanup(s);
   }
 
   // Release self-hold (allows final deletion when refcount reaches 0).
   ReleaseSelfHoldIfNeeded();
+}
+
+void TCPClientSocket::Impl::DoCloseCleanup(SOCKET s) {
+  controller_.StopWatching();
+  if (s != INVALID_SOCKET) {
+    closesocket(s);
+  }
 }
 
 void TCPClientSocket::Impl::ShutdownWrite() {
@@ -168,11 +185,31 @@ bool TCPClientSocket::Impl::Connect(
     const IPEndPoint& addr,
     TCPClientSocket::ConnectCallback callback,
     scoped_refptr<TaskRunner> io_runner) {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(io_runner);
   DCHECK_MSG(!connected_, "Connect: socket already connected — cannot reconnect");
   DCHECK_MSG(!io_runner_, "Connect: io_runner_ already set");
   io_runner_ = std::move(io_runner);
+
+  // Connect must run on the IO thread (MessagePumpForIO::Current).
+  if (io_thread_id_ != std::thread::id() &&
+      std::this_thread::get_id() != io_thread_id_) {
+    io_runner_->PostTask(
+        FROM_HERE,
+        BindOnce([](scoped_refptr<Impl> self, IPEndPoint a,
+                    TCPClientSocket::ConnectCallback cb) {
+          self->Connect(a, std::move(cb), self->io_runner_);
+        }, WrapRefCounted(this), addr, std::move(callback)));
+    return true;  // Request accepted — will be processed on IO thread.
+  }
+
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  return DoConnect(addr, std::move(callback));
+}
+
+bool TCPClientSocket::Impl::DoConnect(
+    const IPEndPoint& addr,
+    TCPClientSocket::ConnectCallback callback) {
+  io_thread_id_ = std::this_thread::get_id();
 
   struct sockaddr_storage sa = {};
   int sa_len = 0;
@@ -262,7 +299,27 @@ void TCPClientSocket::Impl::EnsurePumpRegistered() {
 void TCPClientSocket::Impl::ReadAsync(
     scoped_refptr<IOBuffer> buf, std::size_t buf_len,
     AsyncInputStream::IOReadCallback callback) {
+  // If called from a thread other than the designated IO thread,
+  // trampoline the call there to prevent IOCP registration on the
+  // wrong thread (e.g. Acceptor instead of Worker).
+  if (io_thread_id_ != std::thread::id() &&
+      std::this_thread::get_id() != io_thread_id_) {
+    io_runner_->PostTask(
+        FROM_HERE,
+        BindOnce(
+            [](scoped_refptr<Impl> self, scoped_refptr<IOBuffer> b,
+               std::size_t len, AsyncInputStream::IOReadCallback cb) {
+              self->ReadAsync(std::move(b), len, std::move(cb));
+            },
+            WrapRefCounted(this), std::move(buf), buf_len,
+            std::move(callback)));
+    return;
+  }
+
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  // Lazy-capture the IO thread ID on first successful I/O call.
+  if (io_thread_id_ == std::thread::id())
+    io_thread_id_ = std::this_thread::get_id();
   EnsurePumpRegistered();
   DCHECK_MSG(!closed_ && socket_ != INVALID_SOCKET,
              "ReadAsync: socket closed or invalid");
@@ -312,7 +369,26 @@ void TCPClientSocket::Impl::ReadAsync(
 void TCPClientSocket::Impl::WriteAsync(
     scoped_refptr<IOBuffer> buf, std::size_t buf_len,
     AsyncOutputStream::IOWriteCallback callback) {
+  // If called from a thread other than the designated IO thread,
+  // trampoline the call there (same reasoning as ReadAsync).
+  if (io_thread_id_ != std::thread::id() &&
+      std::this_thread::get_id() != io_thread_id_) {
+    io_runner_->PostTask(
+        FROM_HERE,
+        BindOnce(
+            [](scoped_refptr<Impl> self, scoped_refptr<IOBuffer> b,
+               std::size_t len, AsyncOutputStream::IOWriteCallback cb) {
+              self->WriteAsync(std::move(b), len, std::move(cb));
+            },
+            WrapRefCounted(this), std::move(buf), buf_len,
+            std::move(callback)));
+    return;
+  }
+
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  // Lazy-capture the IO thread ID on first successful I/O call.
+  if (io_thread_id_ == std::thread::id())
+    io_thread_id_ = std::this_thread::get_id();
   EnsurePumpRegistered();
   DCHECK_MSG(!closed_ && socket_ != INVALID_SOCKET,
              "WriteAsync: socket closed or invalid");

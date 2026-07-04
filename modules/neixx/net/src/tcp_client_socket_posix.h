@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #include <sys/socket.h>
 
@@ -79,6 +80,14 @@ class TCPClientSocket::Impl final
   // Releases the self-hold reference if held (must be called under mutex_).
   void ReleaseSelfHoldIfNeeded();
 
+  // Physical fd + watcher cleanup — must run on the IO thread.
+  void DoCloseCleanup(int fd);
+
+  // Actual connect logic (socket create, bind, connect, pump register).
+  // Called by Connect() after the trampoline check.
+  bool DoConnect(const IPEndPoint& addr,
+                 TCPClientSocket::ConnectCallback callback);
+
   int fd_ = -1;
   bool connected_ = false;
   std::atomic<bool> closed_{false};
@@ -101,6 +110,10 @@ class TCPClientSocket::Impl final
 
   scoped_refptr<TaskRunner> io_runner_;
   std::mutex mutex_;
+  // Cached thread ID of the IO thread.  Set on first successful connection
+  // to the IO thread; used to detect cross-thread I/O calls that would
+  // silently register with the wrong epoll instance.
+  std::thread::id io_thread_id_;
 
   // Thread safety validation.
   DECLARE_THREAD_CHECKER(thread_checker_);

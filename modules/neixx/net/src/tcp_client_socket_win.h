@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #include <neixx/common/location.h>
 #include <neixx/functional/bind.h>
@@ -103,6 +104,9 @@ class TCPClientSocket::Impl final
   std::mutex mutex_;
 
   scoped_refptr<TaskRunner> io_runner_;
+  // Cached thread ID of the IO thread.  Set on first successful connection
+  // to the IO thread; used to detect cross-thread I/O calls.
+  std::thread::id io_thread_id_;
 
   // Thread safety validation.
   DECLARE_THREAD_CHECKER(thread_checker_);
@@ -112,6 +116,14 @@ class TCPClientSocket::Impl final
 
   // Starts background drain read after orphan shutdown.
   void StartOrphanDrain();
+
+  // Physical socket + watcher cleanup — must run on the IO thread.
+  void DoCloseCleanup(SOCKET s);
+
+  // Actual connect logic (WSASocket, bind, ConnectEx, pump register).
+  // Called by Connect() after the trampoline check.
+  bool DoConnect(const IPEndPoint& addr,
+                 TCPClientSocket::ConnectCallback callback);
 
   // Ensures the socket is registered with the current thread's IOCP.
   // Called lazily on first ReadAsync/WriteAsync to support Multi-Reactor
