@@ -202,3 +202,30 @@ The trade-off:
 **Approve for implementation.** OnceCallback templatization is the next
 architectural step toward full Chromium callback parity.  See commit
 `6483caa` for the net module that depends on this.
+
+---
+
+## TCP Net Module — Pending Tests
+
+### `TCPServerSocket_FDExhaustion` (POSIX only, P2)
+
+**Goal**: Verify that the server survives transient FD exhaustion (EMFILE/ENFILE)
+and recovers when file descriptors become available again.
+
+**Blocked by**: IO thread (MessagePumpForIO) requires epoll FDs internally;
+exhausting process-level FDs starves the pump, preventing task dispatch and
+deadlocking the test.
+
+**Approach** (drafted, not yet working):
+1. Save `RLIMIT_NOFILE`, set a tight soft limit.
+2. Exhaust FDs with dummy sockets.
+3. Start server (needs 1 listen fd — release a few held FDs first).
+4. Connect while exhausted → server `accept4` must handle EMFILE gracefully
+   without crashing.
+5. Release held FDs → retry connect → must succeed.
+
+**Next steps**:
+- Investigate whether the IO pump can be temporarily paused during FD exhaustion.
+- Or: test the EMFILE code path directly by calling `accept4` on an fd
+  pre-configured to fail, without exhausting system FDs.
+- Or: use a mock/epoll-free IO pump for this specific test.
