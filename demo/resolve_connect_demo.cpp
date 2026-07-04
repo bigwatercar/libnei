@@ -5,7 +5,8 @@
 // Demonstrates the end-to-end async networking flow:
 //   1. Resolve a hostname via HostResolver (background worker thread)
 //   2. Connect to the first resolved address via TCPClientSocket (IO thread)
-//   3. Verify the connection by reading a few bytes (no HTTP parsing)
+//   3. Send HTTP GET /generate_204 request
+//   4. Read and print the HTTP response
 //
 // Build: cmake --build . --target resolve_connect_demo
 // Run:   ./resolve_connect_demo [hostname] [port]
@@ -16,13 +17,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <string>
 
 #include <neixx/common/at_exit.h>
-#include <neixx/functional/bind.h>
-#include <neixx/functional/callback.h>
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/net/address_list.h>
@@ -56,6 +56,7 @@ class IoThread {
 struct State {
   nei::WaitableEvent done{nei::WaitableEvent::ResetPolicy::kAutomatic, false};
   std::atomic<bool> connected{false};
+  std::atomic<bool> response_received{false};
 };
 
 void RunDemo(const std::string& host, uint16_t port) {
@@ -72,7 +73,7 @@ void RunDemo(const std::string& host, uint16_t port) {
 
   resolver.Resolve(
       host,
-      [port, io_runner, state](const nei::net::AddressList& addresses) {
+      [host, port, io_runner, state](const nei::net::AddressList& addresses) {
         if (addresses.empty()) {
           std::cerr << "ERROR: no addresses resolved" << std::endl;
           state->done.Signal();
@@ -88,7 +89,7 @@ void RunDemo(const std::string& host, uint16_t port) {
         auto client = std::make_shared<nei::net::TCPClientSocket>();
         client->Connect(
             target,
-            [client, state](bool success) {
+            [client, host, state](bool success) {
               if (!success) {
                 std::cerr << "ERROR: connect failed" << std::endl;
                 state->done.Signal();
@@ -96,9 +97,63 @@ void RunDemo(const std::string& host, uint16_t port) {
               }
               state->connected.store(true);
               std::cout << "[2] Connected!" << std::endl;
-              // Connection success is sufficient proof — close immediately.
-              client->Close();
-              state->done.Signal();
+
+              // ---- Step 3: Send HTTP GET request ----
+              std::string request =
+                  "GET /generate_204 HTTP/1.1\r\n"
+                  "Host: " + host + "\r\n"
+                  "Connection: close\r\n"
+                  "\r\n";
+
+              auto write_buf =
+                  nei::MakeRefCounted<nei::IOBufferWithSize>(request.size());
+              std::memcpy(write_buf->data(), request.data(), request.size());
+
+              std::cout << "[3] Sending HTTP GET /generate_204 ..."
+                        << std::endl;
+
+              client->WriteAsync(
+                  write_buf, request.size(),
+                  [client, state](bool ws, std::size_t /*n*/) {
+                    if (!ws) {
+                      std::cerr << "ERROR: write failed" << std::endl;
+                      state->done.Signal();
+                      return;
+                    }
+                    std::cout << "[3] Request sent." << std::endl;
+
+                    // ---- Step 4: Read HTTP response ----
+                    auto read_buf =
+                        nei::MakeRefCounted<nei::IOBufferWithSize>(4096);
+                    std::cout << "[4] Reading response ..." << std::endl;
+
+                    client->ReadAsync(
+                        read_buf, 4096,
+                        [client, read_buf, state](bool rs, std::size_t n) {
+                          if (!rs && n == 0) {
+                            std::cout << "[4] Server closed connection."
+                                      << std::endl;
+                            state->done.Signal();
+                            return;
+                          }
+                          if (!rs) {
+                            std::cerr << "ERROR: read failed" << std::endl;
+                            state->done.Signal();
+                            return;
+                          }
+
+                          state->response_received.store(true);
+                          std::cout << "[4] Received " << n << " bytes:"
+                                    << std::endl;
+                          std::cout.write(
+                              read_buf->data(),
+                              static_cast<std::streamsize>(n));
+                          std::cout << std::endl;
+
+                          client->Close();
+                          state->done.Signal();
+                        });
+                  });
             },
             io_runner);
       },
@@ -114,6 +169,8 @@ void RunDemo(const std::string& host, uint16_t port) {
   std::cout << "=== Result ===" << std::endl;
   std::cout << "  Connected:  " << (state->connected.load() ? "YES" : "NO")
             << std::endl;
+  std::cout << "  Response:   "
+            << (state->response_received.load() ? "YES" : "NO") << std::endl;
   if (state->connected.load())
     std::cout << std::endl << "Demo completed successfully." << std::endl;
 }
