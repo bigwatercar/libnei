@@ -98,15 +98,9 @@ void Lock::Release() {
   impl_->Release();
 }
 
-#if defined(_WIN32)
-CRITICAL_SECTION *Lock::GetImpl() {
+void *Lock::GetImpl() {
   return impl_->GetNativeHandle();
 }
-#else
-pthread_mutex_t *Lock::GetImpl() {
-  return impl_->GetNativeHandle();
-}
-#endif
 
 AutoLock::AutoLock(Lock &lock)
     : lock_(lock) {

@@ -5,12 +5,6 @@
 
 #include <memory>
 
-#if defined(_WIN32)
-#include <Windows.h>
-#else
-#include <pthread.h>
-#endif
-
 #include <nei/macros/nei_export.h>
 
 namespace nei {
@@ -30,11 +24,10 @@ public:
   void Acquire();
   void Release();
 
-#if defined(_WIN32)
-  CRITICAL_SECTION *GetImpl();
-#else
-  pthread_mutex_t *GetImpl();
-#endif
+  // Returns a pointer to the platform-native lock primitive.
+  // Windows: CRITICAL_SECTION*; POSIX: pthread_mutex_t*.
+  // Callers must cast to the appropriate type.
+  void *GetImpl();
 
 private:
   std::unique_ptr<Impl> impl_;
