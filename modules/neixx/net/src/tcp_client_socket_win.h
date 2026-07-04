@@ -34,25 +34,8 @@ namespace nei::net {
 // =============================================================================
 // TcpOverlappedContext — OVERLAPPED + callback state for a single I/O op
 // =============================================================================
-struct TcpOverlappedContext {
-  OVERLAPPED overlapped = {};
-  scoped_refptr<IOBuffer> buffer;
-  std::size_t buf_len = 0;
-
-  enum class Op { kConnect, kRead, kWrite } op = Op::kRead;
-
-  TCPClientSocket::ConnectCallback connect_cb;
-  AsyncInputStream::IOReadCallback   read_cb;
-  AsyncOutputStream::IOWriteCallback write_cb;
-
-  // Keeps the Impl alive while the OVERLAPPED is in-flight.  When IOCP
-  // completes and OnIOCompleted destroys this context, the ref is released.
-  scoped_refptr<TCPClientSocket::Impl> self_ref;
-
-  // If true, this is a drain read posted by StartOrphanDrain().  OnIOCompleted
-  // must NOT fire the user callback when orphaned_ is set.
-  bool is_drain_read = false;
-};
+// Defined after TCPClientSocket::Impl so scoped_refptr<Impl> sees full type.
+struct TcpOverlappedContext;
 
 // =============================================================================
 // TCPClientSocket::Impl (Windows: ConnectEx + WSARecv/WSASend via IOCP)
@@ -145,6 +128,29 @@ class TCPClientSocket::Impl final
 
   // Must be the last member.
   WeakPtrFactory<Impl> weak_factory_;
+};
+
+// =============================================================================
+// TcpOverlappedContext — full definition (after Impl for scoped_refptr<Impl>)
+// =============================================================================
+struct TcpOverlappedContext {
+  OVERLAPPED overlapped = {};
+  scoped_refptr<IOBuffer> buffer;
+  std::size_t buf_len = 0;
+
+  enum class Op { kConnect, kRead, kWrite } op = Op::kRead;
+
+  TCPClientSocket::ConnectCallback connect_cb;
+  AsyncInputStream::IOReadCallback   read_cb;
+  AsyncOutputStream::IOWriteCallback write_cb;
+
+  // Keeps the Impl alive while the OVERLAPPED is in-flight.  When IOCP
+  // completes and OnIOCompleted destroys this context, the ref is released.
+  scoped_refptr<TCPClientSocket::Impl> self_ref;
+
+  // If true, this is a drain read posted by StartOrphanDrain().  OnIOCompleted
+  // must NOT fire the user callback when orphaned_ is set.
+  bool is_drain_read = false;
 };
 
 }  // namespace nei::net

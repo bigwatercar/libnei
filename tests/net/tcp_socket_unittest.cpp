@@ -606,5 +606,98 @@ TEST_F(TcpSocketTest, MultiReactorRoundRobin) {
     w->Stop();
 }
 
+// ===========================================================================
+// Test 9 — WriteChainNoStackOverflow (re-entrancy defence)
+// ===========================================================================
+//
+// Verifies that rapid sequential writes do not cause synchronous re-entrancy
+// or stack overflow.  Each write callback immediately posts the next write;
+// if the system were dispatching synchronously, the call stack would grow
+// unboundedly.  A depth counter proves tasks are trampolined via PostTask.
+
+TEST_F(TcpSocketTest, WriteChainNoStackOverflow) {
+  const uint16_t port = FindFreePort();
+  ASSERT_NE(port, 0);
+  constexpr int kChainLength = 1000;
+
+  WaitableEvent chain_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::atomic<int> max_depth{0};
+  std::atomic<int> write_count{0};
+  std::atomic<int> server_read_count{0};
+
+  auto server = std::make_shared<TCPServerSocket>();
+
+  io_runner_->PostTask(FROM_HERE, [&, this, port]() {
+    bool ok = server->Listen(
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
+        [&](bool success,
+            std::unique_ptr<TCPClientSocket> accepted) mutable {
+          ASSERT_TRUE(success);
+          auto sock = std::make_shared<std::unique_ptr<TCPClientSocket>>(
+              std::move(accepted));
+
+          auto do_read = std::make_shared<std::function<void()>>();
+          *do_read = [&, sock, do_read]() {
+            auto buf = nei::MakeRefCounted<nei::IOBufferWithSize>(64);
+            (*sock)->ReadAsync(buf, 64,
+                [&, do_read](bool s, std::size_t n) {
+                  if (!s || n == 0) return;
+                  server_read_count.fetch_add(1);
+                  (*do_read)();
+                });
+          };
+          (*do_read)();
+        },
+        io_runner_, {});
+    ASSERT_TRUE(ok);
+
+    // ---- client: chain of 1000 small writes ----
+    auto client = std::make_shared<nei::net::TCPClientSocket>();
+    auto depth = std::make_shared<std::atomic<int>>(0);
+    auto remaining = std::make_shared<std::atomic<int>>(kChainLength);
+    auto do_write = std::make_shared<std::function<void()>>();
+
+    *do_write = [&, client, depth, remaining, do_write]() {
+      int d = depth->fetch_add(1) + 1;
+      int prev = max_depth.load();
+      while (d > prev && !max_depth.compare_exchange_weak(prev, d)) {}
+
+      auto buf = nei::MakeRefCounted<nei::IOBufferWithSize>(1);
+      buf->data()[0] = 'X';
+      client->WriteAsync(buf, 1,
+          [&, depth, remaining, do_write, client](bool ok, std::size_t) {
+            depth->fetch_sub(1);
+            ASSERT_TRUE(ok);
+            write_count.fetch_add(1);
+            if (remaining->fetch_sub(1) > 1) {
+              (*do_write)();
+            } else {
+              client->Close();
+              chain_done.Signal();
+            }
+          });
+    };
+
+    // Connect first, then start the write chain from the connect callback.
+    client->Connect(
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+        [do_write](bool ok) {
+          ASSERT_TRUE(ok);
+          (*do_write)();
+        },
+        io_runner_);
+  });
+
+  chain_done.Wait();
+
+  EXPECT_EQ(write_count.load(), kChainLength)
+      << "All " << kChainLength << " writes must complete";
+  EXPECT_LE(max_depth.load(), 2)
+      << "Max recursion depth should be ≤2 (async dispatch), "
+         "was " << max_depth.load() << " — possible synchronous re-entrancy";
+  EXPECT_GT(server_read_count.load(), 0)
+      << "Server should have read at least some data";
+}
+
 }  // namespace
 }  // namespace nei::net
