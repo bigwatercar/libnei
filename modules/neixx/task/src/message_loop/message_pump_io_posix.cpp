@@ -213,25 +213,59 @@ class MessagePumpForIOState {
     }
 
     const std::uint64_t watch_id = next_watch_id_.fetch_add(1, std::memory_order_relaxed);
-    epoll_event ev{};
-    ev.events = EPOLLERR | EPOLLHUP;
+
+    // Build the desired event mask for this watch.
+    std::uint32_t desired_events = EPOLLERR | EPOLLHUP;
     if (mode == MessagePumpForIO::FdWatchController::Mode::READ || mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
-      ev.events |= EPOLLIN;
+      desired_events |= EPOLLIN;
     }
     if (mode == MessagePumpForIO::FdWatchController::Mode::WRITE || mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
-      ev.events |= EPOLLOUT;
+      desired_events |= EPOLLOUT;
     }
-    ev.data.u64 = watch_id;
 
+    int epoll_op = EPOLL_CTL_ADD;
     {
       AutoLock lock(state_lock_);
+      // If another watch already exists for this fd, use EPOLL_CTL_MOD to
+      // merge the new flags instead of ADD (which would fail with EEXIST).
+      for (const auto& kv : watches_) {
+        if (kv.second.handle == handle) {
+          epoll_op = EPOLL_CTL_MOD;
+          // Merge the existing watch's events with our desired events.
+          std::uint32_t existing = EPOLLERR | EPOLLHUP;
+          if (kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ ||
+              kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
+            existing |= EPOLLIN;
+          }
+          if (kv.second.mode == MessagePumpForIO::FdWatchController::Mode::WRITE ||
+              kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
+            existing |= EPOLLOUT;
+          }
+          desired_events |= existing;
+          break;
+        }
+      }
       watches_[watch_id] = WatchRecord{handle, watcher, mode};
     }
 
-    if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, static_cast<int>(handle), &ev) != 0) {
-      AutoLock lock(state_lock_);
-      watches_.erase(watch_id);
-      return false;
+    epoll_event ev{};
+    ev.events = desired_events;
+    ev.data.u64 = watch_id;
+
+    if (epoll_ctl(epoll_fd_, epoll_op, static_cast<int>(handle), &ev) != 0) {
+      // If MOD fails because the fd was already deleted (race with StopWatching
+      // on another controller), try ADD as a fallback.
+      if (epoll_op == EPOLL_CTL_MOD && errno == ENOENT) {
+        if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, static_cast<int>(handle), &ev) != 0) {
+          AutoLock lock(state_lock_);
+          watches_.erase(watch_id);
+          return false;
+        }
+      } else {
+        AutoLock lock(state_lock_);
+        watches_.erase(watch_id);
+        return false;
+      }
     }
 
     controller->pump_ = nullptr;  // set by owner after success
@@ -249,10 +283,41 @@ class MessagePumpForIOState {
 
     AutoLock lock(state_lock_);
     watches_.erase(watch_id);
-    // epoll_ctl 必须在同一把锁的保护下执行，防止 fd 被复用后新 watch 的内核
-    // 监听被此处的 EPOLL_CTL_DEL 误杀（Linux fd 重用天坑）。
+
+    // Compute the remaining event mask for this fd.  If other watches still
+    // exist for the same handle, use EPOLL_CTL_MOD to keep those flags alive
+    // instead of EPOLL_CTL_DEL which would drop all watches for this fd.
+    std::uint32_t remaining_events = 0;
+    std::uint64_t remaining_watch_id = 0;
+    bool has_other = false;
+    for (const auto& kv : watches_) {
+      if (kv.second.handle == handle) {
+        has_other = true;
+        remaining_watch_id = kv.first;
+        remaining_events |= EPOLLERR | EPOLLHUP;
+        if (kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ ||
+            kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
+          remaining_events |= EPOLLIN;
+        }
+        if (kv.second.mode == MessagePumpForIO::FdWatchController::Mode::WRITE ||
+            kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
+          remaining_events |= EPOLLOUT;
+        }
+      }
+    }
+
     if (epoll_fd_ >= 0) {
-      (void)epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, static_cast<int>(handle), nullptr);
+      if (has_other && remaining_events != 0) {
+        // Other watches still exist — modify instead of delete.
+        // Must use a valid remaining watch_id so the dispatch loop
+        // can still look up the watcher when this fd signals.
+        epoll_event ev{};
+        ev.events = remaining_events;
+        ev.data.u64 = remaining_watch_id;
+        (void)epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, static_cast<int>(handle), &ev);
+      } else {
+        (void)epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, static_cast<int>(handle), nullptr);
+      }
     }
   }
 

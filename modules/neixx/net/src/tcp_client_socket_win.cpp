@@ -83,7 +83,7 @@ void TCPClientSocket::Impl::Close() {
   SOCKET s = socket_;
   socket_ = INVALID_SOCKET;
 
-  if (!io_runner_->BelongsToCurrentThread()) {
+  if (io_runner_ && !io_runner_->BelongsToCurrentThread()) {
     io_runner_->PostTask(
         FROM_HERE,
         BindOnce([](scoped_refptr<Impl> self, SOCKET s_to_close) {
@@ -205,7 +205,7 @@ bool TCPClientSocket::Impl::Connect(
         FROM_HERE,
         BindOnce([](scoped_refptr<Impl> self, IPEndPoint a,
                     TCPClientSocket::ConnectCallback cb) {
-          self->Connect(a, std::move(cb), self->io_runner_);
+          self->DoConnect(a, std::move(cb));
         }, WrapRefCounted(this), addr, std::move(callback)));
     return true;  // Request accepted — will be processed on IO thread.
   }

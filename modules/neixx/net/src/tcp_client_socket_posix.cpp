@@ -82,7 +82,7 @@ void TCPClientSocket::Impl::Close() {
   int fd = fd_;
   fd_ = -1;
 
-  if (!io_runner_->BelongsToCurrentThread()) {
+  if (io_runner_ && !io_runner_->BelongsToCurrentThread()) {
     // Post cleanup to the IO thread.  The scoped_refptr keeps Impl alive
     // until the cleanup completes.
     io_runner_->PostTask(
@@ -208,7 +208,7 @@ bool TCPClientSocket::Impl::Connect(
         FROM_HERE,
         BindOnce([](scoped_refptr<Impl> self, IPEndPoint a,
                     TCPClientSocket::ConnectCallback cb) {
-          self->Connect(a, std::move(cb), self->io_runner_);
+          self->DoConnect(a, std::move(cb));
         }, WrapRefCounted(this), addr, std::move(callback)));
     return true;  // Request accepted — will be processed on IO thread.
   }
@@ -393,6 +393,7 @@ void TCPClientSocket::Impl::OnFileCanReadWithoutBlocking(
 
   ssize_t n = read(fd_, buf->data(), len);
   if (n > 0) {
+    read_controller_.StopWatching();
     PostReadResult(std::move(cb), true, static_cast<std::size_t>(n));
   } else if (n == 0) {
     PostReadResult(std::move(cb), false, 0);  // EOF
@@ -453,6 +454,7 @@ void TCPClientSocket::Impl::OnFileCanWriteWithoutBlocking(
       write_offset_ = 0;
       auto cb = std::move(write_cb_);
       lock.unlock();
+      write_controller_.StopWatching();
       PostWriteResult(std::move(cb), true, len);
     } else {
       // Partial write — update offset and re-arm.
