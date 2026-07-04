@@ -44,6 +44,14 @@ struct TcpOverlappedContext {
   TCPClientSocket::ConnectCallback connect_cb;
   AsyncInputStream::IOReadCallback   read_cb;
   AsyncOutputStream::IOWriteCallback write_cb;
+
+  // Keeps the Impl alive while the OVERLAPPED is in-flight.  When IOCP
+  // completes and OnIOCompleted destroys this context, the ref is released.
+  scoped_refptr<TCPClientSocket::Impl> self_ref;
+
+  // If true, this is a drain read posted by StartOrphanDrain().  OnIOCompleted
+  // must NOT fire the user callback when orphaned_ is set.
+  bool is_drain_read = false;
 };
 
 // =============================================================================
@@ -104,9 +112,9 @@ class TCPClientSocket::Impl final
   std::mutex mutex_;
 
   scoped_refptr<TaskRunner> io_runner_;
-  // Cached thread ID of the IO thread.  Set on first successful connection
-  // to the IO thread; used to detect cross-thread I/O calls.
+  // Cached thread ID + flag for cross-thread trampoline detection.
   std::thread::id io_thread_id_;
+  bool io_thread_bound_ = false;
 
   // Thread safety validation.
   DECLARE_THREAD_CHECKER(thread_checker_);

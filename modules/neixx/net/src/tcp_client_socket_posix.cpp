@@ -82,7 +82,7 @@ void TCPClientSocket::Impl::Close() {
   int fd = fd_;
   fd_ = -1;
 
-  if (io_thread_id_ != std::thread::id() &&
+  if (io_thread_bound_ &&
       std::this_thread::get_id() != io_thread_id_) {
     // Post cleanup to the IO thread.  The scoped_refptr keeps Impl alive
     // until the cleanup completes.
@@ -204,7 +204,7 @@ bool TCPClientSocket::Impl::Connect(
   io_runner_ = std::move(io_runner);
 
   // Connect must run on the IO thread (MessagePumpForIO::Current).
-  if (io_thread_id_ != std::thread::id() &&
+  if (io_thread_bound_ &&
       std::this_thread::get_id() != io_thread_id_) {
     io_runner_->PostTask(
         FROM_HERE,
@@ -223,6 +223,7 @@ bool TCPClientSocket::Impl::DoConnect(
     const IPEndPoint& addr,
     TCPClientSocket::ConnectCallback callback) {
   io_thread_id_ = std::this_thread::get_id();
+  io_thread_bound_ = true;
 
   fd_ = CreateSocket(addr);
   if (fd_ < 0) return false;
@@ -282,7 +283,7 @@ void TCPClientSocket::Impl::ReadAsync(
   // trampoline the call there.  This prevents the socket from being
   // accidentally registered with the wrong thread's epoll instance
   // (e.g. the Acceptor thread instead of the Worker thread).
-  if (io_thread_id_ != std::thread::id() &&
+  if (io_thread_bound_ &&
       std::this_thread::get_id() != io_thread_id_) {
     io_runner_->PostTask(
         FROM_HERE,
@@ -298,8 +299,10 @@ void TCPClientSocket::Impl::ReadAsync(
 
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   // Lazy-capture the IO thread ID on first successful I/O call.
-  if (io_thread_id_ == std::thread::id())
+  if (!io_thread_bound_) {
     io_thread_id_ = std::this_thread::get_id();
+    io_thread_bound_ = true;
+  }
 
   if (closed_ || fd_ < 0) {
     if (callback) {
@@ -335,7 +338,7 @@ void TCPClientSocket::Impl::WriteAsync(
     AsyncOutputStream::IOWriteCallback callback) {
   // If called from a thread other than the designated IO thread,
   // trampoline the call there (same reasoning as ReadAsync).
-  if (io_thread_id_ != std::thread::id() &&
+  if (io_thread_bound_ &&
       std::this_thread::get_id() != io_thread_id_) {
     io_runner_->PostTask(
         FROM_HERE,
@@ -351,8 +354,10 @@ void TCPClientSocket::Impl::WriteAsync(
 
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   // Lazy-capture the IO thread ID on first successful I/O call.
-  if (io_thread_id_ == std::thread::id())
+  if (!io_thread_bound_) {
     io_thread_id_ = std::this_thread::get_id();
+    io_thread_bound_ = true;
+  }
 
   if (closed_ || fd_ < 0) {
     if (callback) {
@@ -531,9 +536,15 @@ void TCPClientSocket::Impl::PostReadResult(AsyncInputStream::IOReadCallback cb,
       io_runner_->PostTask(
           FROM_HERE,
           BindOnce(
-              [](AsyncInputStream::IOReadCallback c, bool s, std::size_t n) {
+              [](scoped_refptr<Impl> self,
+                 AsyncInputStream::IOReadCallback c, bool s, std::size_t n) {
+                // Drop the callback if the Impl was orphaned between the
+                // read completing and this task executing.
+                if (self->orphaned_)
+                  return;
                 c(s, n);
               },
+              WrapRefCounted(this),
               std::move(cb), success, bytes));
     }
   }
@@ -542,20 +553,21 @@ void TCPClientSocket::Impl::PostReadResult(AsyncInputStream::IOReadCallback cb,
 void TCPClientSocket::Impl::PostWriteResult(AsyncOutputStream::IOWriteCallback cb,
                                             bool success, std::size_t bytes) {
   if (cb) {
-    if (orphaned_) {
-      // Orphan path: write flushed → trigger shutdown, not user callback.
-      OnOrphanWriteFlushed();
-      return;
-    }
     DCHECK_MSG(io_runner_,
                "PostWriteResult: io_runner_ is null");
     if (io_runner_) {
       io_runner_->PostTask(
           FROM_HERE,
           BindOnce(
-              [](AsyncOutputStream::IOWriteCallback c, bool s, std::size_t n) {
+              [](scoped_refptr<Impl> self,
+                 AsyncOutputStream::IOWriteCallback c, bool s, std::size_t n) {
+                if (self->orphaned_) {
+                  self->OnOrphanWriteFlushed();
+                  return;
+                }
                 c(s, n);
               },
+              WrapRefCounted(this),
               std::move(cb), success, bytes));
     }
   }

@@ -83,7 +83,7 @@ void TCPClientSocket::Impl::Close() {
   SOCKET s = socket_;
   socket_ = INVALID_SOCKET;
 
-  if (io_thread_id_ != std::thread::id() &&
+  if (io_thread_bound_ &&
       std::this_thread::get_id() != io_thread_id_) {
     io_runner_->PostTask(
         FROM_HERE,
@@ -152,16 +152,26 @@ void TCPClientSocket::Impl::OnOrphanWriteFlushed() {
 
 void TCPClientSocket::Impl::StartOrphanDrain() {
   auto drain_buf = MakeRefCounted<IOBufferWithSize>(4096);
-  // Self reference keeps Impl alive across ReadAsync which is fire-and-forget
-  // from the perspective of StartOrphanDrain's caller.
-  ReadAsync(std::move(drain_buf), 4096,
-            [this](bool success, std::size_t n) {
-              // EOF or error — close the socket, which releases self-hold.
-              if (!success || n == 0) {
-                Close();
-              }
-              // Otherwise keep reading — the Impl is kept alive by has_self_ref_.
-            });
+  // Mark this read as a drain read so OnIOCompleted won't fire the user
+  // callback when orphaned_ is true.
+  auto* ctx = new TcpOverlappedContext();
+  ctx->op = TcpOverlappedContext::Op::kRead;
+  ctx->buffer = drain_buf;
+  ctx->buf_len = 4096;
+  ctx->is_drain_read = true;
+  ctx->self_ref = WrapRefCounted(this);
+
+  WSABUF wsa_buf;
+  wsa_buf.buf = ctx->buffer->data();
+  wsa_buf.len = static_cast<ULONG>(ctx->buf_len);
+
+  DWORD flags = 0;
+  int rc = WSARecv(socket_, &wsa_buf, 1, nullptr, &flags,
+                   &ctx->overlapped, nullptr);
+  if (rc == SOCKET_ERROR && WSAGetLastError() != ERROR_IO_PENDING) {
+    delete ctx;
+    Close();  // Cleanup triggers ReleaseSelfHoldIfNeeded.
+  }
 }
 
 void TCPClientSocket::Impl::ReleaseSelfHoldIfNeeded() {
@@ -191,7 +201,7 @@ bool TCPClientSocket::Impl::Connect(
   io_runner_ = std::move(io_runner);
 
   // Connect must run on the IO thread (MessagePumpForIO::Current).
-  if (io_thread_id_ != std::thread::id() &&
+  if (io_thread_bound_ &&
       std::this_thread::get_id() != io_thread_id_) {
     io_runner_->PostTask(
         FROM_HERE,
@@ -210,6 +220,7 @@ bool TCPClientSocket::Impl::DoConnect(
     const IPEndPoint& addr,
     TCPClientSocket::ConnectCallback callback) {
   io_thread_id_ = std::this_thread::get_id();
+  io_thread_bound_ = true;
 
   struct sockaddr_storage sa = {};
   int sa_len = 0;
@@ -227,6 +238,7 @@ bool TCPClientSocket::Impl::DoConnect(
   auto* ctx = new TcpOverlappedContext();
   ctx->op = TcpOverlappedContext::Op::kConnect;
   ctx->connect_cb = std::move(callback);
+  ctx->self_ref = WrapRefCounted(this);  // Keep Impl alive until IOCP completion.
 
   LPFN_CONNECTEX fn_connect = GetConnectEx();
   if (!fn_connect) {
@@ -302,7 +314,7 @@ void TCPClientSocket::Impl::ReadAsync(
   // If called from a thread other than the designated IO thread,
   // trampoline the call there to prevent IOCP registration on the
   // wrong thread (e.g. Acceptor instead of Worker).
-  if (io_thread_id_ != std::thread::id() &&
+  if (io_thread_bound_ &&
       std::this_thread::get_id() != io_thread_id_) {
     io_runner_->PostTask(
         FROM_HERE,
@@ -317,6 +329,11 @@ void TCPClientSocket::Impl::ReadAsync(
   }
 
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  // Lazy-capture the IO thread ID on first successful I/O call.
+  if (!io_thread_bound_) {
+    io_thread_id_ = std::this_thread::get_id();
+    io_thread_bound_ = true;
+  }
   // Lazy-capture the IO thread ID on first successful I/O call.
   if (io_thread_id_ == std::thread::id())
     io_thread_id_ = std::this_thread::get_id();
@@ -342,6 +359,7 @@ void TCPClientSocket::Impl::ReadAsync(
   ctx->buffer = std::move(buf);
   ctx->buf_len = buf_len;
   ctx->read_cb = std::move(callback);
+  ctx->self_ref = WrapRefCounted(this);  // Keep Impl alive until IOCP completion.
 
   WSABUF wsa_buf;
   wsa_buf.buf = ctx->buffer->data();
@@ -371,7 +389,7 @@ void TCPClientSocket::Impl::WriteAsync(
     AsyncOutputStream::IOWriteCallback callback) {
   // If called from a thread other than the designated IO thread,
   // trampoline the call there (same reasoning as ReadAsync).
-  if (io_thread_id_ != std::thread::id() &&
+  if (io_thread_bound_ &&
       std::this_thread::get_id() != io_thread_id_) {
     io_runner_->PostTask(
         FROM_HERE,
@@ -386,6 +404,11 @@ void TCPClientSocket::Impl::WriteAsync(
   }
 
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  // Lazy-capture the IO thread ID on first successful I/O call.
+  if (!io_thread_bound_) {
+    io_thread_id_ = std::this_thread::get_id();
+    io_thread_bound_ = true;
+  }
   // Lazy-capture the IO thread ID on first successful I/O call.
   if (io_thread_id_ == std::thread::id())
     io_thread_id_ = std::this_thread::get_id();
@@ -411,6 +434,7 @@ void TCPClientSocket::Impl::WriteAsync(
   ctx->buffer = std::move(buf);
   ctx->buf_len = buf_len;
   ctx->write_cb = std::move(callback);
+  ctx->self_ref = WrapRefCounted(this);  // Keep Impl alive until IOCP completion.
 
   WSABUF wsa_buf;
   wsa_buf.buf = ctx->buffer->data();
@@ -471,7 +495,13 @@ void TCPClientSocket::Impl::OnIOCompleted(
     }
     case TcpOverlappedContext::Op::kRead: {
       auto cb = std::move(ctx->read_cb);
+      bool is_drain = ctx->is_drain_read;
       delete ctx;
+      // If orphaned and this is NOT a drain read, drop the user callback
+      // silently — the user has already destroyed the shell.  Drain reads
+      // (is_drain_read == true) are internal and don't carry user callbacks.
+      if (orphaned_ && !is_drain)
+        break;
       if (cb) {
         DCHECK_MSG(io_runner_, "OnIOCompleted(kRead): io_runner_ is null");
         if (io_runner_) {

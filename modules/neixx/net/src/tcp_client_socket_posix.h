@@ -110,10 +110,10 @@ class TCPClientSocket::Impl final
 
   scoped_refptr<TaskRunner> io_runner_;
   std::mutex mutex_;
-  // Cached thread ID of the IO thread.  Set on first successful connection
-  // to the IO thread; used to detect cross-thread I/O calls that would
-  // silently register with the wrong epoll instance.
+  // Cached thread ID of the IO thread + flag indicating it has been set.
+  // Used to detect cross-thread I/O calls (trampoline check).
   std::thread::id io_thread_id_;
+  bool io_thread_bound_ = false;
 
   // Thread safety validation.
   DECLARE_THREAD_CHECKER(thread_checker_);
