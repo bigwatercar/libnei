@@ -149,7 +149,7 @@ void RunBenchmark(size_t buffer_size, size_t total_mb) {
     client->Connect(
         nei::net::IPEndPoint(
             nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
-        [&, buffer_size](bool ok) {
+        [&bench_done, &server_bytes, client, write_buf, total_bytes, buffer_size](bool ok) {
           if (!ok) { std::cerr << "connect failed" << std::endl; bench_done.Signal(); return; }
           auto rem = std::make_shared<std::atomic<size_t>>(total_bytes);
           auto dw = std::make_shared<std::function<void()>>();
@@ -187,6 +187,9 @@ void RunBenchmark(size_t buffer_size, size_t total_mb) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
+#if defined(_WIN32)
+  nei::net::EnsureWsa();
+#endif
   nei::AtExitManager at_exit;
   nei::ThreadPoolInstance::CreateAndStart(
       nei::ThreadPoolInstance::InitParams{});
