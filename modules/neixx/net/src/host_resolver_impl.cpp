@@ -12,6 +12,7 @@
 #include <neixx/task/task_runner.h>
 #include <neixx/task/task_traits.h>
 #include <neixx/task/thread_pool_instance.h>
+#include <neixx/net/wsa_init.h>
 #include <neixx/strings/utf_string_conversions.h>
 
 #if defined(_WIN32)
@@ -33,30 +34,6 @@ struct WeakPtrThreadSafe<net::HostResolver::Impl> : std::true_type {};
 }  // namespace nei
 
 namespace nei::net {
-
-// =============================================================================
-// RAII Winsock initializer (Windows only)
-// =============================================================================
-#if defined(_WIN32)
-namespace {
-
-struct WsaInitializer {
-  WsaInitializer() {
-    WSADATA data = {};
-    WSAStartup(MAKEWORD(2, 2), &data);
-  }
-  ~WsaInitializer() {
-    WSACleanup();
-  }
-};
-
-void EnsureWsaInitialized() {
-  static WsaInitializer wsa;
-  (void)wsa;
-}
-
-}  // namespace
-#endif  // _WIN32
 
 // =============================================================================
 // sockaddr → IPEndPoint conversion helper
@@ -98,7 +75,7 @@ AddressList ResolveBlocking(const std::string& host) {
     return result;
 
 #if defined(_WIN32)
-  EnsureWsaInitialized();
+  EnsureWsa();
 
   // UTF-8 hostname → UTF-16 via the project's canonical conversion utility.
   std::u16string u16host = UTF8ToUTF16(host);
