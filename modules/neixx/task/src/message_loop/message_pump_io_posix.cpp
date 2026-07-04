@@ -36,7 +36,6 @@ ThreadLocalStorage::Slot& GetCurrentPumpSlot() {
   return slot;
 }
 
-constexpr std::uint64_t kWakeEventId = 1;
 constexpr std::size_t kMaxEpollEvents = 16;
 
 int ComputeWaitTimeoutMs(const MessagePump::Delegate::NextWorkInfo& next_work_info,
@@ -84,7 +83,12 @@ class MessagePumpForIOState {
 
     epoll_event ev{};
     ev.events = EPOLLIN;
-    ev.data.u64 = kWakeEventId;
+    // Use the eventfd's own fd as the epoll token so the dispatch loop can
+    // distinguish wakeup events from regular I/O by comparing ev.data.fd
+    // against event_fd_.  This avoids the union-aliasing risk of using a
+    // small magic constant (e.g. 1) in ev.data.u64, which would collide
+    // with a real user fd that happens to have the same numeric value.
+    ev.data.fd = event_fd_;
     if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, event_fd_, &ev) != 0) {
       std::fprintf(stderr, "[MessagePumpForIO] epoll_ctl ADD wakefd failed: %s\n",
                    std::strerror(errno));
@@ -373,7 +377,7 @@ class MessagePumpForIOState {
     bool ran_work_wakeup = false;
     for (int i = 0; i < event_count; ++i) {
       const epoll_event& event = events[static_cast<std::size_t>(i)];
-      if (event.data.u64 == kWakeEventId) {
+      if (event.data.fd == event_fd_) {
         (void)DrainWakeEvent();
         TRACE_EVENT_INSTANT("nei.message_pump", "WakeEventDrained");
         ran_work_wakeup = true;
