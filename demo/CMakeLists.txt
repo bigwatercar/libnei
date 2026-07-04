@@ -37,6 +37,9 @@ target_link_libraries(elevated_process_demo PRIVATE nei::nei)
 add_executable(memory_monitor_demo memory_monitor_demo.cpp)
 target_link_libraries(memory_monitor_demo PRIVATE nei::nei)
 
+add_executable(resolve_connect_demo resolve_connect_demo.cpp)
+target_link_libraries(resolve_connect_demo PRIVATE nei::nei)
+
 if(WIN32)
   add_executable(pipe_stream_cross_process_win_demo
                  pipe_stream_cross_process_win_demo.cpp)
