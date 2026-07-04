@@ -387,14 +387,14 @@ TEST_F(TcpSocketTest, OrphanedDestruction) {
         io_runner_, {});
     ASSERT_TRUE(ok);
 
-    auto client = std::make_unique<TCPClientSocket>();
+    auto client = std::make_shared<TCPClientSocket>();
     client->Connect(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
-        [&, c = &client](bool ok) {
+        [client](bool ok) {
           ASSERT_TRUE(ok);
           // Post a pending read so Orphan() has a callback to cancel.
           auto buf = MakeRefCounted<IOBufferWithSize>(64);
-          (*c)->ReadAsync(buf, 64, [](bool, std::size_t) {});
+          client->ReadAsync(buf, 64, [](bool, std::size_t) {});
         },
         io_runner_);
   });
