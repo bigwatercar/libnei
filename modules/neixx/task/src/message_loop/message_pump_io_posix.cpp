@@ -250,7 +250,11 @@ class MessagePumpForIOState {
 
     epoll_event ev{};
     ev.events = desired_events;
-    ev.data.u64 = watch_id;
+    // Use fd as the epoll token instead of watch_id so that DispatchOneBatch
+    // can look up ALL watchers for this fd (read + write) by iterating the
+    // watches_ map, rather than depending on a single watch_id that would
+    // only reach one of them.
+    ev.data.fd = static_cast<int>(handle);
 
     if (epoll_ctl(epoll_fd_, epoll_op, static_cast<int>(handle), &ev) != 0) {
       // If MOD fails because the fd was already deleted (race with StopWatching
@@ -288,12 +292,10 @@ class MessagePumpForIOState {
     // exist for the same handle, use EPOLL_CTL_MOD to keep those flags alive
     // instead of EPOLL_CTL_DEL which would drop all watches for this fd.
     std::uint32_t remaining_events = 0;
-    std::uint64_t remaining_watch_id = 0;
     bool has_other = false;
     for (const auto& kv : watches_) {
       if (kv.second.handle == handle) {
         has_other = true;
-        remaining_watch_id = kv.first;
         remaining_events |= EPOLLERR | EPOLLHUP;
         if (kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ ||
             kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
@@ -309,11 +311,10 @@ class MessagePumpForIOState {
     if (epoll_fd_ >= 0) {
       if (has_other && remaining_events != 0) {
         // Other watches still exist — modify instead of delete.
-        // Must use a valid remaining watch_id so the dispatch loop
-        // can still look up the watcher when this fd signals.
+        // Use fd as the epoll token (consistent with RegisterWatch).
         epoll_event ev{};
         ev.events = remaining_events;
-        ev.data.u64 = remaining_watch_id;
+        ev.data.fd = static_cast<int>(handle);
         (void)epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, static_cast<int>(handle), &ev);
       } else {
         (void)epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, static_cast<int>(handle), nullptr);
@@ -380,27 +381,50 @@ class MessagePumpForIOState {
         continue;
       }
 
-      WatchRecord record;
-      bool found = false;
+      // Extract the triggered fd from the epoll token (set by RegisterWatch).
+      int triggered_fd = event.data.fd;
+
+      // Collect all watchers for this fd under the lock.  A single fd may
+      // have up to two watchers (one READ, one WRITE).  After collecting,
+      // we release the lock and invoke callbacks so that re-entrant
+      // StartWatching / StopWatching inside callbacks cannot deadlock.
+      std::vector<WatchRecord> watchers;
       {
         AutoLock lock(state_lock_);
-        auto it = watches_.find(event.data.u64);
-        if (it != watches_.end()) {
-          record = it->second;
-          found = true;
+        for (const auto& kv : watches_) {
+          if (kv.second.handle == triggered_fd) {
+            watchers.push_back(kv.second);
+          }
         }
       }
-      if (!found || record.watcher == nullptr) {
-        continue;
-      }
 
-      const bool can_read = (event.events & (EPOLLIN | EPOLLHUP | EPOLLERR)) != 0;
-      const bool can_write = (event.events & (EPOLLOUT | EPOLLERR)) != 0;
-      if (can_read && (record.mode == MessagePumpForIO::FdWatchController::Mode::READ || record.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE)) {
-        record.watcher->OnFileCanReadWithoutBlocking(record.handle);
-      }
-      if (can_write && (record.mode == MessagePumpForIO::FdWatchController::Mode::WRITE || record.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE)) {
-        record.watcher->OnFileCanWriteWithoutBlocking(record.handle);
+      if (watchers.empty())
+        continue;
+
+      // Dispatch by event mask: EPOLLIN → OnFileCanReadWithoutBlocking,
+      // EPOLLOUT → OnFileCanWriteWithoutBlocking.  A single epoll event
+      // may carry both flags (e.g. EPOLLHUP makes the fd both readable
+      // and writable), so we check each flag independently against the
+      // watcher's registered mode.
+      for (const auto& record : watchers) {
+        if (record.watcher == nullptr)
+          continue;
+
+        const bool can_read =
+            (event.events & (EPOLLIN | EPOLLHUP | EPOLLERR)) != 0;
+        const bool can_write =
+            (event.events & (EPOLLOUT | EPOLLERR)) != 0;
+
+        if (can_read &&
+            (record.mode == MessagePumpForIO::FdWatchController::Mode::READ ||
+             record.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE)) {
+          record.watcher->OnFileCanReadWithoutBlocking(record.handle);
+        }
+        if (can_write &&
+            (record.mode == MessagePumpForIO::FdWatchController::Mode::WRITE ||
+             record.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE)) {
+          record.watcher->OnFileCanWriteWithoutBlocking(record.handle);
+        }
       }
       any_event = true;
     }
