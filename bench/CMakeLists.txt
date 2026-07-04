@@ -48,6 +48,9 @@ target_link_libraries(async_file_bench PRIVATE nei::nei)
 add_executable(pipe_stream_bench pipe_stream_bench.cpp)
 target_link_libraries(pipe_stream_bench PRIVATE nei::nei)
 
+add_executable(tcp_loopback_bench tcp_loopback_bench.cpp)
+target_link_libraries(tcp_loopback_bench PRIVATE nei::nei)
+
 if(WIN32)
   add_executable(pipe_stream_cross_process_bench
                  pipe_stream_cross_process_bench_win.cpp)
