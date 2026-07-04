@@ -78,10 +78,13 @@ add_executable(
   xdr_test.cpp
 )
 
+add_subdirectory(net)
+
 target_link_libraries(nei_tests PRIVATE nei::nei GTest::gtest)
 target_include_directories(
   nei_tests PRIVATE ${PROJECT_SOURCE_DIR}/modules/neixx/io/src
                     ${PROJECT_SOURCE_DIR}/modules/neixx/process/src
+                    ${PROJECT_SOURCE_DIR}/modules/neixx/net/src
 )
 
 include(GoogleTest)

@@ -3,10 +3,32 @@ set(NEIXX_NET_SOURCES
   include/neixx/net/ip_end_point.h
   include/neixx/net/address_list.h
   include/neixx/net/host_resolver.h
+  include/neixx/net/tcp_server_socket.h
+  include/neixx/net/tcp_client_socket.h
   src/ip_address.cpp
   src/host_resolver_impl.h
   src/host_resolver_impl.cpp
+  src/tcp_server_socket.cpp
+  src/tcp_client_socket.cpp
 )
+
+if(WIN32)
+  list(APPEND NEIXX_NET_SOURCES
+    include/neixx/net/wsa_init.h
+    src/wsa_init.cpp
+    src/tcp_server_socket_win.h
+    src/tcp_server_socket_win.cpp
+    src/tcp_client_socket_win.h
+    src/tcp_client_socket_win.cpp
+  )
+else()
+  list(APPEND NEIXX_NET_SOURCES
+    src/tcp_server_socket_posix.h
+    src/tcp_server_socket_posix.cpp
+    src/tcp_client_socket_posix.h
+    src/tcp_client_socket_posix.cpp
+  )
+endif()
 
 target_sources(nei PRIVATE ${NEIXX_NET_SOURCES})
 

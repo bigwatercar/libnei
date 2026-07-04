@@ -1,0 +1,274 @@
+#include "tcp_server_socket_posix.h"
+
+#if !defined(_WIN32)
+
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <cstring>
+#include <utility>
+
+#include <nei/debug/check.h>
+#include <neixx/net/tcp_client_socket.h>
+#include "tcp_client_socket_posix.h"
+#include <neixx/task/message_loop/message_pump_io.h>
+
+namespace nei::net {
+
+// =============================================================================
+// TCPServerSocket::Impl
+// =============================================================================
+
+TCPServerSocket::Impl::Impl()
+    : weak_factory_(this, FROM_HERE_MEMBER) {
+  DETACH_FROM_THREAD(thread_checker_);  // Lazy-bind on first IO-thread use.
+}
+
+TCPServerSocket::Impl::~Impl() {
+  Close();
+}
+
+bool TCPServerSocket::Impl::Listen(
+    const IPEndPoint& addr, int backlog,
+    TCPServerSocket::AcceptCallback callback,
+    scoped_refptr<TaskRunner> acceptor_runner,
+    TCPServerSocket::RunnerSelector worker_selector) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(acceptor_runner);
+  DCHECK_MSG(listen_fd_ < 0, "Listen: already listening");
+
+  listen_fd_ = CreateListenSocket(addr, backlog);
+  if (listen_fd_ < 0)
+    return false;
+
+  accept_callback_ = std::move(callback);
+  io_runner_ = std::move(acceptor_runner);
+  worker_selector_ = std::move(worker_selector);
+
+  // Register with the IO pump for read notifications.
+  auto* pump = MessagePumpForIO::Current();
+  DCHECK_MSG(pump, "Listen: pump null — not on IO thread");
+
+  watch_controller_.StartWatching(
+      pump, listen_fd_,
+      MessagePumpForIO::FdWatchController::Mode::READ, this);
+  return true;
+}
+
+void TCPServerSocket::Impl::Close() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  if (closed_.exchange(true)) return;
+
+  // Fire pending accept callback with failure.
+  if (accept_callback_) {
+    DCHECK_MSG(io_runner_, "Close: io_runner_ is null");
+    if (io_runner_) {
+      auto cb = std::move(accept_callback_);
+      auto runner = io_runner_;
+      lock.unlock();
+      runner->PostTask(
+          FROM_HERE,
+          BindOnce([](TCPServerSocket::AcceptCallback c) {
+            c(false, nullptr);
+          }, std::move(cb)));
+      lock.lock();
+    }
+  }
+
+  watch_controller_.StopWatching();
+  if (listen_fd_ >= 0) {
+    close(listen_fd_);
+    listen_fd_ = -1;
+  }
+  lock.unlock();
+
+  // Release self-hold (allows final deletion).
+  ReleaseSelfHoldIfNeeded();
+}
+
+void TCPServerSocket::Impl::Shutdown() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  if (closed_.exchange(true)) return;
+
+  // Silent shutdown — clear the callback without firing it.
+  accept_callback_ = {};
+
+  watch_controller_.StopWatching();
+  if (listen_fd_ >= 0) {
+    close(listen_fd_);
+    listen_fd_ = -1;
+  }
+  // NOTE: Do NOT release self-hold here.  Orphan() manages the self-hold
+  // lifecycle — releasing too early causes UAF if the IO thread is still
+  // processing in-flight accepts.
+}
+
+void TCPServerSocket::Impl::Orphan() {
+  if (orphaned_.exchange(true)) return;
+
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!has_self_ref_) {
+      has_self_ref_ = true;
+      this->AddRef();
+    }
+  }
+
+  if (!closed_) {
+    Shutdown();  // Silent — stops watching, closes fd. Does NOT release self-hold.
+  }
+
+  // Post a task to release self-hold after any in-flight accept callback
+  // has completed.  OnFileCanReadWithoutBlocking may also release it at
+  // its exit; the mutex + has_self_ref_ flag guarantees exactly one release.
+  DCHECK_MSG(io_runner_, "Orphan: io_runner_ is null");
+  if (io_runner_) {
+    io_runner_->PostTask(
+        FROM_HERE,
+        BindOnce([](scoped_refptr<Impl> self) {
+          self->ReleaseSelfHoldIfNeeded();
+        }, WrapRefCounted(this)));
+  }
+}
+
+void TCPServerSocket::Impl::OnFileCanReadWithoutBlocking(
+    NativeIOHandle /*handle*/) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  // Drain all pending connections — edge-triggered starvation prevention.
+  while (true) {
+    struct sockaddr_storage client_addr = {};
+    socklen_t addr_len = sizeof(client_addr);
+    int client_fd = accept4(listen_fd_,
+                            reinterpret_cast<struct sockaddr*>(&client_addr),
+                            &addr_len, SOCK_NONBLOCK | SOCK_CLOEXEC);
+
+    if (client_fd < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        // Edge-triggered: re-arm the watch for future connections.
+        auto* pump = MessagePumpForIO::Current();
+        DCHECK_MSG(pump, "OnFileCanRead: pump null");
+        watch_controller_.StartWatching(
+            pump, listen_fd_,
+            MessagePumpForIO::FdWatchController::Mode::READ, this);
+        break;  // All pending connections drained.
+      }
+      // Transient resource exhaustion (EMFILE / ENFILE) — just wait for the
+      // next epoll trigger.  Do NOT stop watching; the server stays alive.
+      if (errno == EMFILE || errno == ENFILE) {
+        // Transient FD exhaustion — retry on next epoll trigger.
+        break;
+      }
+      // Fatal error (EBADF, etc.) — stop watching to prevent busy-loop.
+      watch_controller_.StopWatching();
+      break;
+    }
+
+    // Disable Nagle for lower latency.
+    int opt = 1;
+    setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+
+    // Build a TCPClientSocket from the accepted fd.
+    scoped_refptr<TaskRunner> worker_runner =
+        worker_selector_ ? worker_selector_() : nullptr;
+    if (!worker_runner)
+      worker_runner = io_runner_;
+    auto* client_impl = new TCPClientSocket::Impl(client_fd, worker_runner);
+    auto client_socket = std::make_unique<TCPClientSocket>(client_impl);
+
+    // Deliver on target runner, under mutex for thread-safe Close().
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      if (closed_ || !accept_callback_) {
+        // Server was closed while we were accepting — discard.
+        break;
+      }
+      DCHECK_MSG(io_runner_, "OnFileCanRead: io_runner_ is null");
+      if (io_runner_) {
+        io_runner_->PostTask(
+            FROM_HERE,
+            BindOnce(
+                [](TCPServerSocket::AcceptCallback cb,
+                   std::unique_ptr<TCPClientSocket> sock) {
+                  cb(true, std::move(sock));
+                },
+                accept_callback_, std::move(client_socket)));
+      }
+    }
+  }
+
+  // If orphaned and the accept loop has drained (no more in-flight accepts
+  // because the fd is closed), release the self-hold reference.
+  if (orphaned_) {
+    ReleaseSelfHoldIfNeeded();
+  }
+}
+
+int TCPServerSocket::Impl::CreateListenSocket(const IPEndPoint& addr,
+                                               int backlog) {
+  struct sockaddr_storage sa = {};
+  socklen_t sa_len = 0;
+  if (!EndPointToSockAddr(addr, &sa, &sa_len))
+    return -1;
+
+  int fd = socket(sa.ss_family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+                  IPPROTO_TCP);
+  if (fd < 0) return -1;
+
+  int reuse = 1;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+  if (bind(fd, reinterpret_cast<struct sockaddr*>(&sa), sa_len) < 0) {
+    close(fd);
+    return -1;
+  }
+
+  if (listen(fd, backlog) < 0) {
+    close(fd);
+    return -1;
+  }
+
+  return fd;
+}
+
+bool TCPServerSocket::Impl::EndPointToSockAddr(
+    const IPEndPoint& ep, ::sockaddr_storage* out, ::socklen_t* out_len) {
+  std::memset(out, 0, sizeof(*out));
+
+  if (ep.address().IsIPv4()) {
+    auto* sa = reinterpret_cast<struct sockaddr_in*>(out);
+    sa->sin_family = AF_INET;
+    sa->sin_port = htons(ep.port());
+    std::memcpy(&sa->sin_addr, ep.address().data().data(), 4);
+    *out_len = sizeof(struct sockaddr_in);
+  } else if (ep.address().IsIPv6()) {
+    auto* sa = reinterpret_cast<struct sockaddr_in6*>(out);
+    sa->sin6_family = AF_INET6;
+    sa->sin6_port = htons(ep.port());
+    std::memcpy(&sa->sin6_addr, ep.address().data().data(), 16);
+    *out_len = sizeof(struct sockaddr_in6);
+  } else {
+    return false;
+  }
+  return true;
+}
+
+void TCPServerSocket::Impl::ReleaseSelfHoldIfNeeded() {
+  bool should_release = false;
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (has_self_ref_) {
+      has_self_ref_ = false;
+      should_release = true;
+    }
+  }
+  if (should_release)
+    this->Release();
+}
+
+}  // namespace nei::net
+
+#endif  // !_WIN32

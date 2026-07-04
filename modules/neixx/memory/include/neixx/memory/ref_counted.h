@@ -200,6 +200,15 @@ public:
     AddRefIfNeeded();
   }
 
+  // Implicit upcast from scoped_refptr<U> to scoped_refptr<T> when U* -> T*.
+  // This allows scoped_refptr<Derived> to be used where scoped_refptr<Base>
+  // is expected, sharing the same reference count.
+  template <typename U,
+            typename = std::enable_if_t<std::is_convertible_v<U*, T*>>>
+  scoped_refptr(const scoped_refptr<U> &other) noexcept : ptr_(other.get()) {
+    AddRefIfNeeded();
+  }
+
   scoped_refptr(scoped_refptr &&other) noexcept : ptr_(other.ptr_) {
     other.ptr_ = nullptr;
   }
@@ -332,6 +341,16 @@ scoped_refptr<T> MakeRefCounted(Args &&...args) {
                 "Release() returning void");
 #endif
   return scoped_refptr<T>(new T(std::forward<Args>(args)...));
+}
+
+// =============================================================================
+// WrapRefCounted — safely wraps a raw RefCountedThreadSafe pointer into a
+// scoped_refptr, adding a reference.  Use when a raw `this` must be captured
+// by a task closure and the object may be destroyed before the task runs.
+// =============================================================================
+template <typename T>
+scoped_refptr<T> WrapRefCounted(T* ptr) {
+  return scoped_refptr<T>(ptr);
 }
 
 } // namespace nei
