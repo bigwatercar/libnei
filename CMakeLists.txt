@@ -90,6 +90,7 @@ if(BUILD_SHARED_LIBS)
       PROPERTIES C_VISIBILITY_PRESET hidden
                  CXX_VISIBILITY_PRESET hidden
                  VISIBILITY_INLINES_HIDDEN YES
+                 POSITION_INDEPENDENT_CODE ON
     )
   endif()
 else()
