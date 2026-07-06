@@ -2,6 +2,8 @@
 
 #if defined(_WIN32)
 
+#include <Windows.h>
+
 #include <atomic>
 #include <array>
 #include <chrono>
