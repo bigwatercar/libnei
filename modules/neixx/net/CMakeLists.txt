@@ -8,6 +8,8 @@ set(NEIXX_NET_SOURCES
   src/ip_address.cpp
   src/host_resolver_impl.h
   src/host_resolver_impl.cpp
+  src/cares_context.h
+  src/cares_context.cpp
   src/tcp_server_socket.cpp
   src/tcp_client_socket.cpp
 )
@@ -41,5 +43,8 @@ target_include_directories(
 if(WIN32)
   target_link_libraries(nei PRIVATE ws2_32)
 endif()
+
+# c-ares — asynchronous DNS resolver (3rdparty/)
+target_link_libraries(nei PRIVATE cares)
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

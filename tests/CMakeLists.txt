@@ -81,7 +81,9 @@ add_executable(
 add_subdirectory(net)
 
 target_link_libraries(nei_tests PRIVATE nei::nei GTest::gtest)
-target_compile_options(nei_tests PRIVATE /FS)  # /FS: force synchronous PDB writes (avoids C1041)
+if(MSVC)
+  target_compile_options(nei_tests PRIVATE /FS)  # /FS: force synchronous PDB writes (avoids C1041)
+endif()
 target_include_directories(
   nei_tests PRIVATE ${PROJECT_SOURCE_DIR}/modules/neixx/io/src
                     ${PROJECT_SOURCE_DIR}/modules/neixx/process/src

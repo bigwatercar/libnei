@@ -4,16 +4,17 @@
 #include <cstring>
 #include <utility>
 
+// c-ares — winsock2.h must come before windows.h, handled by ares headers.
+#include <ares.h>
+
 #include <nei/debug/check.h>
 #include <neixx/common/location.h>
 #include <neixx/functional/bind.h>
 #include <neixx/functional/callback.h>
 #include <neixx/task/bind_post_task.h>
 #include <neixx/task/task_runner.h>
-#include <neixx/task/task_traits.h>
-#include <neixx/task/thread_pool_instance.h>
-#include <neixx/net/wsa_init.h>
-#include <neixx/strings/utf_string_conversions.h>
+
+#include "cares_context.h"
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -62,65 +63,72 @@ IPEndPoint SockAddrToIPEndPoint(const struct sockaddr* addr,
   return IPEndPoint();
 }
 
+// =============================================================================
+// QueryContext — heap-allocated trampoline carrying per-query state through
+//               the c-ares C-style callback.
+// =============================================================================
+struct QueryContext {
+  WeakPtr<HostResolver::Impl> weak_self;
+  ResolveCallback user_callback;
+  scoped_refptr<TaskRunner> target_runner;
+};
+
 }  // namespace
 
 // =============================================================================
-// ResolveBlocking — the single blocking call site
+// ConvertAresAddrInfo — convert ares_addrinfo linked list → AddressList
 // =============================================================================
 
-AddressList ResolveBlocking(const std::string& host) {
-  AddressList result;
-
-  if (host.empty())
-    return result;
-
-#if defined(_WIN32)
-  EnsureWsa();
-
-  // UTF-8 hostname → UTF-16 via the project's canonical conversion utility.
-  std::u16string u16host = UTF8ToUTF16(host);
-  if (u16host.empty())
-    return result;
-
-  ADDRINFOW hints = {};
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-  hints.ai_protocol = IPPROTO_TCP;
-
-  ADDRINFOW* ai = nullptr;
-  if (GetAddrInfoW(reinterpret_cast<const wchar_t*>(u16host.c_str()),
-                   nullptr, &hints, &ai) != 0)
-    return result;
-
-  for (ADDRINFOW* p = ai; p != nullptr; p = p->ai_next) {
-    IPEndPoint ep = SockAddrToIPEndPoint(p->ai_addr,
-                                         static_cast<socklen_t>(p->ai_addrlen));
-    if (!ep.address().IsUnspecified())
-      result.push_back(std::move(ep));
+AddressList ConvertAresAddrInfo(const struct ares_addrinfo* result) {
+  AddressList addresses;
+  if (!result) {
+    return addresses;
   }
 
-  FreeAddrInfoW(ai);
-#else
-  struct addrinfo hints = {};
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-  hints.ai_protocol = IPPROTO_TCP;
-
-  struct addrinfo* ai = nullptr;
-  if (getaddrinfo(host.c_str(), nullptr, &hints, &ai) != 0)
-    return result;
-
-  for (struct addrinfo* p = ai; p != nullptr; p = p->ai_next) {
-    IPEndPoint ep = SockAddrToIPEndPoint(p->ai_addr, p->ai_addrlen);
-    if (!ep.address().IsUnspecified())
-      result.push_back(std::move(ep));
+  for (const struct ares_addrinfo_node* node = result->nodes; node != nullptr;
+       node = node->ai_next) {
+    IPEndPoint ep = SockAddrToIPEndPoint(node->ai_addr,
+                                         static_cast<socklen_t>(node->ai_addrlen));
+    if (!ep.address().IsUnspecified()) {
+      addresses.push_back(std::move(ep));
+    }
   }
 
-  freeaddrinfo(ai);
-#endif
-
-  return result;
+  return addresses;
 }
+
+// =============================================================================
+// OnAresCallback — static C callback invoked by c-ares on the event thread.
+// =============================================================================
+
+namespace {
+
+void OnAresCallback(void* arg, int status, int /*timeouts*/,
+                    struct ares_addrinfo* result) {
+  // Take ownership of the query context.
+  std::unique_ptr<QueryContext> query(static_cast<QueryContext*>(arg));
+
+  // If the HostResolver has been destroyed, silently drop.
+  if (!query->weak_self) {
+    return;
+  }
+
+  AddressList addresses;
+  if (status == ARES_SUCCESS) {
+    addresses = ConvertAresAddrInfo(result);
+  }
+
+  if (result) {
+    ares_freeaddrinfo(result);
+  }
+
+  // Post the user callback to the target runner.
+  auto deliver = BindPostTask(query->target_runner,
+                               std::move(query->user_callback));
+  std::move(deliver).Run(std::move(addresses));
+}
+
+}  // namespace
 
 // =============================================================================
 // HostResolver shell (PIMPL forwarding)
@@ -128,6 +136,9 @@ AddressList ResolveBlocking(const std::string& host) {
 
 HostResolver::HostResolver()
     : impl_(std::make_unique<Impl>()) {}
+
+HostResolver::HostResolver(const HostResolverOptions& options)
+    : impl_(std::make_unique<Impl>(options)) {}
 
 HostResolver::~HostResolver() = default;
 
@@ -142,12 +153,11 @@ bool HostResolver::Resolve(const std::string& host,
 // =============================================================================
 
 HostResolver::Impl::Impl()
-    : blocking_runner_(
-          ThreadPoolInstance::Get()->CreateSequencedTaskRunner(
-              TaskTraits(TaskPriority::USER_VISIBLE, MayBlock()))),
-      weak_factory_(this, FROM_HERE_MEMBER) {
-  DCHECK(blocking_runner_);
-}
+    : Impl(HostResolverOptions{}) {}
+
+HostResolver::Impl::Impl(const HostResolverOptions& options)
+    : options_(options),
+      weak_factory_(this, FROM_HERE_MEMBER) {}
 
 HostResolver::Impl::~Impl() = default;
 
@@ -156,39 +166,27 @@ bool HostResolver::Impl::Resolve(const std::string& host,
                                   scoped_refptr<TaskRunner> target_runner) {
   DCHECK(target_runner);
 
-  // Build the worker task as a single BindOnce closure.
-  // ┌─────────────────────────────────────────────────────────────┐
-  // │  Worker thread:                                             │
-  // │  1. WeakPtr check → bail if Impl already destroyed          │
-  // │  2. ResolveBlocking(host) → AddressList                     │
-  // │  3. Bind result into user callback → void() OnceCallback    │
-  // │  4. BindPostTask(target_runner, bound_cb) → void()          │
-  // │  5. Run() → posts to target_runner where user cb executes   │
-  // └─────────────────────────────────────────────────────────────┘
+  if (host.empty()) {
+    // Empty host: deliver empty result asynchronously on target_runner.
+    auto deliver = BindPostTask(target_runner, std::move(callback));
+    std::move(deliver).Run(AddressList());
+    return true;
+  }
 
-  auto worker_task = BindOnce(
-      [](WeakPtr<Impl> weak_self, std::string host_copy,
-         ResolveCallback user_cb,
-         scoped_refptr<TaskRunner> target) {
-        if (!weak_self)
-          return;
+  // Build the query context (heap-allocated, owned by the c-ares callback).
+  auto* query = new QueryContext{
+      weak_factory_.GetWeakPtr(),
+      std::move(callback),
+      std::move(target_runner)
+  };
 
-        // Execute the blocking DNS lookup on this worker thread.
-        AddressList addresses = ResolveBlocking(host_copy);
+  struct ares_addrinfo_hints hints = {};
+  hints.ai_family = options_.address_family;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_protocol = IPPROTO_TCP;
 
-        // BindPostTask preserves the OnceCallback<const AddressList&>
-        // signature.  When deliver.Run(addresses) is called, it posts
-        // user_cb to |target| where user_cb.Run(addresses) executes.
-        auto deliver = BindPostTask(target, std::move(user_cb));
-        std::move(deliver).Run(addresses);
-      },
-      weak_factory_.GetWeakPtr(), host, std::move(callback),
-      std::move(target_runner));
-
-  // Post to the blocking worker thread.
-  const bool posted = blocking_runner_->PostTask(FROM_HERE,
-                                                  std::move(worker_task));
-  return posted;
+  CaresContext::Get()->Resolve(host, options_, &hints, OnAresCallback, query);
+  return true;
 }
 
 }  // namespace nei::net

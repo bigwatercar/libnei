@@ -13,30 +13,34 @@
 #include <neixx/net/host_resolver.h>
 #include <neixx/task/task_runner.h>
 
+// Forward declarations for c-ares.
+struct ares_addrinfo;
+
 namespace nei::net {
 
-// Performs a blocking getaddrinfo/GetAddrInfoW call and returns the result
-// as an AddressList.  Must only be called on a thread marked MayBlock().
-AddressList ResolveBlocking(const std::string& host);
+// Converts a c-ares ares_addrinfo linked list to an AddressList.
+// Returns empty list on nullptr or conversion failure.
+AddressList ConvertAresAddrInfo(const struct ares_addrinfo* result);
 
 // =============================================================================
 // HostResolver::Impl — private implementation detail
 // =============================================================================
 //
-// Owns a dedicated sequenced-task-runner on which blocking DNS lookups
-// execute.  The dual-thread trampoline works as follows:
+// Uses c-ares for asynchronous DNS resolution via a shared CaresContext
+// singleton.  The dual-thread trampoline works as follows:
 //
-//   1. Resolve() → BindPostTask wraps the user callback for target_runner
-//   2. PostTask → DoResolveOnWorker runs on the blocking runner
-//   3. DoResolveOnWorker → ResolveBlocking (getaddrinfo), then fires the
-//      wrapped callback which automatically posts back to target_runner
+//   1. Resolve() → CaresContext::Resolve() submits to c-ares channel
+//   2. c-ares event thread performs the lookup asynchronously
+//   3. OnAresCallback fires → ConvertAresAddrInfo → BindPostTask to
+//      target_runner where the user callback executes
 //
 // Lifetime: the WeakPtrFactory guarantees that if the HostResolver is
-// destroyed while a DNS lookup is in flight, the worker callback becomes
-// a no-op (WeakPtr expired → BindOnce skips invocation).
+// destroyed while a DNS lookup is in flight, the callback becomes
+// a no-op (WeakPtr expired → query context is silently dropped).
 class HostResolver::Impl {
  public:
   Impl();
+  explicit Impl(const HostResolverOptions& options);
   ~Impl();
 
   Impl(const Impl&) = delete;
@@ -47,7 +51,7 @@ class HostResolver::Impl {
                scoped_refptr<TaskRunner> target_runner);
 
  private:
-  scoped_refptr<TaskRunner> blocking_runner_;
+  HostResolverOptions options_;
 
   // Must be the last member — ensures all WeakPtrs are invalidated before
   // any other member is destroyed.

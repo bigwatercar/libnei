@@ -5,6 +5,14 @@
 
 #include <memory>
 #include <string>
+#include <vector>
+
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <sys/socket.h>
+#endif
 
 #include <nei/macros/nei_export.h>
 #include <neixx/functional/callback.h>
@@ -21,6 +29,41 @@ namespace net {
 // OnceCallback<const AddressList&> guarantees no unnecessary copies;
 // the AddressList is moved through the dual-thread trampoline.
 using ResolveCallback = OnceCallback<const AddressList&>;
+
+// =============================================================================
+// HostResolverOptions — DNS resolution configuration backed by c-ares.
+//
+// All fields map directly to c-ares ares_options.  Two HostResolverOptions
+// compare equal when all fields match, allowing shared channel reuse.
+// =============================================================================
+struct NEI_API HostResolverOptions {
+  // DNS query timeout in milliseconds.  0 = use c-ares default (5000ms).
+  // Crawler scenarios should use 3000-5000ms.  Corresponds to ARES_OPT_TIMEOUTMS.
+  int timeout_ms = 5000;
+
+  // Number of retry attempts on failure.  0 = no retries.
+  // Corresponds to ARES_OPT_TRIES.
+  int tries = 2;
+
+  // Custom DNS server list in "ip[:port]" format, e.g. {"8.8.8.8", "1.1.1.1:53"}.
+  // Empty = use system DNS.  Corresponds to ARES_OPT_SERVERS.
+  std::vector<std::string> dns_servers;
+
+  // Address family preference: AF_UNSPEC (default, dual-stack), AF_INET (IPv4
+  // only), or AF_INET6 (IPv6 only).  Corresponds to ARES_OPT_LOOKUPS.
+  int address_family = AF_UNSPEC;
+
+  // Rotate DNS servers for load distribution.  Corresponds to ARES_OPT_ROTATE.
+  bool rotate_servers = false;
+
+  // Max concurrent queries per channel.  0 = unlimited (bound by OS fd limit).
+  // High-concurrency crawler scenarios should leave this at 0.
+  int max_concurrent_queries = 0;
+};
+
+// Comparison operators for std::map key ordering and equality.
+NEI_API bool operator<(const HostResolverOptions& a, const HostResolverOptions& b);
+NEI_API bool operator==(const HostResolverOptions& a, const HostResolverOptions& b);
 
 // Asynchronous DNS hostname resolver.
 //
@@ -46,6 +89,7 @@ class NEI_API HostResolver {
   class Impl;
 
   HostResolver();
+  explicit HostResolver(const HostResolverOptions& options);
   ~HostResolver();
 
   HostResolver(const HostResolver&) = delete;

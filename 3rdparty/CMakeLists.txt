@@ -8,6 +8,7 @@
 # Build as a static library with all extras disabled.  c-ares is linked
 # PRIVATEly into nei so it never leaks into the public ABI.
 set(CARES_STATIC ON CACHE BOOL "" FORCE)
+set(CARES_STATIC_PIC ON CACHE BOOL "" FORCE)
 set(CARES_SHARED OFF CACHE BOOL "" FORCE)
 set(CARES_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(CARES_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
