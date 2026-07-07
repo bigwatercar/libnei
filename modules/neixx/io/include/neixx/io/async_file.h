@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
@@ -95,6 +96,20 @@ class NEI_API AsyncFile {
                          OpenDisposition disposition,
                          const scoped_refptr<TaskRunner>& background_runner,
                          OpenCallback callback) = 0;
+
+  // Convenience overload accepting std::filesystem::path.
+  // Converts to UTF-8 string and delegates to the virtual method.
+  // The reinterpret_cast handles C++20 char8_t: path::u8string() returns
+  // std::u8string in C++20 vs std::string in C++17.
+  void OpenAsync(const std::filesystem::path& path,
+                 OpenMode mode,
+                 OpenDisposition disposition,
+                 const scoped_refptr<TaskRunner>& background_runner,
+                 OpenCallback callback) {
+    auto u8 = path.u8string();
+    OpenAsync(std::string(reinterpret_cast<const char*>(u8.data()), u8.size()),
+              mode, disposition, background_runner, std::move(callback));
+  }
 
   virtual void ReadAsync(scoped_refptr<IOBuffer> buf,
                          std::size_t bytes_to_read,
