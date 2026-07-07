@@ -14,6 +14,13 @@
 #include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
 #include <neixx/threading/thread.h>
+#if __cplusplus >= 202002L
+namespace { inline std::string PathToUTF8(const std::filesystem::path& p) { auto u = p.u8string(); return {reinterpret_cast<const char*>(u.data()), u.size()}; } }
+#else
+namespace { inline std::string PathToUTF8(const std::filesystem::path& p) { return p.u8string(); } }
+#endif
+
+
 
 namespace {
 
@@ -31,7 +38,7 @@ std::filesystem::path MakeTempPath() {
 bool RunDemo(nei::AsyncFile& file,
              const nei::scoped_refptr<nei::TaskRunner>& background_runner,
              const std::filesystem::path& path) {
-  const std::string path_str = path.u8string();
+  const std::string path_str = PathToUTF8(path);
   const std::string payload_text = "Hello from AsyncFile demo (cross-platform).";
   const std::vector<std::uint8_t> payload(payload_text.begin(),
                                           payload_text.end());

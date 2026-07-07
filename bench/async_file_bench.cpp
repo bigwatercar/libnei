@@ -26,6 +26,13 @@
 #include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
 #include <neixx/threading/thread.h>
+#if __cplusplus >= 202002L
+namespace { inline std::string PathToUTF8(const std::filesystem::path& p) { auto u = p.u8string(); return {reinterpret_cast<const char*>(u.data()), u.size()}; } }
+#else
+namespace { inline std::string PathToUTF8(const std::filesystem::path& p) { return p.u8string(); } }
+#endif
+
+
 
 namespace {
 
@@ -71,7 +78,7 @@ BenchEntry BenchWrite(nei::AsyncFile& file,
                       std::size_t chunk_size,
                       std::size_t total_bytes,
                       const std::vector<std::uint8_t>& fill) {
-  const std::string path_str = path.u8string();
+  const std::string path_str = PathToUTF8(path);
   const std::size_t nchunks = (total_bytes + chunk_size - 1) / chunk_size;
 
   nei::WaitableEvent ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -148,7 +155,7 @@ BenchEntry BenchRead(nei::AsyncFile& file,
                      const std::filesystem::path& path,
                      std::size_t chunk_size,
                      std::size_t total_bytes) {
-  const std::string path_str = path.u8string();
+  const std::string path_str = PathToUTF8(path);
   const std::size_t nchunks = (total_bytes + chunk_size - 1) / chunk_size;
 
   nei::WaitableEvent ev(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -247,7 +254,7 @@ int main() {
   std::cout << std::endl << std::endl;
 
   const std::filesystem::path base = MakeTempPath();
-  std::cout << "Temp file: " << base.u8string() << std::endl;
+  std::cout << "Temp file: " << PathToUTF8(base) << std::endl;
 
   nei::Thread io{"async-bench-io"};
   nei::Thread bg{"async-bench-bg"};

@@ -70,21 +70,10 @@ std::string UTF16ToUTF8Impl(std::u16string_view utf16) {
 
 } // namespace
 
-// Public API: C++20 uses char8_t types; C++17 uses char types.
-// UTF8ToUTF16Impl / UTF16ToUTF8Impl always operate on std::string / std::string_view.
-#if __cplusplus >= 202002L
-std::u16string UTF8ToUTF16(std::u8string_view utf8) {
-  return UTF8ToUTF16Impl(std::string_view(
-      reinterpret_cast<const char*>(utf8.data()), utf8.size()));
-}
-std::u8string UTF16ToUTF8(std::u16string_view utf16) {
-  std::string tmp = UTF16ToUTF8Impl(utf16);
-  return std::u8string(reinterpret_cast<const char8_t*>(tmp.data()), tmp.size());
-}
-#else
+// Public API: always use std::string_view / std::string for UTF-8 to maintain
+// compatibility across C++17 and C++20.
 std::u16string UTF8ToUTF16(std::string_view utf8) { return UTF8ToUTF16Impl(utf8); }
 std::string UTF16ToUTF8(std::u16string_view utf16) { return UTF16ToUTF8Impl(utf16); }
-#endif
 
 } // namespace nei
 

@@ -17,6 +17,13 @@
 #include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
 #include <neixx/threading/thread.h>
+#if __cplusplus >= 202002L
+namespace { inline std::string PathToUTF8(const std::filesystem::path& p) { auto u = p.u8string(); return {reinterpret_cast<const char*>(u.data()), u.size()}; } }
+#else
+namespace { inline std::string PathToUTF8(const std::filesystem::path& p) { return p.u8string(); } }
+#endif
+
+
 
 namespace nei {
 namespace {
@@ -45,7 +52,7 @@ TEST(FileInputStreamAdapterTest, BridgesAsyncFileAndAsyncLineReader) {
   ASSERT_TRUE(bg_runner);
 
   const std::filesystem::path path = MakeTempFilePath("line_bridge");
-  const std::string path_utf8 = path.u8string();
+  const std::string path_utf8 = PathToUTF8(path);
 
   auto writer_file = AsyncFile::Create(io_runner);
   ASSERT_TRUE(writer_file);

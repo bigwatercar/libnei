@@ -25,6 +25,13 @@
 #include <neixx/threading/platform_thread.h>
 #include <neixx/threading/thread.h>
 #include <neixx/io/io_buffer.h>
+#if __cplusplus >= 202002L
+namespace { inline std::string PathToUTF8(const std::filesystem::path& p) { auto u = p.u8string(); return {reinterpret_cast<const char*>(u.data()), u.size()}; } }
+#else
+namespace { inline std::string PathToUTF8(const std::filesystem::path& p) { return p.u8string(); } }
+#endif
+
+
 
 namespace nei {
 namespace {
@@ -196,7 +203,7 @@ TEST(AsyncFileWinTest, OpenMissingFileReturnsGenericNoSuchFile) {
 
   io_runner->PostTask(FROM_HERE, [&, io_runner, bg_runner]() {
     auto file = std::make_shared<AsyncFileWin>(io_runner);
-    file->OpenAsync(path.u8string(), AsyncFile::OpenMode::kReadOnly,
+    file->OpenAsync(PathToUTF8(path), AsyncFile::OpenMode::kReadOnly,
                     AsyncFile::OpenDisposition::kOpenExisting, bg_runner,
                     [&, file](bool open_success, AsyncFile::Error open_error) {
                       callback_called.store(true, std::memory_order_release);
@@ -235,7 +242,7 @@ TEST(AsyncFileWinTest, LargeReadWriteCallbackDeterminismOnIoThread) {
   ASSERT_TRUE(bg_runner);
 
   const std::filesystem::path path = MakeTempFilePath("large_det");
-  const std::string path_utf8 = path.u8string();
+  const std::string path_utf8 = PathToUTF8(path);
   const std::size_t kLargeBytes = 32u * 1024u * 1024u;
   const std::vector<std::uint8_t> payload = MakePayload(kLargeBytes, 7);
 
@@ -405,7 +412,7 @@ TEST(AsyncFileWinTest, RepeatedStressMaintainsCallbackThreadDeterminism) {
   ASSERT_TRUE(bg_runner);
 
   const std::filesystem::path path = MakeTempFilePath("stress_det");
-  const std::string path_utf8 = path.u8string();
+  const std::string path_utf8 = PathToUTF8(path);
   constexpr int kRounds = 40;
   const std::size_t kBytesPerRound = 2u * 1024u * 1024u;
 
@@ -582,7 +589,7 @@ TEST(AsyncFileWinTest, AppendModeAppendsIgnoringCallerOffsetInOrder) {
   ASSERT_TRUE(bg_runner);
 
   const std::filesystem::path path = MakeTempFilePath("append_order");
-  const std::string path_utf8 = path.u8string();
+  const std::string path_utf8 = PathToUTF8(path);
   const std::vector<std::uint8_t> payload1 = MakePayload(64 * 1024, 11);
   const std::vector<std::uint8_t> payload2 = MakePayload(64 * 1024, 23);
 
@@ -704,7 +711,7 @@ TEST(AsyncFileWinTest, ConcurrentAppendPreservesWholeWriteBlocks) {
   constexpr std::size_t kBlockSize = 4096;
 
   const std::filesystem::path path = MakeTempFilePath("append_concurrent");
-  const std::string path_utf8 = path.u8string();
+  const std::string path_utf8 = PathToUTF8(path);
 
   std::array<std::vector<std::uint8_t>, kWriters> payloads;
   for (int i = 0; i < kWriters; ++i) {
@@ -840,7 +847,7 @@ TEST(AsyncFileWinTest, FileReadParsesLinesWithAsyncLineReader) {
   ASSERT_TRUE(bg_runner);
 
   const std::filesystem::path path = MakeTempFilePath("line_reader");
-  const std::string path_utf8 = path.u8string();
+  const std::string path_utf8 = PathToUTF8(path);
   const std::string text = "alpha\r\nbeta\ngamma\r\nlast_line";
   const std::vector<std::uint8_t> bytes(text.begin(), text.end());
 
@@ -933,7 +940,7 @@ TEST(AsyncFileWinTest, RaiiDestructionDoesNotHangAndDataIsFlushed) {
   ASSERT_TRUE(bg_runner);
 
   const std::filesystem::path path = MakeTempFilePath("raii_destruct");
-  const std::string path_utf8 = path.u8string();
+  const std::string path_utf8 = PathToUTF8(path);
   const std::vector<std::uint8_t> payload = MakePayload(4096, 0xAB);
 
   // Scope block: create, open, write, then release  --  RAII destruction.

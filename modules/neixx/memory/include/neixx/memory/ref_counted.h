@@ -173,18 +173,12 @@ protected:
 //
 // `scoped_refptr` owns one reference while holding a non-null pointer and
 // automatically balances `AddRef()` / `Release()` across copy/move/reset.
-#if defined(__cpp_concepts) && __cpp_concepts >= 201907L
-template <detail::RefCountedLike T>
-#else
 template <typename T>
-#endif
 class scoped_refptr {
 public:
-#if !defined(__cpp_concepts) || __cpp_concepts < 201907L
   static_assert(detail::IsRefCountedLike<T>::value,
                 "scoped_refptr<T> requires T to provide const AddRef() and const "
                 "Release() returning void");
-#endif
 
   scoped_refptr() noexcept = default;
 
@@ -329,17 +323,11 @@ bool operator!=(std::nullptr_t, const scoped_refptr<T>& rhs) noexcept {
 
 // Factory helper that creates a ref-counted object and returns it as
 // `scoped_refptr<T>`.
-#if defined(__cpp_concepts) && __cpp_concepts >= 201907L
-template <detail::RefCountedLike T, typename... Args>
-#else
 template <typename T, typename... Args>
-#endif
 scoped_refptr<T> MakeRefCounted(Args &&...args) {
-#if !defined(__cpp_concepts) || __cpp_concepts < 201907L
   static_assert(detail::IsRefCountedLike<T>::value,
                 "MakeRefCounted<T> requires T to provide const AddRef() and const "
                 "Release() returning void");
-#endif
   return scoped_refptr<T>(new T(std::forward<Args>(args)...));
 }
 

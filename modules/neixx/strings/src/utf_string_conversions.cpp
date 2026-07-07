@@ -21,18 +21,10 @@ std::u16string ASCIIToUTF16Impl(std::string_view ascii) {
 
 } // namespace
 
-// Public API: C++20 uses char8_t types; C++17 uses char types.
-// The Impl always operates on std::string_view; the C++20 wrappers
-// reinterpret_cast between char8_t and char (layout-compatible for UTF-8).
-#if __cplusplus >= 202002L
-std::u16string ASCIIToUTF16(std::u8string_view ascii) {
-  return ASCIIToUTF16Impl(std::string_view(
-      reinterpret_cast<const char*>(ascii.data()), ascii.size()));
-}
-#else
+// Public API: always use std::string_view for UTF-8/ASCII to maintain
+// compatibility across C++17 and C++20.
 std::u16string ASCIIToUTF16(std::string_view ascii) {
   return ASCIIToUTF16Impl(ascii);
 }
-#endif
 
 } // namespace nei

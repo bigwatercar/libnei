@@ -10,6 +10,13 @@
 
 #include <nei/utils/crc32.h>
 #include <nei/utils/sha256.h>
+#if __cplusplus >= 202002L
+namespace { inline std::string PathToUTF8(const std::filesystem::path& p) { auto u = p.u8string(); return {reinterpret_cast<const char*>(u.data()), u.size()}; } }
+#else
+namespace { inline std::string PathToUTF8(const std::filesystem::path& p) { return p.u8string(); } }
+#endif
+
+
 
 namespace {
 
@@ -76,9 +83,9 @@ TEST(UtilsCrc32Test, IncrementalAndFileHelpersWork) {
   EXPECT_STREQ(hex.data(), "352441c2");
 
   WriteFileAll(path, input);
-  EXPECT_EQ(nei_crc32_file_sum(path.u8string().c_str(), &checksum), 0);
+  EXPECT_EQ(nei_crc32_file_sum(PathToUTF8(path).c_str(), &checksum), 0);
   EXPECT_EQ(checksum, 0x352441C2U);
-  EXPECT_EQ(nei_crc32_file_sum_hex(path.u8string().c_str(), hex.data()), 0);
+  EXPECT_EQ(nei_crc32_file_sum_hex(PathToUTF8(path).c_str(), hex.data()), 0);
   EXPECT_STREQ(hex.data(), "352441c2");
   std::filesystem::remove(path);
 }
@@ -127,7 +134,7 @@ TEST(UtilsSha256Test, IncrementalAndFileHelpersWork) {
   EXPECT_STREQ(hex.data(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 
   WriteFileAll(path, input);
-  EXPECT_EQ(nei_sha256_file_sum_hex(path.u8string().c_str(), hex.data()), 0);
+  EXPECT_EQ(nei_sha256_file_sum_hex(PathToUTF8(path).c_str(), hex.data()), 0);
   EXPECT_STREQ(hex.data(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
   std::filesystem::remove(path);
 }

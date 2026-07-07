@@ -64,10 +64,10 @@ TEST(StringUtilTest, StringAppendFNullFormatDoesNotModifyDestination) {
 }
 
 TEST(StringUtilTest, TruncateUTF8DoesNotSplitMultibyteCharacter) {
-  const std::string input = u8"A\u4F60B"; // bytes: 1 + 3 + 1
+  const std::string input = "A\u4F60B"; // bytes: 1 + 3 + 1
   EXPECT_EQ(nei::TruncateUTF8(input, 0), "");
   EXPECT_EQ(nei::TruncateUTF8(input, 1), "A");
   EXPECT_EQ(nei::TruncateUTF8(input, 2), "A");
-  EXPECT_EQ(nei::TruncateUTF8(input, 4), u8"A\u4F60");
+  EXPECT_EQ(nei::TruncateUTF8(input, 4), "A\u4F60");
   EXPECT_EQ(nei::TruncateUTF8(input, 5), input);
 }
