@@ -22,7 +22,7 @@ namespace {
 constexpr DWORD kAddrBufferSize =
     sizeof(struct sockaddr_storage) + 16;
 
-// LPFN_ACCEPTEX function pointer — loaded once via WSAIoctl.
+// LPFN_ACCEPTEX function pointer  --  loaded once via WSAIoctl.
 LPFN_ACCEPTEX GetAcceptEx() {
   static LPFN_ACCEPTEX fn = nullptr;
   if (!fn) {
@@ -73,7 +73,7 @@ bool TCPServerSocket::Impl::Listen(
 
   // Register listen socket with the pump's IOCP.
   auto* pump = MessagePumpForIO::Current();
-  DCHECK_MSG(pump, "Listen: pump null — not on IO thread");
+  DCHECK_MSG(pump, "Listen: pump null  --  not on IO thread");
   controller_.StartWatching(
       pump, reinterpret_cast<NativeIOHandle>(listen_socket_),
       MessagePumpForIO::FdWatchController::Mode::READ, this);
@@ -107,7 +107,7 @@ void TCPServerSocket::Impl::Close() {
     closesocket(listen_socket_);
     listen_socket_ = INVALID_SOCKET;
   }
-  // Clear pending — IOCP completions will still fire with was_pending=false
+  // Clear pending  --  IOCP completions will still fire with was_pending=false
   // and self-cleanup.
   pending_accepts_.clear();
   lock.unlock();
@@ -120,7 +120,7 @@ void TCPServerSocket::Impl::Shutdown() {
   std::unique_lock<std::mutex> lock(mutex_);
   if (closed_.exchange(true)) return;
 
-  // Silent shutdown — clear the callback without firing it.
+  // Silent shutdown  --  clear the callback without firing it.
   accept_callback_ = {};
 
   controller_.StopWatching();
@@ -130,7 +130,7 @@ void TCPServerSocket::Impl::Shutdown() {
   }
   pending_accepts_.clear();
   // NOTE: Do NOT release self-hold here.  Orphan() manages the self-hold
-  // lifecycle — releasing too early causes UAF when IOCP completions for
+  // lifecycle  --  releasing too early causes UAF when IOCP completions for
   // pending AcceptEx calls are still in the queue.
 }
 
@@ -146,7 +146,7 @@ void TCPServerSocket::Impl::Orphan() {
   }
 
   if (!closed_) {
-    Shutdown();  // Silent — stops watching, closes fd. Does NOT release self-hold.
+    Shutdown();  // Silent  --  stops watching, closes fd. Does NOT release self-hold.
   }
 
   // If no pending accepts remain, release self-hold immediately.
@@ -208,7 +208,7 @@ void TCPServerSocket::Impl::PostAccept() {
 }
 
 // =============================================================================
-// IOCP completion — routed by the pump via CompletionWatcher
+// IOCP completion  --  routed by the pump via CompletionWatcher
 // =============================================================================
 
 void TCPServerSocket::Impl::OnIOCompleted(
@@ -230,7 +230,7 @@ void TCPServerSocket::Impl::OnIOCompleted(
   }
 
   // If the ctx was already cleared from pending_accepts_ (e.g. by Close()),
-  // just clean up the client socket and the context — no callback.
+  // just clean up the client socket and the context  --  no callback.
   if (!was_pending) {
     if (client != INVALID_SOCKET)
       closesocket(client);
@@ -246,7 +246,7 @@ void TCPServerSocket::Impl::OnIOCompleted(
     return;
   }
 
-  // Normal path — ctx was pending; post another accept unless closed.
+  // Normal path  --  ctx was pending; post another accept unless closed.
   if (!closed_) PostAccept();
 
   if (error_code != 0) {

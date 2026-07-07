@@ -18,6 +18,7 @@
 #include <neixx/functional/callback.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/net/address_list.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 
 namespace nei {
 
@@ -31,7 +32,7 @@ namespace net {
 using ResolveCallback = OnceCallback<const AddressList&>;
 
 // =============================================================================
-// HostResolverOptions — DNS resolution configuration backed by c-ares.
+// HostResolverOptions  --  DNS resolution configuration backed by c-ares.
 //
 // All fields map directly to c-ares ares_options.  Two HostResolverOptions
 // compare equal when all fields match, allowing shared channel reuse.
@@ -47,7 +48,9 @@ struct NEI_API HostResolverOptions {
 
   // Custom DNS server list in "ip[:port]" format, e.g. {"8.8.8.8", "1.1.1.1:53"}.
   // Empty = use system DNS.  Corresponds to ARES_OPT_SERVERS.
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::vector<std::string> dns_servers;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 
   // Address family preference: AF_UNSPEC (default, dual-stack), AF_INET (IPv4
   // only), or AF_INET6 (IPv6 only).  Corresponds to ARES_OPT_LOOKUPS.
@@ -113,7 +116,9 @@ class NEI_API HostResolver {
                scoped_refptr<TaskRunner> target_runner);
 
  private:
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 }  // namespace net

@@ -5,7 +5,6 @@
 
 #if defined(_WIN32)
 
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
 #include <cstddef>
@@ -105,8 +104,8 @@ class PipeInputStream::Impl final
                      std::uint32_t bytes_transferred,
                      std::uint32_t error_code) override;
 
-  void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override {}
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) override {}
+  void OnFileCanReadWithoutBlocking(NativeIOHandle) override {}
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {}
 
   void ShutdownAndSelfDestruct();
 
@@ -153,8 +152,8 @@ class PipeOutputStream::Impl final
 
   void MaybeStartNextQueuedWrite();
 
-  void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override {}
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) override {}
+  void OnFileCanReadWithoutBlocking(NativeIOHandle) override {}
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {}
 
   void ShutdownAndSelfDestruct();
 

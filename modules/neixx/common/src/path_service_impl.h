@@ -1,6 +1,6 @@
 /**
  * @file path_service_impl.h
- * @brief Internal definition of PathService::Impl — NOT part of the public API.
+ * @brief Internal definition of PathService::Impl  --  NOT part of the public API.
  *
  * @details
  * This header exposes the full class definition of @ref nei::PathService::Impl
@@ -30,7 +30,7 @@
 namespace nei {
 
 // =============================================================================
-// PathService::Impl — Full definition (internal only)
+// PathService::Impl  --  Full definition (internal only)
 // =============================================================================
 
 class PathService::Impl {

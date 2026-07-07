@@ -54,7 +54,7 @@ static uint64_t nei_flake_now_ms(void) {
   if (us >= 0) {
     return (uint64_t)(us / 1000);
   }
-  /* Fallback: QPC unavailable — use the regular wall clock. */
+  /* Fallback: QPC unavailable  --  use the regular wall clock. */
   const int64_t ms = nei_time_now_ms();
   return (ms >= 0) ? (uint64_t)ms : 0ULL;
 }

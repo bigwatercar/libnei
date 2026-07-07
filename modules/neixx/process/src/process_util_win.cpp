@@ -1,6 +1,5 @@
 #if defined(_WIN32)
 
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <shellapi.h>
 
@@ -190,7 +189,7 @@ ProcessExitInfo ProcessUtil::Launch(
         return DupInheritable(
             reinterpret_cast<HANDLE>(static_cast<uintptr_t>(cfg.target_handle)));
       case StdIOType::PIPE: {
-        // Simple anonymous pipe for fire-and-forget — no overlapped I/O.
+        // Simple anonymous pipe for fire-and-forget  --  no overlapped I/O.
         HANDLE read_end = INVALID_HANDLE_VALUE;
         HANDLE write_end = INVALID_HANDLE_VALUE;
         SECURITY_ATTRIBUTES sa{};

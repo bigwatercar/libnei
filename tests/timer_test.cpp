@@ -14,7 +14,7 @@ namespace nei {
 namespace {
 
 // =============================================================================
-// TimerTest — 辅助函数
+// TimerTest  --  辅助函数
 //
 // 每个测试自行创建 SequenceManager，避免线程绑定跨测试泄漏。
 // RunPumpWithTimeout 投递延迟 Quit 后驱动 pump，
@@ -135,7 +135,7 @@ TEST(TimerTest, OneShotTimerPostedFromRecordsLocation) {
 }
 
 // ---------------------------------------------------------------------------
-// ★ 析构安全拦截
+// * 析构安全拦截
 // ---------------------------------------------------------------------------
 
 TEST(TimerTest, OneShotTimerDestructionPreventsCallback) {
@@ -151,7 +151,7 @@ TEST(TimerTest, OneShotTimerDestructionPreventsCallback) {
     // 驱动 pump 确保 Start() 已执行
     mgr.runner()->PostTask(FROM_HERE, [&mgr] { mgr.manager()->Quit(); });
     mgr.RunPump();
-    // timer 在此析构 → InvalidateWeakPtrs()
+    // timer 在此析构 -> InvalidateWeakPtrs()
   }
 
   // 创建新的 manager 排干延迟任务
@@ -184,7 +184,7 @@ TEST(TimerTest, RepeatingTimerFiresMultipleTimes) {
 }
 
 // ---------------------------------------------------------------------------
-// ★ 自毁灭重入攻击
+// * 自毁灭重入攻击
 // ---------------------------------------------------------------------------
 
 TEST(TimerTest, RepeatingTimerStopFromWithinCallback) {

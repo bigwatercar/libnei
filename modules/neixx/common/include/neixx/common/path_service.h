@@ -1,6 +1,6 @@
 /**
  * @file path_service.h
- * @brief Path routing container — unified interface for well-known filesystem paths.
+ * @brief Path routing container  --  unified interface for well-known filesystem paths.
  *
  * @details
  * `PathService` provides a centralized, overridable registry for common
@@ -43,7 +43,7 @@
 namespace nei {
 
 // =============================================================================
-// PathKeys — Well-known path identifiers
+// PathKeys  --  Well-known path identifiers
 // =============================================================================
 
 /** @brief Enumeration of well-known filesystem path keys.
@@ -88,7 +88,7 @@ enum class PathKeys : int {
 };
 
 // =============================================================================
-// PathProvider — Pluggable path resolution callback
+// PathProvider  --  Pluggable path resolution callback
 // =============================================================================
 
 /**
@@ -105,7 +105,7 @@ enum class PathKeys : int {
 using PathProvider = bool (*)(int key, std::filesystem::path *out);
 
 // =============================================================================
-// PathService — Singleton path registry
+// PathService  --  Singleton path registry
 // =============================================================================
 
 /**

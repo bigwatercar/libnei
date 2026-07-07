@@ -18,7 +18,7 @@ class AsyncOutputStream;
 class TaskRunner;
 
 // ---------------------------------------------------------------------------
-// MessageChannel — structured message framing over async byte streams
+// MessageChannel  --  structured message framing over async byte streams
 // ---------------------------------------------------------------------------
 //
 // MessageChannel wraps a pair of AsyncInputStream / AsyncOutputStream and
@@ -36,11 +36,11 @@ class TaskRunner;
 // -----------------------
 // MessageChannel operates on two explicitly-injected TaskRunners:
 //
-//  |io_task_runner| — all low-level I/O (ReadAsync / WriteAsync callbacks,
+//  |io_task_runner|  --  all low-level I/O (ReadAsync / WriteAsync callbacks,
 //      byte-buffer assembly, the while-loop frame-parsing state machine)
 //      executes exclusively on this runner.
 //
-//  |client_task_runner| — all user callbacks (MessageReceivedCallback and
+//  |client_task_runner|  --  all user callbacks (MessageReceivedCallback and
 //      ErrorCallback) are delivered on this runner via PostTask + WeakPtr
 //      trampoline.  No user code ever executes on the I/O runner.
 //
@@ -62,7 +62,7 @@ class TaskRunner;
 class NEI_API MessageChannel final {
  public:
   // A single complete message frame (8-byte header already stripped).
-  // The payload is allocated from IOBufferPool — no std::vector or new.
+  // The payload is allocated from IOBufferPool  --  no std::vector or new.
   using Message = scoped_refptr<IOBufferWithSize>;
 
   // Invoked once per complete received message on |client_task_runner|.
@@ -76,10 +76,10 @@ class NEI_API MessageChannel final {
 
   // Constructs a MessageChannel with explicit TaskRunner injection.
   //
-  // |io_task_runner|     — where all I/O state-machine work happens.
-  // |client_task_runner| — where all user callbacks are delivered.
-  // |read_stream|        — underlying async input stream (not owned).
-  // |write_stream|       — underlying async output stream (not owned).
+  // |io_task_runner|      --  where all I/O state-machine work happens.
+  // |client_task_runner|  --  where all user callbacks are delivered.
+  // |read_stream|         --  underlying async input stream (not owned).
+  // |write_stream|        --  underlying async output stream (not owned).
   //
   // Both runners must be non-null.  The streams must outlive this object.
   MessageChannel(scoped_refptr<TaskRunner> io_task_runner,
@@ -92,8 +92,8 @@ class NEI_API MessageChannel final {
   MessageChannel& operator=(const MessageChannel&) = delete;
 
   // Begin receiving messages.  Must be called at most once.
-  // |on_message| — invoked for each complete frame on |client_task_runner|.
-  // |on_error|   — invoked once on unrecoverable error or graceful close
+  // |on_message|  --  invoked for each complete frame on |client_task_runner|.
+  // |on_error|    --  invoked once on unrecoverable error or graceful close
   //                on |client_task_runner|.
   void StartReading(MessageReceivedCallback on_message,
                     ErrorCallback on_error);

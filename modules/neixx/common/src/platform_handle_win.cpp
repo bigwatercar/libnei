@@ -12,7 +12,7 @@ namespace nei {
 // PlatformHandle::FromNativeHandle<Traits>().
 
 // ===========================================================================
-// Impl — type-erased storage for PlatformHandle
+// Impl  --  type-erased storage for PlatformHandle
 // ===========================================================================
 //
 // Stores the raw handle and three function pointers (validity check,

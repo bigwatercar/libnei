@@ -19,7 +19,7 @@ extern "C" {
  * @brief Check whether a file is currently in use by another process.
  *
  * On Windows this performs a mandatory exclusivity check (@c dwShareMode=0).
- * On POSIX this uses @c flock (advisory — only detects cooperative
+ * On POSIX this uses @c flock (advisory  --  only detects cooperative
  * lockers) and a write-open test (catches @c ETXTBSY on running
  * executables).  A return value of 0 does not guarantee the file is
  * truly idle on POSIX.

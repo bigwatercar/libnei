@@ -11,7 +11,7 @@ namespace nei {
 namespace {
 
 // =============================================================================
-// MockTracker — 生命周期探针
+// MockTracker  --  生命周期探针
 //
 // 用于验证 CancelableOnceClosure::Cancel() 是否在调用线程上立即析构了
 // 捕获的资源（而非滞留在底层任务队列中）。析构时将 alive 置为 false。
@@ -22,7 +22,7 @@ struct LifecycleTracker {
 };
 
 // =============================================================================
-// CancelableOnceClosureTest — 测试夹具
+// CancelableOnceClosureTest  --  测试夹具
 // =============================================================================
 class CancelableOnceClosureTest : public testing::Test {
  protected:
@@ -69,7 +69,7 @@ TEST_F(CancelableOnceClosureTest, CancelIsIdempotent) {
 }
 
 // ---------------------------------------------------------------------------
-// ★ 极速内存释放验证 (Immediate Resource Reclamation)
+// * 极速内存释放验证 (Immediate Resource Reclamation)
 // ---------------------------------------------------------------------------
 
 TEST_F(CancelableOnceClosureTest, CancelReleasesResourcesImmediately) {
@@ -84,7 +84,7 @@ TEST_F(CancelableOnceClosureTest, CancelReleasesResourcesImmediately) {
         },
         std::move(t)));
     task.Cancel();
-    // ★ Cancel() 返回后，捕获的 LifecycleTracker 必须已被析构
+    // * Cancel() 返回后，捕获的 LifecycleTracker 必须已被析构
     EXPECT_FALSE(*tracker->alive);
   }
 }
@@ -135,7 +135,7 @@ TEST_F(CancelableOnceClosureTest, OperatorBoolReflectsValidity) {
 }
 
 // ---------------------------------------------------------------------------
-// callback() — PostTask 适配
+// callback()  --  PostTask 适配
 // ---------------------------------------------------------------------------
 
 TEST_F(CancelableOnceClosureTest, CallbackReturnsRunnableOnceCallback) {
@@ -218,7 +218,7 @@ TEST_F(CancelableOnceClosureTest, DestructorAutoCancelsOutstandingCallback) {
   {
     auto task = MakeTask([&ran] { ran.store(true); });
     cb = task.callback();
-    // task 析构 → ~CancelableOnceClosure() → Cancel() + Release()
+    // task 析构 -> ~CancelableOnceClosure() -> Cancel() + Release()
   }
 
   // callback() 持有的 scoped_refptr 保持 Impl 存活，但 cancelled_=true

@@ -498,7 +498,7 @@ TEST_F(ThreadPoolInstanceTest, GetReturnsNonNullAfterInit) {
 
 TEST_F(ThreadPoolInstanceTest, GetReturnsNonNullAfterShutdown) {
   // Leaky Singleton pattern: Shutdown() drains workers but keeps the shell
-  // alive.  Get() still returns a valid pointer — only the pool's internal
+  // alive.  Get() still returns a valid pointer  --  only the pool's internal
   // threads have been joined.  The OS reclaims the shell at process exit.
   ThreadPoolInstance::Shutdown();
   EXPECT_NE(ThreadPoolInstance::Get(), nullptr);

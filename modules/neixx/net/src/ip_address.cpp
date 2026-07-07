@@ -76,7 +76,7 @@ IPAddress IPAddress::FromString(const std::string& str) {
     }
   }
 
-  return IPAddress();  // Parse failure → unspecified.
+  return IPAddress();  // Parse failure -> unspecified.
 }
 
 std::string IPAddress::ToString() const {

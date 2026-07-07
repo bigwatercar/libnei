@@ -18,7 +18,7 @@
 namespace nei {
 
 // ===========================================================================
-// PipeInputStream — public forwarding
+// PipeInputStream  --  public forwarding
 // ===========================================================================
 
 PipeInputStream::PipeInputStream(scoped_refptr<TaskRunner> io_task_runner)
@@ -52,7 +52,7 @@ void PipeInputStream::ReadAsync(scoped_refptr<IOBuffer> buf,
 void PipeInputStream::Close() { impl_->Close(); }
 
 // ===========================================================================
-// PipeOutputStream — public forwarding
+// PipeOutputStream  --  public forwarding
 // ===========================================================================
 
 PipeOutputStream::PipeOutputStream(scoped_refptr<TaskRunner> io_task_runner)

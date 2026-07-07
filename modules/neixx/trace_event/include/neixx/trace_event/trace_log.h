@@ -4,7 +4,7 @@
 #define NEIXX_TRACE_EVENT_TRACE_LOG_H_
 
 // =============================================================================
-// TraceLog — 全局 Trace 事件收集器 (Chromium-style)
+// TraceLog  --  全局 Trace 事件收集器 (Chromium-style)
 // =============================================================================
 //
 // 单例管控全局 Trace 开关和事件归集。每个线程拥有私有的 TraceBuffer，
@@ -30,21 +30,22 @@
 
 #include <nei/macros/nei_export.h>
 #include <neixx/common/singleton.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/common/time.h>
 
 namespace nei {
 
 // =============================================================================
-// TraceEvent — 单条 Trace 事件记录
+// TraceEvent  --  单条 Trace 事件记录
 // =============================================================================
 //
 // 支持 chrome://tracing 的四种事件阶段 (phase):
-//   'X' — Complete Event  (TRACE_EVENT0),        带 duration_us
-//   'B' — Begin Event     (TRACE_EVENT_BEGIN),    duration_us = 0
-//   'E' — End Event       (TRACE_EVENT_END),      duration_us = 0
-//   'I' — Instant Event   (TRACE_EVENT_INSTANT),  duration_us = 0
+//   'X'  --  Complete Event  (TRACE_EVENT0),        带 duration_us
+//   'B'  --  Begin Event     (TRACE_EVENT_BEGIN),    duration_us = 0
+//   'E'  --  End Event       (TRACE_EVENT_END),      duration_us = 0
+//   'I'  --  Instant Event   (TRACE_EVENT_INSTANT),  duration_us = 0
 //
-// ★ 零拷贝设计: category 和 name 直接存储宏传入的字符串字面量指针。
+// * 零拷贝设计: category 和 name 直接存储宏传入的字符串字面量指针。
 //   这些字面量位于可执行文件的只读数据段 (.rodata), 生命周期与进程等长。
 // =============================================================================
 struct NEI_API TraceEvent {
@@ -57,12 +58,12 @@ struct NEI_API TraceEvent {
 };
 
 // =============================================================================
-// ThreadTraceBuffer — 每线程私有的带锁事件缓冲区
+// ThreadTraceBuffer  --  每线程私有的带锁事件缓冲区
 // =============================================================================
 //
 // 每个工作线程持有一个独立的 ThreadTraceBuffer。
 // - 正常写入: 线程独占访问, mutex 无竞争 (同类线程不会同时写)
-// - Flush:    主线程对每个 buffer 加锁 → 提取事件 → 清空 → 解锁
+// - Flush:    主线程对每个 buffer 加锁 -> 提取事件 -> 清空 -> 解锁
 //   彻底消除 "主线程遍历 + 工作线程 push_back" 的并发修改 UB。
 // =============================================================================
 struct ThreadTraceBuffer {
@@ -102,7 +103,7 @@ class NEI_API TraceLog final {
   //   4. 按时间戳排序
   //   5. 输出为 JSON
   //
-  // 注意: 不依赖 g_trace_enabled 标志来防止并发修改 —— 改为对每个
+  // 注意: 不依赖 g_trace_enabled 标志来防止并发修改  --  --  改为对每个
   //       Buffer 加锁提取, 彻底消除 "一边读一边写" 的数据竞争。
   void Flush(std::ostream& out);
 
@@ -133,7 +134,9 @@ class NEI_API TraceLog final {
   // 全局注册表: TraceLog 拥有所有 Buffer 内存。
   // 线程通过裸指针访问 (指针在 TraceLog 存活期间始终有效)。
   mutable std::mutex                              registry_lock_;
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::vector<std::unique_ptr<ThreadTraceBuffer>> thread_buffers_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 // =============================================================================
@@ -142,7 +145,7 @@ class NEI_API TraceLog final {
 //
 // TRACE_EVENT0 宏展开时第一步检查此标记。
 // 使用 memory_order_relaxed: 打点线程不需要精确同步, 仅需"最终一致性"。
-// 最坏情况: 关闭 Trace 后仍有极少量残留事件写入 → 直接丢弃, 无副作用。
+// 最坏情况: 关闭 Trace 后仍有极少量残留事件写入 -> 直接丢弃, 无副作用。
 extern NEI_API std::atomic<bool> g_trace_enabled;
 
 }  // namespace nei

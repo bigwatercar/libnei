@@ -305,7 +305,7 @@ NEI_API int nei_log_add_config(const nei_log_config_st *config, nei_log_config_h
  *
  * @note This call may block while the consumer thread finishes draining
  * pending events.  After it returns, the configuration handle is invalid
- * and all sink resources have been released — do **not** call
+ * and all sink resources have been released  --  do **not** call
  * @ref nei_log_release_sink on sinks that were registered with this
  * configuration, as they have already been released.
  *
@@ -326,7 +326,7 @@ NEI_API void nei_log_remove_config(nei_log_config_handle_t handle);
  * initial uninitialized state and can be re-used if needed.
  *
  * @note Do **not** call @ref nei_log_release_sink on sinks that were
- * registered through the config API — they are released by this call.
+ * registered through the config API  --  they are released by this call.
  */
 NEI_API void nei_log_shutdown(void);
 
@@ -366,7 +366,7 @@ NEI_API int nei_log_add_sink(nei_log_config_st *config, nei_log_sink_st *sink);
  *
  * @details Finds @p sink in @p config->sinks, removes it (sets the slot
  * to NULL), and compacts the array so that remaining sinks stay contiguous
- * with no gaps.  Does **not** invoke the sink's release callback — call
+ * with no gaps.  Does **not** invoke the sink's release callback  --  call
  * @ref nei_log_release_sink separately if the sink should be freed.
  *
  * @note After calling this function, invoke @ref nei_log_update_config

@@ -4,7 +4,7 @@
 #include <cstring>
 #include <utility>
 
-// c-ares — winsock2.h must come before windows.h, handled by ares headers.
+// c-ares  --  winsock2.h must come before windows.h, handled by ares headers.
 #include <ares.h>
 
 #include <nei/debug/check.h>
@@ -26,7 +26,7 @@
 #endif
 
 // =============================================================================
-// WeakPtrThreadSafe specialization — Impl is used across threads.
+// WeakPtrThreadSafe specialization  --  Impl is used across threads.
 // Must be in nei:: (primary template namespace), not nei::net.
 // =============================================================================
 namespace nei {
@@ -37,7 +37,7 @@ struct WeakPtrThreadSafe<net::HostResolver::Impl> : std::true_type {};
 namespace nei::net {
 
 // =============================================================================
-// sockaddr → IPEndPoint conversion helper
+// sockaddr -> IPEndPoint conversion helper
 // =============================================================================
 namespace {
 
@@ -64,7 +64,7 @@ IPEndPoint SockAddrToIPEndPoint(const struct sockaddr* addr,
 }
 
 // =============================================================================
-// QueryContext — heap-allocated trampoline carrying per-query state through
+// QueryContext  --  heap-allocated trampoline carrying per-query state through
 //               the c-ares C-style callback.
 // =============================================================================
 struct QueryContext {
@@ -76,7 +76,7 @@ struct QueryContext {
 }  // namespace
 
 // =============================================================================
-// ConvertAresAddrInfo — convert ares_addrinfo linked list → AddressList
+// ConvertAresAddrInfo  --  convert ares_addrinfo linked list -> AddressList
 // =============================================================================
 
 AddressList ConvertAresAddrInfo(const struct ares_addrinfo* result) {
@@ -98,7 +98,7 @@ AddressList ConvertAresAddrInfo(const struct ares_addrinfo* result) {
 }
 
 // =============================================================================
-// OnAresCallback — static C callback invoked by c-ares on the event thread.
+// OnAresCallback  --  static C callback invoked by c-ares on the event thread.
 // =============================================================================
 
 namespace {

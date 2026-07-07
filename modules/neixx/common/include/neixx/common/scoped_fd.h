@@ -4,14 +4,14 @@
 #define NEIXX_COMMON_SCOPED_FD_H_
 
 // ===========================================================================
-// ScopedFD — Chromium-style POSIX file descriptor RAII wrapper
+// ScopedFD  --  Chromium-style POSIX file descriptor RAII wrapper
 // ===========================================================================
 //
 // This is a POSIX-only header.  It intentionally includes <unistd.h>.
 // Use it directly in platform-specific code.  For cross-platform handle
 // transfer use PlatformHandle (which wraps ScopedFD internally).
 //
-// ScopedFD is not a template — there is only one fd type on POSIX.
+// ScopedFD is not a template  --  there is only one fd type on POSIX.
 // ===========================================================================
 
 #if defined(_WIN32)

@@ -1,7 +1,7 @@
 /**
  * @file log.h
  * @author ylf
- * @brief NEIXX C++ Log Macros — C++ convenience wrapper over nei/log/log.h
+ * @brief NEIXX C++ Log Macros  --  C++ convenience wrapper over nei/log/log.h
  * @version 0.1
  * @date 2026-06-22
  *

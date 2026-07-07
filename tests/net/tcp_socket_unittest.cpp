@@ -1,5 +1,5 @@
 // =============================================================================
-// TCP socket unit tests — async handshake, data transfer, error paths,
+// TCP socket unit tests  --  async handshake, data transfer, error paths,
 // and destruction safety.
 // =============================================================================
 
@@ -37,7 +37,7 @@ namespace nei::net {
 namespace {
 
 // ===========================================================================
-// TcpSocketTest fixture — provides a dedicated IO thread with MessagePumpForIO.
+// TcpSocketTest fixture  --  provides a dedicated IO thread with MessagePumpForIO.
 // ===========================================================================
 
 class TcpSocketTest : public testing::Test {
@@ -98,7 +98,7 @@ class TcpSocketTest : public testing::Test {
 };
 
 // ===========================================================================
-// Test 1 — BasicHandshake
+// Test 1  --  BasicHandshake
 // ===========================================================================
 
 TEST_F(TcpSocketTest, BasicHandshake) {
@@ -147,7 +147,7 @@ TEST_F(TcpSocketTest, BasicHandshake) {
 }
 
 // ===========================================================================
-// Test 2 — AsyncStreamTransfer (1 MB zero-copy)
+// Test 2  --  AsyncStreamTransfer (1 MB zero-copy)
 // ===========================================================================
 
 TEST_F(TcpSocketTest, AsyncStreamTransfer) {
@@ -171,7 +171,7 @@ TEST_F(TcpSocketTest, AsyncStreamTransfer) {
     std::memset(recv_buf->data(), 0, kTransferSize);
     auto recv_offset = std::make_shared<std::size_t>(0);
 
-    // Pass as scoped_refptr<IOBuffer> — IOBufferWithSize inherits from
+    // Pass as scoped_refptr<IOBuffer>  --  IOBufferWithSize inherits from
     // IOBuffer with a single RefCountedThreadSafe<IOBuffer> base, so the
     // refcount is shared even when the pointer type differs.
     scoped_refptr<IOBuffer> ref_base(ref_buf.get());
@@ -243,7 +243,7 @@ TEST_F(TcpSocketTest, AsyncStreamTransfer) {
 }
 
 // ===========================================================================
-// Test 3 — ConnectionRefused (async failure detection)
+// Test 3  --  ConnectionRefused (async failure detection)
 // ===========================================================================
 
 TEST_F(TcpSocketTest, ConnectionRefused) {
@@ -272,7 +272,7 @@ TEST_F(TcpSocketTest, ConnectionRefused) {
 }
 
 // ===========================================================================
-// Test 4 — ServerDestructionWhilePending (no crash, no leak)
+// Test 4  --  ServerDestructionWhilePending (no crash, no leak)
 // ===========================================================================
 
 TEST_F(TcpSocketTest, ServerDestructionWhilePending) {
@@ -303,7 +303,7 @@ TEST_F(TcpSocketTest, ServerDestructionWhilePending) {
 }
 
 // ===========================================================================
-// Test 5 — ExplicitShutdownWrite (half-close handshake)
+// Test 5  --  ExplicitShutdownWrite (half-close handshake)
 // ===========================================================================
 
 TEST_F(TcpSocketTest, ExplicitShutdownWrite) {
@@ -325,7 +325,7 @@ TEST_F(TcpSocketTest, ExplicitShutdownWrite) {
           auto sock = std::make_shared<std::unique_ptr<TCPClientSocket>>(
               std::move(accepted));
 
-          // Keep reading until EOF — proof that ShutdownWrite sent FIN.
+          // Keep reading until EOF  --  proof that ShutdownWrite sent FIN.
           auto buf = MakeRefCounted<IOBufferWithSize>(64);
           auto do_read = std::make_shared<std::function<void()>>();
           *do_read = [&, sock, buf, do_read]() {
@@ -365,7 +365,7 @@ TEST_F(TcpSocketTest, ExplicitShutdownWrite) {
 }
 
 // ===========================================================================
-// Test 6 — OrphanedDestruction_FoolproofFallback
+// Test 6  --  OrphanedDestruction_FoolproofFallback
 // ===========================================================================
 
 TEST_F(TcpSocketTest, OrphanedDestruction) {
@@ -381,7 +381,7 @@ TEST_F(TcpSocketTest, OrphanedDestruction) {
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
         [&accepted](bool success,
                      std::unique_ptr<TCPClientSocket> client) {
-          // Just signal acceptance — client will be orphaned.
+          // Just signal acceptance  --  client will be orphaned.
           accepted.Signal();
         },
         io_runner_, {});
@@ -405,11 +405,11 @@ TEST_F(TcpSocketTest, OrphanedDestruction) {
   io_runner_->PostTask(FROM_HERE, [&drain]() { drain.Signal(); });
   drain.Wait();
 
-  SUCCEED() << "Client destroyed without Close/ShutdownWrite — no UAF, no leak";
+  SUCCEED() << "Client destroyed without Close/ShutdownWrite  --  no UAF, no leak";
 }
 
 // ===========================================================================
-// Test 7 — OrphanedBackgroundFlush (orphan writes data + sends FIN)
+// Test 7  --  OrphanedBackgroundFlush (orphan writes data + sends FIN)
 // ===========================================================================
 //
 // Verifies that when TCPClientSocket is destroyed with a large pending write,
@@ -451,7 +451,7 @@ TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
           *do_read = [&, sock, recv_buf, recv_offset, do_read]() {
             std::size_t remaining = kTransferSize - *recv_offset;
             // Read in chunks.  Once the expected byte count is reached we
-            // keep reading a small buffer — the next read will return 0
+            // keep reading a small buffer  --  the next read will return 0
             // (EOF) which proves the orphan sent FIN.
             std::size_t chunk = remaining > 0 ? remaining : 64;
             auto read_buf = MakeRefCounted<IOBufferWithSize>(chunk);
@@ -460,7 +460,7 @@ TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
                 [&, sock, recv_buf, recv_offset, do_read, read_buf](
                     bool s, std::size_t n) {
                   if (!s || n == 0) {
-                    // EOF — orphan finished flushing and sent FIN.
+                    // EOF  --  orphan finished flushing and sent FIN.
                     eof_received.store(true);
                     if (*recv_offset == kTransferSize) {
                       // Verify data integrity byte-for-byte against the
@@ -501,7 +501,7 @@ TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
         [&, send_buf, client](bool connected) mutable {
           ASSERT_TRUE(connected);
-          // Post a large write — the kernel send buffer is much smaller
+          // Post a large write  --  the kernel send buffer is much smaller
           // than 1 MB, so the write will not complete synchronously.
           client->WriteAsync(send_buf, kTransferSize,
                              [](bool, std::size_t) {
@@ -519,14 +519,14 @@ TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
 
   transfer_done.Wait();
   EXPECT_TRUE(eof_received.load())
-      << "Server should detect EOF — orphaned Impl must send FIN";
+      << "Server should detect EOF  --  orphaned Impl must send FIN";
   EXPECT_TRUE(all_data_received.load())
       << "Server must receive all " << kTransferSize
-      << " bytes with the correct pattern — orphan must flush data";
+      << " bytes with the correct pattern  --  orphan must flush data";
 }
 
 // ===========================================================================
-// Test 8 — MultiReactorRoundRobin (4 worker IO threads, round-robin)
+// Test 8  --  MultiReactorRoundRobin (4 worker IO threads, round-robin)
 // ===========================================================================
 //
 // Verifies that RunnerSelector correctly distributes accepted connections
@@ -567,7 +567,7 @@ TEST_F(TcpSocketTest, MultiReactorRoundRobin) {
           ASSERT_TRUE(success);
           ASSERT_NE(client, nullptr);
           // The client socket is already bound to a worker IO thread.
-          // Close it immediately — no I/O needed for this smoke test.
+          // Close it immediately  --  no I/O needed for this smoke test.
           client->Close();
           if (++accepted == kNumConnections)
             all_accepted.Signal();
@@ -607,7 +607,7 @@ TEST_F(TcpSocketTest, MultiReactorRoundRobin) {
 }
 
 // ===========================================================================
-// Test 9 — WriteChainNoStackOverflow (re-entrancy defence)
+// Test 9  --  WriteChainNoStackOverflow (re-entrancy defence)
 // ===========================================================================
 //
 // Verifies that rapid sequential writes do not cause synchronous re-entrancy
@@ -694,7 +694,7 @@ TEST_F(TcpSocketTest, WriteChainNoStackOverflow) {
       << "All " << kChainLength << " writes must complete";
   EXPECT_LE(max_depth.load(), 2)
       << "Max recursion depth should be ≤2 (async dispatch), "
-         "was " << max_depth.load() << " — possible synchronous re-entrancy";
+         "was " << max_depth.load() << "  --  possible synchronous re-entrancy";
   EXPECT_GT(server_read_count.load(), 0)
       << "Server should have read at least some data";
 }

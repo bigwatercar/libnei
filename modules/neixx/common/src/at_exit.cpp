@@ -21,7 +21,7 @@ AtExitManager::AtExitManager() {
   std::lock_guard<std::mutex> lock(lock_);
 
   // At most one AtExitManager may exist at any time.  A second construction
-  // is always a programmer error — DCHECK in debug, CHECK in release — and
+  // is always a programmer error  --  DCHECK in debug, CHECK in release  --  and
   // must abort before any damage is done.
   DCHECK_EQ_MSG(g_top_manager_, nullptr,
                 "AtExitManager: a second instance was created while one is "
@@ -38,7 +38,7 @@ AtExitManager::AtExitManager() {
 AtExitManager::~AtExitManager() {
   // Step 1: Drain all registered callbacks via the public API.
   // ProcessCallbacksNow() swaps the stack under lock and executes LIFO
-  // outside the lock — the same deadlock-safe protocol used everywhere.
+  // outside the lock  --  the same deadlock-safe protocol used everywhere.
   ProcessCallbacksNow();
 
   // Step 2: Unregister *this* so no further callbacks can be registered.

@@ -96,7 +96,7 @@ TEST(PlatformThreadTest, SleepShortDurationPrecision) {
   const int64_t avg_us = total_us / kIterations;
   EXPECT_LT(avg_us, kMaxAvgUs)
       << "Average Sleep(1ms) took " << avg_us
-      << " us — high-resolution timer may not be active.";
+      << " us  --  high-resolution timer may not be active.";
 }
 
 TEST(PlatformThreadTest, SetCurrentThreadNameBestEffort) {

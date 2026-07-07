@@ -110,17 +110,7 @@ if(NEI_BENCHMARK_SPDLOG)
 endif()
 
 if(WIN32 AND BUILD_SHARED_LIBS)
-  function(nei_copy_runtime_dlls target_name)
-    add_custom_command(
-      TARGET ${target_name}
-      POST_BUILD
-      COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different
-        $<TARGET_RUNTIME_DLLS:${target_name}> $<TARGET_FILE_DIR:${target_name}>
-      COMMAND_EXPAND_LISTS
-    )
-  endfunction()
-
+  include(neiTargetUtils)
   nei_copy_runtime_dlls(log_bench)
   nei_copy_runtime_dlls(string_append_bench)
   nei_copy_runtime_dlls(flake_id_bench)
@@ -130,8 +120,26 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_copy_runtime_dlls(async_file_bench)
   nei_copy_runtime_dlls(pipe_stream_bench)
   nei_copy_runtime_dlls(pipe_stream_cross_process_bench)
+  nei_copy_runtime_dlls(tcp_loopback_bench)
+  nei_copy_runtime_dlls(tcp_conn_stress_bench)
+  nei_copy_runtime_dlls(tcp_rtt_bench)
+
+
+  nei_set_utf8_encoding(log_bench)
+  nei_set_utf8_encoding(string_append_bench)
+  nei_set_utf8_encoding(flake_id_bench)
+  nei_set_utf8_encoding(task_thread_bench)
+  nei_set_utf8_encoding(task_threadpool_bench)
+  nei_set_utf8_encoding(task_priority_perf_demo)
+  nei_set_utf8_encoding(async_file_bench)
+  nei_set_utf8_encoding(pipe_stream_bench)
+  nei_set_utf8_encoding(pipe_stream_cross_process_bench)
+  nei_set_utf8_encoding(tcp_loopback_bench)
+  nei_set_utf8_encoding(tcp_conn_stress_bench)
+  nei_set_utf8_encoding(tcp_rtt_bench)
 
   if(NEI_BENCHMARK_SPDLOG AND TARGET log_bench_compare)
     nei_copy_runtime_dlls(log_bench_compare)
+    nei_set_utf8_encoding(log_bench_compare)
   endif()
 endif()

@@ -4,7 +4,7 @@
 #define NEIXX_TASK_THREAD_CHECKER_H_
 
 // =============================================================================
-// ThreadChecker — 物理线程归属校验器 (Chromium-style)
+// ThreadChecker  --  物理线程归属校验器 (Chromium-style)
 // =============================================================================
 //
 // 目的：在 Debug 构建中检测"对象被错误的物理线程访问"这类并发逻辑错误。
@@ -71,18 +71,18 @@ class NEI_API ThreadChecker {
     // PlatformThread::CurrentId() 返回 std::uintptr_t，在所有平台上均非零。
     const PlatformThread::PlatformThreadId current = PlatformThread::CurrentId();
     DCHECK_MSG(current != static_cast<PlatformThread::PlatformThreadId>(0),
-               "PlatformThread::CurrentId() returned 0 — cannot be used as thread identity.");
+               "PlatformThread::CurrentId() returned 0  --  cannot be used as thread identity.");
     thread_id_.store(current, std::memory_order_relaxed);
   }
 
-  // 禁止拷贝/移动 —— checker 的生命周期与宿主对象严格绑定。
+  // 禁止拷贝/移动  --  --  checker 的生命周期与宿主对象严格绑定。
   ThreadChecker(const ThreadChecker&) = delete;
   ThreadChecker& operator=(const ThreadChecker&) = delete;
   ThreadChecker(ThreadChecker&&) = delete;
   ThreadChecker& operator=(ThreadChecker&&) = delete;
 
   // -----------------------------------------------------------------------
-  // CalledOnValidThread() — 判断当前线程是否为构造/绑定时的合法线程。
+  // CalledOnValidThread()  --  判断当前线程是否为构造/绑定时的合法线程。
   //
   // 返回 true 表示：
   //   a) checker 未处于 detached 状态，且当前线程 ID 与绑定的 ID 一致；或
@@ -104,10 +104,10 @@ class NEI_API ThreadChecker {
       PlatformThread::PlatformThreadId expected = kDetachedSentinel;
       if (thread_id_.compare_exchange_strong(expected, current,
                                               std::memory_order_acq_rel)) {
-        // CAS 成功 —— 当前线程抢到绑定权。
+        // CAS 成功  --  --  当前线程抢到绑定权。
         return true;
       }
-      // CAS 失败 —— 另一个线程抢先绑定了。重新读取并比对。
+      // CAS 失败  --  --  另一个线程抢先绑定了。重新读取并比对。
       bound = thread_id_.load(std::memory_order_relaxed);
     }
 
@@ -115,7 +115,7 @@ class NEI_API ThreadChecker {
   }
 
   // -----------------------------------------------------------------------
-  // DetachFromThread() — 解除当前线程绑定，进入"待重新绑定"状态。
+  // DetachFromThread()  --  解除当前线程绑定，进入"待重新绑定"状态。
   //
   // 调用后，下一次 CalledOnValidThread() 将把调用者所在的线程
   // 惰性绑定为新的合法线程。
@@ -163,7 +163,7 @@ class NEI_API ThreadChecker {
 //
 // 设计说明：这些宏是 ThreadChecker 的"唯一正确用法入口"。
 // 在 Release 模式下，宏展开为空操作，彻底消除 ThreadChecker 的运行时开销
-// 和内存占用。禁止直接使用 ThreadChecker 的成员方法 —— 这绕过了零开销保证。
+// 和内存占用。禁止直接使用 ThreadChecker 的成员方法  --  --  这绕过了零开销保证。
 //
 
 #if NEI_DCHECK_IS_ON
@@ -183,7 +183,7 @@ class NEI_API ThreadChecker {
 
 #else  // !NEI_DCHECK_IS_ON
 
-// Release 模式：完全零开销 —— 不声明任何成员，不产生任何代码。
+// Release 模式：完全零开销  --  --  不声明任何成员，不产生任何代码。
 // 注意：DECLARE_THREAD_CHECKER 展开为空（不是 ((void)0)），
 // 因为它用于类成员声明，((void)0) 在 class body 中是非法的。
 #define DECLARE_THREAD_CHECKER(name)

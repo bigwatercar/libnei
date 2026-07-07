@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Custom test main — provides an AtExitManager for the entire test process.
+// Custom test main  --  provides an AtExitManager for the entire test process.
 //
 // Many neixx components (IOBufferPool via Singleton<>, etc.) require an active
 // AtExitManager at initialization time.  Google Test's default main() does not

@@ -10,7 +10,7 @@
       "name": "base-common",
       "hidden": true,
       "cacheVariables": {
-        "CMAKE_C_STANDARD": "99",
+        "CMAKE_C_STANDARD": "11",
         "CMAKE_CXX_STANDARD": "17",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_CXX_EXTENSIONS": "OFF",
@@ -34,12 +34,18 @@
       "binaryDir": "${sourceDir}/build/${presetName}"
     },
     {
-      "name": "windows-msvc-release-shared",
-      "displayName": "Windows MSVC Release Shared",
-      "description": "Release shared build for Windows with MSVC",
-      "inherits": "windows-msvc-release",
+      "name": "windows-msvc-debug",
+      "displayName": "Windows MSVC Debug",
+      "description": "Debug build for Windows with MSVC",
+      "inherits": "base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
       "cacheVariables": {
-        "BUILD_SHARED_LIBS": "ON"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BUILD_SHARED_LIBS": "OFF"
       }
     },
     {
@@ -67,42 +73,18 @@
       }
     },
     {
-      "name": "windows-msvc-debug",
-      "displayName": "Windows MSVC Debug",
-      "description": "Debug build for Windows with MSVC",
-      "inherits": "base",
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
-      },
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "BUILD_SHARED_LIBS": "OFF"
-      }
-    },
-    {
-      "name": "windows-vs2022-release-shared",
-      "displayName": "Windows VS2022 Release Shared",
-      "description": "Release shared build for Windows with Visual Studio 2022",
-      "inherits": "windows-vs2022-release",
+      "name": "windows-msvc-release-shared",
+      "displayName": "Windows MSVC Release Shared",
+      "description": "Release shared build for Windows with MSVC",
+      "inherits": "windows-msvc-release",
       "cacheVariables": {
         "BUILD_SHARED_LIBS": "ON"
       }
     },
     {
-      "name": "windows-vs2022-debug-shared",
-      "displayName": "Windows VS2022 Debug Shared",
-      "description": "Debug shared build for Windows with Visual Studio 2022",
-      "inherits": "windows-vs2022-debug",
-      "cacheVariables": {
-        "BUILD_SHARED_LIBS": "ON"
-      }
-    },
-    {
-      "name": "windows-vs2022-release",
-      "displayName": "Windows VS2022 Release",
-      "description": "Release build for Windows with Visual Studio 2022",
+      "name": "windows-vs2022-static",
+      "displayName": "Windows VS2022 Static",
+      "description": "Multi-config build for Windows with Visual Studio 2022 (static libs)",
       "inherits": "base-vs",
       "condition": {
         "type": "equals",
@@ -114,9 +96,9 @@
       }
     },
     {
-      "name": "windows-vs2022-debug",
-      "displayName": "Windows VS2022 Debug",
-      "description": "Debug build for Windows with Visual Studio 2022",
+      "name": "windows-vs2022-shared",
+      "displayName": "Windows VS2022 Shared",
+      "description": "Multi-config build for Windows with Visual Studio 2022 (shared libs)",
       "inherits": "base-vs",
       "condition": {
         "type": "equals",
@@ -124,7 +106,7 @@
         "rhs": "Windows"
       },
       "cacheVariables": {
-        "BUILD_SHARED_LIBS": "OFF"
+        "BUILD_SHARED_LIBS": "ON"
       }
     },
     {
@@ -143,6 +125,15 @@
       }
     },
     {
+      "name": "linux-gcc-debug-shared",
+      "displayName": "Linux GCC Debug Shared",
+      "description": "Debug shared build for Linux with GCC",
+      "inherits": "linux-gcc-debug",
+      "cacheVariables": {
+        "BUILD_SHARED_LIBS": "ON"
+      }
+    },
+    {
       "name": "linux-gcc-release",
       "displayName": "Linux GCC Release",
       "description": "Release build for Linux with GCC",
@@ -155,15 +146,6 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "BUILD_SHARED_LIBS": "OFF"
-      }
-    },
-    {
-      "name": "linux-gcc-debug-shared",
-      "displayName": "Linux GCC Debug Shared",
-      "description": "Debug shared build for Linux with GCC",
-      "inherits": "linux-gcc-debug",
-      "cacheVariables": {
-        "BUILD_SHARED_LIBS": "ON"
       }
     },
     {
@@ -182,35 +164,35 @@
       "configurePreset": "windows-msvc-debug"
     },
     {
-      "name": "windows-msvc-release",
-      "configurePreset": "windows-msvc-release"
-    },
-    {
       "name": "windows-msvc-debug-shared",
       "configurePreset": "windows-msvc-debug-shared"
+    },
+    {
+      "name": "windows-msvc-release",
+      "configurePreset": "windows-msvc-release"
     },
     {
       "name": "windows-msvc-release-shared",
       "configurePreset": "windows-msvc-release-shared"
     },
     {
-      "name": "windows-vs2022-debug",
-      "configurePreset": "windows-vs2022-debug",
+      "name": "windows-vs2022-static-debug",
+      "configurePreset": "windows-vs2022-static",
       "configuration": "Debug"
     },
     {
-      "name": "windows-vs2022-release",
-      "configurePreset": "windows-vs2022-release",
+      "name": "windows-vs2022-static-release",
+      "configurePreset": "windows-vs2022-static",
       "configuration": "Release"
     },
     {
-      "name": "windows-vs2022-debug-shared",
-      "configurePreset": "windows-vs2022-debug-shared",
+      "name": "windows-vs2022-shared-debug",
+      "configurePreset": "windows-vs2022-shared",
       "configuration": "Debug"
     },
     {
-      "name": "windows-vs2022-release-shared",
-      "configurePreset": "windows-vs2022-release-shared",
+      "name": "windows-vs2022-shared-release",
+      "configurePreset": "windows-vs2022-shared",
       "configuration": "Release"
     },
     {
@@ -218,12 +200,12 @@
       "configurePreset": "linux-gcc-debug"
     },
     {
-      "name": "linux-gcc-release",
-      "configurePreset": "linux-gcc-release"
-    },
-    {
       "name": "linux-gcc-debug-shared",
       "configurePreset": "linux-gcc-debug-shared"
+    },
+    {
+      "name": "linux-gcc-release",
+      "configurePreset": "linux-gcc-release"
     },
     {
       "name": "linux-gcc-release-shared",
@@ -244,31 +226,41 @@
       "inherits": "test-base"
     },
     {
+      "name": "windows-msvc-debug-shared",
+      "configurePreset": "windows-msvc-debug-shared",
+      "inherits": "test-base"
+    },
+    {
       "name": "windows-msvc-release",
       "configurePreset": "windows-msvc-release",
       "inherits": "test-base"
     },
     {
-      "name": "windows-vs2022-debug",
-      "configurePreset": "windows-vs2022-debug",
+      "name": "windows-msvc-release-shared",
+      "configurePreset": "windows-msvc-release-shared",
+      "inherits": "test-base"
+    },
+    {
+      "name": "windows-vs2022-static-debug",
+      "configurePreset": "windows-vs2022-static",
       "configuration": "Debug",
       "inherits": "test-base"
     },
     {
-      "name": "windows-vs2022-release",
-      "configurePreset": "windows-vs2022-release",
+      "name": "windows-vs2022-static-release",
+      "configurePreset": "windows-vs2022-static",
       "configuration": "Release",
       "inherits": "test-base"
     },
     {
-      "name": "windows-vs2022-debug-shared",
-      "configurePreset": "windows-vs2022-debug-shared",
+      "name": "windows-vs2022-shared-debug",
+      "configurePreset": "windows-vs2022-shared",
       "configuration": "Debug",
       "inherits": "test-base"
     },
     {
-      "name": "windows-vs2022-release-shared",
-      "configurePreset": "windows-vs2022-release-shared",
+      "name": "windows-vs2022-shared-release",
+      "configurePreset": "windows-vs2022-shared",
       "configuration": "Release",
       "inherits": "test-base"
     },
@@ -278,23 +270,13 @@
       "inherits": "test-base"
     },
     {
-      "name": "linux-gcc-release",
-      "configurePreset": "linux-gcc-release",
-      "inherits": "test-base"
-    },
-    {
-      "name": "windows-msvc-debug-shared",
-      "configurePreset": "windows-msvc-debug-shared",
-      "inherits": "test-base"
-    },
-    {
-      "name": "windows-msvc-release-shared",
-      "configurePreset": "windows-msvc-release-shared",
-      "inherits": "test-base"
-    },
-    {
       "name": "linux-gcc-debug-shared",
       "configurePreset": "linux-gcc-debug-shared",
+      "inherits": "test-base"
+    },
+    {
+      "name": "linux-gcc-release",
+      "configurePreset": "linux-gcc-release",
       "inherits": "test-base"
     },
     {

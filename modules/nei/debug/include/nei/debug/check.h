@@ -29,8 +29,8 @@
 
 #define NEI_INTERNAL_CHECK_FAIL_MSG(kind, expr_text, msg)                                                              \
   do {                                                                                                                 \
-    fprintf(stderr, "[FATAL:%s:%d] %s failed: (%s) — %s\n", __FILE__, __LINE__, kind, expr_text, msg);                 \
-    NEI_LOG_FATAL("%s failed: (%s) — %s", kind, expr_text, msg);                                                    \
+    fprintf(stderr, "[FATAL:%s:%d] %s failed: (%s)  --  %s\n", __FILE__, __LINE__, kind, expr_text, msg);                 \
+    NEI_LOG_FATAL("%s failed: (%s)  --  %s", kind, expr_text, msg);                                                    \
     nei_log_flush();                                                                                                   \
     abort();                                                                                                           \
   } while (0)

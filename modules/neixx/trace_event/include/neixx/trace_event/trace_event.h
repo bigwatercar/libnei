@@ -4,14 +4,14 @@
 #define NEIXX_TRACE_EVENT_TRACE_EVENT_H_
 
 // =============================================================================
-// TRACE_EVENT0 — 零开销 RAII 性能埋点宏 (Chromium-style)
+// TRACE_EVENT0  --  零开销 RAII 性能埋点宏 (Chromium-style)
 // =============================================================================
 //
 // 使用范式:
 //   void MyFunction() {
 //     TRACE_EVENT0("category", "MyFunction");
 //     // ... 被追踪的代码 ...
-//   }  // ← 作用域结束时自动记录 END 时间戳
+//   }  // <- 作用域结束时自动记录 END 时间戳
 //
 // 机制:
 //   1. 宏展开第一步检查 g_trace_enabled 原子标记 (memory_order_relaxed)
@@ -24,7 +24,7 @@
 //   {"name":"MyFunction","cat":"category","ph":"X","ts":123456,"dur":789,"pid":0,"tid":42}
 //
 // 扩展宏 (未来):
-//   TRACE_EVENT1(cat, name, arg1_name, arg1_val)  — 带一个参数
+//   TRACE_EVENT1(cat, name, arg1_name, arg1_val)   --  带一个参数
 //   TRACE_EVENT2(cat, name, arg1_name, arg1_val, arg2_name, arg2_val)
 // =============================================================================
 
@@ -45,7 +45,7 @@ namespace internal {
 std::uint64_t GetCurrentThreadId();
 
 // =============================================================================
-// TraceEventScope — RAII Trace 作用域 (Complete Event, ph:'X')
+// TraceEventScope  --  RAII Trace 作用域 (Complete Event, ph:'X')
 // =============================================================================
 //
 // 构造时记录开始信息, 析构时计算持续时长并写入 TraceLog。
@@ -84,7 +84,7 @@ class TraceEventScope final {
 };
 
 // =============================================================================
-// TraceEventInstantScope — 即时事件作用域 (Begin/End/Instant)
+// TraceEventInstantScope  --  即时事件作用域 (Begin/End/Instant)
 // =============================================================================
 //
 // 构造时立即发射事件到 TraceLog, 析构为空操作。
@@ -118,7 +118,7 @@ class TraceEventInstantScope final {
 // 记录一个 Complete 事件 (ph: 'X'), 自动计算持续时间。
 // category 和 name 必须是字符串字面量 (const char*), 不进行拷贝。
 //
-// ★ 零开销快速路径:
+// * 零开销快速路径:
 //   宏展开后第一步检查原子标记 g_trace_enabled。
 //   若为 false, 编译器优化掉后续所有死代码。
 //

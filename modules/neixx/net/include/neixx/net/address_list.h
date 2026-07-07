@@ -7,6 +7,7 @@
 
 #include <nei/macros/nei_export.h>
 #include <neixx/net/ip_end_point.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 
 namespace nei::net {
 
@@ -49,7 +50,9 @@ class NEI_API AddressList {
   void push_back(IPEndPoint&& ep) { endpoints_.push_back(std::move(ep)); }
 
  private:
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::vector<IPEndPoint> endpoints_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 }  // namespace nei::net

@@ -17,7 +17,7 @@ int nei_is_file_busy(const char *path) {
      * If ANY other handle exists on this file (regardless of how
      * permissive its sharing mode is), this will fail with a sharing
      * violation.  dwDesiredAccess = 0 means we don't need to read or
-     * write — we just want to test exclusivity. */
+     * write  --  we just want to test exclusivity. */
     h = CreateFileW(wpath, 0,        /* no access needed */
                     0,               /* no sharing allowed */
                     NULL, OPEN_EXISTING,

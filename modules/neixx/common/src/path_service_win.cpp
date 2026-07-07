@@ -35,7 +35,7 @@ static bool GetKnownFolder(const KNOWNFOLDERID &folderId,
 }
 
 // =============================================================================
-// DefaultProvider — platform path resolution (Windows)
+// DefaultProvider  --  platform path resolution (Windows)
 // =============================================================================
 
 bool PathService::Impl::DefaultProvider(int key,

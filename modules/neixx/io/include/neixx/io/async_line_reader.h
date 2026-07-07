@@ -9,6 +9,7 @@
 
 #include <nei/macros/nei_export.h>
 #include <neixx/io/async_stream.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 
 namespace nei {
 
@@ -50,7 +51,9 @@ class NEI_API AsyncLineReader {
                                std::size_t bytes_read);
 
   AsyncInputStream* stream_ = nullptr;
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::shared_ptr<State> state_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 }  // namespace nei

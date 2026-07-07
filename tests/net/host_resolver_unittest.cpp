@@ -1,5 +1,5 @@
 // =============================================================================
-// HostResolver unit tests — async DNS resolution via c-ares
+// HostResolver unit tests  --  async DNS resolution via c-ares
 // =============================================================================
 
 // winsock2.h must come before windows.h on Windows.
@@ -27,7 +27,7 @@ namespace nei::net {
 namespace {
 
 // =============================================================================
-// Test fixture — provides a dedicated thread with TaskRunner for callbacks.
+// Test fixture  --  provides a dedicated thread with TaskRunner for callbacks.
 // =============================================================================
 
 class HostResolverTest : public testing::Test {
@@ -272,7 +272,7 @@ TEST_F(HostResolverTest, CustomTimeout) {
 // =============================================================================
 
 TEST_F(HostResolverTest, DestroyBeforeCallback) {
-  // Resolve and immediately destroy the resolver — should not crash.
+  // Resolve and immediately destroy the resolver  --  should not crash.
   {
     HostResolver resolver;
     std::atomic<bool> called{false};
@@ -388,7 +388,7 @@ TEST_F(HostResolverTest, StressConcurrent) {
     resolver.Resolve(host,
         [&completed, &errors, &all_done, kTotal](const AddressList& result) {
           if (result.empty()) {
-            // Invalid domain or timeout — expected for some hosts.
+            // Invalid domain or timeout  --  expected for some hosts.
           }
           if (++completed == kTotal) {
             all_done.Signal();

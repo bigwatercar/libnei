@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
-// c-ares headers — winsock2.h must come before windows.h, handled by ares.
+// c-ares headers  --  winsock2.h must come before windows.h, handled by ares.
 #include <ares.h>
 
 #include <nei/debug/check.h>
@@ -37,7 +37,7 @@ bool operator==(const HostResolverOptions& a, const HostResolverOptions& b) {
 }
 
 // =============================================================================
-// Options → c-ares ares_options conversion
+// Options -> c-ares ares_options conversion
 // =============================================================================
 
 namespace {

@@ -19,7 +19,7 @@ class AsyncOutputStream;
 class TaskRunner;
 
 // ---------------------------------------------------------------------------
-// RpcEndpoint — asynchronous RPC proxy engine over MessageChannel
+// RpcEndpoint  --  asynchronous RPC proxy engine over MessageChannel
 // ---------------------------------------------------------------------------
 //
 // RpcEndpoint wraps MessageChannel and adds structured RPC semantics on top
@@ -29,9 +29,9 @@ class TaskRunner;
 //   [1-byte MessageType][8-byte RequestID (LE)][Business Payload]
 //
 // Message types:
-//   kOneWay   (0) — fire-and-forget, no response expected
-//   kRequest  (1) — expects a kResponse with matching RequestID
-//   kResponse (2) — carries the reply for a previous kRequest
+//   kOneWay   (0)  --  fire-and-forget, no response expected
+//   kRequest  (1)  --  expects a kResponse with matching RequestID
+//   kResponse (2)  --  carries the reply for a previous kRequest
 //
 // Thread safety
 // -------------
@@ -58,8 +58,8 @@ class NEI_API RpcEndpoint final {
   using ResponseCallback = std::function<void(MessageBuffer response)>;
 
   // Handler for incoming kRequest messages.
-  // |request_payload| — the business payload after the RPC header.
-  // |reply_cb|        — call this to send a response back.
+  // |request_payload|  --  the business payload after the RPC header.
+  // |reply_cb|         --  call this to send a response back.
   using RequestHandler =
       std::function<void(MessageBuffer request_payload, ReplyCallback reply_cb)>;
 
@@ -69,10 +69,10 @@ class NEI_API RpcEndpoint final {
   // Constructs an RpcEndpoint.  Internally creates a MessageChannel on
   // the given streams with the two injected TaskRunners.
   //
-  // |io_task_runner|     — where I/O state-machine work happens.
-  // |client_task_runner| — where all user callbacks are delivered.
-  // |read_stream|        — underlying async input stream (not owned).
-  // |write_stream|       — underlying async output stream (not owned).
+  // |io_task_runner|      --  where I/O state-machine work happens.
+  // |client_task_runner|  --  where all user callbacks are delivered.
+  // |read_stream|         --  underlying async input stream (not owned).
+  // |write_stream|        --  underlying async output stream (not owned).
   RpcEndpoint(scoped_refptr<TaskRunner> io_task_runner,
               scoped_refptr<TaskRunner> client_task_runner,
               AsyncInputStream* read_stream,

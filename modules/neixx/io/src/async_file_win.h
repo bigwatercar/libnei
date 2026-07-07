@@ -10,6 +10,7 @@
 
 #include <nei/macros/nei_export.h>
 #include <neixx/io/async_file.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 
 namespace nei {
 
@@ -66,7 +67,9 @@ class NEI_API AsyncFileWin final : public AsyncFile {
 
  private:
   class Impl;
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 }  // namespace nei

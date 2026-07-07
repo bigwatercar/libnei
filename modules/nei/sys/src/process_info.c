@@ -218,9 +218,9 @@ int nei_get_current_directory(char *buf, size_t size) {
 /*
  * Encoding notes by platform:
  *
- *   Windows  — GetModuleFileNameW → WideCharToMultiByte(CP_UTF8) → UTF-8
- *   macOS    — _NSGetExecutablePath / realpath → native UTF-8 (NFD)
- *   Linux    — readlink("/proc/self/exe") → raw kernel bytes, typically UTF-8
+ *   Windows   --  GetModuleFileNameW -> WideCharToMultiByte(CP_UTF8) -> UTF-8
+ *   macOS     --  _NSGetExecutablePath / realpath -> native UTF-8 (NFD)
+ *   Linux     --  readlink("/proc/self/exe") -> raw kernel bytes, typically UTF-8
  */
 
 int nei_get_executable_path(char *buf, size_t size) {

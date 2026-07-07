@@ -2,7 +2,6 @@
 
 #if defined(_WIN32)
 
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winsock2.h>
 
@@ -17,7 +16,7 @@ struct WsaInit {
     WSADATA data = {};
     WSAStartup(MAKEWORD(2, 2), &data);
   }
-  // NoDestructor skips the destructor — WSACleanup is unnecessary at process
+  // NoDestructor skips the destructor  --  WSACleanup is unnecessary at process
   // exit and may race with other Winsock-using static destructors.
   ~WsaInit() { WSACleanup(); }
 };

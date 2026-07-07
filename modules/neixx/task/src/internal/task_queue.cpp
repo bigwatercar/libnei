@@ -74,7 +74,7 @@ class TaskQueue::Impl {
       // binary search (std::upper_bound, O(log n)) followed by a deque
       // insert (O(n) element shift).  This path only triggers when tasks
       // are posted with pre-assigned sequence numbers from different
-      // producers that don't coordinate ordering — rare in practice.
+      // producers that don't coordinate ordering  --  rare in practice.
       if (immediate_fifo_queue_.empty() ||
           task.sequence_num >= immediate_fifo_queue_.back().sequence_num) {
         immediate_fifo_queue_.push_back(std::move(task));         // O(1)

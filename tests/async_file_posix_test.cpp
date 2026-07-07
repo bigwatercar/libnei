@@ -812,7 +812,7 @@ TEST_F(AsyncFilePosixTest, RaiiDestructionDoesNotHangAndDataIsFlushed) {
   const std::string path_utf8 = path.u8string();
   const std::vector<std::uint8_t> payload = MakePayload(4096, 0xAB);
 
-  // Scope block: create, open, write, then release — RAII destruction.
+  // Scope block: create, open, write, then release  --  RAII destruction.
   {
     auto file = std::make_shared<AsyncFilePosix>(io_runner_);
     ASSERT_TRUE(file);
@@ -844,7 +844,7 @@ TEST_F(AsyncFilePosixTest, RaiiDestructionDoesNotHangAndDataIsFlushed) {
     ASSERT_TRUE(write_done.TimedWait(std::chrono::seconds(10)));
     ASSERT_TRUE(write_ok.load(std::memory_order_acquire));
 
-    // file.reset() happens here — must not hang or crash.
+    // file.reset() happens here  --  must not hang or crash.
   }
 
   // Let the IO thread process the orphan's DeleteSoon task.

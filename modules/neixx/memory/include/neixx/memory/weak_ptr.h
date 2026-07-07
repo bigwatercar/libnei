@@ -60,9 +60,9 @@ public:
   // Returns a WeakPtr without source-location tracking.
   // Prefer the Location overload for better UAF diagnostics.
   //
-  // ★ Lazy re-creation: if the factory has been invalidated (flag_ is null),
+  // * Lazy re-creation: if the factory has been invalidated (flag_ is null),
   //   a new InternalFlag is created automatically.  This allows the factory
-  //   to be reused after InvalidateWeakPtrs() — essential for timers and
+  //   to be reused after InvalidateWeakPtrs()  --  essential for timers and
   //   other components that stop/restart their weak references.
   WeakPtr<T> GetWeakPtr() const {
     if (!flag_) {

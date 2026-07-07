@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #endif
+#include <stdlib.h>
 
 int nei_get_cpu_count(void) {
 #ifdef _WIN32

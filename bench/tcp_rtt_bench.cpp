@@ -122,7 +122,7 @@ void RunRttBench(int total_connections) {
     return workers[idx]->runner();
   };
 
-  // ---- Server: accept → read ping → write pong → close ----
+  // ---- Server: accept -> read ping -> write pong -> close ----
   acceptor_thread.runner()->PostTask(FROM_HERE,
       [&, acc_runner = acceptor_thread.runner(), ws = std::move(worker_selector)]() mutable {
     bool ok = server->Listen(
@@ -160,7 +160,7 @@ void RunRttBench(int total_connections) {
 
   server_ready.Wait();
 
-  // ---- Clients: connect → write ping → read pong (measure RTT) → close ----
+  // ---- Clients: connect -> write ping -> read pong (measure RTT) -> close ----
   const int batch_size = 500;
   std::atomic<int> client_done{0};
   std::atomic<int> client_fail{0};

@@ -7,6 +7,7 @@
 #include <thread>
 
 #include <neixx/common/location.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/common/time.h>
 #include <neixx/functional/callback.h>
 #include <neixx/memory/ref_counted.h>
@@ -80,7 +81,9 @@ class NEI_API TaskRunner : public RefCountedThreadSafe<TaskRunner> {
   const TaskTraits& traits() const { return traits_; }
 
  private:
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   TaskTraits traits_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 }  // namespace nei

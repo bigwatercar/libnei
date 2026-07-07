@@ -9,6 +9,7 @@
 #include <string>
 
 #include <nei/macros/nei_export.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/common/time.h>
 
 namespace nei {
@@ -52,8 +53,9 @@ public:
 
   private:
     class Impl;
-
+    NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
     std::unique_ptr<Impl> impl_;
+    NEI_SUPPRESS_MSC_WARNING_4251_END
 
     friend class PlatformThread;
   };

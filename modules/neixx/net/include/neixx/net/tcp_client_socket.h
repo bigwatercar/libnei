@@ -19,7 +19,7 @@ class TaskRunner;
 namespace net {
 
 // =============================================================================
-// TCPClientSocket — async TCP connect + read/write
+// TCPClientSocket  --  async TCP connect + read/write
 // =============================================================================
 //
 // Implements both AsyncInputStream and AsyncOutputStream.  After a successful
@@ -72,7 +72,7 @@ class NEI_API TCPClientSocket : public AsyncInputStream,
   // Shuts down the write side (POSIX: SHUT_WR, Windows: SD_SEND), sending
   // FIN to the peer while keeping the read side open to drain the peer's
   // response / EOF.  After calling ShutdownWrite(), WriteAsync() must not
-  // be called — the write stream is closed.
+  // be called  --  the write stream is closed.
   //
   // Close() is still available as a hard-close that stops all I/O immediately.
   void ShutdownWrite();
@@ -97,7 +97,7 @@ class NEI_API TCPClientSocket : public AsyncInputStream,
   // the shell via internal reference counting during background drain.
   void Orphan();
 
-  Impl* impl_ = nullptr;  // Raw pointer — lifetime managed by RefCountedThreadSafe
+  Impl* impl_ = nullptr;  // Raw pointer  --  lifetime managed by RefCountedThreadSafe
 };
 
 }  // namespace net

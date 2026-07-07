@@ -8,11 +8,11 @@
 #include <vector>
 
 #include <nei/macros/nei_export.h>
-
+#include <nei/macros/suppress_compiler_warnings.h>
 namespace nei {
 
 // ---------------------------------------------------------------------------
-// AtExitManager — process-global ordered-shutdown facility
+// AtExitManager -- process-global ordered-shutdown facility
 // ---------------------------------------------------------------------------
 //
 // Manages a LIFO stack of cleanup callbacks that are guaranteed to execute in
@@ -28,13 +28,13 @@ namespace nei {
 //   }  // ~AtExitManager fires ProcessCallbacksNow(), executing all callbacks LIFO.
 //
 // ---------------------------------------------------------------------------
-// ## Linking model constraint (CRITICAL — READ BEFORE USING AS STATIC LIBRARY)
+// ## Linking model constraint (CRITICAL -- READ BEFORE USING AS STATIC LIBRARY)
 // ---------------------------------------------------------------------------
 //
 // `g_top_manager_` and `lock_` are file-scope static members defined in
 // `at_exit.cpp`.  In a **shared library (DLL/so) build**, there is exactly one
 // copy of these variables in the library's data segment, shared by all
-// consumers across the process — correct by construction.
+// consumers across the process -- correct by construction.
 //
 // In a **static library build**, however, each final binary (EXE or DLL) that
 // links `neixx` statically receives its own private copy of `g_top_manager_`,
@@ -45,7 +45,7 @@ namespace nei {
 //   - The AtExitManager instance created in main() would only capture
 //     callbacks registered from code compiled into the EXE.
 //   - `RegisterCallback()` called from code inside a DLL would see that DLL's
-//     own `g_top_manager_` (nullptr) and silently return false — the callback
+//     own `g_top_manager_` (nullptr) and silently return false -- the callback
 //     is **dropped** and never executes.
 //
 // This is the same fundamental constraint that Chromium itself operates under:
@@ -55,7 +55,7 @@ namespace nei {
 //
 // ## Thread safety
 //
-// `RegisterCallback` is fully thread-safe — it acquires a mutex internally.
+// `RegisterCallback` is fully thread-safe -- it acquires a mutex internally.
 // `ProcessCallbacksNow` executes callbacks *outside* the mutex to prevent
 // re-entrant deadlocks (a callback might itself call RegisterCallback or
 // attempt to destroy another AtExitManager on a different thread).
@@ -137,9 +137,11 @@ class NEI_API AtExitManager {
   // Guards both `g_top_manager_` and `stack_`.
   static std::mutex lock_;
 
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   // The LIFO callback stack.  Owned by the current top manager; emptied by
   // ProcessCallbacksNow() via std::swap under the lock.
   std::vector<Callback> stack_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 }  // namespace nei

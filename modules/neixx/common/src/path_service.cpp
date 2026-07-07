@@ -1,6 +1,6 @@
 /**
  * @file path_service.cpp
- * @brief Core implementation — singleton construction + static-method forwarding.
+ * @brief Core implementation  --  singleton construction + static-method forwarding.
  */
 
 #include <neixx/common/path_service.h>
@@ -13,7 +13,7 @@
 namespace nei {
 
 // =============================================================================
-// Singleton — using the project-wide Singleton infra with Leaky traits.
+// Singleton  --  using the project-wide Singleton infra with Leaky traits.
 // PathService is a system-level facility that may be queried during shutdown
 // (e.g. crash handler wants to resolve a dump path); Leaky prevents
 // use-after-free when cleanup order is indeterminate.
@@ -30,7 +30,7 @@ PathService::Impl &GetImpl() {
 }  // namespace
 
 // =============================================================================
-// PathService — lifecycle
+// PathService  --  lifecycle
 // =============================================================================
 
 PathService::PathService() = default;
@@ -38,7 +38,7 @@ PathService::PathService() = default;
 PathService::~PathService() = default;
 
 // =============================================================================
-// PathService — static interface (forwards to singleton Impl)
+// PathService  --  static interface (forwards to singleton Impl)
 // =============================================================================
 
 void PathService::RegisterProvider(PathProvider provider, int key_start,
@@ -55,7 +55,7 @@ void PathService::Override(PathKeys key, const std::filesystem::path &path) {
 }
 
 // =============================================================================
-// PathService::Impl — construction
+// PathService::Impl  --  construction
 // =============================================================================
 
 PathService::Impl::Impl() {
@@ -69,7 +69,7 @@ PathService::Impl::Impl() {
 PathService::Impl::~Impl() = default;
 
 // =============================================================================
-// PathService::Impl — RegisterProvider
+// PathService::Impl  --  RegisterProvider
 // =============================================================================
 
 void PathService::Impl::RegisterProvider(PathProvider provider, int key_start,
@@ -86,7 +86,7 @@ void PathService::Impl::RegisterProvider(PathProvider provider, int key_start,
 }
 
 // =============================================================================
-// PathService::Impl — Get (cached, lazy-loading path lookup)
+// PathService::Impl  --  Get (cached, lazy-loading path lookup)
 // =============================================================================
 
 std::optional<std::filesystem::path> PathService::Impl::Get(int key) {
@@ -116,7 +116,7 @@ std::optional<std::filesystem::path> PathService::Impl::Get(int key) {
 }
 
 // =============================================================================
-// PathService::Impl — Override (force-write cache for mocking)
+// PathService::Impl  --  Override (force-write cache for mocking)
 // =============================================================================
 
 void PathService::Impl::Override(int key, const std::filesystem::path &path) {

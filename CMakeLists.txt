@@ -3,7 +3,8 @@ cmake_minimum_required(VERSION 3.23)
 project(
   nei
   VERSION 0.1.0
-  DESCRIPTION "A modular C/C++ library template"
+  DESCRIPTION
+    "libNei: A modern, cross-platform C/C++ foundation library focusing on performance, safety, and ease of use. The name derives from 'Neiku' (内库) in Chinese, metaphorically implying 'inner strength'—haha!"
   LANGUAGES C CXX
 )
 
@@ -24,6 +25,8 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
@@ -31,6 +34,7 @@ option(NEI_BUILD_TESTS "Build nei tests" ON)
 option(NEI_BUILD_BENCHMARKS "Build nei benchmarks" ON)
 option(NEI_BUILD_DEMOS "Build nei demos" ON)
 option(NEI_ENABLE_WARNINGS "Enable strict warnings" ON)
+option(NEI_TREAT_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(NEI_ENABLE_LONG_BENCH_TESTS
        "Enable long-running benchmark tests in CTest" OFF
 )
@@ -44,7 +48,8 @@ if(NEI_BUILD_TESTS)
   include(CTest)
 endif()
 
-# Set default build type to Debug if no configuration is specified (single-config generators)
+# Set default build type to Debug if no configuration is specified
+# (single-config generators)
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
   message(WARNING "No build type specified, defaulting to Debug")
   set(CMAKE_BUILD_TYPE
@@ -59,6 +64,13 @@ if(NEI_ENABLE_WARNINGS)
   else()
     add_compile_options(-Wall -Wextra -Wpedantic)
   endif()
+  if(NEI_TREAT_WARNINGS_AS_ERRORS)
+    if(MSVC)
+      add_compile_options(/WX)
+    else()
+      add_compile_options(-Werror)
+    endif()
+  endif()
 endif()
 
 # ============================================================================
@@ -69,14 +81,14 @@ add_library(nei::nei ALIAS nei)
 
 # Platform definitions
 if(WIN32)
-  target_compile_definitions(nei PUBLIC NOMINMAX)
+  target_compile_definitions(nei PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
   if(MSVC)
     target_compile_options(nei PRIVATE /utf-8)
-    # /Zc:__cplusplus — MSVC reports 199711L by default even under
-    # /std:c++17.  This flag makes __cplusplus reflect the actual standard
-    # version (e.g. 201703L for C++17).  Applied at the top-level nei
-    # target so that C++ wrapper sources in the pure-C nei module also
-    # get correct feature-detection macros.
+    # /Zc:__cplusplus — MSVC reports 199711L by default even under /std:c++17.
+    # This flag makes __cplusplus reflect the actual standard version (e.g.
+    # 201703L for C++17).  Applied at the top-level nei target so that C++
+    # wrapper sources in the pure-C nei module also get correct
+    # feature-detection macros.
     target_compile_options(nei PUBLIC /Zc:__cplusplus)
   endif()
 endif()
@@ -99,8 +111,8 @@ endif()
 
 # Non-Windows dependencies
 if(NOT WIN32)
-  # _POSIX_C_SOURCE=199309L is required for clock_gettime / struct timespec
-  # when compiling in strict C11 mode (otherwise GCC hides these POSIX types).
+  # _POSIX_C_SOURCE=199309L is required for clock_gettime / struct timespec when
+  # compiling in strict C11 mode (otherwise GCC hides these POSIX types).
   target_compile_definitions(nei PUBLIC _POSIX_C_SOURCE=199309L)
   find_package(Threads REQUIRED)
   target_link_libraries(

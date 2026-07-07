@@ -7,6 +7,7 @@
 #include <string>
 
 #include <nei/macros/nei_export.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/synchronization/lock.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/message_loop/message_pump_type.h>
@@ -68,11 +69,15 @@ class NEI_API Thread final : public PlatformThread::Delegate {
  private:
   void ThreadMain() override;
 
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::string name_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
   Options options_;      ///< Written by Start/StartWithOptions, read by ThreadMain.
   mutable Lock lock_;
   PlatformThread::Handle handle_;
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   scoped_refptr<TaskRunner> task_runner_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
   // Non-owning pointer to a WaitableEvent on the call stack of
   // StartWithOptions().  Must only be read/written under |lock_|.
   WaitableEvent* start_event_ = nullptr;

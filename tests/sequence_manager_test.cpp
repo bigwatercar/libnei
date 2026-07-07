@@ -378,7 +378,7 @@ TEST(SequenceManagerTest, ShutdownDuringConcurrentPostingDoesNotDeadlockOrCrash)
 // Regression test for priority-schedule quota inflation bug.
 //
 // When USER_BLOCKING bucket is empty, the old "continue" implementation
-// silently skipped UB slots and let USER_VISIBLE consume them — effectively
+// silently skipped UB slots and let USER_VISIBLE consume them  --  effectively
 // giving UV a 7/7 quota instead of the intended 2/7.
 //
 // The fix: next_priority_index_ advances unconditionally (before the bucket
@@ -396,7 +396,7 @@ TEST(SequenceManagerTest, ShutdownDuringConcurrentPostingDoesNotDeadlockOrCrash)
 TEST(SequenceManagerTest, EmptyHighPriorityBucketDoesNotInflateLowPriorityQuota) {
   ScopedSingleQueueFastPathToggle disable_fast_path(false);
 
-  // Schedule: [UB, UB, UB, UB, UV, UV, BE] — 4 UB slots, 2 UV slots, 1 BE.
+  // Schedule: [UB, UB, UB, UB, UV, UV, BE]  --  4 UB slots, 2 UV slots, 1 BE.
   // When both UB and UV have tasks, UB should get 4/7 picks and UV should
   // get 2/7 picks. The bug caused empty UB slots to silently fall through to
   // UV (because next_priority_index_ wasn't advanced), giving UV up to 6/7

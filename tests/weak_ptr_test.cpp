@@ -269,8 +269,8 @@ TEST(WeakPtrThreadSafeTest, OptInAllowsCrossThreadDereference) {
   // Cross-thread dereference should NOT trigger assertion because
   // WeakPtrThreadSafe<ThreadSafeObj> is true_type.
   std::thread t([wp]() {
-    EXPECT_TRUE(wp);      // operator bool() — always safe.
-    EXPECT_NE(wp.get(), nullptr);  // get() — safe due to opt-in.
+    EXPECT_TRUE(wp);      // operator bool()  --  always safe.
+    EXPECT_NE(wp.get(), nullptr);  // get()  --  safe due to opt-in.
   });
   t.join();
 }

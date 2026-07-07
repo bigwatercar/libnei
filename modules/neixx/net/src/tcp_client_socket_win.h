@@ -5,7 +5,6 @@
 
 #if defined(_WIN32)
 
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winsock2.h>
 #include <mswsock.h>
@@ -32,7 +31,7 @@
 namespace nei::net {
 
 // =============================================================================
-// TcpOverlappedContext — OVERLAPPED + callback state for a single I/O op
+// TcpOverlappedContext  --  OVERLAPPED + callback state for a single I/O op
 // =============================================================================
 // Defined after TCPClientSocket::Impl so scoped_refptr<Impl> sees full type.
 struct TcpOverlappedContext;
@@ -46,7 +45,7 @@ class TCPClientSocket::Impl final
       public MessagePumpForIO::CompletionWatcher {
  public:
   Impl();
-  // From TCPServerSocket accept — socket is already connected, io_runner
+  // From TCPServerSocket accept  --  socket is already connected, io_runner
   // is bound immediately to prevent accidental Connect() misuse.
   Impl(SOCKET accepted_socket, scoped_refptr<TaskRunner> io_runner);
 
@@ -88,7 +87,7 @@ class TCPClientSocket::Impl final
   std::atomic<bool> orphaned_{false};
   std::atomic<bool> write_shutdown_{false};
 
-  // IOCP watcher controller — registers socket with the pump's completion port.
+  // IOCP watcher controller  --  registers socket with the pump's completion port.
   MessagePumpForIO::FdWatchController controller_;
 
   // Protects has_self_ref_.
@@ -105,7 +104,7 @@ class TCPClientSocket::Impl final
   // Starts background drain read after orphan shutdown.
   void StartOrphanDrain();
 
-  // Physical socket + watcher cleanup — must run on the IO thread.
+  // Physical socket + watcher cleanup  --  must run on the IO thread.
   void DoCloseCleanup(SOCKET s);
 
   // Actual connect logic (WSASocket, bind, ConnectEx, pump register).
@@ -131,7 +130,7 @@ class TCPClientSocket::Impl final
 };
 
 // =============================================================================
-// TcpOverlappedContext — full definition (after Impl for scoped_refptr<Impl>)
+// TcpOverlappedContext  --  full definition (after Impl for scoped_refptr<Impl>)
 // =============================================================================
 struct TcpOverlappedContext {
   OVERLAPPED overlapped = {};

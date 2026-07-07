@@ -8,15 +8,15 @@
 //   2. RegisterCallback ordering (LIFO execution at shutdown)
 //   3. IOBufferPool::GetInstance() delegates to
 //      Singleton<IOBufferPool, LeakySingletonTraits<IOBufferPool>>::GetInstance()
-//   4. At exit, LeakySingletonTraits::Delete() â†?PurgeMemory()
+//   4. At exit, LeakySingletonTraits::Delete() -> PurgeMemory()
 //      drains cached 4K/64K blocks but keeps the singleton shell alive
 //   5. A detached background thread sleeps and then accesses the pool DURING
-//      the shutdown window â€?proving that the Leaky pattern prevents
+//      the shutdown window -- proving that the Leaky pattern prevents
 //      use-after-free crashes
 //
 // Expected output (LIFO order during ~AtExitManager):
 //   [AtExit] Callback 3 (registered last, runs first)
-//   [AtExit] IOBufferPool cleanup â€?draining cached 4K/64K blocks
+//   [AtExit] IOBufferPool cleanup -- draining cached 4K/64K blocks
 //   [AtExit] Callback 2
 //   [AtExit] Callback 1 (registered first, runs last)
 //   [Worker] Safely accessed leaky singleton during exit window.
@@ -31,7 +31,7 @@
 #include <thread>
 
 // ---------------------------------------------------------------------------
-// ScopedPrint â€?RAII helper for visualizing stack unwinding order
+// ScopedPrint -- RAII helper for visualizing stack unwinding order
 // ---------------------------------------------------------------------------
 class ScopedPrint {
  public:
@@ -50,17 +50,17 @@ class ScopedPrint {
 };
 
 // ---------------------------------------------------------------------------
-// BackgroundWorker â€?simulates a residual I/O thread that wakes up during
+// BackgroundWorker -- simulates a residual I/O thread that wakes up during
 // the process shutdown window.
 //
 // If IOBufferPool were a traditional singleton (deleted at exit), the
 // GetInstance() call below would either:
-//   (a) return a dangling pointer â†?use-after-free crash, or
-//   (b) re-create the pool â†?memory leak (orphaned cleanup callback)
+//   (a) return a dangling pointer -> use-after-free crash, or
+//   (b) re-create the pool -> memory leak (orphaned cleanup callback)
 //
 // With LeakySingletonTraits + Singleton<T>, the pool shell stays alive
 // forever.  PurgeMemory() has already freed the cached buffers, but
-// the pool object itself is still valid â€?GetInstance() returns a live
+// the pool object itself is still valid -- GetInstance() returns a live
 // reference, and AcquireBuffer() would allocate fresh memory from the OS
 // (which will be reclaimed at process exit).
 // ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ void BackgroundWorker() {
   // waking up right in the middle of ~AtExitManager callback execution.
   std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
-  // Critical moment â€?if this were a traditional `delete`-based singleton,
+  // Critical moment -- if this were a traditional `delete`-based singleton,
   // we would crash here with a null-pointer dereference or use-after-free.
   auto& pool = nei::IOBufferPool::GetInstance();
   std::printf("[Worker] Safely accessed leaky singleton during exit window. "
@@ -105,7 +105,7 @@ int main() {
     });
 
     nei::AtExitManager::RegisterCallback([] {
-      std::printf("[AtExit] IOBufferPool cleanup â€?draining cached 4K/64K blocks\n");
+      std::printf("[AtExit] IOBufferPool cleanup -- draining cached 4K/64K blocks\n");
     });
 
     nei::AtExitManager::RegisterCallback([] {
@@ -113,7 +113,7 @@ int main() {
     });
 
     // -------------------------------------------------------------------
-    // Step 3: Access IOBufferPool â€?triggers Singleton<>::GetInstance().
+    // Step 3: Access IOBufferPool -- triggers Singleton<>::GetInstance().
     // -------------------------------------------------------------------
     std::printf("\n--- Accessing IOBufferPool (Leaky Singleton) ---\n");
 
@@ -136,7 +136,7 @@ int main() {
     std::printf("\n--- Launching background worker thread ---\n");
     std::thread worker(BackgroundWorker);
     worker.detach();
-    std::printf("Background worker detached â€?will wake during shutdown.\n");
+    std::printf("Background worker detached -- will wake during shutdown.\n");
 
     // -------------------------------------------------------------------
     // Step 5: Stack objects (destroyed BEFORE AtExitManager).
@@ -145,9 +145,9 @@ int main() {
     ScopedPrint scoped_a("Scoped A (bottom of stack)");
     ScopedPrint scoped_b("Scoped B (above Scoped A)");
 
-    std::printf("\n=== main() returning â€?~AtExitManager will now fire ===\n\n");
+    std::printf("\n=== main() returning -- ~AtExitManager will now fire ===\n\n");
 
-  }  // ~AtExitManager fires here â€?LIFO drain of all callbacks
+  }  // ~AtExitManager fires here -- LIFO drain of all callbacks
 
   // -----------------------------------------------------------------------
   // Post-shutdown: give the detached background thread time to wake up,
@@ -155,9 +155,9 @@ int main() {
   //
   // In a traditional singleton (delete-based), the worker would crash here
   // with a use-after-free.  With LeakySingletonTraits, the pool shell is
-  // still alive â€?the worker safely accesses GetInstance().
+  // still alive -- the worker safely accesses GetInstance().
   // -----------------------------------------------------------------------
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  std::printf("\n=== Process exiting â€?OS reclaims all memory ===\n");
+  std::printf("\n=== Process exiting -- OS reclaims all memory ===\n");
   return 0;
 }

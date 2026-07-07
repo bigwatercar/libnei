@@ -62,7 +62,7 @@ int nei_utf8_to_wstr(const char *src, wchar_t *buf, int size) {
 
 int nei_mbcs_to_utf8(const char *src, int src_len,
                      char *buf, size_t size) {
-    /* Step 1: MBCS → wchar_t */
+    /* Step 1: MBCS -> wchar_t */
     int wlen = MultiByteToWideChar(CP_ACP, 0, src, src_len, NULL, 0);
     if (wlen <= 0) {
         return -1;
@@ -79,7 +79,7 @@ int nei_mbcs_to_utf8(const char *src, int src_len,
 
     MultiByteToWideChar(CP_ACP, 0, src, src_len, wbuf, wlen);
 
-    /* Step 2: wchar_t → UTF-8 */
+    /* Step 2: wchar_t -> UTF-8 */
     int w_src_len = (src_len < 0) ? -1 : wlen;
     int result = wstr_to_mb_impl(CP_UTF8, wbuf, w_src_len, buf, size);
 
@@ -91,7 +91,7 @@ int nei_mbcs_to_utf8(const char *src, int src_len,
 
 int nei_utf8_to_mbcs(const char *src, int src_len,
                      char *buf, size_t size) {
-    /* Step 1: UTF-8 → wchar_t */
+    /* Step 1: UTF-8 -> wchar_t */
     int wlen = MultiByteToWideChar(CP_UTF8, 0, src, src_len, NULL, 0);
     if (wlen <= 0) {
         return -1;
@@ -108,7 +108,7 @@ int nei_utf8_to_mbcs(const char *src, int src_len,
 
     MultiByteToWideChar(CP_UTF8, 0, src, src_len, wbuf, wlen);
 
-    /* Step 2: wchar_t → MBCS */
+    /* Step 2: wchar_t -> MBCS */
     int w_src_len = (src_len < 0) ? -1 : wlen;
     int result = wstr_to_mb_impl(CP_ACP, wbuf, w_src_len, buf, size);
 

@@ -53,7 +53,7 @@ TCPClientSocket::Impl::Impl(SOCKET accepted_socket,
   EnsureWsa();
   // Lazy-bind: the socket will be registered with whichever IO thread
   // performs the first ReadAsync / WriteAsync.  This enables Multi-Reactor
-  // worker-thread dispatch — the worker_selector_ on the server side
+  // worker-thread dispatch  --  the worker_selector_ on the server side
   // picks the IO runner, and the first I/O on that worker thread binds
   // the socket to the worker's IOCP via EnsurePumpRegistered().
   //
@@ -64,7 +64,7 @@ TCPClientSocket::Impl::Impl(SOCKET accepted_socket,
   int opt = 1;
   setsockopt(socket_, IPPROTO_TCP, TCP_NODELAY,
              reinterpret_cast<char*>(&opt), sizeof(opt));
-  // RegisterWithPump() is deferred to first I/O — see EnsurePumpRegistered().
+  // RegisterWithPump() is deferred to first I/O  --  see EnsurePumpRegistered().
 }
 
 // =============================================================================
@@ -78,7 +78,7 @@ TCPClientSocket::Impl::~Impl() {
 void TCPClientSocket::Impl::Close() {
   if (closed_.exchange(true)) return;
 
-  // Extract socket — physical cleanup must run on the IO thread to avoid
+  // Extract socket  --  physical cleanup must run on the IO thread to avoid
   // racing with IOCP completion processing.
   SOCKET s = socket_;
   socket_ = INVALID_SOCKET;
@@ -127,7 +127,7 @@ void TCPClientSocket::Impl::Orphan() {
   }
 
   if (!closed_) {
-    // Check if there's a pending write — if so, wait for flush before FIN.
+    // Check if there's a pending write  --  if so, wait for flush before FIN.
     // On Windows, pending writes are tracked via in-flight IOCP contexts,
     // not a member variable.  We signal intent via orphaned_ and let
     // OnIOCompleted(kWrite) call OnOrphanWriteFlushed().
@@ -145,7 +145,7 @@ void TCPClientSocket::Impl::Orphan() {
 
 void TCPClientSocket::Impl::OnOrphanWriteFlushed() {
   ShutdownWrite();
-  // Drain read has already been posted by Orphan() — the read will
+  // Drain read has already been posted by Orphan()  --  the read will
   // see EOF and call Close(), which triggers ReleaseSelfHoldIfNeeded().
 }
 
@@ -195,7 +195,7 @@ bool TCPClientSocket::Impl::Connect(
     TCPClientSocket::ConnectCallback callback,
     scoped_refptr<TaskRunner> io_runner) {
   DCHECK(io_runner);
-  DCHECK_MSG(!connected_, "Connect: socket already connected — cannot reconnect");
+  DCHECK_MSG(!connected_, "Connect: socket already connected  --  cannot reconnect");
   DCHECK_MSG(!io_runner_, "Connect: io_runner_ already set");
   io_runner_ = std::move(io_runner);
 
@@ -207,7 +207,7 @@ bool TCPClientSocket::Impl::Connect(
                     TCPClientSocket::ConnectCallback cb) {
           self->DoConnect(a, std::move(cb));
         }, WrapRefCounted(this), addr, std::move(callback)));
-    return true;  // Request accepted — will be processed on IO thread.
+    return true;  // Request accepted  --  will be processed on IO thread.
   }
 
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
@@ -247,7 +247,7 @@ bool TCPClientSocket::Impl::DoConnect(
                        sa_len, nullptr, 0, nullptr, &ctx->overlapped);
 
   if (!ok && WSAGetLastError() != ERROR_IO_PENDING) {
-    // Post async failure — never callback synchronously.
+    // Post async failure  --  never callback synchronously.
     auto cb = std::move(ctx->connect_cb);
     delete ctx;
     Close();
@@ -437,7 +437,7 @@ void TCPClientSocket::Impl::WriteAsync(
 }
 
 // =============================================================================
-// IOCP completion — routed by the pump via CompletionWatcher
+// IOCP completion  --  routed by the pump via CompletionWatcher
 // =============================================================================
 
 void TCPClientSocket::Impl::OnIOCompleted(
@@ -457,7 +457,7 @@ void TCPClientSocket::Impl::OnIOCompleted(
       auto cb = std::move(ctx->connect_cb);
       delete ctx;
       if (orphaned_) {
-        // Orphan path — drop the callback, no user notification.
+        // Orphan path  --  drop the callback, no user notification.
         break;
       }
       if (cb) {
@@ -476,7 +476,7 @@ void TCPClientSocket::Impl::OnIOCompleted(
       bool is_drain = ctx->is_drain_read;
       delete ctx;
       // If orphaned and this is NOT a drain read, drop the user callback
-      // silently — the user has already destroyed the shell.  Drain reads
+      // silently  --  the user has already destroyed the shell.  Drain reads
       // (is_drain_read == true) are internal and don't carry user callbacks.
       if (orphaned_ && !is_drain)
         break;
@@ -497,7 +497,7 @@ void TCPClientSocket::Impl::OnIOCompleted(
       auto cb = std::move(ctx->write_cb);
       delete ctx;
       if (orphaned_) {
-        // Orphan path: write flushed → trigger shutdown, not user callback.
+        // Orphan path: write flushed -> trigger shutdown, not user callback.
         OnOrphanWriteFlushed();
         break;
       }

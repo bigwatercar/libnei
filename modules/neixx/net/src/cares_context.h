@@ -20,7 +20,7 @@ typedef struct ares_channeldata ares_channel_t;
 namespace nei::net {
 
 // =============================================================================
-// CaresContext — singleton managing c-ares channels.
+// CaresContext  --  singleton managing c-ares channels.
 //
 // Each unique HostResolverOptions gets its own ares_channel.  c-ares 1.34+
 // manages its own event thread internally via ARES_OPT_EVENT_THREAD, so no

@@ -314,7 +314,7 @@ class MessagePumpForIOState {
 
     if (epoll_fd_ >= 0) {
       if (has_other && remaining_events != 0) {
-        // Other watches still exist — modify instead of delete.
+        // Other watches still exist  --  modify instead of delete.
         // Use fd as the epoll token (consistent with RegisterWatch).
         epoll_event ev{};
         ev.events = remaining_events;
@@ -405,8 +405,8 @@ class MessagePumpForIOState {
       if (watchers.empty())
         continue;
 
-      // Dispatch by event mask: EPOLLIN → OnFileCanReadWithoutBlocking,
-      // EPOLLOUT → OnFileCanWriteWithoutBlocking.  A single epoll event
+      // Dispatch by event mask: EPOLLIN -> OnFileCanReadWithoutBlocking,
+      // EPOLLOUT -> OnFileCanWriteWithoutBlocking.  A single epoll event
       // may carry both flags (e.g. EPOLLHUP makes the fd both readable
       // and writable), so we check each flag independently against the
       // watcher's registered mode.

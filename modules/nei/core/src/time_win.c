@@ -15,7 +15,7 @@ static int64_t get_qpc_freq(void) {
 }
 
 /* -------------------------------------------------------------------------
- * Wall-clock (FILETIME → Unix epoch)
+ * Wall-clock (FILETIME -> Unix epoch)
  * ------------------------------------------------------------------------- */
 
 /* FILETIME epoch (1601) to Unix epoch (1970) offset in 100-ns units. */
@@ -56,7 +56,7 @@ static nei_time_qpc_anchor_st g_qpc_anchor = {0, 0, 0, 0};
 
 #define NEI_TIME_QPC_REANCHOR_INTERVAL_US 100000
 
-/* GetSystemTimePreciseAsFileTime (Win8+) — provides microsecond-precision
+/* GetSystemTimePreciseAsFileTime (Win8+)  --  provides microsecond-precision
  * wall-clock time directly, avoiding the need for QPC anchoring. */
 static VOID (WINAPI *g_pfn_GetSystemTimePreciseAsFileTime)(LPFILETIME) = NULL;
 static volatile LONG g_precise_detected = 0;
@@ -77,7 +77,7 @@ static void nei_time_qpc_init_anchor(void) {
         nei_time_detect_precise_api();
 
         if (g_pfn_GetSystemTimePreciseAsFileTime != NULL) {
-            /* Precise API available — no QPC anchoring needed. */
+            /* Precise API available  --  no QPC anchoring needed. */
             InterlockedExchange(&g_qpc_anchor.state, 2);
             return;
         }
@@ -104,7 +104,7 @@ static void nei_time_qpc_init_anchor(void) {
 }
 
 int64_t nei_time_qpc_fast_us(void) {
-    /* Win8+: use GetSystemTimePreciseAsFileTime directly — no QPC anchoring. */
+    /* Win8+: use GetSystemTimePreciseAsFileTime directly  --  no QPC anchoring. */
     if (g_pfn_GetSystemTimePreciseAsFileTime != NULL) {
         FILETIME ft;
         g_pfn_GetSystemTimePreciseAsFileTime(&ft);

@@ -3,8 +3,8 @@
  * @brief Demonstrates process and system memory monitoring using nei/sys APIs.
  *
  * Checks:
- *  1. Process memory usage — warns if resident memory exceeds a threshold.
- *  2. System memory pressure — warns if available memory drops too low.
+ *  1. Process memory usage  --  warns if resident memory exceeds a threshold.
+ *  2. System memory pressure  --  warns if available memory drops too low.
  */
 
 #include <cstdint>
@@ -16,7 +16,7 @@
 
 namespace {
 
-/* Thresholds — tweak as needed for your application. */
+/* Thresholds  --  tweak as needed for your application. */
 constexpr uint64_t kProcessResidentWarnBytes = 100ULL * 1024 * 1024; /* 100 MiB */
 constexpr double   kSystemMemoryWarnRatio    = 0.10;               /* < 10 % free */
 

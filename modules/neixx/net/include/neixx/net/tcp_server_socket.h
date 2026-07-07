@@ -19,7 +19,7 @@ namespace net {
 class TCPClientSocket;
 
 // =============================================================================
-// TCPServerSocket — async TCP listen + accept
+// TCPServerSocket  --  async TCP listen + accept
 // =============================================================================
 //
 // Windows: AcceptEx + IOCP.  POSIX: accept4 + epoll.
@@ -88,7 +88,7 @@ class NEI_API TCPServerSocket final {
  private:
   void Orphan();
 
-  Impl* impl_ = nullptr;  // Raw pointer — lifetime managed by RefCountedThreadSafe
+  Impl* impl_ = nullptr;  // Raw pointer  --  lifetime managed by RefCountedThreadSafe
 };
 
 }  // namespace net

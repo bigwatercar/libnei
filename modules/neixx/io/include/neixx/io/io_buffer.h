@@ -10,6 +10,7 @@
 
 #include <nei/macros/nei_export.h>
 #include <neixx/common/singleton.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/memory/ref_counted.h>
 
 namespace nei {
@@ -71,8 +72,9 @@ class NEI_API IOBufferWithSize : public IOBuffer {
 
  private:
   friend class IOBufferPool;
-
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<char[]> storage_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
   std::size_t size_ = 0;
   RecycleFunc recycle_func_ = nullptr;
   void* recycle_context_ = nullptr;
@@ -121,7 +123,9 @@ class NEI_API DrainableIOBuffer final : public IOBuffer {
  private:
   void RefreshDataPointer();
 
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   scoped_refptr<IOBuffer> base_buffer_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
   std::size_t size_ = 0;
   std::size_t offset_ = 0;
 };
@@ -169,7 +173,9 @@ class NEI_API IOBufferPool {
   Bucket& GetOrCreateBucket(std::size_t block_size);
 
   mutable std::mutex lock_;
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::vector<Bucket> buckets_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 }  // namespace nei

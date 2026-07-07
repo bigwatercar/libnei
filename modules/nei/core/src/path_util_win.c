@@ -5,6 +5,8 @@
 #include <sys/stat.h>
 #include <io.h>
 #include <windows.h>
+#include <direct.h>
+#include <wchar.h>
 
 int nei_path_exists(const char *path) {
     if (path == NULL) return 0;

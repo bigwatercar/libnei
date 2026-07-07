@@ -25,7 +25,7 @@ namespace {
 // 8-byte header: [4-byte LE length][4-byte LE magic word 0x4E454958].
 constexpr std::size_t kHeaderSize = 8;
 
-// Magic word 'NEIX' — used as a sanity check to detect corrupted or
+// Magic word 'NEIX'  --  used as a sanity check to detect corrupted or
 // mismatched protocol streams.
 constexpr uint32_t kMagicWord = 0x4E454958;
 
@@ -91,7 +91,7 @@ class MessageChannel::Impl final {
   }
 
   // =========================================================================
-  // Public API (called from MessageChannel — ANY thread)
+  // Public API (called from MessageChannel  --  ANY thread)
   // =========================================================================
 
   void StartReading(MessageChannel::MessageReceivedCallback on_message,
@@ -177,7 +177,7 @@ class MessageChannel::Impl final {
 
  private:
   // =========================================================================
-  // Read path — state machine (ALL on io_task_runner_)
+  // Read path  --  state machine (ALL on io_task_runner_)
   // =========================================================================
 
   // Issues a single ReadAsync() to the underlying stream.
@@ -187,7 +187,7 @@ class MessageChannel::Impl final {
       std::lock_guard<std::mutex> guard(lock_);
       if (error_signaled_ || closing_) return;
     }
-    // read_in_flight_ is only accessed on io_task_runner_ — lock-free.
+    // read_in_flight_ is only accessed on io_task_runner_  --  lock-free.
     if (read_in_flight_) return;
     read_in_flight_ = true;
 
@@ -199,7 +199,7 @@ class MessageChannel::Impl final {
     auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
     scoped_refptr<TaskRunner> io_runner = io_task_runner_;
 
-    // Raw I/O callback may fire on any thread — trampoline to
+    // Raw I/O callback may fire on any thread  --  trampoline to
     // io_task_runner_ via BindPostTask where the state machine lives.
     read_stream_->ReadAsync(
         std::move(base_buf),
@@ -235,7 +235,7 @@ class MessageChannel::Impl final {
       read_in_flight_ = false;
 
       // If we are already in an error state the callback chain has been
-      // torn down — drop this chunk silently.
+      // torn down  --  drop this chunk silently.
       if (error_signaled_) return;
 
       if (!success || bytes_read == 0) {
@@ -243,7 +243,7 @@ class MessageChannel::Impl final {
         should_signal_error = true;
       } else {
         // Append the freshly-read bytes to the persistent receive buffer.
-        // receive_buffer_ is io_task_runner_ private — lock-free access.
+        // receive_buffer_ is io_task_runner_ private  --  lock-free access.
         const uint8_t* data =
             reinterpret_cast<const uint8_t*>(read_buf->data());
         receive_buffer_.insert(receive_buffer_.end(),
@@ -307,7 +307,7 @@ class MessageChannel::Impl final {
     {
       std::lock_guard<std::mutex> guard(lock_);
       if (!error_signaled_ && !closing_) {
-        // OK to call BeginRead() — we are on io_task_runner_.
+        // OK to call BeginRead()  --  we are on io_task_runner_.
         BeginRead();
       } else if (closing_ && !error_signaled_) {
         // Stream closed gracefully by the remote side (EOF) while
@@ -338,7 +338,7 @@ class MessageChannel::Impl final {
   //
   // Called exclusively on io_task_runner_.
   // receive_buffer_ / consume_offset_ / read_state_ / current_message_size_
-  // are io_task_runner_-private — no lock needed.
+  // are io_task_runner_-private  --  no lock needed.
   std::vector<MessageChannel::Message> TryParseFrames(
       bool* should_signal_error) {
     std::vector<MessageChannel::Message> messages;
@@ -372,12 +372,12 @@ class MessageChannel::Impl final {
             receive_buffer_.size() - consume_offset_;
 
         if (available_now < current_message_size_) {
-          // Not enough bytes yet — need another read chunk.
+          // Not enough bytes yet  --  need another read chunk.
           break;
         }
 
         // Extract the complete payload into a pool-allocated buffer.
-        // No std::vector or new — zero-copy-pool allocation.
+        // No std::vector or new  --  zero-copy-pool allocation.
         scoped_refptr<IOBufferWithSize> msg_buf =
             IOBufferPool::GetInstance().AcquireBuffer(
                 current_message_size_);
@@ -401,12 +401,12 @@ class MessageChannel::Impl final {
 
   // Erases the consumed prefix from receive_buffer_ when it exceeds the
   // compaction threshold.
-  // Called exclusively on io_task_runner_ — lock-free.
+  // Called exclusively on io_task_runner_  --  lock-free.
   void CompactReceiveBuffer() {
     if (consume_offset_ == 0) return;
 
     if (consume_offset_ >= receive_buffer_.size()) {
-      // All bytes consumed — reset entirely.
+      // All bytes consumed  --  reset entirely.
       receive_buffer_.clear();
       consume_offset_ = 0;
       return;
@@ -420,7 +420,7 @@ class MessageChannel::Impl final {
   }
 
   // =========================================================================
-  // Write path — draining pipeline (io_task_runner_)
+  // Write path  --  draining pipeline (io_task_runner_)
   // =========================================================================
 
   // Pops the front of pending_writes_ and issues a WriteAsync().
@@ -438,7 +438,7 @@ class MessageChannel::Impl final {
       if (error_signaled_) return;
 
       if (current_write_buf_) {
-        // Continuing a partial write — the buffer is still at the front
+        // Continuing a partial write  --  the buffer is still at the front
         // of pending_writes_, current_write_offset_ tracks progress.
         write_buf = current_write_buf_;
         remaining = write_buf->size() - current_write_offset_;
@@ -472,7 +472,7 @@ class MessageChannel::Impl final {
       return;
     }
 
-    // No work to do — go idle.
+    // No work to do  --  go idle.
     if (!write_buf) return;
 
     // Create a windowed view into the remaining bytes.
@@ -507,7 +507,7 @@ class MessageChannel::Impl final {
       if (error_signaled_) return;
 
       if (!success || bytes_written == 0) {
-        // Write failure — tear down the channel and discard the buffer.
+        // Write failure  --  tear down the channel and discard the buffer.
         if (current_write_buf_) {
           pending_writes_.pop_front();
           current_write_buf_.reset();
@@ -519,7 +519,7 @@ class MessageChannel::Impl final {
         current_write_offset_ += bytes_written;
 
         if (current_write_offset_ >= current_write_buf_->size()) {
-          // Buffer fully written — pop it from the queue.
+          // Buffer fully written  --  pop it from the queue.
           pending_writes_.pop_front();
           current_write_buf_.reset();
           current_write_offset_ = 0;
@@ -529,14 +529,14 @@ class MessageChannel::Impl final {
             SignalErrorLocked();
             should_signal_error = true;
           } else if (!pending_writes_.empty()) {
-            // More writes queued — continue draining.
+            // More writes queued  --  continue draining.
             should_issue_next = true;
           } else {
-            // Queue empty and not closing — go idle.
+            // Queue empty and not closing  --  go idle.
             write_in_flight_ = false;
           }
         } else {
-          // Partial write — kernel didn't accept all bytes.  Issue the
+          // Partial write  --  kernel didn't accept all bytes.  Issue the
           // next write for the remaining portion.
           should_issue_next = true;
         }
@@ -567,7 +567,7 @@ class MessageChannel::Impl final {
   // Marks the channel as errored and clears the message callback.
   // Must be called with lock_ held.
   //
-  // NOTE: on_error_ is deliberately NOT cleared here — the caller is
+  // NOTE: on_error_ is deliberately NOT cleared here  --  the caller is
   // responsible for moving it out under the lock and posting it to
   // client_task_runner_ OUTSIDE the lock.
   void SignalErrorLocked() {
@@ -590,7 +590,7 @@ class MessageChannel::Impl final {
   }
 
   // =========================================================================
-  // Read state machine (io_task_runner_ private — lock-free)
+  // Read state machine (io_task_runner_ private  --  lock-free)
   // =========================================================================
 
   enum class ReadState {
@@ -603,8 +603,8 @@ class MessageChannel::Impl final {
   // =========================================================================
 
   // Explicitly-injected TaskRunners.
-  // io_task_runner_     — all I/O operations + state machine execute here.
-  // client_task_runner_ — all user callbacks are posted here.
+  // io_task_runner_      --  all I/O operations + state machine execute here.
+  // client_task_runner_  --  all user callbacks are posted here.
   const scoped_refptr<TaskRunner> io_task_runner_;
   const scoped_refptr<TaskRunner> client_task_runner_;
 
@@ -628,7 +628,7 @@ class MessageChannel::Impl final {
   bool closing_ = false;
   bool error_signaled_ = false;
 
-  // ---- I/O-private state (io_task_runner_ exclusive — LOCK-FREE) ----------
+  // ---- I/O-private state (io_task_runner_ exclusive  --  LOCK-FREE) ----------
 
   // Accumulated bytes read from the stream, not yet consumed into messages.
   std::vector<uint8_t> receive_buffer_;
@@ -644,7 +644,7 @@ class MessageChannel::Impl final {
   // Current in-flight write buffer (NOT popped from pending_writes_ until
   // every byte is accepted by the kernel).  Together with
   // current_write_offset_ this defends against partial writes where the
-  // OS buffer accepts fewer bytes than requested — the remaining bytes
+  // OS buffer accepts fewer bytes than requested  --  the remaining bytes
   // are re-submitted in the next write cycle instead of being lost.
   scoped_refptr<IOBufferWithSize> current_write_buf_;
   std::size_t current_write_offset_ = 0;
@@ -659,7 +659,7 @@ class MessageChannel::Impl final {
 };
 
 // ===========================================================================
-// MessageChannel — public forwarding
+// MessageChannel  --  public forwarding
 // ===========================================================================
 
 MessageChannel::MessageChannel(

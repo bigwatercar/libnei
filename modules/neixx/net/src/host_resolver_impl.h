@@ -23,20 +23,20 @@ namespace nei::net {
 AddressList ConvertAresAddrInfo(const struct ares_addrinfo* result);
 
 // =============================================================================
-// HostResolver::Impl — private implementation detail
+// HostResolver::Impl  --  private implementation detail
 // =============================================================================
 //
 // Uses c-ares for asynchronous DNS resolution via a shared CaresContext
 // singleton.  The dual-thread trampoline works as follows:
 //
-//   1. Resolve() → CaresContext::Resolve() submits to c-ares channel
+//   1. Resolve() -> CaresContext::Resolve() submits to c-ares channel
 //   2. c-ares event thread performs the lookup asynchronously
-//   3. OnAresCallback fires → ConvertAresAddrInfo → BindPostTask to
+//   3. OnAresCallback fires -> ConvertAresAddrInfo -> BindPostTask to
 //      target_runner where the user callback executes
 //
 // Lifetime: the WeakPtrFactory guarantees that if the HostResolver is
 // destroyed while a DNS lookup is in flight, the callback becomes
-// a no-op (WeakPtr expired → query context is silently dropped).
+// a no-op (WeakPtr expired -> query context is silently dropped).
 class HostResolver::Impl {
  public:
   Impl();
@@ -53,7 +53,7 @@ class HostResolver::Impl {
  private:
   HostResolverOptions options_;
 
-  // Must be the last member — ensures all WeakPtrs are invalidated before
+  // Must be the last member  --  ensures all WeakPtrs are invalidated before
   // any other member is destroyed.
   WeakPtrFactory<Impl> weak_factory_;
 };

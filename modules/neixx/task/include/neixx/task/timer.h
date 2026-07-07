@@ -4,19 +4,19 @@
 #define NEIXX_TASK_TIMER_H_
 
 // =============================================================================
-// OneShotTimer / RepeatingTimer — 高精度定时器 (Chromium-style)
+// OneShotTimer / RepeatingTimer  --  高精度定时器 (Chromium-style)
 // =============================================================================
 //
 // 基于 PostDelayedTask + WeakPtr 实现，零额外线程开销。
 //
-// ★ 序列安全：Start()、Stop() 和定时器回调均在绑定的 TaskRunner 序列
+// * 序列安全：Start()、Stop() 和定时器回调均在绑定的 TaskRunner 序列
 //   上执行，内部通过 SequenceChecker 强制执行运行期校验。
 //
-// ★ 零损耗取消 (OneShotTimer): Stop() 调用 InvalidateWeakPtrs()，
+// * 零损耗取消 (OneShotTimer): Stop() 调用 InvalidateWeakPtrs()，
 //   已投递的延迟任务在唤醒瞬间检测到 WeakPtr 失效，静默丢弃，无需
 //   任何额外的同步开销。
 //
-// ★ 自毁灭防御 (RepeatingTimer): 底层回调执行用户任务后，重新检查
+// * 自毁灭防御 (RepeatingTimer): 底层回调执行用户任务后，重新检查
 //   is_running_ 标志。若用户在回调中调用了 Stop()，则不安排下一次
 //   tick，彻底杜绝僵尸心跳。
 //
@@ -35,7 +35,7 @@
 //               BindRepeating(&MyClass::OnTick, weak_factory_.GetWeakPtr()));
 //   // 业务回调内部可安全调用 timer.Stop() 终止心跳
 //
-// ★ PIMPL 保证：公开头文件不暴露 std::mutex、SequenceChecker 或
+// * PIMPL 保证：公开头文件不暴露 std::mutex、SequenceChecker 或
 //   底层计时器实现细节。
 // =============================================================================
 
@@ -52,7 +52,7 @@ namespace nei {
 class TaskRunner;
 
 // =============================================================================
-// OneShotTimer — 单次高精度定时器
+// OneShotTimer  --  单次高精度定时器
 // =============================================================================
 class NEI_API OneShotTimer final {
  public:
@@ -90,7 +90,7 @@ class NEI_API OneShotTimer final {
 };
 
 // =============================================================================
-// RepeatingTimer — 周期高精度定时器
+// RepeatingTimer  --  周期高精度定时器
 // =============================================================================
 class NEI_API RepeatingTimer final {
  public:

@@ -616,7 +616,7 @@ TEST(ChildProcessTest, LaunchWithAllThreePipesStressHandleCleanup) {
   CommandLine command_line(static_cast<int>(sizeof(argv) / sizeof(argv[0])),
                            argv);
 
-  // All three stdio handles use PIPE — this is the worst-case for the
+  // All three stdio handles use PIPE  --  this is the worst-case for the
   // cleanup path: after CreateProcessW every child handle aliases a
   // pipe and must be closed exactly once.
   ProcessLaunchOptions options;

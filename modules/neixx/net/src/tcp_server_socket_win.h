@@ -5,7 +5,6 @@
 
 #if defined(_WIN32)
 
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winsock2.h>
 #include <mswsock.h>
@@ -32,7 +31,7 @@
 namespace nei::net {
 
 // =============================================================================
-// AcceptContext — per-accept OVERLAPPED state
+// AcceptContext  --  per-accept OVERLAPPED state
 // =============================================================================
 //
 // AcceptEx requires a pre-allocated client socket and a contiguous buffer
@@ -93,7 +92,7 @@ class TCPServerSocket::Impl final
   std::atomic<bool> closed_{false};
   std::atomic<bool> orphaned_{false};
 
-  // IOCP watcher controller — registers listen socket with the pump.
+  // IOCP watcher controller  --  registers listen socket with the pump.
   MessagePumpForIO::FdWatchController controller_;
   std::mutex mutex_;
   std::vector<AcceptContext*> pending_accepts_;

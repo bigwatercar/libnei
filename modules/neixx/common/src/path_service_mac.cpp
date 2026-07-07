@@ -23,7 +23,7 @@ namespace nei {
 
 /** @brief Resolve the current user's home directory.
  *
- *  Priority: @c $HOME → DCHECK failure. */
+ *  Priority: @c $HOME -> DCHECK failure. */
 static std::string GetHomeDir() {
   const char *env = getenv("HOME");
   DCHECK(env != nullptr && env[0] != '\0');
@@ -31,7 +31,7 @@ static std::string GetHomeDir() {
 }
 
 // =============================================================================
-// DefaultProvider — platform path resolution (macOS)
+// DefaultProvider  --  platform path resolution (macOS)
 // =============================================================================
 
 bool PathService::Impl::DefaultProvider(int key,
@@ -109,7 +109,7 @@ bool PathService::Impl::DefaultProvider(int key,
   }
 
   // -----------------------------------------------------------------------
-  // DIR_PROGRAM_DATA — not applicable on macOS
+  // DIR_PROGRAM_DATA  --  not applicable on macOS
   // -----------------------------------------------------------------------
   case PathKeys::DIR_PROGRAM_DATA: {
     return false;

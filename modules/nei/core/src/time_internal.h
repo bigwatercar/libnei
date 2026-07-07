@@ -1,4 +1,4 @@
-// Internal header — NOT part of the public API.
+// Internal header  --  NOT part of the public API.
 //
 // Provides direct access to the QPC-anchored wall-clock for
 // performance-critical callers within the nei library.  External

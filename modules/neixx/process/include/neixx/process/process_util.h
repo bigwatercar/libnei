@@ -42,7 +42,7 @@ class NEI_API ProcessUtil {
       const CommandLine& command_line,
       const ElevatedProcessOptions& options);
 
-  /// Simple process launch — no IO thread, no callbacks, no async pipes.
+  /// Simple process launch  --  no IO thread, no callbacks, no async pipes.
   ///
   /// Fire-and-forget mode (default): creates the child and returns
   /// immediately with state = kRunning.  The child process runs

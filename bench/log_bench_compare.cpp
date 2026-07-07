@@ -607,7 +607,7 @@ int main(int argc, char **argv) {
      *
      * The two fmt strings use the same argument types (int, const char*, double) as the
      * cache-hit "multi printf" benchmark above, so the only variable between the two
-     * scenarios is cache hit vs miss — not format string complexity.
+     * scenarios is cache hit vs miss  --  not format string complexity.
      */
     const auto result = time_nei_memory_ms(
         [] {

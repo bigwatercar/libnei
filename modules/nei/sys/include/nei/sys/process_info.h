@@ -179,7 +179,7 @@ inline std::filesystem::path nei_get_current_directory_path() {
 // across C++17 and C++20.
 //
 // The underlying C function returns UTF-8 bytes in a char buffer.
-// - C++20: construct std::u8string → path(char8_t*) interprets UTF-8 natively.
+// - C++20: construct std::u8string -> path(char8_t*) interprets UTF-8 natively.
 // - C++17: use std::filesystem::u8path() because path(const char*)
 //   interprets as the system ANSI/ACP code page on Windows.
 

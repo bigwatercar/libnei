@@ -22,7 +22,7 @@ NEI_API uint64_t nei_get_total_physical_memory(void);
  *
  * The definition of "available" is platform-dependent:
  * - On Windows, this is the amount of physical memory available to the
- *   process (not necessarily free — it includes memory that can be
+ *   process (not necessarily free  --  it includes memory that can be
  *   reclaimed from caches and stand-by lists).
  * - On macOS, this is the free + inactive memory reported by the VM
  *   statistics subsystem.

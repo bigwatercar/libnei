@@ -6,19 +6,20 @@
 #include <memory>
 
 #include <nei/macros/nei_export.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 
 namespace nei {
 
 // ===========================================================================
-// Windows handle traits (forward declarations only — defined in the .cpp)
+// Windows handle traits (forward declarations only  --  defined in the .cpp)
 // ===========================================================================
 //
 // On Windows, HANDLE semantics vary by API.  Three predefined traits are
 // provided to select the correct validity-check and close behaviour:
 //
-//   DefaultHandleTraits   — INVALID_HANDLE_VALUE sentinel, CloseHandle
-//   NullHandleTraits      — NULL sentinel, CloseHandle
-//   PseudoHandleTraits    — NULL + INVALID_HANDLE_VALUE, no close
+//   DefaultHandleTraits    --  INVALID_HANDLE_VALUE sentinel, CloseHandle
+//   NullHandleTraits       --  NULL sentinel, CloseHandle
+//   PseudoHandleTraits     --  NULL + INVALID_HANDLE_VALUE, no close
 //
 // Pass as a template argument to FromNativeHandle:
 //   PlatformHandle::FromNativeHandle<DefaultHandleTraits>(h)
@@ -39,7 +40,7 @@ struct PseudoHandleTraits;
 #endif  // defined(_WIN32)
 
 // ---------------------------------------------------------------------------
-// PlatformHandle — cross-platform, move-only system handle capsule
+// PlatformHandle  --  cross-platform, move-only system handle capsule
 // ---------------------------------------------------------------------------
 class NEI_API PlatformHandle final {
  public:
@@ -78,7 +79,9 @@ class NEI_API PlatformHandle final {
 
  private:
   class Impl;
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 }  // namespace nei

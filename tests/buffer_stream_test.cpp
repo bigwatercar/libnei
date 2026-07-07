@@ -42,7 +42,7 @@ TEST(BufferInputStreamTest, MultipleReadsAdvanceCursor) {
   int call_count = 0;
   std::string received;
 
-  // Read 4, 4, 2 bytes — should exhaust the 10-byte buffer.
+  // Read 4, 4, 2 bytes  --  should exhaust the 10-byte buffer.
   for (int expected : {4, 4, 2}) {
     stream.ReadAsync(buf, 4, [&](bool ok, std::size_t n) {
       call_count++;
@@ -122,8 +122,8 @@ TEST(BufferInputStreamTest, BorrowFromRawPointer) {
 TEST(BufferInputStreamTest, BorrowFromIOBuffer) {
   auto source = scoped_refptr<IOBufferWithSize>(new IOBufferWithSize(5));
   std::memcpy(source->data(), "12345", 5);
-  // Pass as IOBuffer (scoped_refptr<IOBufferWithSize> → scoped_refptr<IOBuffer>
-  // not implicit — use raw pointer).
+  // Pass as IOBuffer (scoped_refptr<IOBufferWithSize> -> scoped_refptr<IOBuffer>
+  // not implicit  --  use raw pointer).
   BufferInputStream stream(
       scoped_refptr<IOBuffer>(source.get()), 5);
 

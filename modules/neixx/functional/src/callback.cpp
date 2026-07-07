@@ -1,4 +1,4 @@
-﻿// callback.cpp — explicit template instantiations for common signatures.
+﻿// callback.cpp  --  explicit template instantiations for common signatures.
 //
 // OnceCallback / RepeatingCallback are now templates with all lifecycle
 // methods inline in callback.h.  This file provides explicit instantiations
@@ -11,7 +11,7 @@
 
 namespace nei {
 
-// void() — the universal PostTask / timer / general-purpose signature.
+// void()  --  the universal PostTask / timer / general-purpose signature.
 template class OnceCallback<>;
 template class RepeatingCallback<>;
 

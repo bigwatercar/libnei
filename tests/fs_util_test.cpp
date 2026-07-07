@@ -36,7 +36,7 @@ TEST(FsUtilTest, IsFileBusyOnOpenFile) {
     ASSERT_NE(fp, nullptr);
     fprintf(fp, "hello");
 
-    /* The file is held open by us — should be detected as busy. */
+    /* The file is held open by us  --  should be detected as busy. */
     int busy = nei_is_file_busy(path);
     fclose(fp);
     nei_file_remove(path);

@@ -1,5 +1,5 @@
 // =============================================================================
-// resolve_connect_demo — DNS resolve + TCP connect to port 80
+// resolve_connect_demo  --  DNS resolve + TCP connect to port 80
 // =============================================================================
 //
 // Demonstrates the end-to-end async networking flow:
@@ -178,7 +178,7 @@ void RunDemo(const std::string& host, uint16_t port) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
-  // AtExitManager must be the first stack object in main() — it ensures
+  // AtExitManager must be the first stack object in main()  --  it ensures
   // cleanup callbacks run in reverse order of registration.
   nei::AtExitManager at_exit;
 

@@ -21,7 +21,7 @@ template <>
 void nei::LeakySingletonTraits<nei::IOBufferPool>::Delete(nei::IOBufferPool* x) {
   if (x) {
     x->PurgeMemory();
-    // Intentionally do NOT delete x — the shell stays alive to prevent
+    // Intentionally do NOT delete x  --  the shell stays alive to prevent
     // use-after-free crashes from background threads during shutdown.
   }
 }

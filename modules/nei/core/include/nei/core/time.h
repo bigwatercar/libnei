@@ -79,7 +79,7 @@ NEI_API int64_t nei_time_now_us_hires(void);
  * @brief Monotonic time in milliseconds.
  *
  * This clock never goes backwards and is unaffected by system clock
- * adjustments.  The absolute value is meaningless — only differences
+ * adjustments.  The absolute value is meaningless  --  only differences
  * between two calls within the same process lifetime are valid.
  *
  * @return Monotonic time in ms, or negative on error.

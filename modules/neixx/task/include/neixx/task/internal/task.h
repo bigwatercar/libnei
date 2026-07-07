@@ -32,7 +32,7 @@ struct Task {
   //   (delayed_run_time, sequence_num) pair.  The ordering is therefore a
   //   valid SWO for std::priority_queue.
   //
-  //   Cross-queue comparisons are NOT meaningful — the heap is per-queue,
+  //   Cross-queue comparisons are NOT meaningful  --  the heap is per-queue,
   //   so operator> is only used within a single TaskQueue's delayed_incoming_queue_.
   bool operator>(const Task& other) const {
     if (delayed_run_time != other.delayed_run_time) {

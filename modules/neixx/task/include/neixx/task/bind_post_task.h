@@ -4,14 +4,14 @@
 #define NEIXX_TASK_BIND_POST_TASK_H_
 
 // =============================================================================
-// BindPostTask — 跨线程回调安全投递器 (Chromium-style)
+// BindPostTask  --  跨线程回调安全投递器 (Chromium-style)
 // =============================================================================
 //
 // 功能：将 OnceCallback / RepeatingCallback 包装为可在任意线程安全调用的
 //       新回调。当返回的回调被触发时，原始回调通过 target_task_runner->PostTask()
 //       投递到目标序列执行。
 //
-// ★ 核心安全特性 — 跨线程析构保护 (Destroy-on-Target-Sequence):
+// * 核心安全特性  --  跨线程析构保护 (Destroy-on-Target-Sequence):
 //   若返回的回调在非目标线程被销毁，BindPostTask 内部自动将原始回调的析构
 //   PostTask 到目标线程。这防止了回调绑定的资源 (scoped_refptr,
 //   unique_ptr, 线程局部对象等) 在错误线程释放导致的 use-after-free。
@@ -23,17 +23,17 @@
 //   OnceCallback io_callback = BindOnce(&DoIO);
 //   OnceCallback safe_callback = BindPostTask(ui_runner, std::move(io_callback));
 //
-//   // 在 IO 线程调用 safe_callback → 自动在 UI 线程执行 DoIO
+//   // 在 IO 线程调用 safe_callback -> 自动在 UI 线程执行 DoIO
 //   std::move(safe_callback).Run();
 //
 //   // 场景 2: 如果 safe_callback 在 IO 线程析构 (未被执行),
 //   //         DoIO 绑定的资源会被 PostTask 到 UI 线程安全释放
 //
-//   // 场景 3: RepeatingCallback — 每次调用都投递到目标线程
+//   // 场景 3: RepeatingCallback  --  每次调用都投递到目标线程
 //   RepeatingCallback repeating = BindRepeating(&HandleEvent);
 //   RepeatingCallback safe = BindPostTask(ui_runner, repeating);
-//   safe.Run();  // → PostTask 到 UI 线程执行 HandleEvent
-//   safe.Run();  // → 再次 PostTask 到 UI 线程执行 HandleEvent
+//   safe.Run();  // -> PostTask 到 UI 线程执行 HandleEvent
+//   safe.Run();  // -> 再次 PostTask 到 UI 线程执行 HandleEvent
 // =============================================================================
 
 #include <tuple>
@@ -80,7 +80,7 @@ template <typename... Args>
 struct is_repeating_callback<RepeatingCallback<Args...>> : std::true_type {};
 
 // ---------------------------------------------------------------------------
-// BindPostTaskTrampoline — 无锁蹦床状态 (线程安全引用计数)
+// BindPostTaskTrampoline  --  无锁蹦床状态 (线程安全引用计数)
 // ---------------------------------------------------------------------------
 //
 // 模板参数 CallbackType: OnceCallback 或 RepeatingCallback
@@ -108,7 +108,7 @@ class BindPostTaskTrampoline
   }
 
   // -----------------------------------------------------------------------
-  // Run() — 将原始回调 + 参数投递到目标 TaskRunner
+  // Run()  --  将原始回调 + 参数投递到目标 TaskRunner
   //
   // OnceCallback: 移动原始回调 (单次调用; 调用后设置 callback_consumed_)
   //               参数通过 std::forward 完美转发至 BindOnce
@@ -166,9 +166,9 @@ class BindPostTaskTrampoline
   friend class RefCountedThreadSafe<BindPostTaskTrampoline>;
 
   // -----------------------------------------------------------------------
-  // ~BindPostTaskTrampoline — 跨线程析构保护
+  // ~BindPostTaskTrampoline  --  跨线程析构保护
   //
-  // ★ 关键安全逻辑:
+  // * 关键安全逻辑:
   //   当最后一个 scoped_refptr<Trampoline> 被释放时, 若当前线程不是
   //   目标 TaskRunner 的线程, 则将原始 callback PostTask 到目标线程
   //   进行析构。这确保 callback 绑定的所有资源 (如 scoped_refptr,
@@ -187,12 +187,12 @@ class BindPostTaskTrampoline
   //   (作为最后的兜底)。
   // -----------------------------------------------------------------------
   ~BindPostTaskTrampoline() {
-    // OnceCallback 已被消耗 → 资源所有权已转移至目标线程, 无需处理
+    // OnceCallback 已被消耗 -> 资源所有权已转移至目标线程, 无需处理
     if (callback_consumed_) {
       return;
     }
 
-    // 无回调或无 runner → 无需处理
+    // 无回调或无 runner -> 无需处理
     if (!task_runner_ || !callback_) {
       return;
     }
@@ -202,18 +202,18 @@ class BindPostTaskTrampoline
         ThreadTaskRunnerHandle::Get();
 
     if (current.get() != task_runner_.get()) {
-      // ★ 不在目标线程 → 弹射回目标线程析构
+      // * 不在目标线程 -> 弹射回目标线程析构
       // 将 callback 的所有权转移到目标线程上的一个空 lambda,
       // lambda 在目标线程执行完毕后, callback 随 lambda 析构。
       task_runner_->PostTask(
           FROM_HERE,
           [cb = std::move(callback_)]() {
-            // cb 在此 lambda 结束时析构 → 在目标线程上释放所有资源
+            // cb 在此 lambda 结束时析构 -> 在目标线程上释放所有资源
           });
       // 标记为已消耗, 防止基类析构时再次处理
       callback_consumed_ = true;
     }
-    // else: 在目标线程上 → callback_ 在此内联析构 (高效路径)
+    // else: 在目标线程上 -> callback_ 在此内联析构 (高效路径)
   }
 
   scoped_refptr<TaskRunner> task_runner_;
@@ -232,7 +232,7 @@ class BindPostTaskTrampoline
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// OnceCallback<Args...> — preserves the input signature.
+// OnceCallback<Args...>  --  preserves the input signature.
 // Returns OnceCallback<Args...> so that calling Run(args...) on the returned
 // callback posts the original callback with those args to the target runner.
 //
@@ -260,7 +260,7 @@ OnceCallback<Args...> BindPostTask(scoped_refptr<TaskRunner> task_runner,
 }
 
 // ---------------------------------------------------------------------------
-// RepeatingCallback<> — void() only.  Parameterized RepeatingCallback will
+// RepeatingCallback<>  --  void() only.  Parameterized RepeatingCallback will
 // be added when needed.
 // ---------------------------------------------------------------------------
 inline RepeatingCallback<> BindPostTask(

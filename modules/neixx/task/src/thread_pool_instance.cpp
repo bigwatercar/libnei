@@ -46,7 +46,7 @@ void ThreadPoolInstance::CreateAndStart(const InitParams& params) {
     bool ok = AtExitManager::RegisterCallback([] {
       if (g_instance) {
         g_instance->pool_.Shutdown();
-        // Intentionally do NOT delete g_instance — Leaky Singleton.
+        // Intentionally do NOT delete g_instance  --  Leaky Singleton.
         // The OS reclaims the shell memory at process exit.
       }
     });
@@ -65,13 +65,13 @@ void ThreadPoolInstance::CreateAndStartWithDefaultParams() {
 // static
 void ThreadPoolInstance::Shutdown() {
   // Manual early-shutdown path.  If AtExitManager is active, the AtExit
-  // callback will also fire later — the pool's Shutdown() is idempotent
+  // callback will also fire later  --  the pool's Shutdown() is idempotent
   // (second call is a no-op), so double-drain is harmless.
   if (g_instance == nullptr) {
     return;
   }
   g_instance->pool_.Shutdown();
-  // Keep g_instance alive (Leaky) — do NOT delete or nullptr it.
+  // Keep g_instance alive (Leaky)  --  do NOT delete or nullptr it.
 }
 
 // static

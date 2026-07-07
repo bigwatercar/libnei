@@ -55,7 +55,7 @@ static const char *find_first_dot_in_basename(const char *path, size_t len) {
 }
 
 /* =========================================================================
- * Public API — string operations
+ * Public API  --  string operations
  * ========================================================================= */
 
 int nei_path_join(char *dst, size_t size, const char *a, const char *b) {
@@ -125,7 +125,7 @@ int nei_path_dirname(const char *path, char *buf, size_t size) {
     /* If the only separator is at position 0, return root. */
     if (sep == path) return buf_copy(buf, size, path, 1);
 
-    /* Windows drive letter root: "C:\" → "C:\" */
+    /* Windows drive letter root: "C:\" -> "C:\" */
     if (sep == path + 2 && path[1] == ':' && nei_path_is_separator(*sep)) {
         return buf_copy(buf, size, path, (size_t)(sep - path + 1));
     }
@@ -168,7 +168,7 @@ int nei_path_stem(const char *path, char *buf, size_t size) {
     /* Find the first dot (after any leading dots). */
     if (start >= end) return buf_copy(buf, size, "", 0);
     if (*start == '.') {
-        /* Base name starts with a dot — skip leading dots, then look
+        /* Base name starts with a dot  --  skip leading dots, then look
          * for the first dot after that as the extension start. */
         const char *p = start + 1;
         while (p < end && *p == '.') ++p;
@@ -195,7 +195,7 @@ int nei_path_extension(const char *path, char *buf, size_t size) {
     const char *sep = find_last_sep(path, end);
     const char *start = sep ? (sep + 1) : path;
 
-    /* No dot, or base name starts with dot → no extension. */
+    /* No dot, or base name starts with dot -> no extension. */
     if (start >= end || *start == '.') return buf_copy(buf, size, "", 0);
 
     const char *last_dot = NULL;
@@ -219,7 +219,7 @@ int nei_path_extensions(const char *path, char *buf, size_t size) {
     const char *sep = find_last_sep(path, end);
     const char *start = sep ? (sep + 1) : path;
 
-    /* No dot, or base name starts with dot → no extension. */
+    /* No dot, or base name starts with dot -> no extension. */
     if (start >= end || *start == '.') return buf_copy(buf, size, "", 0);
 
     const char *first_dot = memchr(start, '.', (size_t)(end - start));
@@ -267,10 +267,10 @@ int nei_path_normalize(const char *path, char *buf, size_t size) {
         while (*p != '\0' && *p != '/' && *p != '\\') ++p;
         size_t comp_len = (size_t)(p - comp);
 
-        /* "." — skip. */
+        /* "."  --  skip. */
         if (comp_len == 1 && comp[0] == '.') continue;
 
-        /* ".." — go up one level. */
+        /* ".."  --  go up one level. */
         if (comp_len == 2 && comp[0] == '.' && comp[1] == '.') {
             if (out_len > root_len) {
                 /* Remove last component. */
@@ -314,7 +314,7 @@ int nei_path_to_native(char *path) {
     }
     return (int)len;
 #else
-    /* POSIX: backslash is a valid filename character — do not alter. */
+    /* POSIX: backslash is a valid filename character  --  do not alter. */
     return (int)strlen(path);
 #endif
 }

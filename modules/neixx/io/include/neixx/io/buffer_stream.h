@@ -17,7 +17,7 @@
 namespace nei {
 
 // ===========================================================================
-// BufferInputStream — reads from an in-memory buffer via AsyncInputStream
+// BufferInputStream  --  reads from an in-memory buffer via AsyncInputStream
 // ===========================================================================
 //
 // Wraps a contiguous byte buffer as an AsyncInputStream so that existing

@@ -344,7 +344,7 @@ scoped_refptr<T> MakeRefCounted(Args &&...args) {
 }
 
 // =============================================================================
-// WrapRefCounted — safely wraps a raw RefCountedThreadSafe pointer into a
+// WrapRefCounted  --  safely wraps a raw RefCountedThreadSafe pointer into a
 // scoped_refptr, adding a reference.  Use when a raw `this` must be captured
 // by a task closure and the object may be destroyed before the task runs.
 // =============================================================================

@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include <nei/sys/os_info.h>
 
 #include <stdio.h>

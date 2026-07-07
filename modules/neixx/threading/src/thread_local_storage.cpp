@@ -20,7 +20,6 @@
 #include <vector>
 
 #if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #else
 #include <pthread.h>
@@ -43,7 +42,7 @@ struct ThreadLocalVector {
   }
 };
 
-// Global singleton — owns the single OS TLS key and the slot→destructor
+// Global singleton  --  owns the single OS TLS key and the slot->destructor
 // mapping.  Leaked intentionally: the OS callback must remain valid for
 // the entire lifetime of the process, even during DLL unload / static
 // destruction when worker threads may still be exiting.
@@ -100,7 +99,7 @@ class TLSManager {
   TLSManager() {
 #if defined(_WIN32)
     tls_index_ = FlsAlloc(&OnThreadExit);
-    // FLS_OUT_OF_INDEXES is a terminal condition — the process cannot
+    // FLS_OUT_OF_INDEXES is a terminal condition  --  the process cannot
     // function without TLS.  We let the nullptr guard in GetThreadVector
     // handle the fallout in release; a debug CHECK would be appropriate
     // but is omitted to keep this file self-contained.
@@ -146,7 +145,7 @@ class TLSManager {
 
   // Per-slot destructor table.  Indexed by slot index.  A null entry
   // means "no destructor" (either never set, or slot was freed).
-  // Release on write, acquire on read — sufficient because slot
+  // Release on write, acquire on read  --  sufficient because slot
   // allocation happens-before thread creation which happens-before
   // thread exit.
   std::atomic<ThreadLocalStorage::TLSDestructorFunc>
@@ -161,7 +160,7 @@ class TLSManager {
 
 }  // namespace
 
-// Slot::Impl — thin wrapper holding a monotonic slot index into the
+// Slot::Impl  --  thin wrapper holding a monotonic slot index into the
 // global TLSManager.  Get/Set delegate to the per-thread vector.
 class ThreadLocalStorage::Slot::Impl {
  public:

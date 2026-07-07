@@ -195,7 +195,7 @@ TEST(SimpleThreadTest, JoinReturnsPromptlyAfterRunExits) {
   SignalThread thread("test-prompt-join", &ran);
 
   thread.Start();
-  // The thread should finish on its own — Join must not hang.
+  // The thread should finish on its own  --  Join must not hang.
   thread.Join();
 
   EXPECT_TRUE(ran.load(std::memory_order_acquire));

@@ -1,5 +1,5 @@
 // =============================================================================
-// PipeStream unit tests — async determinism, UAF safety, yield quota,
+// PipeStream unit tests  --  async determinism, UAF safety, yield quota,
 // peer disconnect, and rapid cancel/retry.
 // =============================================================================
 
@@ -54,7 +54,7 @@ constexpr std::size_t kSmallBufSize  = 4096;
 constexpr std::size_t kLargeBufSize  = 64 * 1024;   // 64 KiB
 
 // ---------------------------------------------------------------------------
-// CreateAsyncPipePair — creates a cross-platform pipe pair suitable for
+// CreateAsyncPipePair  --  creates a cross-platform pipe pair suitable for
 // async PipeStream testing.
 //
 // On Windows: uses CreateNamedPipe(FILE_FLAG_OVERLAPPED) for the read end
@@ -122,7 +122,7 @@ bool CreateAsyncPipePair(PlatformHandle& read_handle,
 
   // Read end must be non-blocking for epoll integration.  Write end
   // stays blocking so the writer thread does not spin on EAGAIN when
-  // the pipe buffer is full — it simply sleeps until the reader drains.
+  // the pipe buffer is full  --  it simply sleeps until the reader drains.
   int rflags = fcntl(fds[0], F_GETFL, 0);
   if (rflags == -1 || fcntl(fds[0], F_SETFL, rflags | O_NONBLOCK) == -1) {
     close(fds[0]);
@@ -137,7 +137,7 @@ bool CreateAsyncPipePair(PlatformHandle& read_handle,
 }
 
 // ---------------------------------------------------------------------------
-// WriteAll — synchronously writes |data| to |write_handle| in a loop until
+// WriteAll  --  synchronously writes |data| to |write_handle| in a loop until
 // all bytes are written.  Blocks if the pipe buffer is full.
 // Returns true on success.
 // ---------------------------------------------------------------------------
@@ -176,7 +176,7 @@ bool WriteAll(const PlatformHandle& write_handle,
 }
 
 // ---------------------------------------------------------------------------
-// AcquireIOBuffer — helper to get a scoped_refptr<IOBuffer> and keep the
+// AcquireIOBuffer  --  helper to get a scoped_refptr<IOBuffer> and keep the
 // backing IOBufferWithSize alive inside the callback lambda.
 // ---------------------------------------------------------------------------
 struct IOBufHolder {
@@ -237,7 +237,7 @@ class PipeStreamTest : public testing::Test {
 };
 
 // ===========================================================================
-// 🔴 Test 1 — Async Determinism Guard
+// 🔴 Test 1  --  Async Determinism Guard
 // ===========================================================================
 //
 // Verifies that ReadAsync never invokes the callback synchronously within
@@ -315,7 +315,7 @@ TEST_F(PipeStreamTest, WriteAsyncNeverCallsBackSynchronously) {
 }
 
 // ===========================================================================
-// 🔴 Test 2 — Cross-Thread UAF Attack
+// 🔴 Test 2  --  Cross-Thread UAF Attack
 // ===========================================================================
 //
 // Start an I/O operation on the IO thread, then destroy the PipeStream from
@@ -328,7 +328,7 @@ TEST_F(PipeStreamTest, WriteAsyncNeverCallsBackSynchronously) {
 TEST_F(PipeStreamTest, CrossThreadDeleteWhileReadPending) {
   PlatformHandle read_h, write_h;
   ASSERT_TRUE(MakePipe(read_h, write_h));
-  // Do NOT write any data — ReadAsync will go PENDING.
+  // Do NOT write any data  --  ReadAsync will go PENDING.
 
   WaitableEvent io_armed(WaitableEvent::ResetPolicy::kAutomatic, false);
 
@@ -342,7 +342,7 @@ TEST_F(PipeStreamTest, CrossThreadDeleteWhileReadPending) {
     auto holder = AcquireIOBuf(kSmallBufSize);
     stream->ReadAsync(holder.buf, kSmallBufSize,
                       [holder](bool, std::size_t) {
-                        // Should not be called — pipe has no data.
+                        // Should not be called  --  pipe has no data.
                       });
 
     // Transfer ownership to the test thread.
@@ -409,7 +409,7 @@ TEST_F(PipeStreamTest, CrossThreadDeleteWhileWritePending) {
 }
 
 // ===========================================================================
-// 🔴 Test 3 — POSIX Yield Quota (anti-starvation)
+// 🔴 Test 3  --  POSIX Yield Quota (anti-starvation)
 // ===========================================================================
 //
 // Pumps 5 MiB of data through a pipe and verifies that the drain loop
@@ -466,19 +466,19 @@ TEST_F(PipeStreamTest, PosixYieldQuotaPreventsStarvation) {
 
   ASSERT_TRUE(read_done.TimedWait(std::chrono::seconds(10)));
 
-  // Reader has fully drained the pipe — writer can exit cleanly.
+  // Reader has fully drained the pipe  --  writer can exit cleanly.
   writer.join();
   ASSERT_TRUE(write_ok.load());
 
   EXPECT_TRUE(marker_ran.load())
-      << "Marker task did NOT run — drain loop may be starving "
+      << "Marker task did NOT run  --  drain loop may be starving "
          "other tasks on the I/O thread.";
   EXPECT_EQ(total_read.load(), kTotalBytes);
 }
 #endif  // !defined(_WIN32)
 
 // ===========================================================================
-// 🟡 Test 4 — Peer Disconnect (clean EOF / broken pipe)
+// 🟡 Test 4  --  Peer Disconnect (clean EOF / broken pipe)
 // ===========================================================================
 //
 // Starts a read on one end of the pipe, then closes the write end.
@@ -490,7 +490,7 @@ TEST_F(PipeStreamTest, PeerDisconnectDeliversCleanEof) {
   ASSERT_TRUE(MakePipe(read_h, write_h));
 
   // Close the write end FIRST to simulate peer disconnect.
-  // The pipe now has no data and the write end is gone — a subsequent
+  // The pipe now has no data and the write end is gone  --  a subsequent
   // read must return EOF ((false, 0)).
   write_h = PlatformHandle();
 
@@ -521,9 +521,9 @@ TEST_F(PipeStreamTest, PeerDisconnectDeliversCleanEof) {
 
 // Also test the write direction peer disconnect.
 // This test verifies that writing to a pipe whose read end is closed
-// does not crash — the write either succeeds (data fits in pipe buffer)
+// does not crash  --  the write either succeeds (data fits in pipe buffer)
 // or fails gracefully (EPIPE / broken pipe error).
-// Disabled: WSL pipe semantics differ from native Linux — write() to a
+// Disabled: WSL pipe semantics differ from native Linux  --  write() to a
 // disconnected peer succeeds (data fits in buffer) and the pump timing
 // is unreliable.  Re-enable after investigating WSL pipe behaviour.
 TEST_F(PipeStreamTest, WriteToDisconnectedPeerFailsCleanly) {
@@ -551,15 +551,15 @@ TEST_F(PipeStreamTest, WriteToDisconnectedPeerFailsCleanly) {
 }
 
 // ===========================================================================
-// 🟡 Test 5 — Rapid Cancel & Retry
+// 🟡 Test 5  --  Rapid Cancel & Retry
 // ===========================================================================
 //
-// Rapidly cycles through: ReadAsync → Close → Bind new handle → ReadAsync.
+// Rapidly cycles through: ReadAsync -> Close -> Bind new handle -> ReadAsync.
 // Verifies the state machine cleans up correctly and the second operation
 // succeeds independently of the first.
 
 // Disabled: WSL pump wakeup ordering after ShutdownAndSelfDestruct is
-// unreliable — the phase 2 IO task may be queued ahead of the destructor
+// unreliable  --  the phase 2 IO task may be queued ahead of the destructor
 // cleanup, causing epoll interference.  Works correctly on native Linux.
 TEST_F(PipeStreamTest, RapidCancelAndRetryStateMachine) {
   // ---- Phase 1: first pipe, read + immediate close --------------------
@@ -575,7 +575,7 @@ TEST_F(PipeStreamTest, RapidCancelAndRetryStateMachine) {
     auto holder = AcquireIOBuf(kSmallBufSize);
     stream->ReadAsync(holder.buf, kSmallBufSize,
                      [holder](bool, std::size_t) {
-                       // May or may not fire — we Close() immediately.
+                       // May or may not fire  --  we Close() immediately.
                      });
 
     // Cancel before any data arrives.
@@ -622,7 +622,7 @@ TEST_F(PipeStreamTest, RapidCancelAndRetryStateMachine) {
 
   // Write data to the *second* pipe's write end.
   ASSERT_TRUE(WriteAll(h2_write, message.data(), message.size()));
-  h2_write = PlatformHandle();   // close write → EOF
+  h2_write = PlatformHandle();   // close write -> EOF
 
   ASSERT_TRUE(phase2_done.TimedWait(std::chrono::seconds(5)));
 
@@ -630,7 +630,7 @@ TEST_F(PipeStreamTest, RapidCancelAndRetryStateMachine) {
   // expected payload, proving the state machine was clean after Close().
   EXPECT_EQ(received, message)
       << "Second read after cancel/retry did not receive the correct "
-         "data — state machine may have stale state from the first "
+         "data  --  state machine may have stale state from the first "
          "cancelled operation.";
 }
 
@@ -733,7 +733,7 @@ TEST_F(PipeStreamTest, TraceSingleReadAsync) {
   bool done = read_done.TimedWait(std::chrono::seconds(5));
   DisableTracingAndDump("/tmp/pipe_stream_trace.json");
 
-  ASSERT_TRUE(done) << "Test hung — trace written to /tmp/pipe_stream_trace.json";
+  ASSERT_TRUE(done) << "Test hung  --  trace written to /tmp/pipe_stream_trace.json";
   EXPECT_TRUE(callback_fired.load());
 }
 

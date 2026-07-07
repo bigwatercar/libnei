@@ -10,7 +10,7 @@
 namespace nei {
 
 // =============================================================================
-// CancelableOnceClosure::Impl — RefCountedThreadSafe 控制块
+// CancelableOnceClosure::Impl  --  RefCountedThreadSafe 控制块
 // =============================================================================
 //
 // 继承 RefCountedThreadSafe 以保证跨线程 callback() / Cancel() 时
@@ -33,10 +33,10 @@ class CancelableOnceClosure::Impl
   explicit Impl(OnceCallback<> task) : task_(std::move(task)) {}
 
   // ---------------------------------------------------------------------------
-  // Run() — 执行闭包（若未取消且未执行过）
+  // Run()  --  执行闭包（若未取消且未执行过）
   //
   // 线程安全：可在任意线程调用。
-  // ★ 锁外回调：在锁内将 task_ 转移到局部变量，释放锁后再执行回调。
+  // * 锁外回调：在锁内将 task_ 转移到局部变量，释放锁后再执行回调。
   //   此设计防止业务回调内部重入 CancelableOnceClosure 时引发死锁。
   // ---------------------------------------------------------------------------
   void Run() {
@@ -48,16 +48,16 @@ class CancelableOnceClosure::Impl
       local_task = std::move(task_);
       // task_ 此时已为空，无法被其他线程再次获取
     }
-    // ★ 锁外执行回调 —— 防止业务层重入引发死锁
+    // * 锁外执行回调  --  --  防止业务层重入引发死锁
     if (local_task)
       std::move(local_task).Run();
   }
 
   // ---------------------------------------------------------------------------
-  // Cancel() — 取消闭包并立即释放捕获资源
+  // Cancel()  --  取消闭包并立即释放捕获资源
   //
   // 线程安全：可在任意线程调用。
-  // ★ 极速内存释放：在锁内将 task_ 转移到局部变量，释放锁后局部变量析构，
+  // * 极速内存释放：在锁内将 task_ 转移到局部变量，释放锁后局部变量析构，
   //   立即释放 OnceCallback 捕获的所有资源（scoped_refptr、unique_ptr、
   //   大块内存等），不等待任何调度到期。
   // ---------------------------------------------------------------------------
@@ -71,7 +71,7 @@ class CancelableOnceClosure::Impl
       local_task = std::move(task_);
       // task_ 已置空，资源所有权已转移至 local_task
     }
-    // local_task 在此析构 → 所有捕获资源立即释放
+    // local_task 在此析构 -> 所有捕获资源立即释放
   }
 
   bool IsCancelled() const {
@@ -85,7 +85,7 @@ class CancelableOnceClosure::Impl
   }
 
   // ---------------------------------------------------------------------------
-  // AsCallback() — 返回一个持有本 Impl 引用的 OnceCallback
+  // AsCallback()  --  返回一个持有本 Impl 引用的 OnceCallback
   //
   // 返回的 OnceCallback 内部持有 scoped_refptr<Impl>，保证 Impl 在
   // 回调执行或析构前始终存活。适合 PostTask 场景。
@@ -111,7 +111,7 @@ class CancelableOnceClosure::Impl
 };
 
 // =============================================================================
-// CancelableOnceClosure — 公开接口实现
+// CancelableOnceClosure  --  公开接口实现
 // =============================================================================
 
 CancelableOnceClosure::CancelableOnceClosure() = default;

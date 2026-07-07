@@ -51,7 +51,7 @@ bool TCPServerSocket::Impl::Listen(
 
   // Register with the IO pump for read notifications.
   auto* pump = MessagePumpForIO::Current();
-  DCHECK_MSG(pump, "Listen: pump null — not on IO thread");
+  DCHECK_MSG(pump, "Listen: pump null  --  not on IO thread");
 
   watch_controller_.StartWatching(
       pump, listen_fd_,
@@ -94,7 +94,7 @@ void TCPServerSocket::Impl::Shutdown() {
   std::unique_lock<std::mutex> lock(mutex_);
   if (closed_.exchange(true)) return;
 
-  // Silent shutdown — clear the callback without firing it.
+  // Silent shutdown  --  clear the callback without firing it.
   accept_callback_ = {};
 
   watch_controller_.StopWatching();
@@ -103,7 +103,7 @@ void TCPServerSocket::Impl::Shutdown() {
     listen_fd_ = -1;
   }
   // NOTE: Do NOT release self-hold here.  Orphan() manages the self-hold
-  // lifecycle — releasing too early causes UAF if the IO thread is still
+  // lifecycle  --  releasing too early causes UAF if the IO thread is still
   // processing in-flight accepts.
 }
 
@@ -119,7 +119,7 @@ void TCPServerSocket::Impl::Orphan() {
   }
 
   if (!closed_) {
-    Shutdown();  // Silent — stops watching, closes fd. Does NOT release self-hold.
+    Shutdown();  // Silent  --  stops watching, closes fd. Does NOT release self-hold.
   }
 
   // Post a task to release self-hold after any in-flight accept callback
@@ -138,7 +138,7 @@ void TCPServerSocket::Impl::Orphan() {
 void TCPServerSocket::Impl::OnFileCanReadWithoutBlocking(
     NativeIOHandle /*handle*/) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  // Drain all pending connections — edge-triggered starvation prevention.
+  // Drain all pending connections  --  edge-triggered starvation prevention.
   while (true) {
     struct sockaddr_storage client_addr = {};
     socklen_t addr_len = sizeof(client_addr);
@@ -156,13 +156,13 @@ void TCPServerSocket::Impl::OnFileCanReadWithoutBlocking(
             MessagePumpForIO::FdWatchController::Mode::READ, this);
         break;  // All pending connections drained.
       }
-      // Transient resource exhaustion (EMFILE / ENFILE) — just wait for the
+      // Transient resource exhaustion (EMFILE / ENFILE)  --  just wait for the
       // next epoll trigger.  Do NOT stop watching; the server stays alive.
       if (errno == EMFILE || errno == ENFILE) {
-        // Transient FD exhaustion — retry on next epoll trigger.
+        // Transient FD exhaustion  --  retry on next epoll trigger.
         break;
       }
-      // Fatal error (EBADF, etc.) — stop watching to prevent busy-loop.
+      // Fatal error (EBADF, etc.)  --  stop watching to prevent busy-loop.
       watch_controller_.StopWatching();
       break;
     }
@@ -183,7 +183,7 @@ void TCPServerSocket::Impl::OnFileCanReadWithoutBlocking(
     {
       std::unique_lock<std::mutex> lock(mutex_);
       if (closed_ || !accept_callback_) {
-        // Server was closed while we were accepting — discard.
+        // Server was closed while we were accepting  --  discard.
         break;
       }
       DCHECK_MSG(io_runner_, "OnFileCanRead: io_runner_ is null");

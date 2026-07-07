@@ -101,7 +101,7 @@ class SequenceManager::Impl {
     SequenceManagerThreadState* state = GetSequenceManagerThreadState();
     if (state != nullptr && state->manager != nullptr) {
       // A SequenceManager is already bound to this thread. Creating a second
-      // one on the same thread is a programming error — only the first one
+      // one on the same thread is a programming error  --  only the first one
       // will actually pump tasks. The second instance will fail with a DCHECK
       // later in BindToCurrentThread() if Run() is called on it.
       return;
@@ -346,7 +346,7 @@ class SequenceManager::Impl {
     SequenceManagerThreadState* state = EnsureSequenceManagerThreadState();
     if (state->manager != nullptr && state->manager != owner_) {
       // A different SequenceManager is already bound to this thread.
-      // This is a fatal programming error in all builds — continuing
+      // This is a fatal programming error in all builds  --  continuing
       // would cause the second manager to silently never pump tasks,
       // making the thread appear hung.
       CHECK_MSG(false,
@@ -451,7 +451,7 @@ class SequenceManager::Impl {
   // Takes the next immediate task according to the weighted round-robin
   // priority schedule defined in priority_schedule_.
   //
-  // Design rationale — why next_priority_index_ must always advance:
+  // Design rationale  --  why next_priority_index_ must always advance:
   //
   // priority_schedule_ is a static slot array, e.g.:
   //   [UB, UB, UB, UB, UV, UV, BE]  (4 : 2 : 1 ratio)
@@ -468,7 +468,7 @@ class SequenceManager::Impl {
   //   skipped, and the first UV slot is consumed. On the next call the pointer
   //   sits at UV slot #2, again consuming it without paying any UB tax. In a
   //   steady state of UV-only tasks, UV effectively gets 7/7 of all slots
-  //   instead of the intended 2/7 — a 3.5× quota inflation. BEST_EFFORT suffers
+  //   instead of the intended 2/7  --  a 3.5× quota inflation. BEST_EFFORT suffers
   //   the symmetric starvation problem in reverse.
   //
   // Fix: advance next_priority_index_ unconditionally to (schedule_index + 1)

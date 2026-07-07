@@ -11,6 +11,7 @@
 #include <neixx/io/async_stream.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/task/task_runner.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 
 namespace nei {
 
@@ -32,8 +33,10 @@ class NEI_API StreamWriter final {
 
  private:
   AsyncOutputStream* stream_ = nullptr;  // Non-owning.
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   scoped_refptr<TaskRunner> target_task_runner_;
   WeakPtrFactory<StreamWriter> weak_factory_{this, FROM_HERE_MEMBER};
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 }  // namespace nei

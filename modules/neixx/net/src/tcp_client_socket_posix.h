@@ -36,7 +36,7 @@ class TCPClientSocket::Impl final
       public MessagePumpForIO::Watcher {
  public:
   Impl();
-  // From TCPServerSocket accept — socket is already connected, io_runner
+  // From TCPServerSocket accept  --  socket is already connected, io_runner
   // is bound immediately to prevent accidental Connect() misuse.
   Impl(int accepted_fd, scoped_refptr<TaskRunner> io_runner);
 
@@ -50,7 +50,7 @@ class TCPClientSocket::Impl final
   void Close();
   void ShutdownWrite();
 
-  // RefCountedThreadSafe release path — calls Close() and then the
+  // RefCountedThreadSafe release path  --  calls Close() and then the
   // implicit destructor chain.
   ~Impl();
 
@@ -80,7 +80,7 @@ class TCPClientSocket::Impl final
   // Releases the self-hold reference if held (must be called under mutex_).
   void ReleaseSelfHoldIfNeeded();
 
-  // Physical fd + watcher cleanup — must run on the IO thread.
+  // Physical fd + watcher cleanup  --  must run on the IO thread.
   void DoCloseCleanup(int fd);
 
   // Actual connect logic (socket create, bind, connect, pump register).

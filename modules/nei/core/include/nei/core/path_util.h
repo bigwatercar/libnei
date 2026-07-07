@@ -148,7 +148,7 @@ NEI_API int nei_path_normalize(const char *path, char *buf, size_t size);
  * On Windows this replaces @c '/' with @c '\\' (Win32 APIs accept both,
  * but @c '\\' is the canonical form).
  *
- * On POSIX systems this is a no-op — backslash is a valid filename
+ * On POSIX systems this is a no-op  --  backslash is a valid filename
  * character and must not be altered.
  *
  * @param path UTF-8 path (must not be NULL).  Modified in place.

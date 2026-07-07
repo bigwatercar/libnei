@@ -1709,7 +1709,7 @@ TEST(LogCTest, AutoFlushFlushesPendingData) {
   nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
   ASSERT_EQ(nei_log_add_config(&cfg, &cfg_handle), 0);
 
-  /* Log without flushing — data is in the stdio buffer only. */
+  /* Log without flushing  --  data is in the stdio buffer only. */
   nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "auto-flush", "line1");
   nei_llog(cfg_handle, NEI_L_INFO, __FILE__, __LINE__, "auto-flush", "line2");
 

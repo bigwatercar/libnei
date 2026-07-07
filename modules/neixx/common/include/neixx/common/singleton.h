@@ -13,18 +13,18 @@
 namespace nei {
 
 // ===========================================================================
-// Singleton Traits — 策略模型控制单例的生命周期与销毁行为
+// Singleton Traits -- 策略模型控制单例的生命周期与销毁行为
 // ===========================================================================
 //
 // Traits 将单例的"内存分配"和"销毁时机"从 Singleton 容器中彻底解耦。
 // 切换 Traits 即可在传统单例与 Leaky 单例之间自由选择，无需修改业务代码。
 //
 // 用法：
-//   DefaultSingletonTraits<T>  — 传统单例，退出时 delete
-//   LeakySingletonTraits<T>    — 泄露单例，永不 delete（防止关机崩溃）
+//   DefaultSingletonTraits<T>  -- 传统单例，退出时 delete
+//   LeakySingletonTraits<T>    -- 泄露单例，永不 delete（防止关机崩溃）
 
 // ---------------------------------------------------------------------------
-// DefaultSingletonTraits — 标准 new/delete 单例策略
+// DefaultSingletonTraits -- 标准 new/delete 单例策略
 // ---------------------------------------------------------------------------
 // 在 AtExitManager 回调中彻底 delete 实例。适用于生命周期可控且退出期不会被
 // 后台残存线程访问的普通单例。
@@ -35,7 +35,7 @@ struct DefaultSingletonTraits {
 };
 
 // ---------------------------------------------------------------------------
-// LeakySingletonTraits — Chromium 防关机崩溃核心策略
+// LeakySingletonTraits -- Chromium 防关机崩溃核心策略
 // ---------------------------------------------------------------------------
 // 退出时**绝不执行 delete** 释放外壳指针。这保证：
 //   1. 后台残存工作线程在退出期间访问单例时，指针依然有效
@@ -57,7 +57,7 @@ struct LeakySingletonTraits {
 };
 
 // ===========================================================================
-// Singleton<T, Traits> — 泛型单例容器
+// Singleton<T, Traits> -- 泛型单例容器
 // ===========================================================================
 //
 // ## 线程安全（Double-Checked Locking + Acquire-Release 内存屏障）
@@ -97,14 +97,14 @@ class Singleton {
     if (instance == nullptr) {
       std::lock_guard<std::mutex> lock(lock_);
 
-      // Re-check under lock with relaxed order — the mutex already
+      // Re-check under lock with relaxed order -- the mutex already
       // provides the necessary acquire/release semantics.
       instance = instance_.load(std::memory_order_relaxed);
       if (instance == nullptr) {
         instance = Traits::New();
 
         // Register the cleanup callback with AtExitManager.
-        // The callback captures nothing — it accesses instance_ directly,
+        // The callback captures nothing -- it accesses instance_ directly,
         // which is a static member and doesn't need capture.
         bool registered = AtExitManager::RegisterCallback([] {
           T* to_delete = instance_.load(std::memory_order_relaxed);
@@ -113,7 +113,7 @@ class Singleton {
           }
         });
 
-        // Fail fast if the process skeleton is broken — a singleton
+        // Fail fast if the process skeleton is broken -- a singleton
         // being initialized without an active AtExitManager indicates
         // a fundamental environment error.
         CHECK_MSG(registered,

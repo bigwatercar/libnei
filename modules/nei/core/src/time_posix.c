@@ -30,7 +30,7 @@ int64_t nei_time_now_us_hires(void) {
 
 void nei_time_qpc_ensure_anchor(void) {
     /* POSIX: clock_gettime(CLOCK_REALTIME) already has nanosecond
-       precision — no separate anchor initialization needed. */
+       precision  --  no separate anchor initialization needed. */
 }
 
 int64_t nei_time_qpc_fast_us(void) {

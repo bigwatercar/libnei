@@ -65,7 +65,7 @@ class TCPServerSocket::Impl final
   // Pump watcher controller for epoll registration.
   MessagePumpForIO::FdWatchController watch_controller_;
 
-  // Protects accept_callback_ — Close()/Shutdown() may be called from
+  // Protects accept_callback_  --  Close()/Shutdown() may be called from
   // any thread while the IO thread is running the accept loop.
   std::mutex mutex_;
 

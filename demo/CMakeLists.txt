@@ -51,17 +51,7 @@ elseif(UNIX)
 endif()
 
 if(WIN32 AND BUILD_SHARED_LIBS)
-  function(nei_copy_runtime_dlls target_name)
-    add_custom_command(
-      TARGET ${target_name}
-      POST_BUILD
-      COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different
-        $<TARGET_RUNTIME_DLLS:${target_name}> $<TARGET_FILE_DIR:${target_name}>
-      COMMAND_EXPAND_LISTS
-    )
-  endfunction()
-
+  include(neiTargetUtils)
   nei_copy_runtime_dlls(log_demo)
   nei_copy_runtime_dlls(log_immediate_crash_demo)
   nei_copy_runtime_dlls(string_util_demo)
@@ -73,4 +63,22 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_copy_runtime_dlls(nei_demo)
   nei_copy_runtime_dlls(at_exit_demo)
   nei_copy_runtime_dlls(pipe_stream_cross_process_win_demo)
+  nei_copy_runtime_dlls(elevated_process_demo)
+  nei_copy_runtime_dlls(memory_monitor_demo)
+  nei_copy_runtime_dlls(resolve_connect_demo)
+
+  nei_set_utf8_encoding(log_demo)
+  nei_set_utf8_encoding(log_immediate_crash_demo)
+  nei_set_utf8_encoding(string_util_demo)
+  nei_set_utf8_encoding(command_line_demo)
+  nei_set_utf8_encoding(flake_id_demo)
+  nei_set_utf8_encoding(message_pump_io_demo)
+  nei_set_utf8_encoding(async_file_demo)
+  nei_set_utf8_encoding(stream_reader_writer_demo)
+  nei_set_utf8_encoding(nei_demo)
+  nei_set_utf8_encoding(at_exit_demo)
+  nei_set_utf8_encoding(pipe_stream_cross_process_win_demo)
+  nei_set_utf8_encoding(elevated_process_demo)
+  nei_set_utf8_encoding(memory_monitor_demo)
+  nei_set_utf8_encoding(resolve_connect_demo)
 endif()

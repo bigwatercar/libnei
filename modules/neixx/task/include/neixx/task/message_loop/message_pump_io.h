@@ -8,6 +8,7 @@
 
 #include <nei/macros/nei_export.h>
 #include <neixx/task/message_loop/message_pump.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 
 namespace nei {
 
@@ -89,7 +90,9 @@ class NEI_API MessagePumpForIO final : public MessagePump {
     friend class MessagePumpForIOState;
 
     MessagePumpForIO* pump_ = nullptr;
+    NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
     std::shared_ptr<Impl> impl_;
+    NEI_SUPPRESS_MSC_WARNING_4251_END
     NativeIOHandle handle_ = NativeIOHandle{};
     Watcher* watcher_ = nullptr;
     Mode mode_ = Mode::READ;
@@ -115,7 +118,9 @@ class NEI_API MessagePumpForIO final : public MessagePump {
   void ScheduleDelayedWork(const TimeTicks& delayed_run_time) override;
 
  private:
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::shared_ptr<Impl> impl_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 }  // namespace nei

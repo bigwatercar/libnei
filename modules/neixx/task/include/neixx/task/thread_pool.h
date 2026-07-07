@@ -12,6 +12,7 @@
 #include <neixx/task/task_runner.h>
 #include <neixx/task/task_traits.h>
 #include <neixx/threading/platform_thread.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 
 namespace nei {
 
@@ -73,7 +74,9 @@ class NEI_API ThreadPool final {
   void SetTaskObserver(TaskObserver* observer);
 
  private:
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 }  // namespace nei

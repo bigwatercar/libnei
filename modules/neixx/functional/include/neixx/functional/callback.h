@@ -111,7 +111,7 @@ constexpr std::size_t REPEATING_SBO_ALIGN = ONCE_SBO_ALIGN;
 #endif
 
 // =============================================================================
-// OnceCallback<Args...> — move-only, single-shot callable wrapper
+// OnceCallback<Args...>  --  move-only, single-shot callable wrapper
 // =============================================================================
 //
 // Template on argument types.  OnceCallback<> is the void() specialization
@@ -122,7 +122,7 @@ constexpr std::size_t REPEATING_SBO_ALIGN = ONCE_SBO_ALIGN;
 // instantiation in the calling TU.
 //
 // Usage:
-//   OnceCallback<> cb = BindOnce(&DoWork);         // void()  — PostTask compat
+//   OnceCallback<> cb = BindOnce(&DoWork);         // void()   --  PostTask compat
 //   OnceCallback<const AddressList&> cb = [](const AddressList& a) { ... };
 //
 template <typename... Args>
@@ -195,7 +195,7 @@ private:
 };
 
 // =============================================================================
-// RepeatingCallback<Args...> — copyable, multi-shot callable wrapper
+// RepeatingCallback<Args...>  --  copyable, multi-shot callable wrapper
 // =============================================================================
 //
 // Currently only void() is supported (RepeatingCallback<>).  Parameterized

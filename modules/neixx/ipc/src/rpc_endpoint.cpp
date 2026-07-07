@@ -126,7 +126,7 @@ class RpcEndpoint::Impl final {
   void Start(ErrorHandler on_error) {
     std::lock_guard<std::mutex> guard(lock_);
     error_handler_ = std::move(on_error);
-    if (!request_handler_) return;  // handler not set yet — caller error
+    if (!request_handler_) return;  // handler not set yet  --  caller error
 
     channel_->StartReading(
         [this](MessageChannel::Message msg) { OnMessageReceived(std::move(msg)); },
@@ -183,7 +183,7 @@ class RpcEndpoint::Impl final {
 
   void OnMessageReceived(MessageChannel::Message msg) {
     if (!msg || msg->size() < kRpcHeaderSize) {
-      // Malformed frame — tear down.
+      // Malformed frame  --  tear down.
       SignalError();
       return;
     }
@@ -194,7 +194,7 @@ class RpcEndpoint::Impl final {
 
     switch (type) {
       case kOneWay:
-        // Fire-and-forget — no built-in dispatch; reserved for future use.
+        // Fire-and-forget  --  no built-in dispatch; reserved for future use.
         break;
 
       case kRequest: {
@@ -240,14 +240,14 @@ class RpcEndpoint::Impl final {
       }
 
       default:
-        // Unknown message type — protocol violation.
+        // Unknown message type  --  protocol violation.
         SignalError();
         break;
     }
   }
 
   void OnChannelError() {
-    // Drain ALL pending requests — stop timers, collect callbacks,
+    // Drain ALL pending requests  --  stop timers, collect callbacks,
     // then fire them outside the lock with nullptr (forced abort).
     std::vector<ResponseCallback> orphaned_callbacks;
     ErrorHandler handler;
@@ -269,7 +269,7 @@ class RpcEndpoint::Impl final {
       handler = std::move(error_handler_);
     }
 
-    // Fire all orphaned response callbacks with nullptr — signals forced
+    // Fire all orphaned response callbacks with nullptr  --  signals forced
     // abort to every in-flight SendRequest caller.  This prevents them
     // from hanging indefinitely waiting for a response that will never
     // arrive.
@@ -295,7 +295,7 @@ class RpcEndpoint::Impl final {
     auto it = pending_requests_.find(request_id);
     if (it == pending_requests_.end()) {
       // Response already arrived and was dispatched before the timer post
-      // reached us — nothing to do.
+      // reached us  --  nothing to do.
       return;
     }
 
@@ -320,7 +320,7 @@ class RpcEndpoint::Impl final {
         pending_requests_.erase(it);
       }
     }
-    // Dispatch OUTSIDE the lock — pass null to signal timeout.
+    // Dispatch OUTSIDE the lock  --  pass null to signal timeout.
     if (cb) {
       cb(nullptr);
     }
@@ -368,7 +368,7 @@ class RpcEndpoint::Impl final {
 };
 
 // ===========================================================================
-// RpcEndpoint — public forwarding
+// RpcEndpoint  --  public forwarding
 // ===========================================================================
 
 RpcEndpoint::RpcEndpoint(scoped_refptr<TaskRunner> io_task_runner,

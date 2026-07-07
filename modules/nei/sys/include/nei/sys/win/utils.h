@@ -33,7 +33,7 @@ extern "C" {
  *         returned as a positive value.  On error, returns a negative
  *         value (e.g. file not found, not a shortcut, COM failure).
  *
- * @note The returned path may still be a shortcut — some shortcuts chain
+ * @note The returned path may still be a shortcut  --  some shortcuts chain
  *       to other shortcuts.  Callers should check and resolve iteratively
  *       if needed.
  */

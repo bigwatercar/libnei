@@ -4,7 +4,7 @@
 #define NEIXX_COMMON_SCOPED_HANDLE_H_
 
 // ===========================================================================
-// ScopedHandle<Traits> — Chromium-style Windows handle RAII wrapper
+// ScopedHandle<Traits>  --  Chromium-style Windows handle RAII wrapper
 // ===========================================================================
 //
 // This is a Windows-only header.  It intentionally includes <windows.h>.
@@ -18,16 +18,15 @@
 //   static void Close(Handle h);    // Resource release (CloseHandle / no-op)
 //
 // Predefined traits:
-//   DefaultHandleTraits   — INVALID_HANDLE_VALUE, CloseHandle
-//   NullHandleTraits      — NULL, CloseHandle
-//   PseudoHandleTraits    — NULL + INVALID_HANDLE_VALUE, no close
+//   DefaultHandleTraits    --  INVALID_HANDLE_VALUE, CloseHandle
+//   NullHandleTraits       --  NULL, CloseHandle
+//   PseudoHandleTraits     --  NULL + INVALID_HANDLE_VALUE, no close
 // ===========================================================================
 
 #if !defined(_WIN32)
 #error "scoped_handle.h is Windows-only"
 #endif
 
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
 #include <utility>
@@ -58,12 +57,12 @@ struct PseudoHandleTraits {
   using Handle = HANDLE;
   // INVALID_HANDLE_VALUE is the reset sentinel for release().
   static Handle NullValue() { return INVALID_HANDLE_VALUE; }
-  // Rejects both NULL and INVALID_HANDLE_VALUE — GetStdHandle uses
+  // Rejects both NULL and INVALID_HANDLE_VALUE  --  GetStdHandle uses
   // both as failure indicators for distinct error modes.
   static bool IsValid(Handle h) {
     return h != nullptr && h != INVALID_HANDLE_VALUE;
   }
-  // Pseudo-handles are owned by the OS — must never be closed.
+  // Pseudo-handles are owned by the OS  --  must never be closed.
   static void Close(Handle h) { (void)h; }
 };
 

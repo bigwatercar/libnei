@@ -138,7 +138,7 @@ TEST(PathUtilTest, StemNoExt) {
 
 TEST(PathUtilTest, StemHiddenFile) {
     char buf[256];
-    /* .gitignore — base name starts with dot, no "extension" */
+    /* .gitignore  --  base name starts with dot, no "extension" */
     nei_path_stem("/a/b/.gitignore", buf, sizeof(buf));
     EXPECT_STREQ(buf, ".gitignore");
 }
@@ -237,7 +237,7 @@ TEST(PathUtilTest, ToNativeMixedSlashes) {
 #ifdef _WIN32
     EXPECT_STREQ(buf, "a\\b\\c\\d");
 #else
-    /* POSIX: backslash is a valid filename character — unchanged. */
+    /* POSIX: backslash is a valid filename character  --  unchanged. */
     EXPECT_STREQ(buf, "a/b\\c/d");
 #endif
 }

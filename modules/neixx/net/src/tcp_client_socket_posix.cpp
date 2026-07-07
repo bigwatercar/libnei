@@ -77,7 +77,7 @@ void TCPClientSocket::Impl::Close() {
     }
   }
 
-  // Extract fd — physical cleanup (StopWatching + close) must run on the
+  // Extract fd  --  physical cleanup (StopWatching + close) must run on the
   // IO thread to avoid racing with epoll_wait.
   int fd = fd_;
   fd_ = -1;
@@ -128,7 +128,7 @@ void TCPClientSocket::Impl::Orphan() {
     }
 
     if (!closed_ && write_buf_ && write_cb_) {
-      // Pending write still in flight — replace the user callback with
+      // Pending write still in flight  --  replace the user callback with
       // our internal flush-then-shutdown callback.  Do NOT send FIN yet;
       // the write data hasn't reached the network.
       write_cb_ = [this](bool /*success*/, std::size_t /*bytes*/) {
@@ -136,12 +136,12 @@ void TCPClientSocket::Impl::Orphan() {
       };
       return;
     }
-    // No pending write — clear write state.
+    // No pending write  --  clear write state.
     write_cb_ = {};
     write_buf_.reset();
   }
 
-  // No pending write — proceed with graceful shutdown immediately.
+  // No pending write  --  proceed with graceful shutdown immediately.
   if (!closed_) {
     ShutdownWrite();
     StartOrphanDrain();
@@ -149,13 +149,13 @@ void TCPClientSocket::Impl::Orphan() {
 }
 
 void TCPClientSocket::Impl::OnOrphanWriteFlushed() {
-  // All buffered data has been written — now safe to send FIN.
+  // All buffered data has been written  --  now safe to send FIN.
   ShutdownWrite();
   StartOrphanDrain();
 }
 
 void TCPClientSocket::Impl::StartOrphanDrain() {
-  // Must post to the IO thread — ReadAsync requires it, and Orphan()
+  // Must post to the IO thread  --  ReadAsync requires it, and Orphan()
   // may be called from any thread (e.g. the shell's destructor).
   DCHECK_MSG(io_runner_, "StartOrphanDrain: io_runner_ is null");
   if (io_runner_) {
@@ -165,12 +165,12 @@ void TCPClientSocket::Impl::StartOrphanDrain() {
           auto drain_buf = MakeRefCounted<IOBufferWithSize>(4096);
           self->ReadAsync(std::move(drain_buf), 4096,
                           [self](bool success, std::size_t n) {
-                            // EOF or error — close the socket, which
+                            // EOF or error  --  close the socket, which
                             // triggers ReleaseSelfHoldIfNeeded().
                             if (!success || n == 0) {
                               self->Close();
                             }
-                            // Otherwise keep reading — self keeps Impl alive.
+                            // Otherwise keep reading  --  self keeps Impl alive.
                           });
         }, WrapRefCounted(this)));
   }
@@ -198,7 +198,7 @@ bool TCPClientSocket::Impl::Connect(
     TCPClientSocket::ConnectCallback callback,
     scoped_refptr<TaskRunner> io_runner) {
   DCHECK(io_runner);
-  DCHECK_MSG(!connected_, "Connect: socket already connected — cannot reconnect");
+  DCHECK_MSG(!connected_, "Connect: socket already connected  --  cannot reconnect");
   DCHECK_MSG(!io_runner_, "Connect: io_runner_ already set");
   io_runner_ = std::move(io_runner);
 
@@ -210,7 +210,7 @@ bool TCPClientSocket::Impl::Connect(
                     TCPClientSocket::ConnectCallback cb) {
           self->DoConnect(a, std::move(cb));
         }, WrapRefCounted(this), addr, std::move(callback)));
-    return true;  // Request accepted — will be processed on IO thread.
+    return true;  // Request accepted  --  will be processed on IO thread.
   }
 
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
@@ -235,7 +235,7 @@ bool TCPClientSocket::Impl::DoConnect(
 
   int rc = connect(fd_, reinterpret_cast<struct sockaddr*>(&sa), sa_len);
   if (rc == 0) {
-    // Connected synchronously — rare but possible on loopback.
+    // Connected synchronously  --  rare but possible on loopback.
     connected_ = true;
     PostConnectResult(true);
     return true;
@@ -257,10 +257,10 @@ bool TCPClientSocket::Impl::DoConnect(
     return false;
   }
 
-  // Register with epoll for writability — when the socket becomes
+  // Register with epoll for writability  --  when the socket becomes
   // writable, the TCP handshake is complete (or failed).
   auto* pump = MessagePumpForIO::Current();
-  DCHECK_MSG(pump, "Connect: pump null — not on IO thread");
+  DCHECK_MSG(pump, "Connect: pump null  --  not on IO thread");
 
   write_controller_.StartWatching(
       pump, fd_,
@@ -316,7 +316,7 @@ void TCPClientSocket::Impl::ReadAsync(
   lock.unlock();
 
   auto* pump = MessagePumpForIO::Current();
-  DCHECK_MSG(pump, "ReadAsync: pump null — not on IO thread");
+  DCHECK_MSG(pump, "ReadAsync: pump null  --  not on IO thread");
 
   read_controller_.StartWatching(
       pump, fd_,
@@ -366,7 +366,7 @@ void TCPClientSocket::Impl::WriteAsync(
   lock.unlock();
 
   auto* pump = MessagePumpForIO::Current();
-  DCHECK_MSG(pump, "WriteAsync: pump null — not on IO thread");
+  DCHECK_MSG(pump, "WriteAsync: pump null  --  not on IO thread");
 
   write_controller_.StartWatching(
       pump, fd_,
@@ -387,7 +387,7 @@ void TCPClientSocket::Impl::OnFileCanReadWithoutBlocking(
   lock.unlock();
 
   if (!buf || !cb) {
-    read_controller_.StopWatching();  // No pending read — stop notifications.
+    read_controller_.StopWatching();  // No pending read  --  stop notifications.
     return;
   }
 
@@ -435,7 +435,7 @@ void TCPClientSocket::Impl::OnFileCanWriteWithoutBlocking(
   std::unique_lock<std::mutex> lock(mutex_);
   if (!write_buf_ || !write_cb_) {
     lock.unlock();
-    write_controller_.StopWatching();  // No pending write — stop notifications.
+    write_controller_.StopWatching();  // No pending write  --  stop notifications.
     return;
   }
   scoped_refptr<IOBuffer> buf = write_buf_;
@@ -447,7 +447,7 @@ void TCPClientSocket::Impl::OnFileCanWriteWithoutBlocking(
   if (n > 0) {
     std::size_t new_offset = offset + static_cast<std::size_t>(n);
     if (new_offset >= len) {
-      // All data written — signal completion.
+      // All data written  --  signal completion.
       lock.lock();
       write_buf_.reset();
       write_buf_len_ = 0;
@@ -457,7 +457,7 @@ void TCPClientSocket::Impl::OnFileCanWriteWithoutBlocking(
       write_controller_.StopWatching();
       PostWriteResult(std::move(cb), true, len);
     } else {
-      // Partial write — update offset and re-arm.
+      // Partial write  --  update offset and re-arm.
       lock.lock();
       write_offset_ = new_offset;
       lock.unlock();

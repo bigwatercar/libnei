@@ -120,7 +120,7 @@ void TraceLog::AddEvent(TraceEvent event) {
   ThreadTraceBuffer* buf = GetOrCreateThreadBuffer();
   if (!buf) return;
 
-  // ★ 线程独占写入: 加锁但无竞争 (同类线程不会同时访问同一个 buf)
+  // * 线程独占写入: 加锁但无竞争 (同类线程不会同时访问同一个 buf)
   //   仅在 Flush() 时主线程会短暂持有此锁来提取数据。
   std::lock_guard<std::mutex> lock(buf->mutex);
   buf->events.push_back(std::move(event));
@@ -134,7 +134,7 @@ void TraceLog::Flush(std::ostream& out) {
     for (auto& buf : thread_buffers_) {
       if (!buf) continue;
 
-      // ★ 对每个 Buffer 加锁 → 提取 → 清空 → 解锁
+      // * 对每个 Buffer 加锁 -> 提取 -> 清空 -> 解锁
       //   彻底消除 "主线程遍历 + 工作线程 push_back" 的并发修改 UB
       std::lock_guard<std::mutex> buf_lock(buf->mutex);
       all_events.insert(all_events.end(),

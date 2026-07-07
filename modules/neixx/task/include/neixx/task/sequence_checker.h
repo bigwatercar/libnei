@@ -4,7 +4,7 @@
 #define NEIXX_TASK_SEQUENCE_CHECKER_H_
 
 // =============================================================================
-// SequenceChecker — 逻辑序列归属校验器 (Chromium-style)
+// SequenceChecker  --  逻辑序列归属校验器 (Chromium-style)
 // =============================================================================
 //
 // 目的：在 Debug 构建中检测"对象被错误的逻辑序列访问"这类并发逻辑错误。
@@ -95,7 +95,7 @@ static_assert(sizeof(void*) >= sizeof(uint64_t),
 
 // 获取存储当前线程 SequenceToken 的 TLS Slot。
 // 使用函数级 static 保证线程安全的延迟初始化 (C++11 6.7/4)。
-// 注意：不再注册析构回调 —— Token 值直接编码在 void* 中，无需清理。
+// 注意：不再注册析构回调  --  --  Token 值直接编码在 void* 中，无需清理。
 inline ThreadLocalStorage::Slot& GetSequenceTokenTLSSlot() {
   static ThreadLocalStorage::Slot slot;
   return slot;
@@ -115,7 +115,7 @@ inline SequenceToken GetCurrentSequenceToken() {
 //
 // 调用者：任务调度基础设施。仅在当前线程上调用。
 //
-// ★ 关键性能特性：此函数完全零分配 —— Token 的 uint64_t 值通过
+// * 关键性能特性：此函数完全零分配  --  --  Token 的 uint64_t 值通过
 //    reinterpret_cast 直接嵌入 void* TLS 槽位，无 new/delete，无堆交互。
 //    在高频任务调度（每秒百万次派发）场景下不会触发系统堆分配器锁竞争。
 inline void SetCurrentSequenceToken(SequenceToken token) {
@@ -146,25 +146,25 @@ class NEI_API SequenceChecker {
     // thread_checker_ 始终在构造时绑定到当前物理线程，用作降级判据。
   }
 
-  // 禁止拷贝/移动 —— checker 的生命周期与宿主对象严格绑定。
+  // 禁止拷贝/移动  --  --  checker 的生命周期与宿主对象严格绑定。
   SequenceChecker(const SequenceChecker&) = delete;
   SequenceChecker& operator=(const SequenceChecker&) = delete;
   SequenceChecker(SequenceChecker&&) = delete;
   SequenceChecker& operator=(SequenceChecker&&) = delete;
 
   // -----------------------------------------------------------------------
-  // CalledOnValidSequence() — 判断当前执行上下文是否为合法的逻辑序列。
+  // CalledOnValidSequence()  --  判断当前执行上下文是否为合法的逻辑序列。
   //
   // 校验逻辑 (按优先级)：
-  //   1. 若 checker 处于 detached 状态 → CAS 惰性绑定到当前上下文
+  //   1. 若 checker 处于 detached 状态 -> CAS 惰性绑定到当前上下文
   //   2. 若 checker 绑定了有效的 SequenceToken：
-  //      a) 若当前 TLS 也有有效 token → 比对 token 值是否一致
-  //      b) 若当前 TLS 无有效 token → 降级使用物理线程 ID 判据
-  //   3. 若 checker 未绑定有效 token → 降级使用物理线程 ID 判据
+  //      a) 若当前 TLS 也有有效 token -> 比对 token 值是否一致
+  //      b) 若当前 TLS 无有效 token -> 降级使用物理线程 ID 判据
+  //   3. 若 checker 未绑定有效 token -> 降级使用物理线程 ID 判据
   //
-  // ★ 线程安全保证：单一的 std::atomic<uint64_t> 状态机 + CAS 惰性绑定，
+  // * 线程安全保证：单一的 std::atomic<uint64_t> 状态机 + CAS 惰性绑定，
   //    彻底消除了多成员变量分散读写导致的数据竞争 (Data Race)。
-  //    TSan 验证通过 —— 所有状态转换均通过 acquire/release 屏障同步。
+  //    TSan 验证通过  --  --  所有状态转换均通过 acquire/release 屏障同步。
   // -----------------------------------------------------------------------
   bool CalledOnValidSequence() const {
     uint64_t state = sequence_state_.load(std::memory_order_acquire);
@@ -179,11 +179,11 @@ class NEI_API SequenceChecker {
       // CAS 争抢绑定权：只有一个线程能成功将 kDetachedState 替换为 new_state
       if (sequence_state_.compare_exchange_strong(state, new_state,
                                                    std::memory_order_acq_rel)) {
-        // CAS 成功 —— 当前线程获得绑定权
+        // CAS 成功  --  --  当前线程获得绑定权
         thread_checker_.DetachFromThread();
         return true;
       }
-      // CAS 失败 —— 另一个线程抢先绑定了。
+      // CAS 失败  --  --  另一个线程抢先绑定了。
       // state 已被 CAS 更新为抢占者的状态值，顺延往下走常规校验路径。
     }
 
@@ -192,19 +192,19 @@ class NEI_API SequenceChecker {
       // checker 之前绑定了某个具体的 SequenceToken
       const SequenceToken current_token = internal::GetCurrentSequenceToken();
       if (current_token.is_valid()) {
-        // L1: 序列级校验 —— 比对 uint64_t token 值
+        // L1: 序列级校验  --  --  比对 uint64_t token 值
         return state == current_token.value();
       }
-      // 当前上下文无序列 token → 降级 L2: 物理线程校验
+      // 当前上下文无序列 token -> 降级 L2: 物理线程校验
       return thread_checker_.CalledOnValidThread();
     } else {
-      // checker 绑定时就没有序列 token → 始终走 L2: 物理线程校验
+      // checker 绑定时就没有序列 token -> 始终走 L2: 物理线程校验
       return thread_checker_.CalledOnValidThread();
     }
   }
 
   // -----------------------------------------------------------------------
-  // DetachFromSequence() — 解除序列/线程绑定，进入"待重新绑定"状态。
+  // DetachFromSequence()  --  解除序列/线程绑定，进入"待重新绑定"状态。
   //
   // 调用后，下一次 CalledOnValidSequence() 将把调用者所在的序列/线程
   // 惰性绑定为新的合法上下文。
@@ -221,14 +221,14 @@ class NEI_API SequenceChecker {
   // 单原子变量状态机编码
   // =========================================================================
   //
-  // 将原来分散的三个变量 —— detached_(atomic<bool>)、has_token_(bool)、
-  // token_(SequenceToken) —— 压缩为单一的 atomic<uint64_t>，彻底消灭
+  // 将原来分散的三个变量  --  --  detached_(atomic<bool>)、has_token_(bool)、
+  // token_(SequenceToken)  --  --  压缩为单一的 atomic<uint64_t>，彻底消灭
   // 多成员变量并发读写导致的数据竞争 (UB / TSan 报错)。
   //
   // 状态编码：
-  //   kDetachedState       = UINT64_MAX  → "已 detach，等待惰性绑定"
-  //   kThreadFallbackState = 0           → "已绑定物理线程，但无 SequenceToken"
-  //   其他值 (1..UINT64_MAX-1)           → 已绑定的具体 SequenceToken::value()
+  //   kDetachedState       = UINT64_MAX  -> "已 detach，等待惰性绑定"
+  //   kThreadFallbackState = 0           -> "已绑定物理线程，但无 SequenceToken"
+  //   其他值 (1..UINT64_MAX-1)           -> 已绑定的具体 SequenceToken::value()
   //
   // 安全性保证：
   //   - SequenceToken::Create() 从 1 开始自增，永不与 0 或 UINT64_MAX 冲突
@@ -272,7 +272,7 @@ class NEI_API SequenceChecker {
 //
 // 设计说明：这些宏是 SequenceChecker 的"唯一正确用法入口"。
 // 在 Release 模式下，宏展开为空操作，彻底消除 SequenceChecker 的运行时开销
-// 和内存占用。禁止直接使用 SequenceChecker 的成员方法 —— 这绕过了零开销保证。
+// 和内存占用。禁止直接使用 SequenceChecker 的成员方法  --  --  这绕过了零开销保证。
 //
 
 #if NEI_DCHECK_IS_ON
@@ -292,7 +292,7 @@ class NEI_API SequenceChecker {
 
 #else  // !NEI_DCHECK_IS_ON
 
-// Release 模式：完全零开销 —— 不声明任何成员，不产生任何代码。
+// Release 模式：完全零开销  --  --  不声明任何成员，不产生任何代码。
 // 注意：DECLARE_SEQUENCE_CHECKER 展开为空（不是 ((void)0)），
 // 因为它用于类成员声明，((void)0) 在 class body 中是非法的。
 #define DECLARE_SEQUENCE_CHECKER(name)

@@ -24,7 +24,7 @@ namespace nei {
 
 /** @brief Resolve the current user's home directory.
  *
- *  Priority: @c $HOME → @c getpwuid_r → @c "/". */
+ *  Priority: @c $HOME -> @c getpwuid_r -> @c "/". */
 static std::string GetHomeDir() {
   const char *env = getenv("HOME");
   if (env != nullptr && env[0] != '\0') {
@@ -46,7 +46,7 @@ static std::string GetHomeDir() {
 
 /** @brief Look up an XDG user directory.
  *
- *  Priority: environment variable → @c $HOME/<fallback_subdir>.
+ *  Priority: environment variable -> @c $HOME/<fallback_subdir>.
  *  Returns an empty path only when the env var is explicitly set to an empty
  *  string (caller should treat this as "not available"). */
 static std::filesystem::path GetXdgUserDir(const char *env_var,
@@ -56,14 +56,14 @@ static std::filesystem::path GetXdgUserDir(const char *env_var,
     return std::filesystem::path(env);
   }
   if (env != nullptr && env[0] == '\0') {
-    /* Explicitly set to empty → user does not want this directory. */
+    /* Explicitly set to empty -> user does not want this directory. */
     return {};
   }
   return std::filesystem::path(GetHomeDir()) / fallback_subdir;
 }
 
 // =============================================================================
-// DefaultProvider — platform path resolution (Linux)
+// DefaultProvider  --  platform path resolution (Linux)
 // =============================================================================
 
 bool PathService::Impl::DefaultProvider(int key,
@@ -132,7 +132,7 @@ bool PathService::Impl::DefaultProvider(int key,
   }
 
   // -----------------------------------------------------------------------
-  // DIR_PROGRAM_DATA — not applicable on Linux
+  // DIR_PROGRAM_DATA  --  not applicable on Linux
   // -----------------------------------------------------------------------
   case PathKeys::DIR_PROGRAM_DATA: {
     return false;
