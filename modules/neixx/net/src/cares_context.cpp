@@ -7,6 +7,7 @@
 #include <ares.h>
 
 #include <nei/debug/check.h>
+#include <neixx/common/location.h>
 #include <neixx/net/wsa_init.h>
 
 namespace nei::net {
@@ -164,11 +165,17 @@ void CaresContext::Resolve(const std::string& host,
                            const HostResolverOptions& options,
                            const struct ares_addrinfo_hints* hints,
                            ResolveCallback callback,
-                           void* arg) {
+                           void* arg,
+                           scoped_refptr<TaskRunner> target_runner) {
   ChannelEntry* entry = GetOrCreateChannel(options);
   if (entry == nullptr) {
-    if (callback) {
-      callback(arg, ARES_ENOMEM, 0, nullptr);
+    // Error path: post the callback to |target_runner| so that the calling
+    // thread is never blocked synchronously.  This keeps callback delivery
+    // consistent with the success path (both are asynchronous).
+    if (callback && target_runner) {
+      target_runner->PostTask(FROM_HERE, [callback, arg]() {
+        callback(arg, ARES_ENOMEM, 0, nullptr);
+      });
     }
     return;
   }

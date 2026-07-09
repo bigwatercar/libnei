@@ -185,7 +185,8 @@ bool HostResolver::Impl::Resolve(const std::string& host,
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_protocol = IPPROTO_TCP;
 
-  CaresContext::Get()->Resolve(host, options_, &hints, OnAresCallback, query);
+  CaresContext::Get()->Resolve(host, options_, &hints, OnAresCallback, query,
+                               query->target_runner);
   return true;
 }
 

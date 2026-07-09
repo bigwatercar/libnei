@@ -10,6 +10,7 @@
 
 #include <neixx/net/host_resolver.h>
 #include <neixx/synchronization/lock.h>
+#include <neixx/task/task_runner.h>
 
 // Forward declarations for c-ares types.
 struct ares_addrinfo;
@@ -38,11 +39,15 @@ class CaresContext {
   CaresContext(const CaresContext&) = delete;
   CaresContext& operator=(const CaresContext&) = delete;
 
+  // |target_runner|  --  callback is always delivered on this runner.
+  // If |target_runner| is null, the callback is called directly (error path)
+  // or on the c-ares event thread (success path).
   void Resolve(const std::string& host,
                const HostResolverOptions& options,
                const struct ares_addrinfo_hints* hints,
                ResolveCallback callback,
-               void* arg);
+               void* arg,
+               scoped_refptr<TaskRunner> target_runner);
 
  private:
   struct ChannelEntry {

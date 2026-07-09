@@ -29,10 +29,13 @@ AddressList ConvertAresAddrInfo(const struct ares_addrinfo* result);
 // Uses c-ares for asynchronous DNS resolution via a shared CaresContext
 // singleton.  The dual-thread trampoline works as follows:
 //
-//   1. Resolve() -> CaresContext::Resolve() submits to c-ares channel
+//   1. Resolve() -> CaresContext::Resolve() submits to c-ares channel, or
+//      if channel creation fails, the error callback is PostTask'd to
+//      |target_runner| (never called synchronously on the caller).
 //   2. c-ares event thread performs the lookup asynchronously
-//   3. OnAresCallback fires -> ConvertAresAddrInfo -> BindPostTask to
-//      target_runner where the user callback executes
+//   3. OnAresCallback fires (on c-ares thread for success, or on
+//      target_runner for channel errors) -> ConvertAresAddrInfo ->
+//      BindPostTask to target_runner where the user callback executes
 //
 // Lifetime: the WeakPtrFactory guarantees that if the HostResolver is
 // destroyed while a DNS lookup is in flight, the callback becomes
