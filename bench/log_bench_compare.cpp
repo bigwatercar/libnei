@@ -36,6 +36,7 @@
 #endif
 
 #include "nei/log/log.h"
+#include <neixx/strings/utf_string_conversions.h>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -498,24 +499,7 @@ int main(int argc, char **argv) {
   /* argv[1] is in the system ANSI code page on Windows MSVC.
    * Convert to UTF-8 so _nei_log_create_default_file_sink receives a
    * properly encoded path. */
-  const int wlen = MultiByteToWideChar(CP_ACP, 0, argv[1], -1, NULL, 0);
-  std::string out_dir;
-  if (wlen > 0) {
-    wchar_t *wbuf = (wchar_t *)malloc((size_t)wlen * sizeof(wchar_t));
-    if (wbuf != NULL) {
-      MultiByteToWideChar(CP_ACP, 0, argv[1], -1, wbuf, wlen);
-      const int u8len = WideCharToMultiByte(CP_UTF8, 0, wbuf, wlen, NULL, 0, NULL, NULL);
-      if (u8len > 0) {
-        out_dir.resize((size_t)u8len - 1U, '\0');
-        WideCharToMultiByte(CP_UTF8, 0, wbuf, wlen, &out_dir[0], u8len, NULL, NULL);
-      }
-      free(wbuf);
-    }
-  }
-  if (out_dir.empty()) {
-    /* Fallback: assume ASCII-only path (ACP = UTF-8 for ASCII subset). */
-    out_dir = argv[1];
-  }
+  const std::string out_dir = nei::SystemCodepageToUTF8(argv[1]);
 #else
   const std::string out_dir = argv[1];
 #endif

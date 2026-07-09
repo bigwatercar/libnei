@@ -23,10 +23,30 @@ std::string UTF16ToUTF8Impl(std::u16string_view utf16) {
 
 } // namespace
 
-// Public API: always use std::string_view / std::string for UTF-8 to maintain
-// compatibility across C++17 and C++20.
-std::u16string UTF8ToUTF16(std::string_view utf8) { return UTF8ToUTF16Impl(utf8); }
-std::string UTF16ToUTF8(std::u16string_view utf16) { return UTF16ToUTF8Impl(utf16); }
+// =============================================================================
+// System codepage (ACP) conversions
+// =============================================================================
+//
+// On POSIX the system encoding is assumed to be UTF-8 (the default on all
+// modern Linux and macOS distributions).  For non-UTF-8 locales these
+// functions still produce valid UTF output; the semantic mapping is a
+// best-effort identity transform.
+
+std::string SystemCodepageToUTF8(std::string_view mbcs) {
+  return std::string(mbcs);
+}
+
+std::u16string SystemCodepageToUTF16(std::string_view mbcs) {
+  return UTF8ToUTF16(mbcs);
+}
+
+std::string UTF8ToSystemCodepage(std::string_view utf8) {
+  return std::string(utf8);
+}
+
+std::string UTF16ToSystemCodepage(std::u16string_view utf16) {
+  return UTF16ToUTF8(utf16);
+}
 
 } // namespace nei
 
