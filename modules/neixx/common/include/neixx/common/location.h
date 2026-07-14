@@ -17,7 +17,8 @@ public:
   constexpr Location(const char *file_name, std::int32_t line, const char *function_name) noexcept
       : file_name_(file_name)
       , function_name_(function_name)
-      , line_(line) {
+      , line_(line)
+      , reserved_(0) {
   }
 
   static constexpr Location Current(const char *file_name, std::int32_t line, const char *function_name) noexcept {
@@ -58,7 +59,7 @@ private:
   const char *file_name_ = nullptr;
   const char *function_name_ = nullptr;
   std::int32_t line_ = 0;
-  std::int32_t reserved_ = 0;
+  [[maybe_unused]] std::int32_t reserved_ = 0;
 };
 
 static_assert(sizeof(Location) == sizeof(const char *) * 2 + sizeof(std::int32_t) * 2,

@@ -43,17 +43,6 @@ static const char *find_last_sep(const char *p, const char *end) {
     return sep;
 }
 
-/* Find the first dot in the base name (after last separator). */
-static const char *find_first_dot_in_basename(const char *path, size_t len) {
-    const char *end = path + len;
-    const char *last_sep = find_last_sep(path, end);
-    const char *start = last_sep ? (last_sep + 1) : path;
-    /* A leading dot in the base name is not an extension separator. */
-    if (start >= end || *start == '.') return NULL;
-    const char *dot = strchr(start, '.');
-    return dot;
-}
-
 /* =========================================================================
  * Public API  --  string operations
  * ========================================================================= */
