@@ -4,7 +4,7 @@ project(
   nei
   VERSION 0.1.0
   DESCRIPTION
-    "libNei: A modern, cross-platform C/C++ foundation library focusing on performance, safety, and ease of use. The name derives from 'Neiku' (内库) in Chinese, metaphorically implying 'inner strength'—haha!"
+    "libNei: A modern, cross-platform C/C++ foundation library focusing on performance, safety, and ease of use."
   LANGUAGES C CXX
 )
 
