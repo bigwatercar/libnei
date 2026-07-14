@@ -4,6 +4,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 #include <windows.h>
 
 /* Stack buffer size for intermediate wchar_t conversions. */
@@ -20,14 +21,27 @@ static int wstr_to_mb_impl(UINT code_page, const wchar_t *src, int src_len,
         return -1;
     }
 
-    /* WideCharToMultiByte includes the null terminator in needed.
-     * Return the byte count excluding it, as documented. */
-    int out_len = needed - 1;
+    /* WideCharToMultiByte includes the null terminator in 'needed' only when:
+     *   - src_len == -1 (null-terminated input), or
+     *   - a null character is found within the first src_len characters.
+     * Only subtract 1 in those cases. */
+    int out_len;
+    if (src_len < 0) {
+        out_len = needed - 1;
+    } else {
+        /* Check for embedded null terminator within the explicit length. */
+        size_t actual = wcsnlen(src, (size_t)src_len);
+        out_len = (actual < (size_t)src_len) ? needed - 1 : needed;
+    }
 
     if (size == 0) {
         return out_len; /* no buffer to write to, report required size */
     }
     if ((size_t)needed >= size) {
+        /* Zero the buffer first: when a multi-byte character doesn't fully fit,
+         * WideCharToMultiByte stops without writing to the remaining bytes,
+         * which may leave buf[...] uninitialized. */
+        memset(buf, 0, size);
         WideCharToMultiByte(code_page, 0, src, src_len,
                             buf, (int)(size - 1), NULL, NULL);
         buf[size - 1] = '\0';

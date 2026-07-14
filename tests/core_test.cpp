@@ -181,6 +181,83 @@ TEST(CoreEncodingTest, MbcsToUtf8ExplicitLength) {
     int len = nei_mbcs_to_utf8(src, 5, buf, sizeof(buf));
     EXPECT_GT(len, 0);
     EXPECT_STREQ(buf, "Hello");
+    EXPECT_EQ(len, 5) << "Return value should be exact byte count without null";
+}
+
+TEST(CoreEncodingTest, WstrToUtf8ExplicitLength) {
+    const wchar_t src[] = L"HelloWorld";
+    char buf[64];
+    int len = nei_wstr_to_utf8(src, 5, buf, sizeof(buf));
+    EXPECT_GT(len, 0);
+    EXPECT_STREQ(buf, "Hello");
+    EXPECT_EQ(len, 5) << "Return value should be exact byte count without null";
+}
+
+/* --- exact buffer size edge cases --- */
+
+TEST(CoreEncodingTest, WstrToUtf8ExactBuffer) {
+    /* Null-terminated src, buffer exactly fits content + null. */
+    const wchar_t src[] = L"Hello";
+    char buf[6];
+    int len = nei_wstr_to_utf8(src, -1, buf, sizeof(buf));
+    EXPECT_EQ(len, 5);
+    EXPECT_STREQ(buf, "Hello");
+}
+
+TEST(CoreEncodingTest, WstrToUtf8ExactBufferContentOnly) {
+    /* Null-terminated src, buffer only fits content, no room for null.
+     * Must truncate and null-terminate. Return value = required size (5). */
+    const wchar_t src[] = L"Hello";
+    char buf[5];
+    int len = nei_wstr_to_utf8(src, -1, buf, sizeof(buf));
+    EXPECT_EQ(len, 5) << "Should return required size when truncated";
+    EXPECT_EQ(buf[4], '\0');
+}
+
+TEST(CoreEncodingTest, WstrToUtf8ExplicitLengthExactBuffer) {
+    /* Explicit length, buffer = content size, no null room.
+     * Must truncate and null-terminate. Return value = required size (5). */
+    const wchar_t src[] = L"HelloWorld";
+    char buf[5];
+    int len = nei_wstr_to_utf8(src, 5, buf, sizeof(buf));
+    EXPECT_EQ(len, 5) << "Should return required size when truncated";
+    EXPECT_EQ(buf[4], '\0');
+}
+
+TEST(CoreEncodingTest, WstrToUtf8ExplicitLengthExactBufferWithNull) {
+    /* Explicit length, buffer = content + 1, just enough for content + null. */
+    const wchar_t src[] = L"HelloWorld";
+    char buf[6];
+    int len = nei_wstr_to_utf8(src, 5, buf, sizeof(buf));
+    EXPECT_EQ(len, 5);
+    EXPECT_STREQ(buf, "Hello");
+}
+
+TEST(CoreEncodingTest, MbcsToUtf8ExplicitLengthExactBuffer) {
+    /* Explicit length MBCS, buffer = content size, no null room. */
+    const char src[] = "HelloWorld";
+    char buf[5];
+    int len = nei_mbcs_to_utf8(src, 5, buf, sizeof(buf));
+    EXPECT_EQ(len, 5) << "Should return required size when truncated";
+    EXPECT_EQ(buf[4], '\0');
+}
+
+TEST(CoreEncodingTest, Utf8ToMbcsExplicitLength) {
+    const char src[] = "HelloWorld";
+    char buf[64];
+    int len = nei_utf8_to_mbcs(src, 5, buf, sizeof(buf));
+    EXPECT_GT(len, 0);
+    EXPECT_STREQ(buf, "Hello");
+    EXPECT_EQ(len, 5) << "Return value should be exact byte count without null";
+}
+
+TEST(CoreEncodingTest, Utf8ToMbcsExplicitLengthExactBuffer) {
+    /* Explicit length UTF-8->MBCS, buffer = content size, no null room. */
+    const char src[] = "HelloWorld";
+    char buf[5];
+    int len = nei_utf8_to_mbcs(src, 5, buf, sizeof(buf));
+    EXPECT_EQ(len, 5) << "Should return required size when truncated";
+    EXPECT_EQ(buf[4], '\0');
 }
 
 #endif /* _WIN32 */
