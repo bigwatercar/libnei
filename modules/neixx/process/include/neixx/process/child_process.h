@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 
 #include <nei/macros/nei_export.h>
 #include <neixx/common/time.h>
@@ -60,6 +61,10 @@ struct ProcessLaunchOptions {
 
   /// If true, ChildProcess destruction force-terminates a still-running child.
   bool kill_on_destruction = false;
+
+  /// Working directory for the child process, UTF-8 encoded.
+  /// Empty means inherit from parent.
+  std::string working_directory;
 
   /// Resource/sandbox constraints applied during launch.
   ResourceLimits resource_limits;

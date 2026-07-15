@@ -357,6 +357,17 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
       env_block = BuildEnvironmentBlockWithControlHandle(child_control_write);
     }
 
+    // Convert working_directory to wide string for CreateProcessW.
+    std::vector<wchar_t> wdir;
+    if (!options.working_directory.empty()) {
+      const std::u16string dir_u16 = UTF8ToUTF16(options.working_directory);
+      wdir.reserve(dir_u16.size() + 1);
+      for (char16_t ch : dir_u16) {
+        wdir.push_back(static_cast<wchar_t>(ch));
+      }
+      wdir.push_back(L'\0');
+    }
+
     PROCESS_INFORMATION pi{};
     const DWORD creation_flags = EXTENDED_STARTUPINFO_PRESENT |
                    CREATE_NEW_PROCESS_GROUP |
@@ -364,7 +375,7 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     const BOOL created = CreateProcessW(
       nullptr, cmdline.data(), nullptr, nullptr, TRUE, creation_flags,
       enable_control_guard ? env_block.data() : nullptr,
-        nullptr, &startup.StartupInfo, &pi);
+        wdir.empty() ? nullptr : wdir.data(), &startup.StartupInfo, &pi);
 
     DeleteProcThreadAttributeList(startup.lpAttributeList);
 

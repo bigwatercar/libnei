@@ -423,6 +423,14 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
         _exit(126);
       }
 
+      // Apply working directory before exec.
+      // chdir() is async-signal-safe and safe to call in the forked child.
+      if (!options.working_directory.empty()) {
+        if (chdir(options.working_directory.c_str()) != 0) {
+          _exit(126);
+        }
+      }
+
       execvp(argv_exec[0], argv_exec.data());
       _exit(127);
     }

@@ -697,5 +697,59 @@ TEST(ChildProcessTest, LinuxResourceLimitsAreApplied) {
 }
 #endif
 
+TEST(ChildProcessTest, LaunchWithWorkingDirectory) {
+  WaitableEvent line_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent terminated_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto state = std::make_shared<LaunchTestState>();
+  state->process_service = ProcessService::Create();
+  ASSERT_TRUE(state->process_service);
+  state->process = std::make_unique<ChildProcess>(state->process_service);
+  state->listener = std::make_unique<CapturingProcessListener>(&terminated_done);
+
+  // Choose a known directory that exists on all platforms.
+  // /tmp on POSIX, %TEMP% on Windows — both always exist.
+#if defined(_WIN32)
+  const char* argv[] = {"cmd", "/d", "/c", "cd"};
+  const std::string expected_dir = "C:\\Windows";
+#else
+  const char* argv[] = {"/bin/sh", "-c", "pwd"};
+  const std::string expected_dir = "/tmp";
+#endif
+  CommandLine command_line(static_cast<int>(sizeof(argv) / sizeof(argv[0])),
+                           argv);
+
+  ProcessLaunchOptions launch_options;
+  launch_options.stdout_config.type = StdIOType::PIPE;
+  launch_options.stdin_config.type = StdIOType::NULL_IO;
+  launch_options.stderr_config.type = StdIOType::NULL_IO;
+  launch_options.working_directory = expected_dir;
+
+  state->process->SetListener(state->listener.get());
+  ASSERT_TRUE(state->process->Launch(command_line, launch_options));
+
+  AsyncInputStream* stdout_stream = state->process->GetStdoutStream();
+  ASSERT_NE(stdout_stream, nullptr);
+
+  auto pull = std::make_shared<PullReadState>();
+  pull->stream = stdout_stream;
+  pull->on_chunk = [state, &line_done](const char* data, std::size_t n) {
+    state->captured_bytes.insert(state->captured_bytes.end(), data, data + n);
+    state->captured_line = std::string(state->captured_bytes.begin(),
+                                       state->captured_bytes.end());
+    line_done.Signal();
+  };
+  pull->on_eof = []() {};
+  IssuePullRead(pull);
+
+  ASSERT_TRUE(line_done.TimedWait(std::chrono::seconds(5)));
+  ASSERT_TRUE(terminated_done.TimedWait(std::chrono::seconds(5)));
+
+  const std::string normalized = NormalizePipeText(state->captured_line);
+  EXPECT_EQ(normalized, expected_dir);
+
+  state->process.reset();
+  state->process_service.reset();
+}
+
 }  // namespace
 }  // namespace nei
