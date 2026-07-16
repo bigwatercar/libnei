@@ -97,28 +97,41 @@ bool UDPSocket::Impl::DoBind(const IPEndPoint& local_addr) {
 void UDPSocket::Impl::Close() {
   if (closed_.exchange(true)) return;
 
-  // CancelIoEx + physical teardown must run on the IO thread.
-  // DoCloseCleanup() itself does NOT call CancelIoEx — callers are
-  // responsible for cancelling in-flight I/O before final teardown.
+  // DoCloseCleanup must run on the IO thread.
   if (io_runner_ && !io_runner_->BelongsToCurrentThread()) {
     io_runner_->PostTask(
         FROM_HERE,
         BindOnce([](scoped_refptr<Impl> self) {
-          // On IO thread: safe to read socket_.
-          if (self->socket_ != INVALID_SOCKET)
-            CancelIoEx(reinterpret_cast<HANDLE>(self->socket_), nullptr);
-          self->DoCloseCleanup();
+          // Re-dispatch to the IO-thread branch below.
+          self->Close();
         }, WrapRefCounted(this)));
-  } else {
-    // Here we are either on the IO thread (io_runner_ set), or io_runner_
-    // is null — which implies Bind() was never called and socket_ must be
-    // INVALID_SOCKET.  In either case CancelIoEx on socket_ is safe.
-    DCHECK(io_runner_ || socket_ == INVALID_SOCKET);
-    if (socket_ != INVALID_SOCKET)
-      CancelIoEx(reinterpret_cast<HANDLE>(socket_), nullptr);
-    DoCloseCleanup();
+    return;
   }
 
+  // Now on the IO thread (or io_runner_ is null — Bind never called).
+  DCHECK(!io_runner_ || io_runner_->BelongsToCurrentThread());
+
+  // Cancel all in-flight I/O.  Each pending OVERLAPPED will complete
+  // with ERROR_OPERATION_ABORTED and arrive via OnIOCompleted.
+  if (socket_ != INVALID_SOCKET) {
+    CancelIoEx(reinterpret_cast<HANDLE>(socket_), nullptr);
+  }
+
+  // If I/O is still in flight, take a self-hold and defer physical
+  // teardown to OnIOCompleted.  Unlike Orphan(), Close() does NOT drop
+  // user callbacks — they are invoked with failure status so that
+  // listeners can observe the socket closure.
+  if (pending_io_count_.load(std::memory_order_acquire) > 0) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!has_self_ref_) {
+      has_self_ref_ = true;
+      this->AddRef();
+    }
+    return;  // OnIOCompleted will trigger DoCloseCleanup when count reaches 0
+  }
+
+  // No I/O in flight — tear down immediately.
+  DoCloseCleanup();
   ReleaseSelfHoldIfNeeded();
 }
 
@@ -397,6 +410,14 @@ void UDPSocket::Impl::OnIOCompleted(
         PostSendToResult(std::move(cb), success,
                          static_cast<int>(bytes_transferred));
       }
+
+      // If Close() was called and this was the last in-flight I/O,
+      // perform deferred teardown (the socket was kept alive by
+      // the self-hold taken in Close()).
+      if (closed_.load(std::memory_order_relaxed) && prev == 1) {
+        DoCloseCleanup();
+        ReleaseSelfHoldIfNeeded();
+      }
       break;
     }
 
@@ -424,6 +445,13 @@ void UDPSocket::Impl::OnIOCompleted(
       if (cb) {
         PostRecvFromResult(std::move(cb), success,
                            static_cast<int>(bytes_transferred), peer);
+      }
+
+      // If Close() was called and this was the last in-flight I/O,
+      // perform deferred teardown.
+      if (closed_.load(std::memory_order_relaxed) && prev == 1) {
+        DoCloseCleanup();
+        ReleaseSelfHoldIfNeeded();
       }
       break;
     }
