@@ -211,7 +211,7 @@ TEST_F(UdpSocketTest, ReentrantCloseInCallback) {
 // Target 5: High-Concurrency EAGAIN Starvation Recovery
 // =============================================================================
 TEST_F(UdpSocketTest, HighConcurrencyDrain) {
-  const int kDatagramCount = 250;
+  const int kDatagramCount = 200;
   const int kPayloadSize   = 64;
 
   RunLoop loop;

@@ -475,7 +475,10 @@ void UDPSocket::Impl::DrainRecvQueue() {
         PostRecvFromResult(std::move(pending.callback), true,
                            static_cast<int>(n), peer_ep);
       }
-      // Continue draining — there may be more datagrams ready.
+      // Each successful read frees receive-buffer space.  Flush any
+      // pending sends that were blocked on ENOBUFS (full receive buffer
+      // on loopback) so that new datagrams can arrive and be read.
+      DrainSendQueue();
       continue;
     }
 
@@ -486,6 +489,7 @@ void UDPSocket::Impl::DrainRecvQueue() {
       if (pending.callback) {
         PostRecvFromResult(std::move(pending.callback), true, 0, peer_ep);
       }
+      DrainSendQueue();
       continue;
     }
 
