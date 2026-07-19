@@ -9,6 +9,12 @@
     要输出或追加的 Markdown 文件路径。
 .PARAMETER Clear
     如果指定此开关，会在写入前先清空目标 Markdown 文件（默认行为是追加）。
+.PARAMETER Include
+    文件名包含过滤器，多个关键字用逗号分隔。只处理文件名（不含路径）包含任一关键字的文件。
+    先应用 Include，再应用 Exclude。不指定则包含所有文件。
+.PARAMETER Exclude
+    文件名排除过滤器，多个关键字用逗号分隔。排除文件名（不含路径）包含任一关键字的文件。
+    先应用 Include，再应用 Exclude。不指定则不排除任何文件。
 #>
 param (
     [Parameter(Mandatory = $true, HelpMessage = "请输入源文件夹或源文件路径")]
@@ -18,7 +24,13 @@ param (
     [string]$MarkdownPath,
 
     [Parameter(Mandatory = $false)]
-    [switch]$Clear
+    [switch]$Clear,
+
+    [Parameter(Mandatory = $false, HelpMessage = "文件名包含过滤器，多个关键字用逗号分隔")]
+    [string]$Include,
+
+    [Parameter(Mandatory = $false, HelpMessage = "文件名排除过滤器，多个关键字用逗号分隔")]
+    [string]$Exclude
 )
 
 # 0. 如果指定了 -Clear，先清空目标文件
@@ -66,6 +78,36 @@ else {
     $filesToProcess = $files | Sort-Object BaseName
 
     Write-Host "找到并排序了 $($filesToProcess.Count) 个文件，正在写入 '$MarkdownPath'..."
+}
+
+# 2.5. 应用 Include / Exclude 文件名过滤
+if ($Include) {
+    $includeKeywords = $Include -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+    if ($includeKeywords.Count -gt 0) {
+        $beforeInclude = $filesToProcess.Count
+        $filesToProcess = $filesToProcess | Where-Object {
+            $fileName = $_.Name
+            $includeKeywords | Where-Object { $fileName -like "*$_*" } | Select-Object -First 1
+        }
+        Write-Host "Include 过滤: $beforeInclude -> $($filesToProcess.Count) 个文件 (关键字: $($includeKeywords -join ', '))"
+    }
+}
+
+if ($Exclude) {
+    $excludeKeywords = $Exclude -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+    if ($excludeKeywords.Count -gt 0) {
+        $beforeExclude = $filesToProcess.Count
+        $filesToProcess = $filesToProcess | Where-Object {
+            $fileName = $_.Name
+            -not ($excludeKeywords | Where-Object { $fileName -like "*$_*" } | Select-Object -First 1)
+        }
+        Write-Host "Exclude 过滤: $beforeExclude -> $($filesToProcess.Count) 个文件 (关键字: $($excludeKeywords -join ', '))"
+    }
+}
+
+if ($filesToProcess.Count -eq 0) {
+    Write-Warning "经过 Include/Exclude 过滤后没有剩余文件，退出。"
+    exit
 }
 
 # 3. 循环处理文件并追加到 Markdown
