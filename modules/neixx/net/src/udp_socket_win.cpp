@@ -69,9 +69,36 @@ bool UDPSocket::Impl::DoBind(const IPEndPoint& local_addr) {
     return false;
 
   socket_ = WSASocketW(sa.ss_family, SOCK_DGRAM, IPPROTO_UDP,
-                       nullptr, 0, WSA_FLAG_OVERLAPPED);
+                       nullptr, 0,
+                       WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
   if (socket_ == INVALID_SOCKET)
     return false;
+
+  // Disable WSAECONNRESET behavior on UDP sockets.  Without this, a
+  // single ICMP Port Unreachable from a prior WSASendTo will cause the
+  // next WSARecvFrom to fail with WSAECONNRESET (10054), tearing down
+  // the entire receive loop.  This is the Windows equivalent of POSIX
+  // ignoring ECONNREFUSED on a connectionless datagram socket.
+#ifndef SIO_UDP_CONNRESET
+#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
+#endif
+  {
+    DWORD bytes_returned = 0;
+    BOOL new_behavior = FALSE;
+    WSAIoctl(socket_, SIO_UDP_CONNRESET, &new_behavior,
+             sizeof(new_behavior), nullptr, 0,
+             &bytes_returned, nullptr, nullptr);
+  }
+
+  // Explicitly set IPV6_V6ONLY for cross-platform consistency.
+  // Windows defaults to 1 (IPv6 only), Linux defaults to 0 (dual-stack).
+  // We set it to 1 on both platforms so that an IPv6 socket never
+  // unexpectedly receives IPv4-mapped traffic.
+  if (sa.ss_family == AF_INET6) {
+    int v6only = 1;
+    setsockopt(socket_, IPPROTO_IPV6, IPV6_V6ONLY,
+               reinterpret_cast<const char*>(&v6only), sizeof(v6only));
+  }
 
   // Enable SO_REUSEADDR before bind.
   int opt = 1;
