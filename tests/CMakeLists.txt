@@ -82,7 +82,7 @@ add_subdirectory(net)
 
 target_link_libraries(nei_tests PRIVATE nei::nei GTest::gtest)
 if(MSVC)
-  target_compile_options(nei_tests PRIVATE /utf-8 /FS)  # /utf-8: source & execution charset = UTF-8; /FS: synchronous PDB writes (avoids C1041)
+  target_compile_options(nei_tests PRIVATE /FS)  # /FS: force synchronous PDB writes (avoids C1041)
 endif()
 target_include_directories(
   nei_tests PRIVATE ${PROJECT_SOURCE_DIR}/modules/neixx/io/src

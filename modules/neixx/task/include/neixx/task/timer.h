@@ -42,6 +42,7 @@
 #include <memory>
 
 #include <nei/macros/nei_export.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/common/location.h>
 #include <neixx/common/time.h>
 #include <neixx/functional/callback.h>
@@ -86,7 +87,9 @@ class NEI_API OneShotTimer final {
 
  private:
   class Impl;
+  NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   std::unique_ptr<Impl> impl_;
+  NEI_SUPPRESS_MSC_WARNING_END
 };
 
 // =============================================================================
@@ -117,7 +120,9 @@ class NEI_API RepeatingTimer final {
 
  private:
   class Impl;
+  NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   std::unique_ptr<Impl> impl_;
+  NEI_SUPPRESS_MSC_WARNING_END
 };
 
 }  // namespace nei

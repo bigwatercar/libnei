@@ -379,8 +379,8 @@ TEST_F(TcpSocketTest, OrphanedDestruction) {
   io_runner_->PostTask(FROM_HERE, [&, this, port]() {
     bool ok = server->Listen(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
-        [&accepted](bool success,
-                     std::unique_ptr<TCPClientSocket> client) {
+        [&accepted](bool /*success*/,
+                     std::unique_ptr<TCPClientSocket> /*client*/) {
           // Just signal acceptance  --  client will be orphaned.
           accepted.Signal();
         },

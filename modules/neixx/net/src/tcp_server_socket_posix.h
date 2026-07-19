@@ -49,8 +49,8 @@ class TCPServerSocket::Impl final
 
  private:
   // MessagePumpForIO::Watcher
-  void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override;
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) override {}
+  void OnFileCanReadWithoutBlocking(NativeIOHandle /*handle*/) override;
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) override {}
 
   bool EndPointToSockAddr(const IPEndPoint& ep,
                           ::sockaddr_storage* out,

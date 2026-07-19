@@ -6,6 +6,7 @@
 #include <memory>
 
 #include <nei/macros/nei_export.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/task/message_loop/message_pump.h>
 
 namespace nei {
@@ -32,7 +33,9 @@ class NEI_API MessagePumpDefault final : public MessagePump {
 
  private:
   class Impl;
+  NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   std::unique_ptr<Impl> impl_;
+  NEI_SUPPRESS_MSC_WARNING_END
 };
 
 }  // namespace nei

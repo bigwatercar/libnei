@@ -8,6 +8,7 @@
 #include <string>
 
 #include <nei/macros/nei_export.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/common/time.h>
 #include <neixx/process/child_process.h>
 
@@ -26,11 +27,13 @@ struct NEI_API ShellExecuteOptions {
   /// The operation to perform.  Default "open" uses the system-default
   /// verb for the file type.
   /// Common values: "open", "edit", "print", "explore", "runas".
+  NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   std::string operation = "open";
   /// Optional parameters passed to the handler application.
   std::string parameters;
   /// Optional working directory.  Empty = current directory.
   std::string working_dir;
+  NEI_SUPPRESS_MSC_WARNING_END
   /// Whether to show the application window.
   bool show_window = true;
 };

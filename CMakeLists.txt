@@ -25,6 +25,14 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Treat source and execution character sets as UTF-8 on MSVC.
+# Without this flag, MSVC encodes \uXXXX escapes in narrow string
+# literals using the system ANSI code page (e.g. CP936), producing
+# C4819 warnings and incorrect byte sequences at runtime.
+if(MSVC)
+  add_compile_options(/utf-8)
+endif()
+
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(GNUInstallDirs)
@@ -83,7 +91,6 @@ add_library(nei::nei ALIAS nei)
 if(WIN32)
   target_compile_definitions(nei PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
   if(MSVC)
-    target_compile_options(nei PRIVATE /utf-8)
     # /Zc:__cplusplus — MSVC reports 199711L by default even under /std:c++17.
     # This flag makes __cplusplus reflect the actual standard version (e.g.
     # 201703L for C++17).  Applied at the top-level nei target so that C++

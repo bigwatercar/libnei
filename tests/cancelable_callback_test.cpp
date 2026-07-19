@@ -78,7 +78,7 @@ TEST_F(CancelableOnceClosureTest, CancelReleasesResourcesImmediately) {
   {
     auto t = std::move(*tracker);  // move tracker into closure capture
     CancelableOnceClosure task(BindOnce(
-        [](LifecycleTracker captured) {
+        [](LifecycleTracker /*captured*/) {
           // If we get here, Cancel() didn't work
           FAIL() << "Callback should not execute after Cancel()";
         },
@@ -96,7 +96,7 @@ TEST_F(CancelableOnceClosureTest, CancelReleasesResourcesOnCallingThread) {
 
   auto t = std::move(*tracker);
   CancelableOnceClosure task(BindOnce(
-      [](LifecycleTracker captured) { FAIL(); },
+      [](LifecycleTracker /*captured*/) { FAIL(); },
       std::move(t)));
 
   cancel_thread_id = std::this_thread::get_id();

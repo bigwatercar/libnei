@@ -135,6 +135,7 @@ TEST_F(HostResolverTest, ResolveDualStack) {
     if (result[i].address().family() == IPAddress::Family::kIPv4) has_ipv4 = true;
     if (result[i].address().family() == IPAddress::Family::kIPv6) has_ipv6 = true;
   }
+  (void)has_ipv6;  // IPv6 depends on network setup — may be absent
 
   // At minimum we should get IPv4; IPv6 depends on network setup.
   EXPECT_TRUE(has_ipv4);

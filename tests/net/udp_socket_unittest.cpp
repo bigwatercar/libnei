@@ -157,7 +157,7 @@ TEST_F(UdpSocketTest, OrphanedWhileRecvPending) {
     EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
 
     auto sock = std::make_shared<UDPSocket>();
-    IPEndPoint bound = BindToLoopback(sock.get(), io_runner_);
+    BindToLoopback(sock.get(), io_runner_);  // bind side-effect only
 
     // Issue RecvFrom — it will pend waiting for data.
     auto recv_buf = MakeRefCounted<IOBufferWithSize>(2048);
@@ -189,7 +189,7 @@ TEST_F(UdpSocketTest, ReentrantCloseInCallback) {
     EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
 
     auto sock = std::make_shared<UDPSocket>();
-    IPEndPoint bound = BindToLoopback(sock.get(), io_runner_);
+    BindToLoopback(sock.get(), io_runner_);  // bind side-effect only
 
     // Issue RecvFrom with a callback that re-enters Close().
     auto recv_buf = MakeRefCounted<IOBufferWithSize>(2048);
@@ -378,7 +378,7 @@ TEST_F(UdpSocketTest, IPv6Loopback) {
     auto send_buf = MakeRefCounted<IOBufferWithSize>(32);
     std::memset(send_buf->data(), 0xAA, 32);
     sock->SendTo(send_buf, 32, bound,
-                 [&, quit_ptr, sock](bool ok, int n) {
+                 [&, quit_ptr, sock](bool ok, int /*n*/) {
                    EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
                    send_ok.store(ok);
                    if (completions.fetch_add(1) + 1 == 2)
@@ -425,7 +425,7 @@ TEST_F(UdpSocketTest, SetBroadcast) {
 
     auto recv_buf = MakeRefCounted<IOBufferWithSize>(64);
     sock->RecvFrom(recv_buf, 64,
-                   [&, quit_ptr, sock](bool ok, int n, const IPEndPoint&) {
+                   [&, quit_ptr, sock](bool ok, int /*n*/, const IPEndPoint&) {
                      EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
                      recv_ok.store(ok);
                      if (completions.fetch_add(1) + 1 == 2)
@@ -557,7 +557,7 @@ TEST_F(UdpSocketTest, MultiplePendingRecvFrom) {
       auto send_buf = MakeRefCounted<IOBufferWithSize>(32);
       std::memset(send_buf->data(), static_cast<char>(i), 32);
       sock->SendTo(send_buf, 32, bound,
-                   [&](bool ok, int /*n*/) {
+                   [&](bool /*ok*/, int /*n*/) {
                      send_count.fetch_add(1, std::memory_order_relaxed);
                    });
     }

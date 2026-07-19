@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include <nei/macros/nei_export.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/io/async_stream.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/task/task_runner.h>
@@ -70,11 +71,15 @@ class NEI_API FileInputStreamAdapter final : public AsyncInputStream {
 
   AsyncFile* file_ = nullptr;  // Non-owning.
   std::uint64_t position_ = 0;  // Current read offset in the file.
+  NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   scoped_refptr<TaskRunner> target_task_runner_;
+  NEI_SUPPRESS_MSC_WARNING_END
   bool closed_ = false;
 
   // WeakPtr factory for safe completion callback gating.
+  NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   WeakPtrFactory<FileInputStreamAdapter> weak_factory_{this, FROM_HERE_MEMBER};
+  NEI_SUPPRESS_MSC_WARNING_END
 };
 
 // ---------------------------------------------------------------------------
@@ -151,11 +156,15 @@ class NEI_API FileOutputStreamAdapter final : public AsyncOutputStream {
 
   AsyncFile* file_ = nullptr;  // Non-owning.
   std::uint64_t position_ = 0;
+  NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   scoped_refptr<TaskRunner> target_task_runner_;
+  NEI_SUPPRESS_MSC_WARNING_END
   bool closed_ = false;
 
   // WeakPtr factory for safe completion callback gating.
+  NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   WeakPtrFactory<FileOutputStreamAdapter> weak_factory_{this, FROM_HERE_MEMBER};
+  NEI_SUPPRESS_MSC_WARNING_END
 };
 
 }  // namespace nei

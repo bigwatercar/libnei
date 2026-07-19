@@ -76,8 +76,8 @@ class PipeInputStream::Impl final : public MessagePumpForIO::Watcher {
 
   void Close();
 
-  void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override;
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) override {}
+  void OnFileCanReadWithoutBlocking(NativeIOHandle /*handle*/) override;
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) override {}
 
   void ShutdownAndSelfDestruct();
 
@@ -120,7 +120,7 @@ class PipeOutputStream::Impl final : public MessagePumpForIO::Watcher {
   void Close();
 
   void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) override;
-  void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override {}
+  void OnFileCanReadWithoutBlocking(NativeIOHandle /*handle*/) override {}
 
   void ShutdownAndSelfDestruct();
 

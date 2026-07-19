@@ -164,7 +164,7 @@ TEST(SysHostInfo, GetHostnameReturnsNonEmpty) {
 
 TEST(SysHostInfo, GetHostnameSmallBuffer) {
     char buf[4];
-    int len = nei_get_hostname(buf, sizeof(buf));
+    nei_get_hostname(buf, sizeof(buf));  // return value unused; test checks null-termination
     // Small buffer: the return value is the required size (or -1 on
     // POSIX). Either way the buffer must be safely null-terminated.
     EXPECT_EQ(buf[sizeof(buf) - 1], '\0');

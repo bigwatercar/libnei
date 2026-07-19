@@ -165,9 +165,9 @@ std::u16string QuoteForCommandLine(std::u16string_view arg) {
   return out;
 }
 
+#if defined(_WIN32)
 std::vector<std::u16string> ParseWindowsCommandLine() {
   std::vector<std::u16string> argv;
-#if defined(_WIN32)
   int argc = 0;
   LPWSTR *wide_argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
   if (wide_argv == nullptr || argc <= 0) {
@@ -184,9 +184,9 @@ std::vector<std::u16string> ParseWindowsCommandLine() {
   }
 
   ::LocalFree(wide_argv);
-#endif
   return argv;
 }
+#endif  // _WIN32
 
 std::mutex &CurrentProcessMutex() {
   static std::mutex mutex;

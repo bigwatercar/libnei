@@ -9,6 +9,7 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <string.h>
 #endif
 #include <stdlib.h>
 

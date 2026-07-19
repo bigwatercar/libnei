@@ -7,6 +7,7 @@
 #include <string>
 
 #include <nei/macros/nei_export.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/synchronization/lock.h>
 #include <neixx/threading/platform_thread.h>
 
@@ -110,7 +111,9 @@ class NEI_API SimpleThread : public PlatformThread::Delegate {
   // PlatformThread::Delegate implementation.
   void ThreadMain() override;
 
+  NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   const std::string name_;
+  NEI_SUPPRESS_MSC_WARNING_END
   Options options_;
 
   mutable Lock lock_;

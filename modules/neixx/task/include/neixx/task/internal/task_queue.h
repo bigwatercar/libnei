@@ -8,6 +8,7 @@
 #include <memory>
 
 #include <nei/macros/nei_export.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/common/time.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/task/internal/task.h>
@@ -54,7 +55,9 @@ class NEI_API TaskQueue final {
   void SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback);
 
  private:
+  NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   std::unique_ptr<Impl> impl_;
+  NEI_SUPPRESS_MSC_WARNING_END
 };
 
 }  // namespace internal

@@ -6,6 +6,7 @@
 #include <memory>
 
 #include <nei/macros/nei_export.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 
 #if defined(_WIN32)
 #ifndef NTAPI
@@ -42,7 +43,9 @@ class NEI_API ThreadLocalStorage final {
 
    private:
     class Impl;
+    NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
     std::unique_ptr<Impl> impl_;
+    NEI_SUPPRESS_MSC_WARNING_END
   };
 
   ThreadLocalStorage() = delete;
