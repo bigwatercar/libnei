@@ -150,6 +150,11 @@ struct UdpOverlappedContext {
   struct sockaddr_storage peer_addr = {};
   int peer_addr_len = sizeof(struct sockaddr_storage);
 
+  // flags must live on the heap (inside UdpOverlappedContext), not on the
+  // stack.  WSARecvFrom may return WSA_IO_PENDING before the kernel writes
+  // the flag bits; a stack-local DWORD would be out of scope by then.
+  DWORD flags = 0;
+
   UDPSocket::SendToCallback send_cb;
   UDPSocket::RecvFromCallback recv_cb;
 

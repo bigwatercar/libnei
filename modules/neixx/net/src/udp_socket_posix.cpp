@@ -408,16 +408,24 @@ void UDPSocket::Impl::DoRecvFrom(scoped_refptr<IOBuffer> buf,
   pending.buf_len = buf_len;
   pending.callback = std::move(callback);
 
+  bool should_start_watching = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    // Only arm the read watcher when the queue transitions from empty
+    // to non-empty.  Repeated StartWatching calls on the same controller
+    // without an intervening StopWatching may trigger epoll_ctl(ADD)
+    // EEXIST errors or internal DCHECK failures.
+    should_start_watching = pending_recvs_.empty();
     pending_recvs_.push_back(std::move(pending));
   }
 
-  auto* pump = MessagePumpForIO::Current();
-  DCHECK_MSG(pump, "DoRecvFrom: pump null — not on IO thread");
-  read_controller_.StartWatching(
-      pump, fd_,
-      MessagePumpForIO::FdWatchController::Mode::READ, this);
+  if (should_start_watching) {
+    auto* pump = MessagePumpForIO::Current();
+    DCHECK_MSG(pump, "DoRecvFrom: pump null — not on IO thread");
+    read_controller_.StartWatching(
+        pump, fd_,
+        MessagePumpForIO::FdWatchController::Mode::READ, this);
+  }
 }
 
 // =============================================================================
@@ -444,6 +452,7 @@ void UDPSocket::Impl::OnFileCanWriteWithoutBlocking(
 // Stops at EAGAIN to prevent busy-looping.
 //
 void UDPSocket::Impl::DrainRecvQueue() {
+  bool did_receive = false;  // batch DrainSendQueue at end, not per-packet
   while (true) {
     PendingRecvFrom pending;
     {
@@ -470,10 +479,7 @@ void UDPSocket::Impl::DrainRecvQueue() {
         PostRecvFromResult(std::move(pending.callback), true,
                            static_cast<int>(n), peer_ep);
       }
-      // Each successful read frees receive-buffer space.  Flush any
-      // pending sends that were blocked on EAGAIN (full send buffer on
-      // loopback) so that new datagrams can arrive and be read.
-      DrainSendQueue();
+      did_receive = true;
       continue;
     }
 
@@ -484,7 +490,7 @@ void UDPSocket::Impl::DrainRecvQueue() {
       if (pending.callback) {
         PostRecvFromResult(std::move(pending.callback), true, 0, peer_ep);
       }
-      DrainSendQueue();
+      did_receive = true;
       continue;
     }
 
@@ -513,6 +519,14 @@ void UDPSocket::Impl::DrainRecvQueue() {
       PostRecvFromResult(std::move(pending.callback), false, 0, IPEndPoint());
     }
     // Continue draining remaining pending recvs.
+  }
+
+  // Batch-flush pending sends once after draining all available datagrams,
+  // rather than after every individual recvfrom.  Per-packet DrainSendQueue
+  // causes excessive lock contention and syscall interleaving under high
+  // throughput (gigabit loopback).
+  if (did_receive) {
+    DrainSendQueue();
   }
 
   // If queue is now empty, stop the read watcher to save CPU.

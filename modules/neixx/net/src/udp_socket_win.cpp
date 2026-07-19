@@ -315,11 +315,21 @@ void UDPSocket::Impl::DoSendTo(scoped_refptr<IOBuffer> buf,
       &ctx->overlapped, nullptr);
 
   if (rc == SOCKET_ERROR && WSAGetLastError() != ERROR_IO_PENDING) {
-    pending_io_count_.fetch_sub(1, std::memory_order_relaxed);
     auto cb = std::move(ctx->send_cb);
     delete ctx;
+    // Decrement and check for deferred cleanup  --  if Close() was called
+    // concurrently and saw pending_io_count_ > 0, it deferred teardown.
+    // Since this request failed immediately (no IOCP completion will fire),
+    // we must trigger DoCloseCleanup ourselves when this was the last I/O.
+    int prev = pending_io_count_.fetch_sub(1, std::memory_order_acq_rel);
     if (cb) {
       PostSendToResult(std::move(cb), false, 0);
+    }
+    if ((closed_.load(std::memory_order_relaxed) ||
+         orphaned_.load(std::memory_order_relaxed)) &&
+        prev == 1) {
+      DoCloseCleanup();
+      ReleaseSelfHoldIfNeeded();
     }
   }
 }
@@ -369,27 +379,34 @@ void UDPSocket::Impl::DoRecvFrom(scoped_refptr<IOBuffer> buf,
   ctx->buf_len = buf_len;
   ctx->recv_cb = std::move(callback);
   ctx->self_ref = WrapRefCounted(this);
+  ctx->flags = 0;  // init heap-local flags before async I/O
   // peer_addr and peer_addr_len are already initialized in the struct.
 
   WSABUF wsa_buf;
   wsa_buf.buf = ctx->buffer->data();
   wsa_buf.len = static_cast<ULONG>(buf_len);
 
-  DWORD flags = 0;
   pending_io_count_.fetch_add(1, std::memory_order_relaxed);
 
   int rc = WSARecvFrom(
-      socket_, &wsa_buf, 1, nullptr, &flags,
+      socket_, &wsa_buf, 1, nullptr, &ctx->flags,
       reinterpret_cast<struct sockaddr*>(&ctx->peer_addr),
       &ctx->peer_addr_len,
       &ctx->overlapped, nullptr);
 
   if (rc == SOCKET_ERROR && WSAGetLastError() != ERROR_IO_PENDING) {
-    pending_io_count_.fetch_sub(1, std::memory_order_relaxed);
     auto cb = std::move(ctx->recv_cb);
     delete ctx;
+    // Same deferred-cleanup check as DoSendTo above.
+    int prev = pending_io_count_.fetch_sub(1, std::memory_order_acq_rel);
     if (cb) {
       PostRecvFromResult(std::move(cb), false, 0, IPEndPoint());
+    }
+    if ((closed_.load(std::memory_order_relaxed) ||
+         orphaned_.load(std::memory_order_relaxed)) &&
+        prev == 1) {
+      DoCloseCleanup();
+      ReleaseSelfHoldIfNeeded();
     }
   }
 }
@@ -450,7 +467,11 @@ void UDPSocket::Impl::OnIOCompleted(
 
     case UdpOverlappedContext::Op::kRecvFrom: {
       IPEndPoint peer;
-      if (success && bytes_transferred > 0) {
+      // Parse peer address on success, even for zero-byte datagrams.
+      // Zero-length UDP packets are legal (NAT keep-alive / heartbeat)
+      // and carry a valid source address — the POSIX path already
+      // handles this correctly.
+      if (success) {
         peer = SockAddrToIPEndPoint(ctx->peer_addr, ctx->peer_addr_len);
       }
       auto cb = std::move(ctx->recv_cb);
