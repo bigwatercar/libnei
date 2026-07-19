@@ -8,6 +8,9 @@
 namespace nei {
 namespace {
 
+// Per-translation-unit global — safe under GTest sequential execution.
+// If parallel test execution is enabled, guard with a mutex or move into
+// the test fixture.
 std::atomic<int> g_tls_destructor_calls{0};
 
 #if defined(_WIN32)

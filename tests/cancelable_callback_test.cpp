@@ -18,7 +18,12 @@ namespace {
 // =============================================================================
 struct LifecycleTracker {
   std::shared_ptr<bool> alive = std::make_shared<bool>(true);
-  ~LifecycleTracker() { *alive = false; }
+  std::shared_ptr<std::thread::id> destructed_on =
+      std::make_shared<std::thread::id>();
+  ~LifecycleTracker() {
+    *alive = false;
+    *destructed_on = std::this_thread::get_id();
+  }
 };
 
 // =============================================================================
@@ -74,6 +79,10 @@ TEST_F(CancelableOnceClosureTest, CancelIsIdempotent) {
 
 TEST_F(CancelableOnceClosureTest, CancelReleasesResourcesImmediately) {
   auto tracker = std::make_shared<LifecycleTracker>();
+  // Copy alive before move — std::move(*tracker) transfers the
+  // LifecycleTracker (and its alive member) out, leaving tracker->alive
+  // as a moved-from (null) shared_ptr.
+  auto alive_guard = tracker->alive;
 
   {
     auto t = std::move(*tracker);  // move tracker into closure capture
@@ -84,26 +93,30 @@ TEST_F(CancelableOnceClosureTest, CancelReleasesResourcesImmediately) {
         },
         std::move(t)));
     task.Cancel();
-    // * Cancel() 返回后，捕获的 LifecycleTracker 必须已被析构
-    EXPECT_FALSE(*tracker->alive);
+    // Cancel() must have released the captured LifecycleTracker.
+    EXPECT_FALSE(*alive_guard);
   }
 }
 
 TEST_F(CancelableOnceClosureTest, CancelReleasesResourcesOnCallingThread) {
-  // 验证 Cancel() 在调用线程上释放资源（而非延迟到某任务队列执行）
+  // Verify Cancel() releases resources on the calling thread, not deferred
+  // to a task queue or background worker.
   auto tracker = std::make_shared<LifecycleTracker>();
-  std::thread::id cancel_thread_id;
+  auto alive_guard = tracker->alive;
+  auto destructed_on = tracker->destructed_on;
+  std::thread::id calling_thread = std::this_thread::get_id();
 
   auto t = std::move(*tracker);
   CancelableOnceClosure task(BindOnce(
       [](LifecycleTracker /*captured*/) { FAIL(); },
       std::move(t)));
 
-  cancel_thread_id = std::this_thread::get_id();
   task.Cancel();
 
-  // tracker 的析构在 Cancel() 调用期间完成，因此 alive 在同一线程已为 false
-  EXPECT_FALSE(*tracker->alive);
+  EXPECT_FALSE(*alive_guard);
+  EXPECT_EQ(*destructed_on, calling_thread)
+      << "Cancel() must release captured resources synchronously on "
+         "the calling thread (not deferred to a background task)";
 }
 
 // ---------------------------------------------------------------------------

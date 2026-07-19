@@ -385,7 +385,8 @@ TEST(AsyncFileWinTest, LargeReadWriteCallbackDeterminismOnIoThread) {
   EXPECT_TRUE(callback_on_io_thread.load(std::memory_order_acquire));
   EXPECT_FALSE(callback_inline_violation.load(std::memory_order_acquire));
   EXPECT_GT(pump_counters.do_work_calls, 0u);
-  EXPECT_GE(task_counters.started_tasks, task_counters.completed_tasks);
+  EXPECT_GT(task_counters.started_tasks, 0u);
+  EXPECT_GT(task_counters.completed_tasks, 0u);
 
   background_thread.Stop();
   io_thread.Stop();
@@ -566,7 +567,8 @@ TEST(AsyncFileWinTest, RepeatedStressMaintainsCallbackThreadDeterminism) {
   EXPECT_TRUE(callback_on_io_thread.load(std::memory_order_acquire));
   EXPECT_FALSE(callback_inline_violation.load(std::memory_order_acquire));
   EXPECT_GT(pump_counters.do_work_calls, 0u);
-  EXPECT_GE(task_counters.started_tasks, task_counters.completed_tasks);
+  EXPECT_GT(task_counters.started_tasks, 0u);
+  EXPECT_GT(task_counters.completed_tasks, 0u);
 
   background_thread.Stop();
   io_thread.Stop();

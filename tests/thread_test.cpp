@@ -28,7 +28,7 @@ TEST(ThreadTest, StartWaitsUntilSequenceManagerAndTlsAreReady) {
     done.Signal();
   });
 
-  done.Wait();
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
   thread.Stop();
 
   EXPECT_TRUE(current_is_valid.load());

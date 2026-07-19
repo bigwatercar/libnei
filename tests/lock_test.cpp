@@ -64,7 +64,9 @@ TEST(LockTest, ManualAcquireBlocksOtherThreadUntilRelease) {
 
   ASSERT_EQ(worker_ready_future.wait_for(std::chrono::seconds(1)), std::future_status::ready);
 
-  EXPECT_EQ(worker_done_future.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
+  // 500ms is long enough for the worker to block but short enough that CI
+  // overload won't cause a false timeout.
+  EXPECT_EQ(worker_done_future.wait_for(std::chrono::milliseconds(500)), std::future_status::timeout);
   EXPECT_FALSE(acquired.load(std::memory_order_acquire));
 
   lock.Release();

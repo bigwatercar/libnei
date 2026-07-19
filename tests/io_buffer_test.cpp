@@ -44,7 +44,7 @@ TEST(IOBufferTest, DrainableIOBufferTracksOffsetAndRemainingBytes) {
   }
 
   scoped_refptr<DrainableIOBuffer> drainable(
-      new DrainableIOBuffer(scoped_refptr<IOBuffer>(base.get()), 16));
+      new DrainableIOBuffer(base, 16));
   ASSERT_TRUE(drainable);
 
   EXPECT_EQ(drainable->BytesConsumed(), 0u);
@@ -63,7 +63,7 @@ TEST(IOBufferTest, DrainableIOBufferConsumeAllMovesToEnd) {
   ASSERT_TRUE(base);
 
   scoped_refptr<DrainableIOBuffer> drainable(
-      new DrainableIOBuffer(scoped_refptr<IOBuffer>(base.get()), 8));
+      new DrainableIOBuffer(base, 8));
   ASSERT_TRUE(drainable);
 
   drainable->DidConsume(8);

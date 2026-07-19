@@ -39,7 +39,10 @@ class ScopedSequenceManager {
   SequenceManager* manager() { return manager_.get(); }
   TaskRunner* runner() { return runner_.get(); }
 
-  // 驱动 pump 直到 manager_->Quit() 被调用
+  // Drive the pump until Quit() is called.  The caller is responsible
+  // for ensuring Quit() will be invoked — if a test callback fails an
+  // EXPECT before posting Quit, the pump will hang.  Prefer
+  // RunPumpWithTimeout() when the test does not guarantee Quit().
   void RunPump() { manager_->Run(); }
 
   // 投递一个延迟 Quit 后驱动 pump

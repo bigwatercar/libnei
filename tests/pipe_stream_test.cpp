@@ -522,9 +522,10 @@ TEST_F(PipeStreamTest, PeerDisconnectDeliversCleanEof) {
 // This test verifies that writing to a pipe whose read end is closed
 // does not crash  --  the write either succeeds (data fits in pipe buffer)
 // or fails gracefully (EPIPE / broken pipe error).
-// Disabled: WSL pipe semantics differ from native Linux  --  write() to a
-// disconnected peer succeeds (data fits in buffer) and the pump timing
-// is unreliable.  Re-enable after investigating WSL pipe behaviour.
+// NOTE: WSL pipe semantics differ from native Linux — write() to a
+// disconnected peer may succeed (data fits in buffer) and pump timing
+// is less reliable.  Only run on native Linux for now.
+#if defined(__linux__) && !defined(__WSL__)
 TEST_F(PipeStreamTest, WriteToDisconnectedPeerFailsCleanly) {
   PlatformHandle read_h, write_h;
   ASSERT_TRUE(MakePipe(read_h, write_h));
@@ -548,6 +549,7 @@ TEST_F(PipeStreamTest, WriteToDisconnectedPeerFailsCleanly) {
   ASSERT_TRUE(write_done.TimedWait(std::chrono::seconds(5)));
   SUCCEED();
 }
+#endif  // __linux__ && !__WSL__
 
 // ===========================================================================
 // 🟡 Test 5  --  Rapid Cancel & Retry
@@ -557,9 +559,10 @@ TEST_F(PipeStreamTest, WriteToDisconnectedPeerFailsCleanly) {
 // Verifies the state machine cleans up correctly and the second operation
 // succeeds independently of the first.
 
-// Disabled: WSL pump wakeup ordering after ShutdownAndSelfDestruct is
-// unreliable  --  the phase 2 IO task may be queued ahead of the destructor
-// cleanup, causing epoll interference.  Works correctly on native Linux.
+// NOTE: WSL pump wakeup ordering after ShutdownAndSelfDestruct is
+// unreliable — the phase 2 IO task may be queued ahead of the destructor
+// cleanup, causing epoll interference.  Only run on native Linux.
+#if defined(__linux__) && !defined(__WSL__)
 TEST_F(PipeStreamTest, RapidCancelAndRetryStateMachine) {
   // ---- Phase 1: first pipe, read + immediate close --------------------
   PlatformHandle h1_read, h1_write;
@@ -632,6 +635,7 @@ TEST_F(PipeStreamTest, RapidCancelAndRetryStateMachine) {
          "data  --  state machine may have stale state from the first "
          "cancelled operation.";
 }
+#endif  // __linux__ && !__WSL__
 
 // Same for the write path.
 TEST_F(PipeStreamTest, RapidWriteCancelAndRetry) {

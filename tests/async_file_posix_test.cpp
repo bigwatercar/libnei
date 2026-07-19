@@ -681,8 +681,11 @@ TEST_F(AsyncFilePosixStressTest, CloseRaceCancelsInFlightOperationsWithoutHang) 
       << " first_bad_native="
       << first_bad_native.load(std::memory_order_acquire);
 
-  EXPECT_EQ(callback_ops.load(std::memory_order_acquire),
-            accepted_ops.load(std::memory_order_acquire));
+  // Load both atomics once to avoid a TOCTOU window between the two
+  // loads where a late callback could increment callback_ops.
+  int final_callbacks = callback_ops.load(std::memory_order_acquire);
+  int final_accepted  = accepted_ops.load(std::memory_order_acquire);
+  EXPECT_EQ(final_callbacks, final_accepted);
   EXPECT_FALSE(bad_outcome.load(std::memory_order_acquire))
       << "unexpected error code="
       << first_bad_code.load(std::memory_order_acquire)

@@ -102,7 +102,7 @@ class TcpSocketTest : public testing::Test {
 // ===========================================================================
 
 TEST_F(TcpSocketTest, BasicHandshake) {
-  const uint16_t port = 19321;
+  const uint16_t port = FindFreePort();
 
   WaitableEvent server_accept_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   WaitableEvent client_connect_done(WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -139,8 +139,8 @@ TEST_F(TcpSocketTest, BasicHandshake) {
         io_runner_);
   });
 
-  server_accept_done.Wait();
-  client_connect_done.Wait();
+  ASSERT_TRUE(server_accept_done.TimedWait(std::chrono::seconds(5)));
+  ASSERT_TRUE(client_connect_done.TimedWait(std::chrono::seconds(5)));
 
   EXPECT_TRUE(accepted.load());
   EXPECT_TRUE(connected.load());
@@ -151,7 +151,7 @@ TEST_F(TcpSocketTest, BasicHandshake) {
 // ===========================================================================
 
 TEST_F(TcpSocketTest, AsyncStreamTransfer) {
-  const uint16_t port = 19322;
+  const uint16_t port = FindFreePort();
   ASSERT_NE(port, 0);
   constexpr std::size_t kTransferSize = 1024 * 1024;
 
@@ -171,8 +171,8 @@ TEST_F(TcpSocketTest, AsyncStreamTransfer) {
     std::memset(recv_buf->data(), 0, kTransferSize);
     auto recv_offset = std::make_shared<std::size_t>(0);
 
-    // Pass as scoped_refptr<IOBuffer>  --  IOBufferWithSize inherits from
-    // IOBuffer with a single RefCountedThreadSafe<IOBuffer> base, so the
+    // IOBufferWithSize inherits RefCountedThreadSafe<IOBuffer>, so it
+    // implicitly converts to scoped_refptr<IOBuffer> — no .get() needed.
     // refcount is shared even when the pointer type differs.
     scoped_refptr<IOBuffer> ref_base(ref_buf.get());
     scoped_refptr<IOBuffer> recv_base(recv_buf.get());
@@ -238,7 +238,7 @@ TEST_F(TcpSocketTest, AsyncStreamTransfer) {
         io_runner_);
   });
 
-  transfer_done.Wait();
+  ASSERT_TRUE(transfer_done.TimedWait(std::chrono::seconds(5)));
   EXPECT_TRUE(data_match.load()) << "1 MB data should match byte-for-byte";
 }
 
@@ -247,7 +247,7 @@ TEST_F(TcpSocketTest, AsyncStreamTransfer) {
 // ===========================================================================
 
 TEST_F(TcpSocketTest, ConnectionRefused) {
-  const uint16_t port = 19323;
+  const uint16_t port = FindFreePort();
   ASSERT_NE(port, 0);
 
   WaitableEvent connect_done(WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -266,7 +266,7 @@ TEST_F(TcpSocketTest, ConnectionRefused) {
         io_runner_);
   });
 
-  connect_done.Wait();
+  ASSERT_TRUE(connect_done.TimedWait(std::chrono::seconds(5)));
   EXPECT_FALSE(connect_result.load())
       << "Connect to dead port should report failure";
 }
@@ -276,7 +276,7 @@ TEST_F(TcpSocketTest, ConnectionRefused) {
 // ===========================================================================
 
 TEST_F(TcpSocketTest, ServerDestructionWhilePending) {
-  const uint16_t port = 19324;
+  const uint16_t port = FindFreePort();
   ASSERT_NE(port, 0);
 
   WaitableEvent server_created(WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -297,8 +297,8 @@ TEST_F(TcpSocketTest, ServerDestructionWhilePending) {
     server_destroyed.Signal();
   });
 
-  server_created.Wait();
-  server_destroyed.Wait();
+  ASSERT_TRUE(server_created.TimedWait(std::chrono::seconds(5)));
+  ASSERT_TRUE(server_destroyed.TimedWait(std::chrono::seconds(5)));
   SUCCEED();
 }
 
@@ -307,7 +307,7 @@ TEST_F(TcpSocketTest, ServerDestructionWhilePending) {
 // ===========================================================================
 
 TEST_F(TcpSocketTest, ExplicitShutdownWrite) {
-  const uint16_t port = 19325;
+  const uint16_t port = FindFreePort();
   ASSERT_NE(port, 0);
 
   WaitableEvent eof_detected(WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -359,7 +359,7 @@ TEST_F(TcpSocketTest, ExplicitShutdownWrite) {
         io_runner_);
   });
 
-  eof_detected.Wait();
+  ASSERT_TRUE(eof_detected.TimedWait(std::chrono::seconds(5)));
   EXPECT_TRUE(server_saw_eof.load())
       << "Server should detect EOF after client ShutdownWrite";
 }
@@ -369,7 +369,7 @@ TEST_F(TcpSocketTest, ExplicitShutdownWrite) {
 // ===========================================================================
 
 TEST_F(TcpSocketTest, OrphanedDestruction) {
-  const uint16_t port = 19326;
+  const uint16_t port = FindFreePort();
   ASSERT_NE(port, 0);
 
   WaitableEvent accepted(WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -400,10 +400,10 @@ TEST_F(TcpSocketTest, OrphanedDestruction) {
   });
 
   // Wait for accept, then let IO thread drain.
-  accepted.Wait();
+  ASSERT_TRUE(accepted.TimedWait(std::chrono::seconds(5)));
   WaitableEvent drain(WaitableEvent::ResetPolicy::kAutomatic, false);
   io_runner_->PostTask(FROM_HERE, [&drain]() { drain.Signal(); });
-  drain.Wait();
+  ASSERT_TRUE(drain.TimedWait(std::chrono::seconds(5)));
 
   SUCCEED() << "Client destroyed without Close/ShutdownWrite  --  no UAF, no leak";
 }
@@ -517,7 +517,7 @@ TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
         io_runner_);
   });
 
-  transfer_done.Wait();
+  ASSERT_TRUE(transfer_done.TimedWait(std::chrono::seconds(5)));
   EXPECT_TRUE(eof_received.load())
       << "Server should detect EOF  --  orphaned Impl must send FIN";
   EXPECT_TRUE(all_data_received.load())
@@ -594,10 +594,10 @@ TEST_F(TcpSocketTest, MultiReactorRoundRobin) {
           },
           io_runner_);
     });
-    connected.Wait();
+    ASSERT_TRUE(connected.TimedWait(std::chrono::seconds(5)));
   }
 
-  all_accepted.Wait();
+  ASSERT_TRUE(all_accepted.TimedWait(std::chrono::seconds(5)));
   EXPECT_EQ(accepted.load(), kNumConnections)
       << "All " << kNumConnections << " connections should be accepted";
 
@@ -688,7 +688,7 @@ TEST_F(TcpSocketTest, WriteChainNoStackOverflow) {
         io_runner_);
   });
 
-  chain_done.Wait();
+  ASSERT_TRUE(chain_done.TimedWait(std::chrono::seconds(5)));
 
   EXPECT_EQ(write_count.load(), kChainLength)
       << "All " << kChainLength << " writes must complete";

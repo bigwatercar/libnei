@@ -46,7 +46,7 @@ TEST(ThreadPoolTest, SequencedTaskRunnerSerializesExecution) {
     });
   }
 
-  done.Wait();
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
   EXPECT_EQ(max_running.load(), 1);
 
   pool.Shutdown();
@@ -62,7 +62,7 @@ TEST(ThreadPoolTest, PostTaskWakesSleepingWorker) {
     done.Signal();
   });
 
-  done.Wait();
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
   pool.Shutdown();
 }
 
@@ -420,56 +420,56 @@ TEST(ThreadPoolTest, ShutdownDropsQueuedNonBlockingTasksButKeepsBlockShutdownTas
   EXPECT_EQ(continue_executed.load(std::memory_order_relaxed), 0);
 }
 
+TEST(ThreadPoolTest, TaskObserverReceivesCallbacksWithPostedFrom) {
+  struct TestObserver : TaskObserver {
+    std::atomic<int> started{0};
+    std::atomic<int> completed{0};
+    std::atomic<bool> had_posted_from{false};
+
+    void OnTaskStarted(const internal::Task& task, TimeDelta) override {
+      started.fetch_add(1, std::memory_order_relaxed);
+      if (!task.posted_from.is_null()) {
+        had_posted_from.store(true, std::memory_order_relaxed);
+        const std::string loc = task.posted_from.ToString();
+        (void)loc;
+      }
+    }
+    void OnTaskCompleted(const internal::Task&, TimeDelta) override {
+      completed.fetch_add(1, std::memory_order_relaxed);
+    }
+  };
+
+  TestObserver observer;
+  ThreadPool pool({1});
+  pool.SetTaskObserver(&observer);
+
+  scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  runner->PostTask(FROM_HERE, [&done]() { done.Signal(); });
+  ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(3000)));
+
+  pool.SetTaskObserver(nullptr);
+  pool.Shutdown();
+
+  EXPECT_GE(observer.started.load(), 1);
+  EXPECT_GE(observer.completed.load(), 1);
+  EXPECT_TRUE(observer.had_posted_from.load());
+}
+
+TEST(ThreadPoolTest, LocationToStringIsNonEmptyForFromHere) {
+  const Location loc = FROM_HERE;
+  EXPECT_FALSE(loc.ToString().empty());
+  EXPECT_NE(loc.ToString(), "unknown");
+}
+
+TEST(ThreadPoolTest, LocationToStringIsUnknownForDefault) {
+  EXPECT_EQ(Location{}.ToString(), "unknown");
+}
+
 }  // namespace
 }  // namespace nei
-
-  TEST(ThreadPoolTest, TaskObserverReceivesCallbacksWithPostedFrom) {
-    struct TestObserver : nei::TaskObserver {
-      std::atomic<int> started{0};
-      std::atomic<int> completed{0};
-      std::atomic<bool> had_posted_from{false};
-
-      void OnTaskStarted(const nei::internal::Task& task, nei::TimeDelta) override {
-        started.fetch_add(1, std::memory_order_relaxed);
-        if (!task.posted_from.is_null()) {
-          had_posted_from.store(true, std::memory_order_relaxed);
-          const std::string loc = task.posted_from.ToString();
-          (void)loc;
-        }
-      }
-      void OnTaskCompleted(const nei::internal::Task&, nei::TimeDelta) override {
-        completed.fetch_add(1, std::memory_order_relaxed);
-      }
-    };
-
-    TestObserver observer;
-    nei::ThreadPool pool({1});
-    pool.SetTaskObserver(&observer);
-
-    nei::scoped_refptr<nei::TaskRunner> runner = pool.CreateSequencedTaskRunner();
-    ASSERT_TRUE(runner);
-
-    nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
-    runner->PostTask(FROM_HERE, [&done]() { done.Signal(); });
-    ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(3000)));
-
-    pool.SetTaskObserver(nullptr);
-    pool.Shutdown();
-
-    EXPECT_GE(observer.started.load(), 1);
-    EXPECT_GE(observer.completed.load(), 1);
-    EXPECT_TRUE(observer.had_posted_from.load());
-  }
-
-  TEST(ThreadPoolTest, LocationToStringIsNonEmptyForFromHere) {
-    const nei::Location loc = FROM_HERE;
-    EXPECT_FALSE(loc.ToString().empty());
-    EXPECT_NE(loc.ToString(), "unknown");
-  }
-
-  TEST(ThreadPoolTest, LocationToStringIsUnknownForDefault) {
-    EXPECT_EQ(nei::Location{}.ToString(), "unknown");
-  }
 
 // ============================================================================
 // ThreadPoolInstance (global singleton) tests

@@ -710,7 +710,10 @@ TEST(ChildProcessTest, LaunchWithWorkingDirectory) {
   // /tmp on POSIX, %TEMP% on Windows — both always exist.
 #if defined(_WIN32)
   const char* argv[] = {"cmd", "/d", "/c", "cd"};
-  const std::string expected_dir = "C:\\Windows";
+  // Use %TEMP% instead of hardcoded C:\Windows.
+  const char* temp = getenv("TEMP");
+  ASSERT_NE(temp, nullptr) << "TEMP environment variable not set";
+  const std::string expected_dir = temp;
 #else
   const char* argv[] = {"/bin/sh", "-c", "pwd"};
   const std::string expected_dir = "/tmp";
