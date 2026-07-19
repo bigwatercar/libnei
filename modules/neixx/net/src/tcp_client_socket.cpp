@@ -17,10 +17,6 @@ TCPClientSocket::TCPClientSocket(Impl* impl) : impl_(impl) {
 }
 
 TCPClientSocket::~TCPClientSocket() {
-  Orphan();
-}
-
-void TCPClientSocket::Orphan() {
   if (impl_) {
     impl_->Orphan();
     impl_->Release();  // Release shell's reference.

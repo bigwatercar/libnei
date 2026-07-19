@@ -13,10 +13,6 @@ TCPServerSocket::TCPServerSocket() : impl_(new Impl()) {
 }
 
 TCPServerSocket::~TCPServerSocket() {
-  Orphan();
-}
-
-void TCPServerSocket::Orphan() {
   if (impl_) {
     impl_->Orphan();
     impl_->Release();  // Release shell's reference.

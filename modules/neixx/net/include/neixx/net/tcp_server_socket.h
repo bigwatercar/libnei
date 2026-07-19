@@ -86,8 +86,6 @@ class NEI_API TCPServerSocket final {
   class Impl;
 
  private:
-  void Orphan();
-
   Impl* impl_ = nullptr;  // Raw pointer  --  lifetime managed by RefCountedThreadSafe
 };
 

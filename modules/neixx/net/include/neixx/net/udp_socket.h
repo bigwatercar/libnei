@@ -113,7 +113,6 @@ class NEI_API UDPSocket {
   class Impl;
 
  private:
-  void Orphan();
   Impl* impl_ = nullptr;  // Raw pointer — lifetime managed by RefCountedThreadSafe
 };
 

@@ -92,11 +92,6 @@ class NEI_API TCPClientSocket : public AsyncInputStream,
   explicit TCPClientSocket(Impl* impl);
 
  private:
-  // Orphans the Impl (cancels pending callbacks, initiates graceful
-  // shutdown) and releases the shell's reference.  The Impl may outlive
-  // the shell via internal reference counting during background drain.
-  void Orphan();
-
   Impl* impl_ = nullptr;  // Raw pointer  --  lifetime managed by RefCountedThreadSafe
 };
 

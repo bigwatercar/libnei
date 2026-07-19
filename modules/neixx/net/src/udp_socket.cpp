@@ -13,10 +13,6 @@ UDPSocket::UDPSocket() : impl_(new Impl()) {
 }
 
 UDPSocket::~UDPSocket() {
-  Orphan();
-}
-
-void UDPSocket::Orphan() {
   if (impl_) {
     impl_->Orphan();
     impl_->Release();  // Release shell's reference.
