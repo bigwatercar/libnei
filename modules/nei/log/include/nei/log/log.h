@@ -898,6 +898,81 @@ NEI_API int nei_log_rollback_unpublished_slot_for_test(uint64_t reserved_pos);
   } while (0)
 
 /**
+ * @defgroup nei_log_macros_raw Raw forwarding macros
+ * @ingroup nei_log_macros
+ * @brief 1:1 forwarding to the C API with full control over positional
+ *        arguments (@p file, @p line, @p func).
+ *
+ * @details These macros forward every argument directly to the
+ * corresponding @c nei_llog / @c nei_vlog / @c nei_llog_literal /
+ * @c nei_vlog_literal function without synthesizing @c __FILE__,
+ * @c __LINE__, or @c NEI_FUNC.  They are intended for use cases where
+ * the caller already has source-location information from another
+ * source (e.g. Qt's @c QMessageLogContext in a custom message handler)
+ * and needs to bridge that context into the NEI log pipeline.
+ *
+ * Like all convenience macros, they are controlled by
+ * @c NEI_LOG_DISABLE_MACROS — when the flag is defined every
+ * invocation becomes a no-op that still evaluates its arguments
+ * (avoiding "unused variable" warnings).
+ * @{
+ */
+
+/**
+ * @brief Forward to @ref nei_llog with caller-supplied source location.
+ * @param config_handle @ref nei_log_config_handle_t
+ * @param level         @ref nei_log_level_e
+ * @param file          Source file path (caller-provided)
+ * @param line          Source line number (caller-provided)
+ * @param func          Function name (caller-provided)
+ * @param fmt           printf-style format string
+ * @param ...           printf-style variadic arguments
+ */
+#define NEI_LLOG(config_handle, level, file, line, func, fmt, ...)                                                     \
+  nei_llog(config_handle, level, file, line, func, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief Forward to @ref nei_vlog with caller-supplied source location.
+ * @param config_handle @ref nei_log_config_handle_t
+ * @param verbose       Verbose sub-level
+ * @param file          Source file path (caller-provided)
+ * @param line          Source line number (caller-provided)
+ * @param func          Function name (caller-provided)
+ * @param fmt           printf-style format string
+ * @param ...           printf-style variadic arguments
+ */
+#define NEI_VLOG(config_handle, verbose, file, line, func, fmt, ...)                                                   \
+  nei_vlog(config_handle, verbose, file, line, func, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief Forward to @ref nei_llog_literal with caller-supplied source location.
+ * @param config_handle @ref nei_log_config_handle_t
+ * @param level         @ref nei_log_level_e
+ * @param file          Source file path (caller-provided)
+ * @param line          Source line number (caller-provided)
+ * @param func          Function name (caller-provided)
+ * @param message       Pre-formatted message bytes
+ * @param length        Message length in bytes
+ */
+#define NEI_LLOG_LITERAL(config_handle, level, file, line, func, message, length)                                       \
+  nei_llog_literal(config_handle, level, file, line, func, message, length)
+
+/**
+ * @brief Forward to @ref nei_vlog_literal with caller-supplied source location.
+ * @param config_handle @ref nei_log_config_handle_t
+ * @param verbose       Verbose sub-level
+ * @param file          Source file path (caller-provided)
+ * @param line          Source line number (caller-provided)
+ * @param func          Function name (caller-provided)
+ * @param message       Pre-formatted message bytes
+ * @param length        Message length in bytes
+ */
+#define NEI_VLOG_LITERAL(config_handle, verbose, file, line, func, message, length)                                     \
+  nei_vlog_literal(config_handle, verbose, file, line, func, message, length)
+
+/** @} */ /* end of nei_log_macros_raw */
+
+/**
  * @brief Log a TRACE message (convenience macro)
  * @param fmt printf-style format string
  * @param ... printf-style variadic arguments
@@ -1003,6 +1078,14 @@ NEI_API int nei_log_rollback_unpublished_slot_for_test(uint64_t reserved_pos);
   ((void)(condition), (void)(config_handle), (void)(level))
 #define NEI_LOG_VERBOSE_LITERAL(verbose, message, length) ((void)(verbose), (void)(message), (void)(length))
 #define NEI_LOG_VERBOSE_LITERAL_IF(condition, verbose, message, length) ((void)(condition))
+#define NEI_LLOG(config_handle, level, file, line, func, fmt, ...)                                                     \
+  ((void)(config_handle), (void)(level), (void)(file), (void)(line), (void)(func))
+#define NEI_VLOG(config_handle, verbose, file, line, func, fmt, ...)                                                   \
+  ((void)(config_handle), (void)(verbose), (void)(file), (void)(line), (void)(func))
+#define NEI_LLOG_LITERAL(config_handle, level, file, line, func, message, length)                                       \
+  ((void)(config_handle), (void)(level), (void)(file), (void)(line), (void)(func), (void)(message), (void)(length))
+#define NEI_VLOG_LITERAL(config_handle, verbose, file, line, func, message, length)                                     \
+  ((void)(config_handle), (void)(verbose), (void)(file), (void)(line), (void)(func), (void)(message), (void)(length))
 #define NEI_LOG_TRACE(fmt, ...) NEI_LOG(NEI_L_TRACE, fmt, ##__VA_ARGS__)
 #define NEI_LOG_TRACE_IF(condition, fmt, ...) ((void)(condition))
 #define NEI_LOG_DEBUG(fmt, ...) NEI_LOG(NEI_L_DEBUG, fmt, ##__VA_ARGS__)
