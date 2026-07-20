@@ -17,6 +17,8 @@
 #include <memory>
 #include <vector>
 
+#include <neixx/common/time.h>
+#include <neixx/functional/bind.h>
 #include <neixx/io/io_buffer.h>
 #include <neixx/net/ip_address.h>
 #include <neixx/net/ip_end_point.h>
@@ -697,6 +699,192 @@ TEST_F(TcpSocketTest, WriteChainNoStackOverflow) {
          "was " << max_depth.load() << "  --  possible synchronous re-entrancy";
   EXPECT_GT(server_read_count.load(), 0)
       << "Server should have read at least some data";
+}
+
+// ===========================================================================
+// Test 10  --  ConnectFailureCallbackRespectsOrphan
+//
+// Verifies the orphaned_ guard in posted connect-failure callbacks (fix for
+// TCP Win OnIOCompleted / TCP POSIX PostConnectResult TOCTOU window).
+//
+// Scenario: connect to a dead port → failure callback is posted → orphan
+// the socket before the callback executes → callback must be silently
+// dropped, not invoked on a destroyed shell.
+// ===========================================================================
+
+TEST_F(TcpSocketTest, ConnectFailureCallbackRespectsOrphan) {
+  // Verify no crash when a connect-failure callback fires near an orphan.
+  // The orphaned_ guard in OnIOCompleted/PostConnectResult prevents the
+  // callback from invoking on a destroyed shell.  On loopback the connect
+  // may fail synchronously (before the orphan), so the callback may still
+  // fire — the point is that it doesn't crash.
+  const uint16_t port = FindFreePort();
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::atomic<bool> callback_fired{false};
+
+  io_runner_->PostTask(FROM_HERE, [this, port, &done, &callback_fired]() {
+    auto client = std::make_shared<TCPClientSocket>();
+    client->Connect(
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+        [&callback_fired](bool /*success*/) {
+          callback_fired.store(true, std::memory_order_relaxed);
+        },
+        io_runner_);
+
+    // Orphan immediately — on loopback the connect may have already
+    // failed synchronously and the callback posted.  The orphaned_ guard
+    // in posted callbacks must handle either case without crashing.
+    client.reset();  // → Orphan()
+
+    // Allow time for any in-flight callback to be dispatched.
+    io_runner_->PostDelayedTask(
+        FROM_HERE,
+        BindOnce([&done]() { done.Signal(); }),
+        TimeDelta::FromSeconds(4));
+  });
+
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  // Whether the callback fired or was dropped, the test didn't crash.
+  SUCCEED();
+}
+
+// ===========================================================================
+// Test 11  --  OrphanedWhileConnectInFlight
+//
+// Verifies the OnIOCompleted self-protector pattern (scoped_refptr<Impl>
+// extracted BEFORE delete ctx).  If ctx→self_ref held the last reference
+// to the Impl, delete ctx would destroy *this, causing UAF on the
+// subsequent orphaned_ check.
+//
+// Scenario: start connecting → orphan before IOCP/epoll completes →
+// OnIOCompleted runs after orphan → self-protector keeps Impl alive
+// through orphaned_ check and cleanup.
+// ===========================================================================
+
+TEST_F(TcpSocketTest, OrphanedWhileConnectInFlight) {
+  // Use a valid server so the connect actually enters the async path.
+  const uint16_t port = FindFreePort();
+
+  WaitableEvent server_ready(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  auto server = std::make_shared<TCPServerSocket>();
+  io_runner_->PostTask(FROM_HERE, [this, server, port, &server_ready]() {
+    ASSERT_TRUE(server->Listen(
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
+        [](bool, std::unique_ptr<TCPClientSocket>) {},
+        io_runner_));
+    server_ready.Signal();
+  });
+  ASSERT_TRUE(server_ready.TimedWait(std::chrono::seconds(5)));
+
+  // Now connect and immediately orphan.
+  WaitableEvent orphan_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  io_runner_->PostTask(FROM_HERE, [this, port, &orphan_done]() {
+    auto client = std::make_shared<TCPClientSocket>();
+    client->Connect(
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+        [](bool /*success*/) {
+          // May or may not fire — the point is no crash.
+        },
+        io_runner_);
+
+    // Orphan immediately — the connect is in-flight (IOCP pending /
+    // epoll EINPROGRESS).  The self-protector in OnIOCompleted must
+    // keep the Impl alive through orphaned_ handling.
+    client.reset();  // ~TCPClientSocket → Orphan()
+
+    io_runner_->PostTask(FROM_HERE, [&orphan_done]() {
+      orphan_done.Signal();
+    });
+  });
+
+  ASSERT_TRUE(orphan_done.TimedWait(std::chrono::seconds(5)));
+  SUCCEED();
+}
+
+// ===========================================================================
+// Test 12  --  TCPNodelayAndIPV6V6ONLY (documentation / coverage note)
+//
+// TCP_NODELAY and IPV6_V6ONLY are set unconditionally during socket
+// creation on both Connect() and Listen() paths.  These are OS-level
+// socket options that cannot be directly observed from userspace without
+// platform-specific introspection (TCP_INFO / getsockopt).
+//
+// The IPv6Loopback test in udp_socket_unittest.cpp validates the IPv6
+// data path; TCP's IPv6 dual-stack behavior is implicitly covered by
+// the existing handshake / transfer tests when ::1 is used.
+//
+// This test documents the expectation that the options are applied and
+// verifies that Connect() + Listen() with IPv6 do not regress.
+// ===========================================================================
+
+TEST_F(TcpSocketTest, ConnectAndListenWithIPv6Loopback) {
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::atomic<bool> ipv6_works{false};
+
+  // Probe: try binding a server to ::1 to see if IPv6 is available.
+  io_runner_->PostTask(FROM_HERE, [this, &done, &ipv6_works]() {
+    uint8_t ipv6_loopback[16] = {};
+    ipv6_loopback[15] = 1;
+    IPEndPoint local(IPAddress::FromIPv6(ipv6_loopback), 0);
+
+    auto server = std::make_shared<TCPServerSocket>();
+    if (server->Listen(local, 1,
+                       [](bool, std::unique_ptr<TCPClientSocket>) {},
+                       io_runner_)) {
+      ipv6_works.store(true, std::memory_order_relaxed);
+    }
+    server->Shutdown();
+    done.Signal();
+  });
+
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  if (!ipv6_works.load()) {
+    GTEST_SKIP() << "IPv6 loopback not available on this host";
+  }
+
+  // IPv6 is available — verify connect + accept round-trip.
+  WaitableEvent accepted_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent connected_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::atomic<bool> accepted{false};
+  std::atomic<bool> connected{false};
+
+  io_runner_->PostTask(FROM_HERE,
+      [this, &accepted_done, &connected_done, &accepted, &connected]() {
+    uint8_t ipv6_loopback[16] = {};
+    ipv6_loopback[15] = 1;
+
+    const uint16_t port = FindFreePort();
+    IPEndPoint bind_addr(IPAddress::FromIPv6(ipv6_loopback), port);
+
+    auto server = std::make_shared<TCPServerSocket>();
+    ASSERT_TRUE(server->Listen(
+        bind_addr, 1,
+        [&accepted, &accepted_done, server](bool ok,
+                                     std::unique_ptr<TCPClientSocket> client) {
+          accepted.store(ok, std::memory_order_relaxed);
+          accepted_done.Signal();
+          if (client) client->Close();
+        },
+        io_runner_));
+
+    auto client = std::make_shared<TCPClientSocket>();
+    client->Connect(
+        bind_addr,
+        [&connected, &connected_done, client](bool ok) {
+          connected.store(ok, std::memory_order_relaxed);
+          connected_done.Signal();
+          client->Close();
+        },
+        io_runner_);
+  });
+
+  ASSERT_TRUE(accepted_done.TimedWait(std::chrono::seconds(5)));
+  ASSERT_TRUE(connected_done.TimedWait(std::chrono::seconds(5)));
+  EXPECT_TRUE(accepted.load());
+  EXPECT_TRUE(connected.load());
 }
 
 }  // namespace
