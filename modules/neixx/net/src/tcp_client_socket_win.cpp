@@ -224,8 +224,21 @@ bool TCPClientSocket::Impl::DoConnect(
     return false;
 
   socket_ = WSASocketW(sa.ss_family, SOCK_STREAM, IPPROTO_TCP,
-                       nullptr, 0, WSA_FLAG_OVERLAPPED);
+                       nullptr, 0,
+                       WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
   if (socket_ == INVALID_SOCKET) return false;
+
+  // Disable Nagle for low-latency operation (consistent with accepted path).
+  int nodelay = 1;
+  setsockopt(socket_, IPPROTO_TCP, TCP_NODELAY,
+             reinterpret_cast<const char*>(&nodelay), sizeof(nodelay));
+
+  // Explicit IPV6_V6ONLY for cross-platform consistency.
+  if (sa.ss_family == AF_INET6) {
+    int v6only = 1;
+    setsockopt(socket_, IPPROTO_IPV6, IPV6_V6ONLY,
+               reinterpret_cast<const char*>(&v6only), sizeof(v6only));
+  }
 
   EnsureBound(sa.ss_family);
   RegisterWithPump();
@@ -455,6 +468,9 @@ void TCPClientSocket::Impl::OnIOCompleted(
         setsockopt(socket_, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0);
       }
       auto cb = std::move(ctx->connect_cb);
+      // Self-protector: extract self_ref BEFORE delete ctx so Impl stays
+      // alive through orphaned_ / callback dispatch below.
+      scoped_refptr<Impl> self_protector = std::move(ctx->self_ref);
       delete ctx;
       if (orphaned_) {
         // Orphan path  --  drop the callback, no user notification.
@@ -465,8 +481,12 @@ void TCPClientSocket::Impl::OnIOCompleted(
         if (io_runner_) {
           io_runner_->PostTask(
               FROM_HERE,
-              BindOnce([](TCPClientSocket::ConnectCallback c, bool ok) { c(ok); },
-                       std::move(cb), success));
+              BindOnce([](scoped_refptr<Impl> self,
+                          TCPClientSocket::ConnectCallback c, bool ok) {
+                         if (self->orphaned_) return;
+                         c(ok);
+                       },
+                       WrapRefCounted(this), std::move(cb), success));
         }
       }
       break;
@@ -474,10 +494,8 @@ void TCPClientSocket::Impl::OnIOCompleted(
     case TcpOverlappedContext::Op::kRead: {
       auto cb = std::move(ctx->read_cb);
       bool is_drain = ctx->is_drain_read;
+      scoped_refptr<Impl> self_protector = std::move(ctx->self_ref);
       delete ctx;
-      // If orphaned and this is NOT a drain read, drop the user callback
-      // silently  --  the user has already destroyed the shell.  Drain reads
-      // (is_drain_read == true) are internal and don't carry user callbacks.
       if (orphaned_ && !is_drain)
         break;
       if (cb) {
@@ -485,9 +503,13 @@ void TCPClientSocket::Impl::OnIOCompleted(
         if (io_runner_) {
           io_runner_->PostTask(
               FROM_HERE,
-              BindOnce([](AsyncInputStream::IOReadCallback c, bool s,
-                          std::size_t n) { c(s, n); },
-                       std::move(cb), success,
+              BindOnce([](scoped_refptr<Impl> self,
+                          AsyncInputStream::IOReadCallback c, bool s,
+                          std::size_t n) {
+                         if (self->orphaned_) return;
+                         c(s, n);
+                       },
+                       WrapRefCounted(this), std::move(cb), success,
                        static_cast<std::size_t>(bytes_transferred)));
         }
       }
@@ -495,9 +517,9 @@ void TCPClientSocket::Impl::OnIOCompleted(
     }
     case TcpOverlappedContext::Op::kWrite: {
       auto cb = std::move(ctx->write_cb);
+      scoped_refptr<Impl> self_protector = std::move(ctx->self_ref);
       delete ctx;
       if (orphaned_) {
-        // Orphan path: write flushed -> trigger shutdown, not user callback.
         OnOrphanWriteFlushed();
         break;
       }
@@ -506,9 +528,13 @@ void TCPClientSocket::Impl::OnIOCompleted(
         if (io_runner_) {
           io_runner_->PostTask(
               FROM_HERE,
-              BindOnce([](AsyncOutputStream::IOWriteCallback c, bool s,
-                          std::size_t n) { c(s, n); },
-                       std::move(cb), success,
+              BindOnce([](scoped_refptr<Impl> self,
+                          AsyncOutputStream::IOWriteCallback c, bool s,
+                          std::size_t n) {
+                         if (self->orphaned_) return;
+                         c(s, n);
+                       },
+                       WrapRefCounted(this), std::move(cb), success,
                        static_cast<std::size_t>(bytes_transferred)));
         }
       }

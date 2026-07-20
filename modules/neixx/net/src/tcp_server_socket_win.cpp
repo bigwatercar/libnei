@@ -302,8 +302,16 @@ SOCKET TCPServerSocket::Impl::CreateListenSocket(const IPEndPoint& addr,
     return INVALID_SOCKET;
 
   SOCKET s = WSASocketW(sa.ss_family, SOCK_STREAM, IPPROTO_TCP,
-                        nullptr, 0, WSA_FLAG_OVERLAPPED);
+                        nullptr, 0,
+                        WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
   if (s == INVALID_SOCKET) return INVALID_SOCKET;
+
+  // Explicit IPV6_V6ONLY for cross-platform consistency.
+  if (sa.ss_family == AF_INET6) {
+    int v6only = 1;
+    setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY,
+               reinterpret_cast<const char*>(&v6only), sizeof(v6only));
+  }
 
   // Set SO_REUSEADDR for quick restart.
   BOOL reuse = TRUE;
@@ -335,7 +343,8 @@ SOCKET TCPServerSocket::Impl::CreateClientSocket() {
     }
   }
   return WSASocketW(family, SOCK_STREAM, IPPROTO_TCP,
-                    nullptr, 0, WSA_FLAG_OVERLAPPED);
+                    nullptr, 0,
+                    WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
 }
 
 scoped_refptr<IOBuffer> TCPServerSocket::Impl::CreateAddrBuffer() {

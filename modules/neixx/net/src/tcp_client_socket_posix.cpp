@@ -507,8 +507,12 @@ void TCPClientSocket::Impl::PostConnectResult(bool success) {
     if (io_runner_) {
       io_runner_->PostTask(
           FROM_HERE,
-          BindOnce([](TCPClientSocket::ConnectCallback c, bool ok) { c(ok); },
-                   std::move(cb), success));
+          BindOnce([](scoped_refptr<Impl> self,
+                      TCPClientSocket::ConnectCallback c, bool ok) {
+                     if (self->orphaned_) return;
+                     c(ok);
+                   },
+                   WrapRefCounted(this), std::move(cb), success));
     }
   }
 }
@@ -565,8 +569,14 @@ void TCPClientSocket::Impl::PostWriteResult(AsyncOutputStream::IOWriteCallback c
 
 int TCPClientSocket::Impl::CreateSocket(const IPEndPoint& addr) {
   int family = addr.address().IsIPv6() ? AF_INET6 : AF_INET;
-  return socket(family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
-                IPPROTO_TCP);
+  int fd = socket(family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+                  IPPROTO_TCP);
+  if (fd >= 0 && family == AF_INET6) {
+    // Explicit IPV6_V6ONLY for cross-platform consistency.
+    int v6only = 1;
+    setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
+  }
+  return fd;
 }
 
 bool TCPClientSocket::Impl::EndPointToSockAddr(

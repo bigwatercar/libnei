@@ -218,6 +218,12 @@ int TCPServerSocket::Impl::CreateListenSocket(const IPEndPoint& addr,
                   IPPROTO_TCP);
   if (fd < 0) return -1;
 
+  // Explicit IPV6_V6ONLY for cross-platform consistency.
+  if (sa.ss_family == AF_INET6) {
+    int v6only = 1;
+    setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
+  }
+
   int reuse = 1;
   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
