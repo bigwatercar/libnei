@@ -29,6 +29,13 @@ class TaskRunnerImpl final : public TaskRunner {
     return std::this_thread::get_id() == bound_thread_id_;
   }
 
+  // For SequenceManager-backed runners, the dedicated thread is the
+  // sequence.  ThreadPool runners will override this via TLS detection
+  // (see pooled_task_source for the worker-thread side).
+  bool RunsTasksInCurrentSequence() const override {
+    return BelongsToCurrentThread();
+  }
+
   bool PostTaskWithTraits(const Location& from_here,
                           const TaskTraits& traits,
                           OnceClosure task) override {

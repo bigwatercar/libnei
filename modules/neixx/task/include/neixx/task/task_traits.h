@@ -29,19 +29,17 @@ struct TaskShutdownBehaviorTag final {
   TaskShutdownBehavior behavior;
 };
 
-// "Culver" is the internal codename for the Chromium-style trait-tag
-// helpers.  These are constexpr factory functions that produce typed tags
-// consumed by TaskTraits' variadic constructor for compile-time trait
-// composition (e.g. TaskTraits(CulverBlocking(), MayBlock())).
-constexpr TaskShutdownBehaviorTag CulverContinuable() {
+// Chromium-style trait-tag factory functions for compile-time trait
+// composition (e.g. TaskTraits(BlockShutdown(), MayBlock())).
+constexpr TaskShutdownBehaviorTag ContinueOnShutdown() {
   return TaskShutdownBehaviorTag{TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN};
 }
 
-constexpr TaskShutdownBehaviorTag CulverSkippable() {
+constexpr TaskShutdownBehaviorTag SkipOnShutdown() {
   return TaskShutdownBehaviorTag{TaskShutdownBehavior::SKIP_ON_SHUTDOWN};
 }
 
-constexpr TaskShutdownBehaviorTag CulverBlocking() {
+constexpr TaskShutdownBehaviorTag BlockShutdown() {
   return TaskShutdownBehaviorTag{TaskShutdownBehavior::BLOCK_SHUTDOWN};
 }
 

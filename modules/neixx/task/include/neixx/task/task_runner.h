@@ -63,8 +63,20 @@ class NEI_API TaskRunner : public RefCountedThreadSafe<TaskRunner> {
 
   // Returns true if the current thread is the thread this runner is bound
   // to.  For IO thread runners, the bound thread is the one that owns the
-  // underlying MessagePumpForIO.  Default implementation returns false.
+  // underlying MessagePumpForIO.  For thread-pool runners, this always
+  // returns false (pool runners are not bound to a specific thread).
+  // Use RunsTasksInCurrentSequence() for pool-aware sequence detection.
   virtual bool BelongsToCurrentThread() const { return false; }
+
+  // Returns true if tasks posted to this runner are guaranteed to run on
+  // the calling thread (i.e., the calling thread is the runner's dedicated
+  // sequence).  This is the preferred method for determining whether it is
+  // safe to access sequence-bound state without locks.
+  //
+  // For SequenceManager-backed runners: same as BelongsToCurrentThread().
+  // For ThreadPool runners: true only if the current thread is actively
+  // executing a task from this runner's queue (TLS-based detection).
+  virtual bool RunsTasksInCurrentSequence() const { return false; }
 
   // Observability helpers for delayed-overflow fallback path.
   // Intended for tests and diagnostics.

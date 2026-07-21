@@ -62,6 +62,14 @@ class NEI_API ThreadPool final {
   /// Shuts down the pool and waits for all workers to exit.
   /// If timeout is positive, workers that have not exited within the deadline
   /// are abandoned (returns false in that case).
+  ///
+  /// WARNING: When Shutdown returns false (timeout), abandoned worker threads
+  /// may still hold raw pointers into pool-internal data structures.  The
+  /// caller MUST NOT destroy the ThreadPool or access any pool-owned state
+  /// until all abandoned threads have exited.  For production use, prefer
+  /// timeout=zero to wait indefinitely, or ensure worker tasks have bounded
+  /// execution time.
+  ///
   /// A zero or negative timeout means wait indefinitely.
   bool Shutdown(TimeDelta timeout = TimeDelta());
 
