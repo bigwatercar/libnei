@@ -162,6 +162,9 @@ void TCPClientSocket::Impl::StartOrphanDrain() {
     io_runner_->PostTask(
         FROM_HERE,
         BindOnce([](scoped_refptr<Impl> self) {
+          // Mark the upcoming read as a drain so PostReadResult does not
+          // drop its callback even when orphaned_ is true.
+          self->is_drain_read_in_flight_ = true;
           auto drain_buf = MakeRefCounted<IOBufferWithSize>(4096);
           self->ReadAsync(std::move(drain_buf), 4096,
                           [self](bool success, std::size_t n) {
@@ -528,10 +531,14 @@ void TCPClientSocket::Impl::PostReadResult(AsyncInputStream::IOReadCallback cb,
           BindOnce(
               [](scoped_refptr<Impl> self,
                  AsyncInputStream::IOReadCallback c, bool s, std::size_t n) {
-                // Drop the callback if the Impl was orphaned between the
-                // read completing and this task executing.
-                if (self->orphaned_)
+                // If the Impl was orphaned between read completion and
+                // task execution, only drop user-level callbacks.  Drain
+                // reads (posted by StartOrphanDrain to detect peer EOF)
+                // must still execute so that Close() → ReleaseSelfHold
+                // runs and the self-hold is released.
+                if (self->orphaned_ && !self->is_drain_read_in_flight_)
                   return;
+                self->is_drain_read_in_flight_ = false;
                 c(s, n);
               },
               WrapRefCounted(this),

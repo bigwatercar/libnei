@@ -69,18 +69,10 @@ void ApplyOptions(const HostResolverOptions& opts, struct ares_options& aopts,
     optmask |= ARES_OPT_ROTATE;
   }
 
-  switch (opts.address_family) {
-    case AF_INET:
-      aopts.lookups = const_cast<char*>("b");
-      optmask |= ARES_OPT_LOOKUPS;
-      break;
-    case AF_INET6:
-      aopts.lookups = const_cast<char*>("c");
-      optmask |= ARES_OPT_LOOKUPS;
-      break;
-    default:
-      break;
-  }
+  // NOTE: opts.address_family is NOT mapped to aopts.lookups.  The
+  // 'lookups' field controls query *channels* ("b"=DNS, "f"=hosts file),
+  // not address family.  IPv4/IPv6 filtering is handled by
+  // ares_addrinfo_hints.ai_family in the caller.
 }
 
 void ApplyServers(ares_channel_t* channel, const HostResolverOptions& opts) {
@@ -133,6 +125,11 @@ void CaresContext::Shutdown() {
 CaresContext::ChannelEntry* CaresContext::GetOrCreateChannel(
     const HostResolverOptions& options) {
   AutoLock lock(lock_);
+  return GetOrCreateChannelLocked(options);
+}
+
+CaresContext::ChannelEntry* CaresContext::GetOrCreateChannelLocked(
+    const HostResolverOptions& options) {
 
   auto it = channels_.find(options);
   if (it != channels_.end()) {
@@ -167,7 +164,18 @@ void CaresContext::Resolve(const std::string& host,
                            ResolveCallback callback,
                            void* arg,
                            scoped_refptr<TaskRunner> target_runner) {
-  ChannelEntry* entry = GetOrCreateChannel(options);
+  // Acquire a raw pointer to the channel entry under lock.  ares_getaddrinfo
+  // is async and must not be called under our mutex to avoid blocking
+  // concurrent resolves on the same context.  The ChannelEntry is owned by
+  // channels_ and is only destroyed by Shutdown() (which joins all in-flight
+  // queries first), so the raw pointer remains valid for the duration of the
+  // ares_getaddrinfo call.
+  ChannelEntry* entry = nullptr;
+  {
+    AutoLock lock(lock_);
+    entry = GetOrCreateChannelLocked(options);
+  }
+
   if (entry == nullptr) {
     // Error path: post the callback to |target_runner| so that the calling
     // thread is never blocked synchronously.  This keeps callback delivery
@@ -180,11 +188,8 @@ void CaresContext::Resolve(const std::string& host,
     return;
   }
 
-  {
-    AutoLock channel_lock(entry->lock);
-    ares_getaddrinfo(entry->channel, host.c_str(), nullptr, hints,
-                     callback, arg);
-  }
+  ares_getaddrinfo(entry->channel, host.c_str(), nullptr, hints,
+                  callback, arg);
 }
 
 }  // namespace nei::net

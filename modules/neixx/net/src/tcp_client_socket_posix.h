@@ -119,6 +119,11 @@ class TCPClientSocket::Impl final
   // Orphan(), cleared and released by Close() or drain completion.
   bool has_self_ref_ = false;
 
+  // Set by StartOrphanDrain before posting a drain read.  PostReadResult
+  // must NOT drop the drain callback even when orphaned_ is true, otherwise
+  // Close() never runs and the self-hold leaks.
+  bool is_drain_read_in_flight_ = false;
+
   // Must be the last member.
   WeakPtrFactory<Impl> weak_factory_;
 };

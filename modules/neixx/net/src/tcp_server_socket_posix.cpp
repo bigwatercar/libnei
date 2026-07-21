@@ -79,6 +79,19 @@ void TCPServerSocket::Impl::Close() {
     }
   }
 
+  // Physical teardown must run on the IO thread to avoid racing
+  // epoll_wait / accept4.  Post to the IO runner (matching the
+  // TCPClientSocket DoCloseCleanup trampoline pattern).
+  if (io_runner_ && !io_runner_->BelongsToCurrentThread()) {
+    lock.unlock();
+    io_runner_->PostTask(
+        FROM_HERE,
+        BindOnce([](scoped_refptr<Impl> self) {
+          self->Close();
+        }, WrapRefCounted(this)));
+    return;
+  }
+
   watch_controller_.StopWatching();
   if (listen_fd_ >= 0) {
     close(listen_fd_);
@@ -162,8 +175,23 @@ void TCPServerSocket::Impl::OnFileCanReadWithoutBlocking(
         // Transient FD exhaustion  --  retry on next epoll trigger.
         break;
       }
-      // Fatal error (EBADF, etc.)  --  stop watching to prevent busy-loop.
+      // Fatal error (EBADF, etc.)  --  stop watching and notify the caller
+      // to prevent silent server death.
       watch_controller_.StopWatching();
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (accept_callback_) {
+          auto cb = std::move(accept_callback_);
+          lock.unlock();
+          if (io_runner_) {
+            io_runner_->PostTask(
+                FROM_HERE,
+                BindOnce([](TCPServerSocket::AcceptCallback c) {
+                  c(false, nullptr);
+                }, std::move(cb)));
+          }
+        }
+      }
       break;
     }
 

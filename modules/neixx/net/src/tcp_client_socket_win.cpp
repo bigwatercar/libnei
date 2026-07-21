@@ -150,6 +150,12 @@ void TCPClientSocket::Impl::OnOrphanWriteFlushed() {
 }
 
 void TCPClientSocket::Impl::StartOrphanDrain() {
+  // Ensure the socket is bound to the IOCP before issuing WSARecv.
+  // Accepted sockets defer pump registration to the first I/O call;
+  // if Orphan() fires before any ReadAsync/WriteAsync, the socket
+  // would otherwise not be associated with any completion port.
+  EnsurePumpRegistered();
+
   auto drain_buf = MakeRefCounted<IOBufferWithSize>(4096);
   // Mark this read as a drain read so OnIOCompleted won't fire the user
   // callback when orphaned_ is true.
@@ -159,6 +165,17 @@ void TCPClientSocket::Impl::StartOrphanDrain() {
   ctx->buf_len = 4096;
   ctx->is_drain_read = true;
   ctx->self_ref = WrapRefCounted(this);
+  // Set a drain callback so OnIOCompleted can trigger Close() on EOF/error
+  // and re-issue reads until the peer shuts down.  This mirrors the POSIX
+  // drain callback behavior.
+  ctx->read_cb = [self = WrapRefCounted(this)](bool success, std::size_t n) {
+    if (!success || n == 0) {
+      self->Close();  // EOF or error  --  triggers ReleaseSelfHoldIfNeeded
+    } else {
+      // Data received during drain  --  keep reading until EOF.
+      self->StartOrphanDrain();
+    }
+  };
 
   WSABUF wsa_buf;
   wsa_buf.buf = ctx->buffer->data();
@@ -505,12 +522,14 @@ void TCPClientSocket::Impl::OnIOCompleted(
               FROM_HERE,
               BindOnce([](scoped_refptr<Impl> self,
                           AsyncInputStream::IOReadCallback c, bool s,
-                          std::size_t n) {
-                         if (self->orphaned_) return;
+                          std::size_t n, bool drain) {
+                         // Only skip user callbacks when orphaned; drain
+                         // callbacks must always fire so Close() can run.
+                         if (!drain && self->orphaned_) return;
                          c(s, n);
                        },
                        WrapRefCounted(this), std::move(cb), success,
-                       static_cast<std::size_t>(bytes_transferred)));
+                       static_cast<std::size_t>(bytes_transferred), is_drain));
         }
       }
       break;

@@ -59,6 +59,8 @@ class CaresContext {
   ~CaresContext();
 
   ChannelEntry* GetOrCreateChannel(const HostResolverOptions& options);
+  // Locked variant — caller must hold lock_.
+  ChannelEntry* GetOrCreateChannelLocked(const HostResolverOptions& options);
   void Shutdown();
 
   mutable Lock lock_;
