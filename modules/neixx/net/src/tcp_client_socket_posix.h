@@ -122,6 +122,10 @@ class TCPClientSocket::Impl final
   // Set by StartOrphanDrain before posting a drain read.  PostReadResult
   // must NOT drop the drain callback even when orphaned_ is true, otherwise
   // Close() never runs and the self-hold leaks.
+  //
+  // Thread-safety: all accesses happen on the dedicated IO thread (the Impl
+  // is bound to a single io_runner_).  If Multi-Reactor worker dispatch is
+  // added in the future, this should become std::atomic<bool>.
   bool is_drain_read_in_flight_ = false;
 
   // Must be the last member.

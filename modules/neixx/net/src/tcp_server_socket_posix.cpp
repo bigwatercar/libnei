@@ -131,8 +131,15 @@ void TCPServerSocket::Impl::Orphan() {
     }
   }
 
-  if (!closed_) {
-    Shutdown();  // Silent  --  stops watching, closes fd. Does NOT release self-hold.
+  // Post Shutdown() to the IO thread to avoid racing epoll_wait / accept4,
+  // matching the trampoline pattern used by Close().
+  DCHECK_MSG(io_runner_, "Orphan: io_runner_ is null");
+  if (io_runner_ && !closed_) {
+    io_runner_->PostTask(
+        FROM_HERE,
+        BindOnce([](scoped_refptr<Impl> self) {
+          self->Shutdown();
+        }, WrapRefCounted(this)));
   }
 
   // Post a task to release self-hold after any in-flight accept callback

@@ -172,8 +172,11 @@ void TCPClientSocket::Impl::StartOrphanDrain() {
                             // triggers ReleaseSelfHoldIfNeeded().
                             if (!success || n == 0) {
                               self->Close();
+                              return;
                             }
-                            // Otherwise keep reading  --  self keeps Impl alive.
+                            // Data received during drain  --  re-issue the
+                            // read to keep draining until the peer sends FIN.
+                            self->StartOrphanDrain();
                           });
         }, WrapRefCounted(this)));
   }

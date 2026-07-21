@@ -150,6 +150,12 @@ void TCPClientSocket::Impl::OnOrphanWriteFlushed() {
 }
 
 void TCPClientSocket::Impl::StartOrphanDrain() {
+  // Send FIN before starting the drain read so the peer knows to close.
+  // For the pending-write case OnOrphanWriteFlushed() already sent FIN;
+  // for the no-pending-write case this is the only place that triggers it.
+  // ShutdownWrite() is idempotent (write_shutdown_ exchange guard).
+  ShutdownWrite();
+
   // Ensure the socket is bound to the IOCP before issuing WSARecv.
   // Accepted sockets defer pump registration to the first I/O call;
   // if Orphan() fires before any ReadAsync/WriteAsync, the socket
