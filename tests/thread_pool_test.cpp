@@ -576,5 +576,67 @@ TEST(ScopedBlockingCallTest, OutsideWorkerIsNoOp) {
   SUCCEED();
 }
 
+// =============================================================================
+// RunsTasksInCurrentSequence / BelongsToCurrentThread for pool runners
+// =============================================================================
+
+// Pool runners are not bound to a specific thread.
+TEST(ThreadPoolTest, BelongsToCurrentThreadReturnsFalse) {
+  ThreadPool pool({2});
+  scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  // On the creating thread (not a pool worker), this must be false.
+  EXPECT_FALSE(runner->BelongsToCurrentThread());
+
+  // Also false from within a task on a worker thread.
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  runner->PostTask(FROM_HERE, [&runner, &done]() {
+    EXPECT_FALSE(runner->BelongsToCurrentThread());
+    done.Signal();
+  });
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  pool.Shutdown();
+}
+
+// RunsTasksInCurrentSequence must return true when a pool worker is
+// actively executing a task from this runner's queue.
+TEST(ThreadPoolTest, RunsTasksInCurrentSequenceWithinTask) {
+  ThreadPool pool({2});
+  scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  // Outside a pool worker context, must be false.
+  EXPECT_FALSE(runner->RunsTasksInCurrentSequence());
+
+  // Inside a task posted to this runner, must be true.
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  runner->PostTask(FROM_HERE, [&runner, &done]() {
+    EXPECT_TRUE(runner->RunsTasksInCurrentSequence());
+    done.Signal();
+  });
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  pool.Shutdown();
+}
+
+// RunsTasksInCurrentSequence must return false when running a task from
+// a DIFFERENT runner.
+TEST(ThreadPoolTest, RunsTasksInCurrentSequenceFalseForDifferentRunner) {
+  ThreadPool pool({2});
+  scoped_refptr<TaskRunner> runner_a = pool.CreateSequencedTaskRunner();
+  scoped_refptr<TaskRunner> runner_b = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner_a);
+  ASSERT_TRUE(runner_b);
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  // Post a task to runner_a that checks runner_b.
+  runner_a->PostTask(FROM_HERE, [&runner_b, &done]() {
+    EXPECT_FALSE(runner_b->RunsTasksInCurrentSequence());
+    done.Signal();
+  });
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  pool.Shutdown();
+}
+
 }  // namespace
 }  // namespace nei

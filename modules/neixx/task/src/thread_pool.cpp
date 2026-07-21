@@ -14,6 +14,7 @@
 
 #include "internal/delayed_task_manager.h"
 #include "internal/pooled_task_source.h"
+#include "internal/pooled_task_runner_utils.h"
 #include <nei/log/log.h>
 #include <neixx/synchronization/condition_variable.h>
 #include <neixx/synchronization/waitable_event.h>
@@ -203,9 +204,14 @@ class WorkerThread final : public PlatformThread::Delegate {
         TRACE_EVENT_END("nei.scheduling", "WorkerThread");
         RestoreBaseline();
         internal::SetCurrentBlockingCallback(nullptr);
+        internal::SetCurrentPooledTaskQueue(nullptr);
         exit_event_.Signal();
         return;
       }
+
+      // Publish the current queue via TLS so RunsTasksInCurrentSequence()
+      // can detect sequence affinity for pool-backed TaskRunners.
+      internal::SetCurrentPooledTaskQueue(queue);
 
       std::size_t remaining_budget = dynamic_turn_budget_;
       while (remaining_budget > 0) {
@@ -298,6 +304,7 @@ class WorkerThread final : public PlatformThread::Delegate {
       }
 
       source_->OnTaskQueueProcessed(queue);
+      internal::SetCurrentPooledTaskQueue(nullptr);
       if (delayed_task_manager_ != nullptr) {
         delayed_task_manager_->OnQueueUpdated(queue);
       }
@@ -405,7 +412,7 @@ class ThreadPool::Impl {
     });
 
     queues_.push_back(std::move(queue));
-    return TaskRunner::Create(raw_queue, traits);
+    return TaskRunner::CreateForThreadPool(raw_queue, traits);
   }
 
   bool Shutdown(TimeDelta timeout = TimeDelta()) {

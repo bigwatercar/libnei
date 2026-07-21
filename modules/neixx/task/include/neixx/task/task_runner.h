@@ -61,6 +61,15 @@ class NEI_API TaskRunner : public RefCountedThreadSafe<TaskRunner> {
   static scoped_refptr<TaskRunner> Create(internal::TaskQueue* task_queue,
                                           const TaskTraits& traits = TaskTraits());
 
+  // Creates a TaskRunner for thread-pool queues.  Differs from Create() in
+  // that BelongsToCurrentThread() always returns false and
+  // RunsTasksInCurrentSequence() uses TLS-based detection to determine
+  // whether the calling thread is currently executing a task from this
+  // runner's queue.
+  static scoped_refptr<TaskRunner> CreateForThreadPool(
+      internal::TaskQueue* task_queue,
+      const TaskTraits& traits = TaskTraits());
+
   // Returns true if the current thread is the thread this runner is bound
   // to.  For IO thread runners, the bound thread is the one that owns the
   // underlying MessagePumpForIO.  For thread-pool runners, this always

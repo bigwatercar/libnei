@@ -6,6 +6,7 @@
 
 #include <neixx/task/internal/task_tracing.h>
 #include <neixx/task/internal/task_queue.h>
+#include "internal/pooled_task_runner_utils.h"
 #include <neixx/trace_event/trace_event.h>
 
 namespace nei {
@@ -114,6 +115,82 @@ class TaskRunnerImpl final : public TaskRunner {
   std::thread::id bound_thread_id_;
 };
 
+// TaskRunner for ThreadPool queues.  Overrides RunsTasksInCurrentSequence()
+// to check a TLS slot set by the worker thread that is actively processing
+// this runner's queue.  BelongsToCurrentThread() always returns false because
+// pool workers are not bound to a single thread.
+class PooledTaskRunnerImpl final : public TaskRunner {
+ public:
+  PooledTaskRunnerImpl(WeakPtr<internal::TaskQueue> task_queue, const TaskTraits& traits)
+      : TaskRunner(traits), task_queue_(std::move(task_queue)) {}
+
+  bool PostTaskWithTraits(const Location& from_here,
+                          const TaskTraits& traits,
+                          OnceClosure task) override {
+    internal::TaskQueue* queue = task_queue_.get();
+    if (queue == nullptr) {
+      internal::RecordWeakPtrExpiredPost();
+      return false;
+    }
+    return PushTask(queue, from_here, traits, std::move(task), TimeDelta());
+  }
+
+  bool PostDelayedTaskWithTraits(const Location& from_here,
+                                 const TaskTraits& traits,
+                                 OnceClosure task,
+                                 TimeDelta delay) override {
+    internal::TaskQueue* queue = task_queue_.get();
+    if (queue == nullptr) {
+      internal::RecordWeakPtrExpiredPost();
+      return false;
+    }
+    return PushTask(queue, from_here, traits, std::move(task), delay);
+  }
+
+  bool BelongsToCurrentThread() const override {
+    return false;  // Pool runners are not thread-bound.
+  }
+
+  bool RunsTasksInCurrentSequence() const override {
+    internal::TaskQueue* queue = task_queue_.get();
+    if (queue == nullptr) {
+      return false;
+    }
+    return internal::GetCurrentPooledTaskQueue() == queue;
+  }
+
+ private:
+  static bool PushTask(internal::TaskQueue* queue,
+                       const Location& from_here,
+                       const TaskTraits& traits,
+                       OnceClosure task,
+                       TimeDelta delay) {
+    TRACE_EVENT0("nei.scheduling", "PooledTaskRunner::PostTask");
+    internal::Task queued_task;
+    queued_task.task = std::move(task);
+    queued_task.posted_from = from_here;
+    queued_task.sequence_num = 0;
+    queued_task.sequence_token = queue->sequence_token();
+    queued_task.traits = traits;
+
+    if (delay.is_positive()) {
+      const auto now = TimeTicks::Now();
+      queued_task.enqueue_time = now;
+      const std::int64_t now_us = now.ToInternalValue();
+      const std::int64_t delay_us = delay.InMicroseconds();
+      if (now_us > std::numeric_limits<std::int64_t>::max() - delay_us) {
+        g_delayed_overflow_fallback_count.fetch_add(1, std::memory_order_relaxed);
+        return queue->PushImmediateTask(std::move(queued_task));
+      }
+      queued_task.delayed_run_time = now + delay;
+      return queue->PushDelayedTask(std::move(queued_task));
+    }
+    return queue->PushImmediateTask(std::move(queued_task));
+  }
+
+  WeakPtr<internal::TaskQueue> task_queue_;
+};
+
 bool TaskRunner::PostTask(const Location& from_here, OnceClosure task) {
   return PostTaskWithTraits(from_here, traits(), std::move(task));
 }
@@ -129,6 +206,16 @@ scoped_refptr<TaskRunner> TaskRunner::Create(internal::TaskQueue* task_queue,
   }
 
   return scoped_refptr<TaskRunner>(new TaskRunnerImpl(task_queue->GetWeakPtr(), traits));
+}
+
+scoped_refptr<TaskRunner> TaskRunner::CreateForThreadPool(
+    internal::TaskQueue* task_queue, const TaskTraits& traits) {
+  if (task_queue == nullptr) {
+    return nullptr;
+  }
+
+  return scoped_refptr<TaskRunner>(
+      new PooledTaskRunnerImpl(task_queue->GetWeakPtr(), traits));
 }
 
 std::int64_t TaskRunner::GetDelayedOverflowFallbackCountForTesting() {

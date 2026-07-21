@@ -26,6 +26,7 @@
   src/scoped_blocking_call.cpp
   src/internal/delayed_task_manager.cpp
   src/internal/pooled_task_source.cpp
+  src/internal/pooled_task_runner_utils.cpp
   src/internal/task_tracing.cpp
   src/internal/task_queue.cpp
   src/message_loop/message_pump_default.cpp
