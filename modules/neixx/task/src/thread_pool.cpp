@@ -214,6 +214,13 @@ class WorkerThread final : public PlatformThread::Delegate {
       internal::SetCurrentPooledTaskQueue(queue);
 
       std::size_t remaining_budget = dynamic_turn_budget_;
+
+      // For concurrent queues, process only one task before releasing
+      // the queue so other workers can interleave.
+      if (queue->is_concurrent()) {
+        remaining_budget = 1;
+      }
+
       while (remaining_budget > 0) {
         const std::size_t request_count =
             std::min(kTaskBatchSize, remaining_budget);
@@ -415,6 +422,67 @@ class ThreadPool::Impl {
     return TaskRunner::CreateForThreadPool(raw_queue, traits);
   }
 
+  scoped_refptr<TaskRunner> CreateConcurrentTaskRunner(const TaskTraits& traits) {
+    AutoLock lock(lock_);
+    if (is_shutdown_) {
+      return nullptr;
+    }
+
+    std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(traits);
+    internal::TaskQueue* raw_queue = queue.get();
+    WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
+
+    // Mark as concurrent so PooledTaskSource skips the in_flight guard.
+    raw_queue->set_concurrent(true);
+
+    task_source_.RegisterTaskQueue(raw_queue);
+    delayed_task_manager_.AddQueue(raw_queue);
+
+    raw_queue->SetOnTaskEnqueuedCallback([this](TaskShutdownBehavior shutdown_behavior) {
+      task_source_.NotifyTaskPosted();
+      if (shutdown_behavior == TaskShutdownBehavior::BLOCK_SHUTDOWN) {
+        AutoLock lock(lock_);
+        ++shutdown_blocking_tasks_count_;
+      }
+    });
+
+    raw_queue->SetOnTaskPostedCallback([this, weak_queue]() {
+      internal::TaskQueue* queue = weak_queue.get();
+      if (queue == nullptr) {
+        return;
+      }
+      task_source_.ReEnqueueTaskQueue(queue);
+      delayed_task_manager_.OnQueueUpdated(queue);
+    });
+
+    queues_.push_back(std::move(queue));
+    return TaskRunner::CreateForThreadPool(raw_queue, traits);
+  }
+
+  void FlushForTesting() {
+    std::vector<scoped_refptr<TaskRunner>> runners;
+    {
+      AutoLock lock(lock_);
+      if (is_shutdown_) return;
+      runners.reserve(queues_.size());
+      for (const auto& q : queues_) {
+        runners.push_back(TaskRunner::CreateForThreadPool(q.get(), q->traits()));
+      }
+    }
+
+    WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+    std::atomic<std::size_t> pending{runners.size()};
+    for (auto& runner : runners) {
+      runner->PostTask(FROM_HERE, [&pending, &done]() {
+        if (pending.fetch_sub(1) == 1) {
+          done.Signal();
+        }
+      });
+    }
+
+    done.TimedWait(std::chrono::seconds(30));
+  }
+
   bool Shutdown(TimeDelta timeout = TimeDelta()) {
     std::vector<internal::TaskQueue*> queues_snapshot;
     std::vector<std::unique_ptr<internal::TaskQueue>> queues_to_shutdown;
@@ -601,6 +669,14 @@ ThreadPool::~ThreadPool() = default;
 
 scoped_refptr<TaskRunner> ThreadPool::CreateSequencedTaskRunner(const TaskTraits& traits) {
   return impl_->CreateSequencedTaskRunner(traits);
+}
+
+scoped_refptr<TaskRunner> ThreadPool::CreateConcurrentTaskRunner(const TaskTraits& traits) {
+  return impl_->CreateConcurrentTaskRunner(traits);
+}
+
+void ThreadPool::FlushForTesting() {
+  impl_->FlushForTesting();
 }
 
 bool ThreadPool::Shutdown(TimeDelta timeout) {

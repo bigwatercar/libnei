@@ -54,6 +54,11 @@ class NEI_API TaskQueue final {
   void SetOnTaskPostedCallback(OnTaskPostedCallback callback);
   void SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback);
 
+  // When true, multiple pool workers may process this queue concurrently.
+  // The PooledTaskSource skips the in_flight guard for concurrent queues.
+  bool is_concurrent() const;
+  void set_concurrent(bool concurrent);
+
  private:
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   std::unique_ptr<Impl> impl_;

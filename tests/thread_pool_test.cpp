@@ -638,5 +638,67 @@ TEST(ThreadPoolTest, RunsTasksInCurrentSequenceFalseForDifferentRunner) {
   pool.Shutdown();
 }
 
+// =============================================================================
+// CreateConcurrentTaskRunner
+// =============================================================================
+
+// Concurrent runners allow tasks to execute in parallel on multiple workers.
+TEST(ThreadPoolTest, ConcurrentRunnerAllowsParallelExecution) {
+  // Use enough workers to enable parallel execution.
+  ThreadPool pool({4});
+  scoped_refptr<TaskRunner> runner = pool.CreateConcurrentTaskRunner();
+  ASSERT_TRUE(runner);
+
+  constexpr int kTaskCount = 8;
+  std::atomic<int> running{0};
+  std::atomic<int> max_running{0};
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::atomic<int> completed{0};
+
+  for (int i = 0; i < kTaskCount; ++i) {
+    runner->PostTask(FROM_HERE, [&running, &max_running, &completed, &done]() {
+      const int now_running = running.fetch_add(1) + 1;
+      int snapshot = max_running.load();
+      while (now_running > snapshot &&
+             !max_running.compare_exchange_weak(snapshot, now_running)) {
+      }
+
+      // Sleep briefly to increase the chance of overlapping with other tasks.
+      PlatformThread::Sleep(TimeDelta::FromMilliseconds(20));
+
+      running.fetch_sub(1);
+      if (completed.fetch_add(1) + 1 == kTaskCount) {
+        done.Signal();
+      }
+    });
+  }
+
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(10)));
+  // Concurrent runners should allow > 1 tasks to run in parallel.
+  EXPECT_GT(max_running.load(), 1);
+  pool.Shutdown();
+}
+
+// =============================================================================
+// FlushForTesting
+// =============================================================================
+
+TEST(ThreadPoolTest, FlushForTestingDrainsAllQueuedWork) {
+  ThreadPool pool({2});
+  scoped_refptr<TaskRunner> runner_a = pool.CreateSequencedTaskRunner();
+  scoped_refptr<TaskRunner> runner_b = pool.CreateSequencedTaskRunner();
+
+  std::atomic<int> counter{0};
+  constexpr int kTotal = 100;
+  for (int i = 0; i < kTotal / 2; ++i) {
+    runner_a->PostTask(FROM_HERE, [&counter]() { counter.fetch_add(1); });
+    runner_b->PostTask(FROM_HERE, [&counter]() { counter.fetch_add(1); });
+  }
+
+  pool.FlushForTesting();
+  EXPECT_EQ(counter.load(), kTotal);
+  pool.Shutdown();
+}
+
 }  // namespace
 }  // namespace nei

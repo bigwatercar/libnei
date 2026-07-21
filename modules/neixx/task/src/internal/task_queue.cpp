@@ -278,6 +278,16 @@ class TaskQueue::Impl {
     on_task_enqueued_callback_ = std::move(callback);
   }
 
+  bool is_concurrent() const {
+    // concurrent_ is set once before the queue is handed to the pool
+    // and never mutated afterwards  --  no lock needed.
+    return concurrent_;
+  }
+
+  void set_concurrent(bool concurrent) {
+    concurrent_ = concurrent;
+  }
+
  private:
   void CancelNonShutdownBlockingTasksLockedImpl(std::vector<Task>* dropped_tasks) {
     if (dropped_tasks == nullptr) {
@@ -313,6 +323,7 @@ class TaskQueue::Impl {
   SequenceToken sequence_token_ = SequenceToken::Create();
   bool shut_down_ = false;
   bool reject_new_tasks_ = false;
+  bool concurrent_ = false;
   std::deque<Task> immediate_fifo_queue_;
   std::int64_t immediate_sequence_num_ = 0;
   std::int64_t delayed_sequence_num_ = 0;
@@ -398,6 +409,14 @@ void TaskQueue::SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback) {
 
 WeakPtr<TaskQueue> TaskQueue::GetWeakPtr() {
   return impl_->GetWeakPtr();
+}
+
+bool TaskQueue::is_concurrent() const {
+  return impl_->is_concurrent();
+}
+
+void TaskQueue::set_concurrent(bool concurrent) {
+  impl_->set_concurrent(concurrent);
 }
 
 }  // namespace internal

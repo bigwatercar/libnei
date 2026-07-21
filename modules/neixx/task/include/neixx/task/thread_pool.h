@@ -59,6 +59,23 @@ class NEI_API ThreadPool final {
   scoped_refptr<TaskRunner> CreateSequencedTaskRunner(
       const TaskTraits& traits = TaskTraits());
 
+  /// Creates a TaskRunner whose tasks may run concurrently on different
+  /// worker threads.  Unlike sequenced runners, there is no guarantee of
+  /// serial execution; tasks posted to a concurrent runner may execute in
+  /// any order and on any available worker.
+  ///
+  /// NOTE: Callers must ensure their tasks are thread-safe when using a
+  /// concurrent runner.
+  scoped_refptr<TaskRunner> CreateConcurrentTaskRunner(
+      const TaskTraits& traits = TaskTraits());
+
+  /// Posts a barrier task to every registered queue and blocks until all
+  /// currently-queued work has been executed.  This is a coarse-grained
+  /// synchronization point intended for test teardown.  New tasks posted
+  /// concurrently with FlushForTesting may or may not be included.
+  /// Must NOT be called from a pool worker thread (would deadlock).
+  void FlushForTesting();
+
   /// Shuts down the pool and waits for all workers to exit.
   /// If timeout is positive, workers that have not exited within the deadline
   /// are abandoned (returns false in that case).

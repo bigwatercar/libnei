@@ -80,10 +80,25 @@ TaskQueue* PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout,
         }
 
         state.queued = false;
+
         if (entry.queue->is_shutdown()) {
           state.in_flight = false;
           state.reenqueue_requested = false;
           continue;
+        }
+
+        if (entry.queue->is_concurrent()) {
+          // Concurrent queues are always available: re-enqueue immediately
+          // so other workers can take from the same queue in parallel.
+          // in_flight tracking is unnecessary because multiple workers
+          // process concurrent queues simultaneously.
+          QueueEntry re_entry = entry;
+          re_entry.order = enqueue_order_.fetch_add(1, std::memory_order_relaxed);
+          shard.heap.push(re_entry);
+          state.queued = true;
+          // Wake other workers so they can also pick up this queue.
+          NotifyWorkAvailable();
+          return entry.queue;
         }
 
         state.in_flight = true;
@@ -142,6 +157,19 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue* queue) {
     }
 
     QueueState& state = it->second;
+
+    // Concurrent queues: ensure the queue is in the heap if it has work,
+    // then notify workers so they pick it up.
+    if (queue->is_concurrent()) {
+      if (queue->HasImmediateWork() && !state.queued) {
+        enqueued = EnqueueLocked(queue, shard_index);
+      }
+      if (queue->HasImmediateWork()) {
+        NotifyWorkAvailable();
+      }
+      return enqueued;
+    }
+
     if (state.in_flight) {
       state.reenqueue_requested = true;
       return false;
@@ -225,6 +253,21 @@ void PooledTaskSource::OnTaskQueueProcessed(TaskQueue* queue) {
     }
 
     QueueState& state = it->second;
+
+    if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
+      state.queued = false;
+      state.reenqueue_requested = false;
+      shard.states.erase(it);
+      return;
+    }
+
+    // Concurrent queues are always in the heap; no in_flight or
+    // re-enqueue logic to unwind.
+    if (queue->is_concurrent()) {
+      state.reenqueue_requested = false;
+      return;
+    }
+
     state.in_flight = false;
 
     if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
