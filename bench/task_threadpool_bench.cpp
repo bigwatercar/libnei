@@ -285,7 +285,26 @@ int main(int argc, char* argv[]) {
   g_sum_sink.store(0, std::memory_order_relaxed);
   g_executed_task_count.store(0, std::memory_order_relaxed);
   BenchmarkResult result_multithread = RunMultiThreadPostBenchmark(*runner, task_count);
-  all_results.push_back({"Multi-threaded PostTask (4 threads)", result_multithread});
+  all_results.push_back({"Multi-threaded PostTask (4 threads, sequenced)", result_multithread});
+
+  // ---- Concurrent runner scenarios ----
+  nei::scoped_refptr<nei::TaskRunner> concurrent_runner = pool.CreateConcurrentTaskRunner();
+  if (!concurrent_runner) {
+    std::cerr << "CreateConcurrentTaskRunner returned null." << '\n';
+    return 1;
+  }
+
+  g_sum_sink.store(0, std::memory_order_relaxed);
+  g_executed_task_count.store(0, std::memory_order_relaxed);
+  BenchmarkResult result_concurrent = RunAddBenchmark(*concurrent_runner, task_count);
+  all_results.push_back({"Concurrent PostTask (single-thread post)", result_concurrent});
+
+  g_sum_sink.store(0, std::memory_order_relaxed);
+  g_executed_task_count.store(0, std::memory_order_relaxed);
+  BenchmarkResult result_concurrent_mt =
+      RunMultiThreadPostBenchmark(*concurrent_runner, task_count);
+  all_results.push_back(
+      {"Concurrent Multi-threaded PostTask (4 threads)", result_concurrent_mt});
 
   nei::internal::SetTaskTracingEnabled(previous_tracing_enabled);
   (void)pool.Shutdown();
