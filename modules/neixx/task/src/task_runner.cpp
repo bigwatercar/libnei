@@ -166,26 +166,46 @@ class PooledTaskRunnerImpl final : public TaskRunner {
                        OnceClosure task,
                        TimeDelta delay) {
     TRACE_EVENT0("nei.scheduling", "PooledTaskRunner::PostTask");
+    const bool tracing_enabled = internal::IsTaskTracingEnabled();
+    const bool is_delayed = delay.is_positive();
+
+    // For immediate tasks, sample enqueue_time at 1/16 rate to reduce
+    // TimeTicks::Now() overhead.  Delayed tasks always capture it.
+    static constexpr int kImmediateTracingSampleRate = 16;
+    bool need_enqueue_time = is_delayed;
+    if (!need_enqueue_time && tracing_enabled) {
+      thread_local int tl_sample_counter = 0;
+      need_enqueue_time = (++tl_sample_counter % kImmediateTracingSampleRate == 0);
+    }
+    const TimeTicks enqueue_time = need_enqueue_time ? TimeTicks::Now() : TimeTicks();
+
     internal::Task queued_task;
     queued_task.task = std::move(task);
     queued_task.posted_from = from_here;
+    queued_task.enqueue_time = enqueue_time;
     queued_task.sequence_num = 0;
     queued_task.sequence_token = queue->sequence_token();
     queued_task.traits = traits;
 
-    if (delay.is_positive()) {
-      const auto now = TimeTicks::Now();
-      queued_task.enqueue_time = now;
-      const std::int64_t now_us = now.ToInternalValue();
+    bool pushed = false;
+    if (is_delayed) {
+      const std::int64_t now_us = enqueue_time.ToInternalValue();
       const std::int64_t delay_us = delay.InMicroseconds();
       if (now_us > std::numeric_limits<std::int64_t>::max() - delay_us) {
         g_delayed_overflow_fallback_count.fetch_add(1, std::memory_order_relaxed);
-        return queue->PushImmediateTask(std::move(queued_task));
+        pushed = queue->PushImmediateTask(std::move(queued_task));
+      } else {
+        queued_task.delayed_run_time = enqueue_time + delay;
+        pushed = queue->PushDelayedTask(std::move(queued_task));
       }
-      queued_task.delayed_run_time = now + delay;
-      return queue->PushDelayedTask(std::move(queued_task));
+    } else {
+      pushed = queue->PushImmediateTask(std::move(queued_task));
     }
-    return queue->PushImmediateTask(std::move(queued_task));
+
+    if (pushed && tracing_enabled) {
+      internal::RecordTaskPosted();
+    }
+    return pushed;
   }
 
   WeakPtr<internal::TaskQueue> task_queue_;
