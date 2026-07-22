@@ -343,7 +343,8 @@ MessagePumpForIO::FdWatchController::~FdWatchController() {
 bool MessagePumpForIO::FdWatchController::StartWatching(MessagePumpForIO* pump,
                                                         NativeIOHandle handle,
                                                         MessagePumpForIO::FdWatchController::Mode mode,
-                                                        MessagePumpForIO::Watcher* watcher) {
+                                                        MessagePumpForIO::Watcher* watcher,
+                                                        bool /*oneshot*/) {
   if (pump == nullptr || watcher == nullptr || pump->impl_ == nullptr) {
     return false;
   }

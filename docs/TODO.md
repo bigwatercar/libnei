@@ -33,7 +33,7 @@ Action: run on native Linux; gate WSL-failing tests with `nei::IsRunningOnWsl()`
 
 ## Pending Optimizations
 
-- **PipeStream epoll oneshot**: switch level-triggered → `EPOLLET` + `EPOLLONESHOT` for lower wakeup overhead.
+- **PipeStream epoll oneshot**: ✅ Completed 2026-07-22. Level-triggered → `EPOLLONESHOT` with explicit re-arm in `DrainRead`/`DrainWrite`.  See `docs/neixx_io_technical.md` §2.12.
 - **PipeStream direct dispatch continuation**: batch-quota-exhausted path could chain directly instead of going through `PostTask`.  Low priority — current design is correct.
 
 ---

@@ -73,7 +73,8 @@ void PipeInputStream::Impl::ReadAsync(scoped_refptr<IOBuffer> buf,
   MessagePumpForIO* pump = MessagePumpForIO::Current();
   if (pump && !controller_.is_watching()) {
     controller_.StartWatching(
-        pump, fd_, MessagePumpForIO::FdWatchController::Mode::READ, this);
+        pump, fd_, MessagePumpForIO::FdWatchController::Mode::READ, this,
+        /*oneshot=*/true);
   }
 
   DrainRead();
@@ -117,6 +118,14 @@ void PipeInputStream::Impl::DrainRead() {
 
   while (read_in_flight_ && bytes_read_ < pending_len_) {
     if (bytes_this_cycle >= pipe_detail::kMaxBytesPerDrain) {
+      // Re-arm the oneshot watch so the pump fires again when more data
+      // arrives, then post a continuation to resume draining.
+      MessagePumpForIO* pump = MessagePumpForIO::Current();
+      if (pump) {
+        controller_.StartWatching(
+            pump, fd_, MessagePumpForIO::FdWatchController::Mode::READ, this,
+            /*oneshot=*/true);
+      }
       auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
       io_task_runner_->PostTask(FROM_HERE,
                                 BindOnce([weak_this]() {
@@ -141,7 +150,17 @@ void PipeInputStream::Impl::DrainRead() {
     }
 
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      if (bytes_read_ > 0) DeliverReadResult(true, bytes_read_);
+      if (bytes_read_ > 0) {
+        DeliverReadResult(true, bytes_read_);
+      } else {
+        // EPOLLONESHOT auto-disabled the fd; re-arm before returning.
+        MessagePumpForIO* pump = MessagePumpForIO::Current();
+        if (pump) {
+          controller_.StartWatching(
+              pump, fd_, MessagePumpForIO::FdWatchController::Mode::READ, this,
+              /*oneshot=*/true);
+        }
+      }
       return;
     }
 
@@ -227,7 +246,8 @@ void PipeOutputStream::Impl::WriteAsync(scoped_refptr<IOBuffer> buf,
   MessagePumpForIO* pump = MessagePumpForIO::Current();
   if (pump && !controller_.is_watching()) {
     controller_.StartWatching(
-        pump, fd_, MessagePumpForIO::FdWatchController::Mode::WRITE, this);
+        pump, fd_, MessagePumpForIO::FdWatchController::Mode::WRITE, this,
+        /*oneshot=*/true);
   }
 
   DrainWrite();
@@ -280,6 +300,14 @@ void PipeOutputStream::Impl::DrainWrite() {
 
   while (write_in_flight_ && bytes_written_ < pending_len_) {
     if (bytes_this_cycle >= pipe_detail::kMaxBytesPerDrain) {
+      // Re-arm the oneshot watch before yielding so the pump can wake us
+      // when the fd becomes writable again.
+      MessagePumpForIO* pump = MessagePumpForIO::Current();
+      if (pump) {
+        controller_.StartWatching(
+            pump, fd_, MessagePumpForIO::FdWatchController::Mode::WRITE, this,
+            /*oneshot=*/true);
+      }
       auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
       io_task_runner_->PostTask(FROM_HERE,
                                 BindOnce([weak_this]() {
@@ -299,7 +327,17 @@ void PipeOutputStream::Impl::DrainWrite() {
     }
 
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      if (bytes_written_ > 0) DeliverWriteResult(true, bytes_written_);
+      if (bytes_written_ > 0) {
+        DeliverWriteResult(true, bytes_written_);
+      } else {
+        // EPOLLONESHOT auto-disabled the fd; re-arm before returning.
+        MessagePumpForIO* pump = MessagePumpForIO::Current();
+        if (pump) {
+          controller_.StartWatching(
+              pump, fd_, MessagePumpForIO::FdWatchController::Mode::WRITE, this,
+              /*oneshot=*/true);
+        }
+      }
       return;
     }
 
@@ -339,6 +377,16 @@ void PipeOutputStream::Impl::StartNextQueuedWrite() {
   pending_cb_ = std::move(next.callback);
   bytes_written_ = 0;
   write_in_flight_ = true;
+
+  // Re-arm the oneshot watch for the newly dequeued write before draining,
+  // because EPOLLONESHOT auto-disabled the fd after the previous operation.
+  MessagePumpForIO* pump = MessagePumpForIO::Current();
+  if (pump) {
+    controller_.StartWatching(
+        pump, fd_, MessagePumpForIO::FdWatchController::Mode::WRITE, this,
+        /*oneshot=*/true);
+  }
+
   DrainWrite();
 }
 

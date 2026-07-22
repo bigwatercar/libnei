@@ -81,7 +81,8 @@ class NEI_API MessagePumpForIO final : public MessagePump {
     bool StartWatching(MessagePumpForIO* pump,
                        NativeIOHandle handle,
                        Mode mode,
-                       Watcher* watcher);
+                       Watcher* watcher,
+                       bool oneshot = false);
     void StopWatching();
     bool is_watching() const;
 

@@ -995,6 +995,82 @@ PipeStream 的核心价值不在“帮你创建跨进程管道”，而在“你
 
 遵守这个分层，PipeStream 会非常稳定；越界让它承担句柄传递或进程拓扑管理职责，使用难度就会显著上升。
 
+### 2.12 POSIX epoll 实现细节
+
+#### 2.12.1 基础模型：`FdWatchController` + level-triggered epoll
+
+POSIX 侧，`PipeInputStream` / `PipeOutputStream` 通过 `FdWatchController` 向
+`MessagePumpForIO` 注册 fd 监听。`FdWatchController::StartWatching` 内部调用
+`epoll_ctl(EPOLL_CTL_ADD/EPOLL_CTL_MOD)`，默认使用**level-triggered**（LT）模式。
+
+LT 模式的语义是：
+
+- 只要 fd 仍处于可读/可写状态，每次 `epoll_wait` 都会返回该事件
+- PipeStream 在 `DrainRead`/`DrainWrite` 循环中读到 `EAGAIN` 后返回，
+  fd 仍保持在 epoll 中，下次数据到达时自动唤醒
+
+这个方案对 TCP/UDP 等工作负载足够可靠，但在高速 pipe 读写下存在**不必要的重复唤醒**：
+即使没有新的 I/O 就绪，只要 Drain 循环未消费完所有数据就主动返回（如受 `kMaxBytesPerDrain`
+配额限制），LT 仍会立即再次触发。
+
+#### 2.12.2 EPOLLONESHOT 优化
+
+自 2026-07-22 起，PipeStream（仅限 `pipe_stream_posix.cpp`）的读写路径改为使用
+`EPOLLONESHOT`。核心改动：
+
+- **`FdWatchController::StartWatching` 新增 `bool oneshot = false` 参数**  
+  默认为 `false`（保持 LT），不影响 TCP/UDP/ChildProcess 等所有现有调用方。
+  仅 PipeStream 传入 `oneshot = true`。
+
+- **POSIX 实现**：`RegisterWatch` 在 `oneshot` 为 `true` 时向 `epoll_event.events`
+  添加 `EPOLLONESHOT` 标志。fd 在 `epoll_wait` 返回该事件后自动从 epoll 中禁用，
+  直到显式重装。
+
+- **Windows 实现**：`oneshot` 参数被接受但忽略（Windows IOCP 不需要等价语义）。
+
+EPOLLONESHOT 的收益：
+
+- 一次 epoll 事件触发后 fd 自动禁用，避免同一就绪状态被反复上报
+- Drain 循环主动返回时（无论因 `kMaxBytesPerDrain` 配额还是 `EAGAIN`），
+  fd 已是禁用状态，不会产生无意义的额外唤醒
+- 减少 epoll 事件处理开销，尤其在高速 pipe 流转场景
+
+#### 2.12.3 重装（re-arm）逻辑
+
+EPOLLONESHOT 要求显式重装，否则 fd 永远不再触发。PipeStream 在以下四处关键路径重装：
+
+| 路径 | 位置 | 说明 |
+|------|------|------|
+| ReadAsync / WriteAsync | 发起新操作时 | 首次 `StartWatching(…, oneshot=true)` |
+| EAGAIN + 0 字节 | DrainRead / DrainWrite | fd 无数据可读/写但仍需等待下次就绪 |
+| kMaxBytesPerDrain 配额耗尽 | DrainRead / DrainWrite | 主动让出执行权前重装，确保后续 epoll 能唤醒 |
+| WriteQueue 出队 | StartNextQueuedWrite | 取下一个排队写入项前重装写监听 |
+
+注意：当 `bytes_read_ > 0 && EAGAIN` 或 `bytes_written_ > 0 && EAGAIN` 时，
+PipeStream **不重装**——此时已通过 `DeliverReadResult`/`DeliverWriteResult`
+向用户交付了部分结果并 `StopWatching`，用户需要发起下一轮 `ReadAsync`/`WriteAsync`。
+
+#### 2.12.4 StopWatching 与 EPOLLONESHOT 的兼容性
+
+`FdWatchController::StopWatching` 内部调用 `epoll_ctl(EPOLL_CTL_DEL)`，其返回值
+被 `(void)` 丢弃。因此以下场景均安全：
+
+- fd 已被 EPOLLONESHOT 自动移除（epoll_ctl 返回 `ENOENT`）
+- 外部 `Close()` 先于 epoll 事件到达
+- 快速 cancel → retry 场景中的 watch 切换
+
+#### 2.12.5 为什么仅 PipeStream 使用 EPOLLONESHOT
+
+TCP/UDP socket 的生命周期与 pipe 有本质区别：
+
+- TCP 连接通常是长生命周期，level-triggered 在`StartOrphanDrain`等优雅关闭
+  场景更易推理
+- UDP 的读写模式更接近消息语义，LT 不会产生显著额外开销
+- `FdWatchController` 支持同一 fd 注册多个 watcher（如同时监听 READ + WRITE），
+  `EPOLLONESHOT` 会一次性禁用整个 fd，可能意外影响同一 fd 上的其他 watcher
+
+因此 `oneshot` 作为 opt-in 参数，只在已充分验证的 PipeStream 路径启用。
+
 
 ---
 

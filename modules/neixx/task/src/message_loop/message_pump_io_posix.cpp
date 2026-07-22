@@ -211,7 +211,8 @@ class MessagePumpForIOState {
   bool RegisterWatch(MessagePumpForIO::FdWatchController* controller,
                      NativeIOHandle handle,
                      MessagePumpForIO::FdWatchController::Mode mode,
-                     MessagePumpForIO::Watcher* watcher) {
+                     MessagePumpForIO::Watcher* watcher,
+                     bool oneshot) {
     if (controller == nullptr || watcher == nullptr || epoll_fd_ < 0 || event_fd_ < 0) {
       return false;
     }
@@ -254,6 +255,9 @@ class MessagePumpForIOState {
 
     epoll_event ev{};
     ev.events = desired_events;
+    if (oneshot) {
+      ev.events |= EPOLLONESHOT;
+    }
     // Use fd as the epoll token instead of watch_id so that DispatchOneBatch
     // can look up ALL watchers for this fd (read + write) by iterating the
     // watches_ map, rather than depending on a single watch_id that would
@@ -464,14 +468,15 @@ MessagePumpForIO::FdWatchController::~FdWatchController() {
 bool MessagePumpForIO::FdWatchController::StartWatching(MessagePumpForIO* pump,
                                                         NativeIOHandle handle,
                                                         Mode mode,
-                                                        MessagePumpForIO::Watcher* watcher) {
+                                                        MessagePumpForIO::Watcher* watcher,
+                                                        bool oneshot) {
   if (pump == nullptr || watcher == nullptr || pump->impl_ == nullptr) {
     return false;
   }
 
   StopWatching();
 
-  if (!pump->impl_->RegisterWatch(this, handle, mode, watcher)) {
+  if (!pump->impl_->RegisterWatch(this, handle, mode, watcher, oneshot)) {
     pump_ = nullptr;
     impl_.reset();
     handle_ = NativeIOHandle{};
