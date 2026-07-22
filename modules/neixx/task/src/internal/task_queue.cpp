@@ -335,7 +335,6 @@ class TaskQueue::Impl {
     // next worker that acquires a slot.
     const int prev =
         running_worker_count_.fetch_sub(1, std::memory_order_release);
-    const int current = prev - 1;
 
     // If we were at or above saturation and now dropped below,
     // AND the queue still has work, tell the caller to re-enqueue.
