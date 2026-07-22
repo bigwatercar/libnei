@@ -288,16 +288,85 @@ class TaskQueue::Impl {
     concurrent_ = concurrent;
   }
 
-  int IncrementRunningTaskCount(int delta) {
-    return running_task_count_.fetch_add(delta, std::memory_order_relaxed) + delta;
+  // ---- Chromium-aligned WillRunTask / DidProcessTask ----
+
+  TaskQueue::RunStatus WillRunTask() {
+    if (!concurrent_) {
+      return TaskQueue::RunStatus::kDisallowed;
+    }
+
+    // Atomically reserve a worker slot, mirroring
+    // JobTaskSource::WillRunTask() in chromium/base.
+    //
+    // Use memory_order_acquire on the increment so that the caller
+    // observes all prior task-enqueue effects, and release on the
+    // saturation check so that other workers see the updated count.
+    const int prev =
+        running_worker_count_.fetch_add(1, std::memory_order_acquire);
+    const int current = prev + 1;
+
+    // Shut down?  Revert and disallow.
+    if (shut_down_) {
+      running_worker_count_.fetch_sub(1, std::memory_order_release);
+      return TaskQueue::RunStatus::kDisallowed;
+    }
+
+    if (current >= TaskQueue::kMaxConcurrentWorkers) {
+      // Last (or beyond-last) slot taken: saturated.
+      // The caller must remove this queue from the ready heap.
+      return TaskQueue::RunStatus::kAllowedSaturated;
+    }
+
+    // Slot reserved with headroom: not saturated.
+    // The queue should stay in the ready heap.
+    return TaskQueue::RunStatus::kAllowedNotSaturated;
   }
 
-  int DecrementRunningTaskCount(int delta) {
-    return running_task_count_.fetch_sub(delta, std::memory_order_relaxed) - delta;
+  bool DidProcessTask() {
+    if (!concurrent_) {
+      return false;
+    }
+
+    // Release the worker slot, mirroring
+    // JobTaskSource::DidProcessTask() in chromium/base.
+    //
+    // Use memory_order_release so that task-completion effects
+    // (e.g. new tasks posted during execution) are visible to the
+    // next worker that acquires a slot.
+    const int prev =
+        running_worker_count_.fetch_sub(1, std::memory_order_release);
+    const int current = prev - 1;
+
+    // If we were at or above saturation and now dropped below,
+    // AND the queue still has work, tell the caller to re-enqueue.
+    //
+    // This mirrors the pattern in Chromium where DidProcessTask()
+    // computes:
+    //   reenqueue = (new_max_concurrency > worker_count_after)
+    // and the caller (RunAndPopNextTask) checks:
+    //   if (task_source_must_be_queued) return task_source;
+    if (prev >= TaskQueue::kMaxConcurrentWorkers) {
+      // Was saturated before this release; now has headroom.
+      // Re-enqueue if work remains so idle workers can pick it up.
+      // Use HasImmediateWork() (acquires lock_) rather than
+      // HasImmediateTasksLocked() because we do not hold lock_ here.
+      return HasImmediateWork();
+    }
+
+    return false;
   }
 
-  int running_task_count() const {
-    return running_task_count_.load(std::memory_order_relaxed);
+  size_t GetRemainingConcurrency() const {
+    if (!concurrent_) {
+      // Sequenced: at most one worker.
+      return running_worker_count_.load(std::memory_order_acquire) == 0 ? 1 : 0;
+    }
+    const int running =
+        running_worker_count_.load(std::memory_order_acquire);
+    if (running >= TaskQueue::kMaxConcurrentWorkers) {
+      return 0;
+    }
+    return static_cast<size_t>(TaskQueue::kMaxConcurrentWorkers - running);
   }
 
  private:
@@ -349,11 +418,12 @@ class TaskQueue::Impl {
   OnTaskEnqueuedCallback on_task_enqueued_callback_;
   WeakPtrFactory<TaskQueue> weak_factory_;
 
-  // Chromium-aligned concurrency tracking (Plan B).
-  // Number of tasks currently "in flight" (taken by workers but not yet
-  // completed).  Used by PooledTaskSource to detect saturation and avoid
-  // heap churn for hot concurrent queues.
-  std::atomic<int> running_task_count_{0};
+  // Chromium-aligned concurrency tracking (WillRunTask / DidProcessTask).
+  // Number of workers currently holding a slot on this queue.
+  // Managed exclusively by WillRunTask() (+1) and DidProcessTask() (-1).
+  // Uses acquire/release ordering to synchronize task-enqueue and
+  // task-completion effects across workers.
+  std::atomic<int> running_worker_count_{0};
 };
 
 TaskQueue::TaskQueue(const TaskTraits& traits)
@@ -437,16 +507,16 @@ void TaskQueue::set_concurrent(bool concurrent) {
   impl_->set_concurrent(concurrent);
 }
 
-int TaskQueue::IncrementRunningTaskCount(int delta) {
-  return impl_->IncrementRunningTaskCount(delta);
+TaskQueue::RunStatus TaskQueue::WillRunTask() {
+  return impl_->WillRunTask();
 }
 
-int TaskQueue::DecrementRunningTaskCount(int delta) {
-  return impl_->DecrementRunningTaskCount(delta);
+bool TaskQueue::DidProcessTask() {
+  return impl_->DidProcessTask();
 }
 
-int TaskQueue::running_task_count() const {
-  return impl_->running_task_count();
+size_t TaskQueue::GetRemainingConcurrency() const {
+  return impl_->GetRemainingConcurrency();
 }
 
 }  // namespace internal

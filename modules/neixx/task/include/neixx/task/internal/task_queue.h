@@ -59,37 +59,55 @@ class NEI_API TaskQueue final {
   bool is_concurrent() const;
   void set_concurrent(bool concurrent);
 
-  // ---- Chromium-aligned concurrency tracking (Plan B) ----
+  // ---- Chromium-aligned concurrency control ----
   //
-  // Mirrors TaskSource::WillRunTask() / DidProcessTask() from
-  // chromium/base/task/thread_pool/task_source.h.  Callers (workers)
-  // atomically reserve and release execution slots so that the
-  // PooledTaskSource can make saturation-based scheduling decisions
-  // without per-task heap churn.
+  // Pixel-level mirror of TaskSource / RegisteredTaskSource from
+  // chromium/base/task/thread_pool/task_source.h.
+  //
+  // Lifecycle per worker handoff:
+  //   1. WillRunTask()      – atomically reserve a worker slot
+  //   2. TakeImmediateTasks() – dequeue tasks while holding the slot
+  //   3. execute tasks
+  //   4. DidProcessTask()   – release the slot; return value drives
+  //                            re-enqueue into the ready heap
 
-  /// Maximum number of workers that may simultaneously run tasks from a
-  /// single concurrent queue.  Matches Chromium's kMaxWorkersPerJob (=256)
-  /// and serves as the saturation threshold for heap management.
-  static constexpr int kMaxConcurrentWorkers = 256;
+  /// Returned by WillRunTask().  Drives heap management in
+  /// PooledTaskSource, directly mirroring TaskSource::RunStatus.
+  enum class RunStatus {
+    kDisallowed,           // Cannot run (shutdown or max concurrency)
+    kAllowedNotSaturated,  // Can run; queue should stay in ready heap
+    kAllowedSaturated,     // Can run; queue should be removed from heap
+  };
 
-  /// Atomically increments the running-task counter by |delta|.
-  /// Returns the new counter value.  Callers should check the returned
-  /// value against kMaxConcurrentWorkers to determine saturation.
+  /// Atomically reserves a worker execution slot.
+  /// Must be called BEFORE TakeImmediateTasks().
+  /// Returns kAllowedNotSaturated if the queue should stay in the
+  /// ready heap after this reservation (more slots available).
+  /// Returns kAllowedSaturated if this was the last slot and the
+  /// queue should be removed from the heap.  The caller must later
+  /// call DidProcessTask() to release the slot; that call will
+  /// determine whether to re-enqueue.
   /// Only meaningful when is_concurrent() is true.
-  int IncrementRunningTaskCount(int delta);
+  RunStatus WillRunTask();
 
-  /// Atomically decrements the running-task counter by |delta|.
-  /// Returns the new counter value.  When the value drops below
-  /// kMaxConcurrentWorkers, the caller should consider re-enqueuing
-  /// this queue into the PooledTaskSource heap.
+  /// Releases the worker slot reserved by WillRunTask().
+  /// Must be called AFTER the reserved tasks have completed.
+  /// Returns true if the queue should be re-enqueued into the
+  /// PooledTaskSource ready heap (was saturated AND still has work).
   /// Only meaningful when is_concurrent() is true.
-  int DecrementRunningTaskCount(int delta);
+  bool DidProcessTask();
 
-  /// Returns a racy snapshot of the running-task counter.
-  /// For use in saturation checks outside the TaskQueue lock.
-  int running_task_count() const;
+  /// Returns the number of additional worker slots available.
+  /// For sequenced queues: at most 1 (0 if occupied).
+  /// For concurrent queues: kMaxConcurrentWorkers minus currently
+  /// reserved slots.
+  size_t GetRemainingConcurrency() const;
 
  private:
+  /// Maximum workers that may simultaneously hold a slot on a single
+  /// concurrent queue.  Mirrors Chromium's kMaxWorkersPerJob (=256)
+  /// used as the default upper bound in GetMaxConcurrency().
+  static constexpr int kMaxConcurrentWorkers = 256;
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   std::unique_ptr<Impl> impl_;
   NEI_SUPPRESS_MSC_WARNING_END
