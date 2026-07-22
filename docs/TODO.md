@@ -229,3 +229,115 @@ deadlocking the test.
 - Or: test the EMFILE code path directly by calling `accept4` on an fd
   pre-configured to fail, without exhausting system FDs.
 - Or: use a mock/epoll-free IO pump for this specific test.
+
+---
+
+## Future Feature Directions — Evaluated 2026-07-22
+
+Chromium reference analysis for four candidate features.  Not yet scheduled.
+
+### 1. File System Monitoring (`FilePathWatcher`)
+
+**Chromium reference**: `base/files/file_path_watcher.h`
+- PIMPL + `PlatformDelegate` pattern
+- Linux: inotify (`file_path_watcher_inotify.cc`)
+- macOS: FSEvents + kqueue (`file_path_watcher_fsevents.cc`, `_kqueue.cc`)
+- Windows: `ReadDirectoryChangesW` + IOCP (`file_path_watcher_win.cc`)
+- Supports recursive / non-recursive, per-file change type (create/delete/modify)
+
+**libnei feasibility**: ★★☆ (Low complexity)
+- Platform abstractions (IOCP/epoll) already in place
+- No external dependencies
+- Natural fit for existing `neixx/io/` module pattern
+
+**Suggested API** (preliminary):
+```cpp
+class FilePathWatcher {
+  using Callback = RepeatingCallback<void(const FilePath& path, bool error)>;
+  bool Watch(const FilePath& path, Type type, Callback cb);  // kNonRecursive / kRecursive
+  void Cancel();
+};
+```
+
+---
+
+### 2. SSL/TLS Support
+
+**Chromium reference**: `net/socket/ssl_client_socket_impl.cc`, `ssl_server_socket_impl.cc`
+- Uses BoringSSL (`third_party/boringssl/`)
+- `SSLClientSocket` implements `StreamSocket` interface — transparently wraps TCP socket
+- `SSLServerSocket` for server-side TLS
+- ALPN negotiation for HTTP/2
+
+**libnei feasibility**: ★★★★ (High complexity)
+- Requires integrating a TLS library (OpenSSL, BoringSSL, or mbedTLS)
+- Must wrap `TCPClientSocket` / `TCPServerSocket` with `SSLClientSocket` / `SSLServerSocket`
+- Certificate management, session cache, ALPN, etc.
+- Prerequisite for HTTP/2
+
+**Suggested integration** (preliminary):
+```
+3rdparty/openssl/          ← or mbedTLS for lighter footprint
+modules/neixx/net/
+  ssl/
+    ssl_client_socket.h    ← wraps TCPClientSocket + TLS handshake
+    ssl_server_socket.h    ← wraps TCPServerSocket + TLS accept
+    ssl_context.h           ← cert/key config, session cache
+```
+
+---
+
+### 3. HTTP / WebSocket / HTTP2 Server
+
+**Chromium reference**:
+- `net/test/embedded_test_server/` — test-grade, supports HTTP/HTTPS/WS/WSS/HTTP2
+  - `HttpConnection::Protocol::kHttp1` / `kHttp2`
+  - `Http1Connection`, `Http2Connection`
+  - `WebSocketConnection`, `InstallDefaultWebSocketHandlers()`
+- `net/server/http_server.h` — lightweight production-grade HTTP server
+
+**libnei feasibility**: ★★★ (Medium complexity)
+- HTTP/1.1: feasible directly on TCP module
+- WebSocket: upgrade from HTTP, framed messaging
+- HTTP/2: requires TLS (ALPN) first
+
+**Suggested phasing**:
+```
+Phase 1: HTTP/1.1 server (parse request, dispatch handler, send response)
+Phase 2: WebSocket upgrade handler
+Phase 3: HTTP/2 (after TLS support)
+```
+
+---
+
+### 4. System / Storage Device Monitoring
+
+**Chromium reference**: No generic `base/` implementation.
+- Chrome OS: `components/storage_monitor/`
+- Windows: `WM_DEVICECHANGE` (not exposed in `base/`)
+- Linux: udev / netlink (not in `base/`)
+
+**libnei feasibility**: ★★★ (Medium-High complexity)
+- Must design cross-platform abstraction from scratch
+- Win: `RegisterDeviceNotification` + `WM_DEVICECHANGE`
+- Linux: `libudev` or `netlink` socket with `epoll`
+- No Chromium reference to follow directly
+
+**Suggested API** (preliminary):
+```cpp
+class DeviceMonitor {
+  using Callback = RepeatingCallback<void(const DeviceEvent& event)>;
+  // DeviceEvent: type (add/remove/change), device path, properties
+};
+```
+
+---
+
+### Priority Recommendation
+
+| Order | Feature | Rationale |
+|-------|---------|-----------|
+| 1 | File System Monitoring | Independent, no deps, platform APIs clear |
+| 2 | HTTP/WebSocket Server | Builds on TCP, practical value |
+| 3 | SSL/TLS | Prerequisite for HTTP2, heavy dependency |
+| 4 | Device Monitoring | No Chromium reference, high design effort |
