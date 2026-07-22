@@ -1,5 +1,51 @@
 # CommandLine 模块技术设计说明
 
+## 速查
+
+```cpp
+#include <neixx/command_line/command_line.h>
+
+// 初始化
+#if defined(_WIN32)
+  nei::CommandLine::Init();
+#else
+  nei::CommandLine::Init(argc, argv);
+#endif
+
+nei::CommandLine& cl = nei::CommandLine::ForCurrentProcess();
+
+// 查询
+cl.HasSwitch("test");                           // 开关是否存在
+cl.GetSwitchValueASCII("name");                 // UTF-8 值
+cl.GetSwitchValueUTF16(u"path");                // UTF-16 值
+cl.GetProgram();                                // program 名
+
+// 追加
+cl.AppendSwitch("flag");                        // 布尔开关
+cl.AppendSwitchASCII("mode", "fast");           // UTF-8 键值
+cl.AppendSwitchUTF16(u"path", u"C:/测试");       // UTF-16 键值
+
+// 复制（白名单 + 黑名单 + 值筛选）
+nei::CommandLine::CopySwitchesOptions opt;
+opt.whitelist = {"lang", "trace"};
+opt.blacklist = {"token"};
+opt.value_filter = nei::CommandLine::SwitchValueFilter::kWithValueOnly;
+opt.policy = nei::CommandLine::DuplicateSwitchPolicy::kReplaceExisting;
+child.CopySwitchesFrom(parent, opt);
+
+// Wrapper
+child.PrependWrapper("sandbox", {"--trace"});
+
+// 视图
+cl.GetArgs();           // 位置参数
+cl.GetWrapperArgv();    // 仅 wrapper
+cl.GetRawArgv();        // 仅 child
+cl.GetFullArgv();       // wrapper + raw
+cl.GetCommandLineString();  // 完整命令行字符串
+```
+
+---
+
 ## 1. 文档目标与范围
 
 本文档描述 `neixx/command_line` 当前实现的设计目标、数据模型、跨平台解析策略、接口语义与典型用法。
