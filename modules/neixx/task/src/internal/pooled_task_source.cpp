@@ -196,10 +196,13 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue* queue) {
     // Concurrent queues: ensure the queue is in the heap if it has work,
     // then notify workers so they pick it up.
     if (queue->is_concurrent()) {
-      if (queue->HasImmediateWork() && !state.queued) {
+      // Single HasImmediateWork() call to avoid acquiring the TaskQueue
+      // lock twice on the hot PostTask path.
+      const bool has_work = queue->HasImmediateWork();
+      if (has_work && !state.queued) {
         enqueued = EnqueueLocked(queue, shard_index);
       }
-      if (queue->HasImmediateWork()) {
+      if (has_work) {
         NotifyWorkAvailable();
       }
       return enqueued;
