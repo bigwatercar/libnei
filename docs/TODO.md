@@ -40,13 +40,18 @@ Action: run on native Linux; gate WSL-failing tests with `nei::IsRunningOnWsl()`
 
 ## OnceCallback Templatization
 
-**Status**: Not started.  Approved for implementation.
+**Status**: ✅ Completed 2026-07-22.
 
-Current `OnceCallback` is `void()`-only (monomorphic), blocking parameterized
-callbacks from using move-only semantics.  Target: `OnceCallback<R(Args...)>`
-with SBO storage and vtable dispatch.
+`OnceCallback<Args...>` is fully templated:
+- SBO (48 bytes) + heap fallback for large functors
+- Supports `void()`, `int`, `const string&`, `unique_ptr<T>`, multi-param
+- `BindOnce` returns `OnceCallback<>` (pre-bound args)
+- `BindPostTask` forwards `Args...` via perfect capture
+- `ResolveCallback = OnceCallback<const AddressList&>` for HostResolver
+- 14 unit tests covering construction, move, run-once, SBO/heap, move-only types
 
-See commit `6483caa` for the net module dependency.
+`RepeatingCallback<Args...>` deferred: template parameter exists but `Run()`
+is still void-only — no current use case requires parameterized repeats.
 
 ---
 

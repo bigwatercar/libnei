@@ -1,4 +1,4 @@
-﻿#include <neixx/functional/callback_base.h>
+#include <neixx/functional/callback_base.h>
 
 namespace nei {
 

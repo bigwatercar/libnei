@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #ifndef NEIXX_FUNCTIONAL_CALLBACK_INTERNAL_H_
 #define NEIXX_FUNCTIONAL_CALLBACK_INTERNAL_H_

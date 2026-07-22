@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #ifndef NEIXX_TASK_INTERNAL_POOLED_TASK_SOURCE_H_
 #define NEIXX_TASK_INTERNAL_POOLED_TASK_SOURCE_H_

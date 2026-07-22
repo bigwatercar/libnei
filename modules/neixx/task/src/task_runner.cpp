@@ -1,4 +1,4 @@
-﻿#include <neixx/task/task_runner.h>
+#include <neixx/task/task_runner.h>
 
 #include <atomic>
 #include <limits>
