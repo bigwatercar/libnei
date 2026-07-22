@@ -45,6 +45,12 @@ constexpr std::size_t kTaskBatchSize = 64;
 constexpr std::size_t kMinTasksPerQueueTurn = 32;
 constexpr std::size_t kMaxTasksPerQueueTurn = 128;
 constexpr std::size_t kSaturatedBatchesToGrow = 2;
+// Concurrent-queue per-handoff budget bounds.  Keep these smaller than
+// the sequenced-queue bounds so that multiple workers can interleave on
+// a hot concurrent queue without excessive contention on the TaskQueue
+// lock, while still amortizing the shard-lock and dequeue overhead.
+constexpr std::size_t kMinConcurrentTasksPerTurn = 4;
+constexpr std::size_t kMaxConcurrentTasksPerTurn = 32;
 constexpr std::int64_t kBackpressureWarningThreshold = 10'000;
 
 /// Maps a task's scheduling class to the OS thread priority that should be
@@ -171,6 +177,32 @@ class WorkerThread final : public PlatformThread::Delegate {
     }
   }
 
+  // Adapts the concurrent-queue per-handoff budget.  Uses the same
+  // saturation heuristic as AdaptTurnBudget() but with a separate,
+  // smaller budget range so that other workers still get a chance to
+  // interleave on hot concurrent queues.
+  void AdaptConcurrentBudget(std::size_t taken, std::size_t requested) {
+    if (requested == 0) {
+      return;
+    }
+
+    if (taken == requested) {
+      ++consecutive_concurrent_saturated_batches_;
+      if (consecutive_concurrent_saturated_batches_ >= kSaturatedBatchesToGrow) {
+        dynamic_concurrent_budget_ =
+            std::min(kMaxConcurrentTasksPerTurn, dynamic_concurrent_budget_ * 2);
+        consecutive_concurrent_saturated_batches_ = 0;
+      }
+      return;
+    }
+
+    consecutive_concurrent_saturated_batches_ = 0;
+    if (taken * 2 <= requested) {
+      dynamic_concurrent_budget_ =
+          std::max(kMinConcurrentTasksPerTurn, dynamic_concurrent_budget_ / 2);
+    }
+  }
+
   void ThreadMain() override {
     TRACE_EVENT_BEGIN("nei.scheduling", "WorkerThread");
 
@@ -215,10 +247,13 @@ class WorkerThread final : public PlatformThread::Delegate {
 
       std::size_t remaining_budget = dynamic_turn_budget_;
 
-      // For concurrent queues, process only one task before releasing
-      // the queue so other workers can interleave.
+      // For concurrent queues, use a separate (smaller) dynamic budget
+      // instead of the hard-coded 1-task limit.  This amortizes the
+      // shard-lock and TaskQueue-lock overhead across multiple tasks
+      // while still keeping the handoff short enough for other workers
+      // to interleave.
       if (queue->is_concurrent()) {
-        remaining_budget = 1;
+        remaining_budget = dynamic_concurrent_budget_;
       }
 
       while (remaining_budget > 0) {
@@ -227,7 +262,11 @@ class WorkerThread final : public PlatformThread::Delegate {
         std::array<internal::Task, kTaskBatchSize> batch;
         const std::size_t task_count =
             queue->TakeImmediateTasks(batch.data(), request_count);
-        AdaptTurnBudget(task_count, request_count);
+        if (queue->is_concurrent()) {
+          AdaptConcurrentBudget(task_count, request_count);
+        } else {
+          AdaptTurnBudget(task_count, request_count);
+        }
         if (task_count == 0) {
           break;
         }
@@ -335,6 +374,9 @@ class WorkerThread final : public PlatformThread::Delegate {
   /// Adaptive per-queue processing budget for this worker thread.
   std::size_t dynamic_turn_budget_ = kTaskBatchSize;
   std::size_t consecutive_saturated_batches_ = 0;
+  /// Adaptive per-queue processing budget for concurrent queues.
+  std::size_t dynamic_concurrent_budget_ = kMinConcurrentTasksPerTurn;
+  std::size_t consecutive_concurrent_saturated_batches_ = 0;
 
   std::string name_;
   PlatformThread::Handle handle_;

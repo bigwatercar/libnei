@@ -88,16 +88,20 @@ TaskQueue* PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout,
         }
 
         if (entry.queue->is_concurrent()) {
-          // Concurrent queues are always available: re-enqueue immediately
-          // so other workers can take from the same queue in parallel.
+          // Concurrent queues may be processed by multiple workers in
+          // parallel.  Only re-enqueue if the queue still has work
+          // remaining; this avoids heap churn (pop+push per-task) when
+          // the worker will drain the queue in this handoff.
           // in_flight tracking is unnecessary because multiple workers
           // process concurrent queues simultaneously.
-          QueueEntry re_entry = entry;
-          re_entry.order = enqueue_order_.fetch_add(1, std::memory_order_relaxed);
-          shard.heap.push(re_entry);
-          state.queued = true;
-          // Wake other workers so they can also pick up this queue.
-          NotifyWorkAvailable();
+          if (entry.queue->HasImmediateWork()) {
+            QueueEntry re_entry = entry;
+            re_entry.order = enqueue_order_.fetch_add(1, std::memory_order_relaxed);
+            shard.heap.push(re_entry);
+            state.queued = true;
+            // Only wake another worker if we actually left work behind.
+            NotifyWorkAvailable();
+          }
           return entry.queue;
         }
 
