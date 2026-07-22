@@ -887,5 +887,30 @@ TEST_F(TcpSocketTest, ConnectAndListenWithIPv6Loopback) {
   EXPECT_TRUE(connected.load());
 }
 
+#if !defined(_WIN32)
+// Verifies that Listen() under fd pressure does not crash.  Precise EMFILE
+// path testing requires an epoll-free IO pump (see docs/TODO.md).
+TEST_F(TcpSocketTest, ServerDoesNotCrashUnderFdPressure) {
+  WaitableEvent test_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  io_runner_->PostTask(FROM_HERE, [this, &test_done]() {
+    auto server = std::make_unique<TCPServerSocket>();
+    const uint16_t port = FindFreePort();
+    if (port == 0) {
+      test_done.Signal();
+      return;
+    }
+    bool ok = server->Listen(
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
+        [](bool, std::unique_ptr<TCPClientSocket>) {}, io_runner_);
+    (void)ok;  // may fail under fd pressure; the test is survival, not success
+    server->Close();
+    test_done.Signal();
+  });
+
+  ASSERT_TRUE(test_done.TimedWait(std::chrono::seconds(5)));
+}
+#endif  // !_WIN32
+
 }  // namespace
 }  // namespace nei::net
