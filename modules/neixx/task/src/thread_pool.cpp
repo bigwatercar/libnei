@@ -256,6 +256,11 @@ class WorkerThread final : public PlatformThread::Delegate {
         remaining_budget = dynamic_concurrent_budget_;
       }
 
+      // ---- Chromium-aligned concurrency tracking (Plan B) ----
+      // Track how many tasks were actually taken from a concurrent queue
+      // so we can update running_task_count_ atomically.
+      std::size_t concurrent_total_taken = 0;
+
       while (remaining_budget > 0) {
         const std::size_t request_count =
             std::min(kTaskBatchSize, remaining_budget);
@@ -264,6 +269,12 @@ class WorkerThread final : public PlatformThread::Delegate {
             queue->TakeImmediateTasks(batch.data(), request_count);
         if (queue->is_concurrent()) {
           AdaptConcurrentBudget(task_count, request_count);
+          // Reserve execution slots for the tasks we just dequeued.
+          // This mirrors TaskSource::WillRunTask() in Chromium.
+          if (task_count > 0) {
+            queue->IncrementRunningTaskCount(static_cast<int>(task_count));
+            concurrent_total_taken += task_count;
+          }
         } else {
           AdaptTurnBudget(task_count, request_count);
         }
@@ -347,6 +358,21 @@ class WorkerThread final : public PlatformThread::Delegate {
         if (task_count < request_count) {
           break;
         }
+      }
+
+      // ---- Chromium-aligned DidProcessTask (Plan B) ----
+      // Release execution slots and re-enqueue the queue if it was
+      // previously saturated and now has capacity again.
+      if (queue->is_concurrent() && concurrent_total_taken > 0) {
+        const int new_count =
+            queue->DecrementRunningTaskCount(static_cast<int>(concurrent_total_taken));
+        if (new_count < internal::TaskQueue::kMaxConcurrentWorkers &&
+            queue->HasImmediateWork()) {
+          // Queue dropped below saturation AND still has work: re-enqueue
+          // so other (possibly idle) workers can pick it up.
+          source_->ReEnqueueTaskQueue(queue);
+        }
+        concurrent_total_taken = 0;
       }
 
       source_->OnTaskQueueProcessed(queue);

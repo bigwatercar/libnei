@@ -59,6 +59,36 @@ class NEI_API TaskQueue final {
   bool is_concurrent() const;
   void set_concurrent(bool concurrent);
 
+  // ---- Chromium-aligned concurrency tracking (Plan B) ----
+  //
+  // Mirrors TaskSource::WillRunTask() / DidProcessTask() from
+  // chromium/base/task/thread_pool/task_source.h.  Callers (workers)
+  // atomically reserve and release execution slots so that the
+  // PooledTaskSource can make saturation-based scheduling decisions
+  // without per-task heap churn.
+
+  /// Maximum number of workers that may simultaneously run tasks from a
+  /// single concurrent queue.  Matches Chromium's kMaxWorkersPerJob (=256)
+  /// and serves as the saturation threshold for heap management.
+  static constexpr int kMaxConcurrentWorkers = 256;
+
+  /// Atomically increments the running-task counter by |delta|.
+  /// Returns the new counter value.  Callers should check the returned
+  /// value against kMaxConcurrentWorkers to determine saturation.
+  /// Only meaningful when is_concurrent() is true.
+  int IncrementRunningTaskCount(int delta);
+
+  /// Atomically decrements the running-task counter by |delta|.
+  /// Returns the new counter value.  When the value drops below
+  /// kMaxConcurrentWorkers, the caller should consider re-enqueuing
+  /// this queue into the PooledTaskSource heap.
+  /// Only meaningful when is_concurrent() is true.
+  int DecrementRunningTaskCount(int delta);
+
+  /// Returns a racy snapshot of the running-task counter.
+  /// For use in saturation checks outside the TaskQueue lock.
+  int running_task_count() const;
+
  private:
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   std::unique_ptr<Impl> impl_;

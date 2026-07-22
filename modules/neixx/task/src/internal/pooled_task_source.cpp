@@ -88,18 +88,31 @@ TaskQueue* PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout,
         }
 
         if (entry.queue->is_concurrent()) {
-          // Concurrent queues may be processed by multiple workers in
-          // parallel.  Only re-enqueue if the queue still has work
-          // remaining; this avoids heap churn (pop+push per-task) when
-          // the worker will drain the queue in this handoff.
-          // in_flight tracking is unnecessary because multiple workers
-          // process concurrent queues simultaneously.
+          // ---- Chromium-aligned saturation-based scheduling (Plan B) ----
+          //
+          // Mirrors JobTaskSource::WillRunTask() in chromium/base:
+          //   - If running_task_count >= kMaxConcurrentWorkers, the queue
+          //     is "saturated": skip it.  It will be re-enqueued when
+          //     DecrementRunningTaskCount() drops below the threshold.
+          //   - Otherwise, hand the queue to a worker.  Re-enqueue only
+          //     if there is remaining work, so other workers can also
+          //     pick it up.
+          //
+          // This eliminates per-task heap churn: the queue entry stays in
+          // the heap across multiple handoffs while unsaturated, and is
+          // only popped when saturated (or drained empty).
+          const int running = entry.queue->running_task_count();
+          if (running >= TaskQueue::kMaxConcurrentWorkers) {
+            // Saturated -- leave out of heap.  Workers will re-enqueue
+            // via DecrementRunningTaskCount() when slots free up.
+            continue;
+          }
+
           if (entry.queue->HasImmediateWork()) {
             QueueEntry re_entry = entry;
             re_entry.order = enqueue_order_.fetch_add(1, std::memory_order_relaxed);
             shard.heap.push(re_entry);
             state.queued = true;
-            // Only wake another worker if we actually left work behind.
             NotifyWorkAvailable();
           }
           return entry.queue;

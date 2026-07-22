@@ -288,6 +288,18 @@ class TaskQueue::Impl {
     concurrent_ = concurrent;
   }
 
+  int IncrementRunningTaskCount(int delta) {
+    return running_task_count_.fetch_add(delta, std::memory_order_relaxed) + delta;
+  }
+
+  int DecrementRunningTaskCount(int delta) {
+    return running_task_count_.fetch_sub(delta, std::memory_order_relaxed) - delta;
+  }
+
+  int running_task_count() const {
+    return running_task_count_.load(std::memory_order_relaxed);
+  }
+
  private:
   void CancelNonShutdownBlockingTasksLockedImpl(std::vector<Task>* dropped_tasks) {
     if (dropped_tasks == nullptr) {
@@ -336,6 +348,12 @@ class TaskQueue::Impl {
   OnTaskPostedCallback on_task_posted_callback_;
   OnTaskEnqueuedCallback on_task_enqueued_callback_;
   WeakPtrFactory<TaskQueue> weak_factory_;
+
+  // Chromium-aligned concurrency tracking (Plan B).
+  // Number of tasks currently "in flight" (taken by workers but not yet
+  // completed).  Used by PooledTaskSource to detect saturation and avoid
+  // heap churn for hot concurrent queues.
+  std::atomic<int> running_task_count_{0};
 };
 
 TaskQueue::TaskQueue(const TaskTraits& traits)
@@ -417,6 +435,18 @@ bool TaskQueue::is_concurrent() const {
 
 void TaskQueue::set_concurrent(bool concurrent) {
   impl_->set_concurrent(concurrent);
+}
+
+int TaskQueue::IncrementRunningTaskCount(int delta) {
+  return impl_->IncrementRunningTaskCount(delta);
+}
+
+int TaskQueue::DecrementRunningTaskCount(int delta) {
+  return impl_->DecrementRunningTaskCount(delta);
+}
+
+int TaskQueue::running_task_count() const {
+  return impl_->running_task_count();
 }
 
 }  // namespace internal
