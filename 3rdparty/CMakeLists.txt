@@ -26,3 +26,24 @@ endif()
 # headers (they use // comments).  Force at least C99.
 set_target_properties(c-ares PROPERTIES C_STANDARD 99)
 set_target_properties(c-ares PROPERTIES C_STANDARD_REQUIRED ON)
+
+# On Linux with CMAKE_BUILD_TYPE=Release, CMake's CheckSymbolExists can
+# lose the C compiler context inside try_compile, causing false negatives
+# for standard POSIX socket symbols.  Pre-set the known results to avoid
+# the broken checks.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(HAVE_SEND 1 CACHE INTERNAL "send() is POSIX")
+  set(HAVE_SENDTO 1 CACHE INTERNAL "sendto() is POSIX")
+  set(HAVE_RECV 1 CACHE INTERNAL "recv() is POSIX")
+  set(HAVE_RECVFROM 1 CACHE INTERNAL "recvfrom() is POSIX")
+  set(HAVE_SOCKET 1 CACHE INTERNAL "socket() is POSIX")
+  set(HAVE_SETSOCKOPT 1 CACHE INTERNAL "setsockopt() is POSIX")
+  set(HAVE_CONNECT 1 CACHE INTERNAL "connect() is POSIX")
+  set(HAVE_FCNTL 1 CACHE INTERNAL "fcntl() is POSIX")
+  set(HAVE_IOCTL 1 CACHE INTERNAL "ioctl() is POSIX")
+  set(HAVE_POLL 1 CACHE INTERNAL "poll() is POSIX")
+  set(HAVE_PIPE 1 CACHE INTERNAL "pipe() is POSIX")
+  set(HAVE_PIPE2 1 CACHE INTERNAL "pipe2() is POSIX")
+  set(HAVE_WRITEV 1 CACHE INTERNAL "writev() is POSIX")
+  set(HAVE_GETTIMEOFDAY 1 CACHE INTERNAL "gettimeofday() is POSIX")
+endif()
