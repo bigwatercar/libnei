@@ -76,11 +76,18 @@ Chromium reference analysis for four candidate features.  Not yet scheduled.
 
 ### 1. File System Monitoring (`FilePathWatcher`)
 
+**Status**: ✅ Completed 2026-07-22.
+
 **Chromium**: `base/files/file_path_watcher.h` (PIMPL + PlatformDelegate)
 - Linux: inotify, macOS: FSEvents+kqueue, Windows: `ReadDirectoryChangesW`+IOCP
 - Recursive / non-recursive, per-file change type
 
-**libnei**: ★★☆ — No deps, platform APIs clear, natural fit for `neixx/io/`.
+**libnei implementation**:
+- Public API: `include/neixx/io/file_path_watcher.h` (PIMPL, `std::function` callback)
+- POSIX backend: `src/file_path_watcher_posix.{h,cpp}` — inotify via `FdWatchController`
+- Windows backend: `src/file_path_watcher_win.{h,cpp}` — `ReadDirectoryChangesW` via IOCP `CompletionWatcher`
+- 8 unit tests covering create/modify/delete detection, cancel, re-watch, error paths
+- See `docs/neixx_files_technical.md` for full documentation.
 
 ### 2. SSL/TLS Support
 

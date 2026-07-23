@@ -10,6 +10,8 @@
 | `PipeStream` | 异步 pipe/socket 端点包装（OS 句柄读写） |
 | `IOBuffer` / `StreamReader` / `Writer` / `AsyncLineReader` | 缓冲管理及高层流适配器 |
 
+另外，文件系统变更监控已独立为 `neixx/files` 模块（`FilePathWatcher`），见 `docs/neixx_files_technical.md`。
+
 所有回调通过调用方提供的 `TaskRunner` 派发，满足"100% 异步"架构红线。
 
 ---
@@ -1018,7 +1020,7 @@ LT 模式的语义是：
 自 2026-07-22 起，PipeStream（仅限 `pipe_stream_posix.cpp`）的读写路径改为使用
 `EPOLLONESHOT`。核心改动：
 
-- **`FdWatchController::StartWatching` 新增 `bool oneshot = false` 参数**  
+- **`FdWatchController::StartWatching` 新增 `bool oneshot = false` 参数**
   默认为 `false`（保持 LT），不影响 TCP/UDP/ChildProcess 等所有现有调用方。
   仅 PipeStream 传入 `oneshot = true`。
 
