@@ -2,8 +2,6 @@
 
 #include "file_path_watcher_win.h"
 
-#include <windows.h>
-
 #include <memory>
 #include <string>
 
@@ -53,15 +51,9 @@ bool FilePathWatcher::Impl::Watch(const std::string& path,
   }
 
   // Convert UTF-8 path to wide string for Windows API.
-  int wide_len = ::MultiByteToWideChar(CP_UTF8, 0, path.c_str(),
-                                       static_cast<int>(path.size()),
-                                       nullptr, 0);
-  if (wide_len <= 0) return false;
-
-  std::wstring wide_path(static_cast<std::size_t>(wide_len), L'\0');
-  ::MultiByteToWideChar(CP_UTF8, 0, path.c_str(),
-                        static_cast<int>(path.size()),
-                        &wide_path[0], wide_len);
+  std::u16string wide_utf16 = UTF8ToUTF16(path);
+  std::wstring wide_path(reinterpret_cast<const wchar_t*>(wide_utf16.data()),
+                         wide_utf16.size());
 
   // Open the directory for change notification.
   HANDLE hDir = ::CreateFileW(
