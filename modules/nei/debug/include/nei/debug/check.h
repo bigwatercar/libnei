@@ -145,4 +145,7 @@
 #define DCHECK_GE_MSG(lhs, rhs, msg) ((void)0)
 #endif
 
+#define NOTREACHED() CHECK(false)
+#define NOTREACHED_MSG(msg) CHECK_MSG(false, msg)
+
 #endif // NEI_DEBUG_CHECK_H
