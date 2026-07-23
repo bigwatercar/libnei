@@ -9,25 +9,9 @@
 
 #include <nei/debug/check.h>
 #include <neixx/common/location.h>
+#include <neixx/strings/utf_string_conversions.h>
 
 namespace nei {
-
-// ===========================================================================
-// Helpers
-// ===========================================================================
-
-std::string FilePathWatcher::Impl::WidenToUtf8(const std::wstring& ws) {
-  if (ws.empty()) return {};
-  int len = ::WideCharToMultiByte(CP_UTF8, 0, ws.c_str(),
-                                  static_cast<int>(ws.size()),
-                                  nullptr, 0, nullptr, nullptr);
-  if (len <= 0) return {};
-  std::string result(static_cast<std::size_t>(len), '\0');
-  ::WideCharToMultiByte(CP_UTF8, 0, ws.c_str(),
-                        static_cast<int>(ws.size()),
-                        &result[0], len, nullptr, nullptr);
-  return result;
-}
 
 FilePathWatcher::ChangeType FilePathWatcher::Impl::MapFileAction(DWORD action) {
   switch (action) {
@@ -214,7 +198,8 @@ void FilePathWatcher::Impl::ProcessNotificationBuffer(
     if (info->FileNameLength > 0) {
       std::wstring wname(info->FileName,
                          info->FileNameLength / sizeof(wchar_t));
-      std::string relative = WidenToUtf8(wname);
+      std::string relative = UTF16ToUTF8(std::u16string_view(
+          reinterpret_cast<const char16_t*>(wname.data()), wname.size()));
 
       ChangeType type = MapFileAction(info->Action);
       DeliverChange(relative, type);

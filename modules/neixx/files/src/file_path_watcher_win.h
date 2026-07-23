@@ -17,6 +17,7 @@
 #include <neixx/common/location.h>
 #include <neixx/files/file_path_watcher.h>
 #include <neixx/functional/bind.h>
+#include <neixx/strings/utf_string_conversions.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/task/message_loop/message_pump_io.h>
 #include <neixx/task/task_runner.h>
@@ -52,7 +53,6 @@ class FilePathWatcher::Impl final : public MessagePumpForIO::CompletionWatcher {
   void DeliverChange(const std::string& relative_path,
                      FilePathWatcher::ChangeType type);
 
-  static std::string WidenToUtf8(const std::wstring& ws);
   static FilePathWatcher::ChangeType MapFileAction(DWORD action);
 
   scoped_refptr<TaskRunner> task_runner_;
