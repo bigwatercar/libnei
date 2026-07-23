@@ -3,6 +3,7 @@
 #ifndef NEIXX_FUNCTIONAL_BIND_H_
 #define NEIXX_FUNCTIONAL_BIND_H_
 
+#include <memory>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -40,7 +41,8 @@ OnceCallback<> BindOnce(F &&functor, Args &&...args) {
 // --- BindRepeating -----------------------------------------------------------
 //
 // Binds a callable and zero or more arguments into a copyable RepeatingCallback.
-// Copies share the same underlying allocation via reference counting.
+// Uses heap allocation with reference counting to allow sharing across copies
+// even when the bound types are not copyable (e.g. unique_ptr).
 //
 template <typename F, typename... Args>
 RepeatingCallback<> BindRepeating(F &&functor, Args &&...args) {
@@ -52,36 +54,23 @@ RepeatingCallback<> BindRepeating(F &&functor, Args &&...args) {
                 "BindRepeating: functor is not callable with lvalue references of bound arguments.");
 
   struct Storage {
-    detail::RepeatingControlBlock ctrl; // MUST be first member
     Fn fn;
     BoundArgs bound;
   };
 
-  auto *s = static_cast<Storage *>(detail::callback_alloc(sizeof(Storage), alignof(Storage)));
-  s->ctrl.invoke = [](detail::RepeatingControlBlock *self) {
-    auto *st = reinterpret_cast<Storage *>(self);
-    // WeakPtr safety: if the first bound arg is a WeakPtr and has expired,
-    // silently skip invocation - no external null-check required.
+  auto shared = std::make_shared<Storage>(
+      Storage{Fn(std::forward<F>(functor)),
+              BoundArgs(detail::StoreBoundArg(std::forward<Args>(args))...)});
+
+  return RepeatingCallback<>([shared]() {
     if constexpr (sizeof...(Args) > 0) {
       if constexpr (detail::is_weak_ptr_v<std::decay_t<std::tuple_element_t<0, BoundArgs>>>) {
-        if (!std::get<0>(st->bound))
+        if (!std::get<0>(shared->bound))
           return;
       }
     }
-    std::apply([&](auto &...a) { std::invoke(st->fn, a...); }, st->bound);
-  };
-  s->ctrl.destroy = [](detail::RepeatingControlBlock *self) {
-    if (self->ref_count.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-      auto *st = reinterpret_cast<Storage *>(self);
-      st->fn.~Fn();
-      st->bound.~BoundArgs();
-      detail::callback_free(self, alignof(Storage));
-    }
-  };
-  new (&s->ctrl.ref_count) std::atomic<int>(1);
-  new (&s->fn) Fn(std::forward<F>(functor));
-  new (&s->bound) BoundArgs(detail::StoreBoundArg(std::forward<Args>(args))...);
-  return RepeatingCallback<>(&s->ctrl);
+    std::apply([&](auto &...a) { std::invoke(shared->fn, a...); }, shared->bound);
+  });
 }
 
 } // namespace nei

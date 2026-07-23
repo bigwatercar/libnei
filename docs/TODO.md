@@ -50,8 +50,11 @@ Action: run on native Linux; gate WSL-failing tests with `nei::IsRunningOnWsl()`
 - `ResolveCallback = OnceCallback<const AddressList&>` for HostResolver
 - 14 unit tests covering construction, move, run-once, SBO/heap, move-only types
 
-`RepeatingCallback<Args...>` deferred: template parameter exists but `Run()`
-is still void-only — no current use case requires parameterized repeats.
+**Status**: ✅ Completed 2026-07-23 — `RepeatingCallback<Args...>` is now fully
+parameterized with `void Run(Args...) const`, copy semantics (SBO copy-construct /
+heap ref-count), `explicit operator bool`, `operator=(nullptr_t)`, and implicit
+construction from compatible callables (excluding `nullptr_t`). `BindRepeating`
+uses `shared_ptr` heap storage. `FilePathWatcher` migrated from `std::function`.
 
 ---
 
