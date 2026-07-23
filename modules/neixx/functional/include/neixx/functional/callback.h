@@ -216,6 +216,10 @@ public:
     return vtable_.invoke_and_destroy != nullptr;
   }
 
+  bool IsNull() const noexcept {
+    return vtable_.invoke_and_destroy == nullptr;
+  }
+
   // Run the callback with arguments.  Consumes *this (move-only).
   void Run(Args... args) && {
     if (vtable_.invoke_and_destroy) {
@@ -231,11 +235,6 @@ public:
                 !std::is_same_v<std::decay_t<F>, OnceCallback>>>
   /*implicit*/ OnceCallback(F &&functor) {
     detail::InitOnceCallbackFromFunctor(*this, std::forward<F>(functor));
-  }
-
-private:
-  bool IsNullImpl() const noexcept override {
-    return vtable_.invoke_and_destroy == nullptr;
   }
 
   detail::OnceCallbackVTable<Args...> vtable_;                            // 16 bytes
@@ -326,6 +325,10 @@ public:
     return vtable_.invoke != nullptr;
   }
 
+  bool IsNull() const noexcept {
+    return vtable_.invoke == nullptr;
+  }
+
   RepeatingCallback &operator=(std::nullptr_t) noexcept {
     if (vtable_.destroy)
       vtable_.destroy(storage_);
@@ -353,11 +356,6 @@ public:
   /*implicit*/ RepeatingCallback(std::nullptr_t) noexcept {
     vtable_ = {nullptr, nullptr, nullptr};
     std::memset(storage_, 0, detail::REPEATING_SBO_SIZE);
-  }
-
-private:
-  bool IsNullImpl() const noexcept override {
-    return vtable_.invoke == nullptr;
   }
 
   detail::RepeatingVTable<Args...> vtable_;

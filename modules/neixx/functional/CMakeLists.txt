@@ -6,7 +6,6 @@ target_sources(
           include/neixx/functional/callback_internal.h
           include/neixx/functional/cancelable_callback.h
           src/cancelable_callback.cpp
-          src/callback_base.cpp
           src/callback.cpp
 )
 

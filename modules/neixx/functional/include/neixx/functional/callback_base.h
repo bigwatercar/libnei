@@ -3,31 +3,23 @@
 #ifndef NEIXX_FUNCTIONAL_CALLBACK_BASE_H_
 #define NEIXX_FUNCTIONAL_CALLBACK_BASE_H_
 
-#include <nei/macros/nei_export.h>
-
 namespace nei {
 
-// Shared abstraction for callback wrappers.
-// This keeps the null-state query behind a stable virtual interface while
-// leaving invocation semantics in the concrete callback types.
-class NEI_API CallbackBase {
-public:
-  virtual ~CallbackBase();
+// Non-virtual, non-polymorphic base for OnceCallback / RepeatingCallback.
+//
+// No vptr — each concrete callback template carries its own C-style vtable
+// (invoke + destroy function pointers) and checks null-ness by testing the
+// vtable pointer directly.  This avoids the 8-byte overhead and indirect-call
+// penalty of a virtual IsNullImpl().
+class CallbackBase {
+protected:
+  CallbackBase() = default;
+  ~CallbackBase() = default;
 
   CallbackBase(const CallbackBase &) = default;
   CallbackBase &operator=(const CallbackBase &) = default;
   CallbackBase(CallbackBase &&) noexcept = default;
   CallbackBase &operator=(CallbackBase &&) noexcept = default;
-
-  bool IsNull() const noexcept {
-    return IsNullImpl();
-  }
-
-protected:
-  CallbackBase() = default;
-
-private:
-  virtual bool IsNullImpl() const noexcept = 0;
 };
 
 } // namespace nei
