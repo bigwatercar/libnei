@@ -1,6 +1,5 @@
 #include <nei/core/file_util.h>
 #include <nei/core/encoding.h>
-#include <nei/core/path_util.h>
 
 #include <stdio.h>
 #include <sys/stat.h>
@@ -8,10 +7,6 @@
 
 FILE *nei_fopen_utf8(const char *path, const char *mode) {
     return fopen(path, mode);
-}
-
-int nei_file_exists(const char *path) {
-    return nei_path_exists(path);
 }
 
 int nei_file_size(const char *path, uint64_t *out_size) {

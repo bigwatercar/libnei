@@ -66,6 +66,52 @@ NEI_API int nei_file_remove(const char *path);
  */
 NEI_API int nei_file_rename(const char *old_path, const char *new_path);
 
+/**
+ * @brief Truncate (clear) a file to zero length.  Creates the file if it
+ * does not exist.
+ *
+ * @param path UTF-8 path.
+ * @return 0 on success, or a negative value on error.
+ */
+NEI_API int nei_file_truncate(const char *path);
+
+/**
+ * @brief Append data to the end of a file.  Creates the file if it does
+ * not exist.
+ *
+ * @param path UTF-8 path.
+ * @param buf  Data to write.
+ * @param len  Number of bytes to write.
+ * @return Number of bytes written, or a negative value on error.
+ */
+NEI_API int64_t nei_file_append(const char *path, const void *buf, size_t len);
+
+/**
+ * @brief Overwrite a file with the given data.  Any existing content is
+ * replaced.  Creates the file if it does not exist.
+ *
+ * @param path UTF-8 path.
+ * @param buf  Data to write.
+ * @param len  Number of bytes to write.
+ * @return Number of bytes written, or a negative value on error.
+ */
+NEI_API int64_t nei_file_write(const char *path, const void *buf, size_t len);
+
+/**
+ * @brief Read data from a file at the given offset.
+ *
+ * Convenience for reading small files: call nei_file_size() first to
+ * allocate a buffer, then read the entire file in one call.
+ *
+ * @param path   UTF-8 path.
+ * @param offset Byte offset to start reading from.
+ * @param buf    Buffer to receive the data.
+ * @param len    Maximum number of bytes to read.
+ * @return The number of bytes actually read (>=0), or a negative value
+ *         on error (file not found, seek/read failure, etc.).
+ */
+NEI_API int64_t nei_file_read(const char *path, int64_t offset, void *buf, size_t len);
+
 #ifdef __cplusplus
 }
 #endif
