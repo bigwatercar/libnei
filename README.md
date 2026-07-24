@@ -24,12 +24,12 @@ This library is developed with the assistance of AI-powered coding assistants. L
 | Module | Description |
 |--------|-------------|
 | `log` | High-performance async logging with MPSC lock-free ring buffer, multiple sinks, and runtime configuration |
-| `core` | Endian conversion utilities (`endian.h`), cross-platform floating-point control |
-| `macros` | Export macros (`NEI_API`), platform detection, and common defines |
+| `core` | Byte-order conversion (`endian.h`), floating-point control (`float_ctrl.h`), encoding (`encoding.h`), file utilities (`file_util.h`), path utilities (`path_util.h`), cryptographically secure random (`random.h`), time utilities (`time.h`) |
+| `macros` | Export macros (`NEI_API`), platform detection, compiler-specific macros, common typedefs |
 | `debug` | Assertion and check macros (`CHECK` / `DCHECK` / `NOTREACHED`) |
 | `xdr` | XDR-style data serialization / deserialization |
-| `utils` | Cryptography & encoding: Base64, CRC32, MD5, SHA-1, SHA-256, UUID (RFC 4122 v4), cryptographically secure random, Flake ID |
-| `sys` | System information: retrieve current process executable path |
+| `utils` | Cryptography & encoding: Base64, CRC32, MD5, SHA-1, SHA-256, UUID (RFC 4122 v4), Flake ID (distributed unique ID) |
+| `sys` | System & hardware info: CPU, memory, disk, OS, hostname, process info (`cpu_info.h` / `memory_info.h` / `disk_info.h` / `os_info.h` / `host_info.h` / `process_info.h`), filesystem utilities (`fs_util.h`) |
 
 ### C++ Library (`neixx` — C++17, optionally enabled)
 
@@ -38,12 +38,15 @@ This library is developed with the assistance of AI-powered coding assistants. L
 | `task` | Async task framework: `TaskRunner`, `SequencedTaskRunner`, `ThreadPool` with priority scheduling, delayed tasks, shutdown policies, `ScopedBlockingCall` compensation workers |
 | `threading` | Cross-platform thread wrapper (`Thread` / `PlatformThread`), thread-local storage |
 | `synchronization` | `Lock`, `ConditionVariable`, `WaitableEvent` |
-| `memory` | `scoped_refptr` / `RefCounted` reference counting, `WeakPtr` / `WeakPtrFactory` (use-after-free-safe async callbacks) |
-| `functional` | Type-safe `Callback` / `Bind` / `CancelableCallback` |
-| `io` | `IOBuffer` buffer hierarchy, `StreamReader` / `StreamWriter`, async file I/O, `AsyncLineReader` |
+| `memory` | `scoped_refptr` / `RefCounted` reference counting, `WeakPtr` / `WeakPtrFactory` (use-after-free-safe async callbacks), `SharedMemory` (cross-platform shared memory regions & mappings) |
+| `functional` | Type-safe `OnceCallback` / `RepeatingCallback` / `BindOnce` / `BindRepeating` / `CancelableCallback` |
+| `io` | `IOBuffer` buffer hierarchy, `StreamReader` / `StreamWriter`, async file I/O, `AsyncLineReader`, `PipeStream` (async pipe/socket endpoints) |
+| `files` | `FilePathWatcher` — cross-platform file system change monitoring (inotify / ReadDirectoryChangesW) |
 | `strings` | String utilities: `SplitString`, `StringPrintf`, UTF conversions, CJK width detection, text normalization |
-| `common` | `AtExitManager`, `NoDestructor`, `Singleton`, `TimeSource`, thread checkers (`SequenceChecker` / `ThreadChecker`) |
+| `common` | `AtExitManager`, `NoDestructor`, `Singleton`, `TimeSource`, thread checkers (`SequenceChecker` / `ThreadChecker`), `PlatformHandle` |
 | `command_line` | Command-line argument parsing |
+| `net` | `TCPServerSocket` / `TCPClientSocket` (cross-platform async TCP), `UDPSocket`, `HostResolver` (async DNS via c-ares) |
+| `ipc` | `MessageChannel` / `RpcEndpoint` — inter-process communication abstractions |
 | `process` | Child process management, process utilities, privilege elevation |
 | `trace_event` | Lightweight trace event instrumentation (optional) |
 | `log` | C++ log header wrapper |
@@ -144,9 +147,10 @@ Headers live under each module's `include/` directory with a unified prefix:
 | Document | Topic |
 |----------|-------|
 | [C Log Module](docs/nei_log_module_technical.md) | Async logging system design |
-| [Task Module](docs/neixx_task_module_technical.md) | Async task framework |
-| [IO Module](docs/neixx_io_technical.md) | Buffers, streams, async files |
-| [Async File](docs/neixx_async_file_technical.md) | Async file I/O implementation |
+| [IO Module](docs/neixx_io_technical.md) | Buffers, streams, async files, pipe/socket endpoints |
+| [Files Module](docs/neixx_files_technical.md) | File system monitoring (FilePathWatcher) |
+| [Memory Module](docs/neixx_memory_technical.md) | Shared memory regions & mappings |
+| [Net Module](docs/neixx_net_technical.md) | TCP/UDP sockets, DNS resolution |
 | [Threading & Sync](docs/neixx_threading_technical.md) | Thread wrappers and synchronization primitives |
 | [WeakPtr](docs/neixx_weak_ptr_technical.md) | Weak pointers and safe async callbacks |
 | [Bind / PostTask](docs/neixx_bind_post_task_technical.md) | Callback binding and task posting |
@@ -157,7 +161,6 @@ Headers live under each module's `include/` directory with a unified prefix:
 | [Thread / Sequence Checker](docs/neixx_thread_sequence_checker_technical.md) | Thread safety checkers |
 | [String Utilities](docs/neixx_strings_technical.md) | String processing |
 | [Command Line](docs/neixx_command_line_technical.md) | Command-line argument parsing |
-| [Command Line Quick Ref](docs/neixx_command_line_quick_reference.md) | Command-line API reference |
 | [Child Process](docs/neixx_child_process_technical.md) | Child process management |
 | [Windows 7 Compatibility](docs/windows7_compatibility.md) | Win7 compatibility notes |
 

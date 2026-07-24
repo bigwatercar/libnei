@@ -24,12 +24,12 @@ Chromium 的 `//base` 目录包含大量精心设计的跨平台基础设施—�
 | 模块 | 说明 |
 |------|------|
 | `log` | 高性能异步日志系统，MPSC 无锁环形缓冲区，支持多 sink、运行时动态配置 |
-| `core` | 字节序转换工具（`endian.h`），跨平台浮点控制 |
-| `macros` | 导出宏（`NEI_API`）、平台检测等公共宏定义 |
+| `core` | 字节序转换（`endian.h`）、浮点控制（`float_ctrl.h`）、编码（`encoding.h`）、文件工具（`file_util.h`）、路径工具（`path_util.h`）、加密安全随机数（`random.h`）、时间工具（`time.h`） |
+| `macros` | 导出宏（`NEI_API`）、平台检测、编译器特定宏、公共类型定义 |
 | `debug` | 断言与检查宏（`CHECK` / `DCHECK` / `NOTREACHED`） |
 | `xdr` | XDR 风格数据序列化 / 反序列化 |
-| `utils` | 密码学与编码工具：Base64、CRC32、MD5、SHA-1、SHA-256、UUID (RFC 4122 v4)、加密安全随机数、Flake ID |
-| `sys` | 系统信息：获取当前进程可执行文件路径 |
+| `utils` | 密码学与编码工具：Base64、CRC32、MD5、SHA-1、SHA-256、UUID (RFC 4122 v4)、Flake ID（分布式唯一 ID） |
+| `sys` | 系统与硬件信息：CPU、内存、磁盘、操作系统、主机名、进程信息（`cpu_info.h` / `memory_info.h` / `disk_info.h` / `os_info.h` / `host_info.h` / `process_info.h`），文件系统工具（`fs_util.h`） |
 
 ### C++ 部分（`neixx` — C++17，可选启用）
 
@@ -38,12 +38,15 @@ Chromium 的 `//base` 目录包含大量精心设计的跨平台基础设施—�
 | `task` | 异步任务框架：`TaskRunner`、`SequencedTaskRunner`、`ThreadPool`，支持优先级调度、延迟任务、关闭策略、`ScopedBlockingCall` 补偿 worker |
 | `threading` | 跨平台线程封装（`Thread` / `PlatformThread`）、线程局部存储 |
 | `synchronization` | `Lock`、`ConditionVariable`、`WaitableEvent` |
-| `memory` | `scoped_refptr` / `RefCounted` 引用计数、`WeakPtr` / `WeakPtrFactory`（防 use-after-free 异步回调） |
-| `functional` | 类型安全的 `Callback` / `Bind` / `CancelableCallback` |
-| `io` | `IOBuffer` 缓冲区体系、`StreamReader` / `StreamWriter`、异步文件读写、`AsyncLineReader` |
+| `memory` | `scoped_refptr` / `RefCounted` 引用计数、`WeakPtr` / `WeakPtrFactory`（防 use-after-free 异步回调）、`SharedMemory`（跨平台共享内存区域与映射） |
+| `functional` | 类型安全的 `OnceCallback` / `RepeatingCallback` / `BindOnce` / `BindRepeating` / `CancelableCallback` |
+| `io` | `IOBuffer` 缓冲区体系、`StreamReader` / `StreamWriter`、异步文件读写、`AsyncLineReader`、`PipeStream`（异步 pipe/socket 端点） |
+| `files` | `FilePathWatcher` — 跨平台文件系统变更监控（inotify / ReadDirectoryChangesW） |
 | `strings` | 字符串工具：`SplitString`、`StringPrintf`、UTF 编码转换、CJK 宽度检测、文本规范化 |
-| `common` | `AtExitManager`、`NoDestructor`、`Singleton`、`TimeSource`、线程检查器（`SequenceChecker` / `ThreadChecker`） |
+| `common` | `AtExitManager`、`NoDestructor`、`Singleton`、`TimeSource`、线程检查器（`SequenceChecker` / `ThreadChecker`）、`PlatformHandle` |
 | `command_line` | 命令行参数解析 |
+| `net` | `TCPServerSocket` / `TCPClientSocket`（跨平台异步 TCP）、`UDPSocket`、`HostResolver`（基于 c-ares 的异步 DNS） |
+| `ipc` | `MessageChannel` / `RpcEndpoint` — 进程间通信抽象 |
 | `process` | 子进程管理、进程工具函数、权限提升 |
 | `trace_event` | 轻量级 trace event 埋点（可选编译） |
 | `log` | C++ 层 log 头文件封装 |
@@ -144,9 +147,10 @@ target_link_libraries(your_target PRIVATE nei::nei)
 | 文档 | 说明 |
 |------|------|
 | [C 日志模块技术文档](docs/nei_log_module_technical.md) | 异步日志系统设计 |
-| [task 模块技术文档](docs/neixx_task_module_technical.md) | 异步任务框架 |
-| [IO 模块技术文档](docs/neixx_io_technical.md) | 缓冲区、流、异步文件 |
-| [异步文件技术文档](docs/neixx_async_file_technical.md) | 异步文件读写实现 |
+| [IO 模块技术文档](docs/neixx_io_technical.md) | 缓冲区、流、异步文件、管道/socket 端点 |
+| [文件模块技术文档](docs/neixx_files_technical.md) | 文件系统监控（FilePathWatcher） |
+| [内存模块技术文档](docs/neixx_memory_technical.md) | 共享内存区域与映射 |
+| [网络模块技术文档](docs/neixx_net_technical.md) | TCP/UDP 套接字、DNS 解析 |
 | [线程与同步技术文档](docs/neixx_threading_technical.md) | 线程封装与同步原语 |
 | [WeakPtr 技术文档](docs/neixx_weak_ptr_technical.md) | 弱引用指针与安全异步回调 |
 | [Bind / PostTask 技术文档](docs/neixx_bind_post_task_technical.md) | 回调绑定与任务投递 |
@@ -157,7 +161,6 @@ target_link_libraries(your_target PRIVATE nei::nei)
 | [Thread / Sequence Checker 技术文档](docs/neixx_thread_sequence_checker_technical.md) | 线程安全检查器 |
 | [字符串工具技术文档](docs/neixx_strings_technical.md) | 字符串处理 |
 | [命令行解析技术文档](docs/neixx_command_line_technical.md) | 命令行参数解析 |
-| [命令行快速参考](docs/neixx_command_line_quick_reference.md) | 命令行 API 速查 |
 | [子进程技术文档](docs/neixx_child_process_technical.md) | 子进程管理 |
 | [Windows 7 兼容性说明](docs/windows7_compatibility.md) | Win7 兼容注意事项 |
 
