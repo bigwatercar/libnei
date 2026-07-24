@@ -6,10 +6,8 @@
 #if !defined(_WIN32)
 
 #include <sys/inotify.h>
-#include <memory>
 #include <string>
 #include <unordered_map>
-#include <vector>
 
 #include <neixx/common/location.h>
 #include <neixx/files/file_path_watcher.h>
@@ -30,18 +28,14 @@ class FilePathWatcher::Impl final : public MessagePumpForIO::Watcher {
              FilePathWatcher::Callback callback);
   void Cancel();
 
+  bool is_watching() const { return watching_; }
+
   // MessagePumpForIO::Watcher:
   void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override;
   void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {}
 
  private:
-  void ShutdownAndSelfDestruct();
-
-  // Reads all pending inotify events from the fd and dispatches callbacks.
   void DrainInotifyEvents();
-
-  // Adds an inotify watch for |path| (and, if recursive, its subdirectories).
-  // Returns true if at least the top-level watch succeeded.
   bool AddWatchRecursive(const std::string& path);
 
   void DeliverChange(const std::string& relative_path,
@@ -58,11 +52,10 @@ class FilePathWatcher::Impl final : public MessagePumpForIO::Watcher {
   std::unordered_map<int, std::string> wd_to_path_;
 
   FilePathWatcher::Callback callback_;
-  std::string watch_root_;    // absolute path passed to Watch()
+  std::string watch_root_;
   bool recursive_ = false;
   bool watching_ = false;
 
-  // Buffer for reading inotify events.  Sized to hold multiple events.
   static constexpr std::size_t kInotifyBufSize = 4096;
   alignas(inotify_event) char inotify_buf_[kInotifyBufSize];
 
@@ -70,6 +63,9 @@ class FilePathWatcher::Impl final : public MessagePumpForIO::Watcher {
 };
 
 }  // namespace nei
+
+template <>
+struct nei::WeakPtrThreadSafe<nei::FilePathWatcher::Impl> : std::true_type {};
 
 #endif  // !defined(_WIN32)
 #endif  // NEIXX_FILES_FILE_PATH_WATCHER_POSIX_H_
