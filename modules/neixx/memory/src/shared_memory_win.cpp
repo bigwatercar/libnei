@@ -1,0 +1,139 @@
+#if defined(_WIN32)
+
+#include "shared_memory_win.h"
+
+#include <nei/debug/check.h>
+
+namespace nei {
+
+// =============================================================================
+// SharedMemoryHandle::Impl
+// =============================================================================
+
+SharedMemoryHandle::Impl::Impl(PlatformHandle handle, std::size_t size)
+    : handle_(handle.ReleaseAsHandle()), size_(size) {}
+
+SharedMemoryHandle::Impl::~Impl() {
+  if (handle_) { ::CloseHandle(handle_); handle_ = nullptr; }
+}
+
+PlatformHandle SharedMemoryHandle::Impl::TakeHandle() {
+  void* h = handle_;
+  handle_ = nullptr;
+  return PlatformHandle::FromNativeHandle<NullHandleTraits>(h);
+}
+
+// =============================================================================
+// ReadOnlySharedMemoryMapping::Impl
+// =============================================================================
+
+ReadOnlySharedMemoryMapping::Impl::~Impl() {
+  if (addr_) { ::UnmapViewOfFile(addr_); addr_ = nullptr; size_ = 0; }
+}
+
+// =============================================================================
+// WritableSharedMemoryMapping::Impl
+// =============================================================================
+
+WritableSharedMemoryMapping::Impl::~Impl() {
+  if (addr_) { ::UnmapViewOfFile(addr_); addr_ = nullptr; size_ = 0; }
+}
+
+// =============================================================================
+// ReadOnlySharedMemoryRegion::Impl
+// =============================================================================
+
+ReadOnlySharedMemoryRegion::Impl::Impl(SharedMemoryHandle handle)
+    : handle_(nullptr), size_(handle.size()) {
+  // Duplicate the handle so we have an independent reference.
+  void* src = handle.GetHandle();
+  if (src) {
+    ::DuplicateHandle(::GetCurrentProcess(), src,
+                      ::GetCurrentProcess(), &handle_,
+                      0, FALSE, DUPLICATE_SAME_ACCESS);
+  }
+}
+
+ReadOnlySharedMemoryRegion::Impl::~Impl() {
+  if (handle_) { ::CloseHandle(handle_); handle_ = nullptr; }
+}
+
+ReadOnlySharedMemoryMapping ReadOnlySharedMemoryRegion::Impl::Map() {
+  if (!handle_) return {};
+  ReadOnlySharedMemoryMapping mapping;
+  void* addr = ::MapViewOfFile(handle_, FILE_MAP_READ, 0, 0, size_);
+  if (addr)
+    mapping.impl_ = std::make_unique<ReadOnlySharedMemoryMapping::Impl>(addr, size_);
+  return mapping;
+}
+
+SharedMemoryHandle ReadOnlySharedMemoryRegion::Impl::TakeHandle() && {
+  void* h = handle_;
+  handle_ = nullptr;
+  return SharedMemoryHandle(
+      PlatformHandle::FromNativeHandle<NullHandleTraits>(h), size_);
+}
+
+// =============================================================================
+// WritableSharedMemoryRegion::Impl
+// =============================================================================
+
+WritableSharedMemoryRegion::Impl::Impl(SharedMemoryHandle handle)
+    : handle_(nullptr), size_(handle.size()) {
+  void* src = handle.GetHandle();
+  if (src) {
+    ::DuplicateHandle(::GetCurrentProcess(), src,
+                      ::GetCurrentProcess(), &handle_,
+                      0, FALSE, DUPLICATE_SAME_ACCESS);
+  }
+}
+
+WritableSharedMemoryRegion::Impl::~Impl() {
+  if (handle_) { ::CloseHandle(handle_); handle_ = nullptr; }
+}
+
+WritableSharedMemoryRegion WritableSharedMemoryRegion::Impl::Create(
+    std::size_t size) {
+  if (size == 0) return {};
+  void* h = ::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr,
+                                 PAGE_READWRITE,
+                                 static_cast<DWORD>(size >> 32),
+                                 static_cast<DWORD>(size & 0xFFFFFFFF),
+                                 nullptr);
+  if (!h) return {};
+  return WritableSharedMemoryRegion(
+      SharedMemoryHandle(PlatformHandle::FromNativeHandle<NullHandleTraits>(h),
+                         size));
+}
+
+WritableSharedMemoryMapping WritableSharedMemoryRegion::Impl::Map() {
+  if (!handle_) return {};
+  WritableSharedMemoryMapping mapping;
+  void* addr = ::MapViewOfFile(handle_, FILE_MAP_WRITE, 0, 0, size_);
+  if (addr)
+    mapping.impl_ = std::make_unique<WritableSharedMemoryMapping::Impl>(addr, size_);
+  return mapping;
+}
+
+ReadOnlySharedMemoryRegion
+WritableSharedMemoryRegion::Impl::ConvertToReadOnly() && {
+  if (!handle_) return {};
+
+  // Duplicate with read-only access, then close the original.
+  void* ro_handle = nullptr;
+  if (!::DuplicateHandle(::GetCurrentProcess(), handle_,
+                         ::GetCurrentProcess(), &ro_handle,
+                         FILE_MAP_READ, FALSE, 0)) {
+    return {};
+  }
+  ::CloseHandle(handle_);
+  handle_ = nullptr;
+
+  return ReadOnlySharedMemoryRegion(
+      SharedMemoryHandle(PlatformHandle::FromNativeHandle<NullHandleTraits>(ro_handle),
+                         size_));
+}
+
+}  // namespace nei
+
+#endif  // defined(_WIN32)
