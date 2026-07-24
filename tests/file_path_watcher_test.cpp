@@ -15,6 +15,7 @@
 
 #include <neixx/common/location.h>
 #include <neixx/files/file_path_watcher.h>
+#include <neixx/functional/bind.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/message_loop/message_pump_io.h>
 #include <neixx/task/message_loop/message_pump_type.h>
@@ -76,7 +77,6 @@ void SleepMs(int ms) {
   std::this_thread::sleep_for(milliseconds(ms));
 }
 
-// Destroys the watcher on its IO thread and waits.
 void DestroyWatcherOnIO(scoped_refptr<TaskRunner> io_runner,
                         std::unique_ptr<FilePathWatcher>& watcher) {
   WaitableEvent done(WaitableEvent::ResetPolicy::kManual);
@@ -115,9 +115,9 @@ class FilePathWatcherTest : public ::testing::Test {
   scoped_refptr<TaskRunner> io_runner_;
 };
 
-// ===========================================================================
-// Tests
-// ===========================================================================
+// =============================================================================
+// Basic API tests (8)
+// =============================================================================
 
 TEST_F(FilePathWatcherTest, DetectFileCreation) {
   auto watcher = std::make_unique<FilePathWatcher>(io_runner());
@@ -217,7 +217,6 @@ TEST_F(FilePathWatcherTest, CancelStopsCallbacks) {
 
   SleepMs(200);
 
-  // Cancel synchronously on the IO thread.
   WaitableEvent cancel_done(WaitableEvent::ResetPolicy::kManual);
   io_runner()->PostTask(FROM_HERE, [&]() { watcher->Cancel(); cancel_done.Signal(); });
   ASSERT_TRUE(cancel_done.TimedWait(milliseconds(2000)));
@@ -312,6 +311,189 @@ TEST_F(FilePathWatcherTest, RewatchAfterCancel) {
 
   CreateEmptyFile(temp_dir_ + "/file2.txt");
   ASSERT_TRUE(done2.TimedWait(milliseconds(5000)));
+
+  DestroyWatcherOnIO(io_runner(), watcher);
+}
+
+// =============================================================================
+// Regression tests (Bug 1/2/3 — 2026-07-24)
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// 靶点 1 — DestroyWhileIoPending
+//
+// Arrange:  create watcher on IO thread.
+// Act:      flood watched directory with file creations from main thread
+//           while the watcher is alive, then post a destroy-task to the
+//           IO thread.  The destroy runs while IOCP/inotify events are
+//           still queued or in-flight.
+// Assert:   a barrier task posted after the destroy confirms the IO thread
+//           drained all residual completions without a crash / UAF.
+// ---------------------------------------------------------------------------
+TEST_F(FilePathWatcherTest, DestroyWhileIoPending) {
+  WaitableEvent watch_ready(WaitableEvent::ResetPolicy::kManual);
+
+  // Create watcher + arm watch on the IO thread.
+  auto runner = io_runner();
+  io_runner()->PostTask(FROM_HERE, [runner, this, &watch_ready]() {
+    auto watcher = std::make_unique<FilePathWatcher>(runner);
+    bool ok = watcher->Watch(temp_dir_, /*recursive=*/false,
+                             [](const std::string&,
+                                FilePathWatcher::ChangeType) {});
+    ASSERT_TRUE(ok);
+
+    // Stash the watcher in a shared_ptr on the IO thread so the
+    // destroy-task (posted later) can reach it.
+    auto stash = std::make_shared<std::unique_ptr<FilePathWatcher>>(
+        std::move(watcher));
+
+    // Post the destroy-task right after arming.
+    runner->PostTask(FROM_HERE, [stash]() { stash->reset(); });
+
+    watch_ready.Signal();
+  });
+
+  ASSERT_TRUE(watch_ready.TimedWait(milliseconds(5000)));
+
+  // Flood the directory from the main thread.  The watcher is still alive
+  // on the IO thread; the destroy-task is queued behind the watch-arming
+  // task but may execute concurrently with this flood on a multi-core
+  // machine.
+  constexpr int kFileCount = 200;
+  for (int i = 0; i < kFileCount; ++i) {
+    CreateEmptyFile(temp_dir_ + "/stress_" + std::to_string(i) + ".txt");
+  }
+
+  // Barrier: post a no-op task.  When it runs we know the destroy-task
+  // (and any residual IOCP/inotify completions) have been processed.
+  WaitableEvent barrier(WaitableEvent::ResetPolicy::kManual);
+  io_runner()->PostTask(FROM_HERE, [&barrier]() { barrier.Signal(); });
+  ASSERT_TRUE(barrier.TimedWait(milliseconds(10000)));
+
+  SUCCEED();
+}
+
+// ---------------------------------------------------------------------------
+// 靶点 2 — CancelPreventsPendingCallbacks
+//
+// Arrange:  watcher on IO thread, callback runner = separate thread.
+//           This forces DeliverChange through the PostTask + WeakPtr path.
+// Act:      trigger an OS event, then immediately Cancel() on the IO
+//           thread before the posted callback is drained.
+// Assert:   the callback counter remains zero — WeakPtr check silently
+//           dropped the queued invocation.
+// ---------------------------------------------------------------------------
+TEST_F(FilePathWatcherTest, CancelPreventsPendingCallbacks) {
+  Thread cb_thread("fpw_cb");
+  Thread::Options cb_opts;
+  cb_opts.message_pump_type = MessagePumpType::DEFAULT;
+  ASSERT_TRUE(cb_thread.StartWithOptions(cb_opts));
+  scoped_refptr<TaskRunner> cb_runner = cb_thread.GetTaskRunner();
+
+  // Gate: block cb_thread from processing anything until we say so.
+  WaitableEvent cb_gate(WaitableEvent::ResetPolicy::kManual);
+  cb_runner->PostTask(FROM_HERE, [&cb_gate]() { cb_gate.Wait(); });
+
+  std::atomic<int> callbacks_fired{0};
+  auto watcher = std::make_unique<FilePathWatcher>(cb_runner);
+
+  WaitableEvent watch_ready(WaitableEvent::ResetPolicy::kManual);
+  io_runner()->PostTask(FROM_HERE, [&]() {
+    bool ok = watcher->Watch(
+        temp_dir_, /*recursive=*/false,
+        [&callbacks_fired](const std::string&,
+                           FilePathWatcher::ChangeType) {
+          ++callbacks_fired;
+        });
+    ASSERT_TRUE(ok);
+    watch_ready.Signal();
+  });
+  ASSERT_TRUE(watch_ready.TimedWait(milliseconds(5000)));
+
+  // Trigger an OS event.  DeliverChange will post the callback to
+  // cb_runner, but cb_thread is blocked behind the gate.
+  CreateEmptyFile(temp_dir_ + "/ghost.txt");
+
+  // Cancel while the callback is queued but not yet executed.
+  WaitableEvent cancel_done(WaitableEvent::ResetPolicy::kManual);
+  io_runner()->PostTask(FROM_HERE, [&]() {
+    watcher->Cancel();
+    cancel_done.Signal();
+  });
+  ASSERT_TRUE(cancel_done.TimedWait(milliseconds(5000)));
+
+  // Open the gate.  The queued callback will run, hit the WeakPtr +
+  // watching_ + callback_ triple check, and silently return.
+  cb_gate.Signal();
+
+  // Barrier: wait until cb_thread has drained all queued tasks.
+  WaitableEvent cb_drained(WaitableEvent::ResetPolicy::kManual);
+  cb_runner->PostTask(FROM_HERE, [&cb_drained]() { cb_drained.Signal(); });
+  ASSERT_TRUE(cb_drained.TimedWait(milliseconds(5000)));
+
+  EXPECT_EQ(callbacks_fired.load(), 0);
+
+  DestroyWatcherOnIO(io_runner(), watcher);
+  cb_thread.Stop();
+}
+
+// ---------------------------------------------------------------------------
+// 靶点 3 — RecursiveWatchDetectsNewSubdirectoryChanges
+//
+// Arrange:  recursive watch on a temp directory.
+// Act:      create a new subdirectory, then immediately create a file
+//           inside that subdirectory.
+// Assert:   the callback fires AND the relative path contains the
+//           subdirectory component (proving the watcher dynamically
+//           added the inotify watch for the new subdir).
+// ---------------------------------------------------------------------------
+TEST_F(FilePathWatcherTest, RecursiveWatchDetectsNewSubdirectoryChanges) {
+  auto watcher = std::make_unique<FilePathWatcher>(io_runner());
+
+  WaitableEvent got_subdir(WaitableEvent::ResetPolicy::kManual);
+  WaitableEvent got_file(WaitableEvent::ResetPolicy::kManual);
+  std::string first_path;
+  std::string second_path;
+  int callback_seq = 0;
+
+  io_runner()->PostTask(FROM_HERE, [&]() {
+    bool ok = watcher->Watch(
+        temp_dir_, /*recursive=*/true,
+        [&](const std::string& path, FilePathWatcher::ChangeType) {
+          ++callback_seq;
+          if (callback_seq == 1) {
+            first_path = path;
+            got_subdir.Signal();
+          } else {
+            second_path = path;
+            got_file.Signal();
+          }
+        });
+    ASSERT_TRUE(ok);
+  });
+
+  // Let the initial recursive scan arm.
+  SleepMs(200);
+
+  // Create a new subdirectory.
+  std::string subdir = temp_dir_ + "/new_subdir";
+#if defined(_WIN32)
+  EXPECT_NE(::CreateDirectoryA(subdir.c_str(), nullptr), 0);
+#else
+  EXPECT_EQ(mkdir(subdir.c_str(), 0755), 0);
+#endif
+
+  // Wait for the subdirectory-creation callback.
+  ASSERT_TRUE(got_subdir.TimedWait(milliseconds(5000)));
+  EXPECT_NE(first_path.find("new_subdir"), std::string::npos);
+
+  // Now create a file inside the new subdirectory.  This is the acid test —
+  // if recursive watch is broken, this event will never fire.
+  CreateEmptyFile(subdir + "/target.txt");
+
+  ASSERT_TRUE(got_file.TimedWait(milliseconds(5000)));
+  EXPECT_NE(second_path.find("new_subdir"), std::string::npos);
+  EXPECT_NE(second_path.find("target.txt"), std::string::npos);
 
   DestroyWatcherOnIO(io_runner(), watcher);
 }
