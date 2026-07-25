@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include <nei/debug/check.h>
+#include <nei/sys/os_info.h>
 
 namespace nei {
 
@@ -22,10 +23,15 @@ namespace {
 
 int CreateSharedMemoryFd(std::size_t size) {
 #if defined(__linux__) && defined(MFD_CLOEXEC) && defined(MFD_ALLOW_SEALING)
-  int fd = memfd_create("nei_shm", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-  if (fd >= 0) {
-    if (ftruncate(fd, static_cast<off_t>(size)) == 0) return fd;
-    close(fd);
+  // WSL2's memfd_create + F_SEAL_WRITE has a kernel bug where sealing a
+  // memfd causes ALL subsequent operations (including PROT_READ mmap and
+  // dup) to fail with EPERM.  Fall back to shm_open on WSL.
+  if (!::nei_is_running_on_wsl()) {
+    int fd = memfd_create("nei_shm", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    if (fd >= 0) {
+      if (ftruncate(fd, static_cast<off_t>(size)) == 0) return fd;
+      close(fd);
+    }
   }
 #endif
 

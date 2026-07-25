@@ -140,6 +140,12 @@ TEST(SysOsInfo, NullBufferReturnsError) {
     EXPECT_LT(nei_get_kernel_version(nullptr, 128), 0);
 }
 
+TEST(SysOsInfo, IsRunningOnWslReturnsValid) {
+    int result = nei_is_running_on_wsl();
+    /* Must return either 0 or 1; must never crash. */
+    EXPECT_TRUE(result == 0 || result == 1);
+}
+
 /* C++ wrappers */
 TEST(SysOsInfo, CppWrappersCompile) {
     std::string name = nei_get_os_name();

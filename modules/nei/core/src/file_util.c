@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/types.h>
 
 int nei_file_exists(const char *path) {
     return nei_path_exists(path);

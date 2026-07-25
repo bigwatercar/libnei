@@ -282,3 +282,34 @@ int nei_get_kernel_version(char *buf, size_t size) {
     }
 #endif
 }
+
+int nei_is_running_on_wsl(void) {
+#ifndef __linux__
+    (void)sizeof(NULL); /* suppress unused warnings */
+    return 0;
+#else
+    /*
+     * Check /proc/version for the "Microsoft" or "WSL" signature that
+     * the WSL kernel embeds in its version string.  E.g.:
+     *   Linux version 6.6.87.2-microsoft-standard-WSL2 ...
+     */
+    FILE *f = fopen("/proc/version", "r");
+    if (f == NULL) {
+        return 0;
+    }
+
+    char buf[256];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+
+    if (n == 0) {
+        return 0;
+    }
+    buf[n] = '\0';
+
+    if (strstr(buf, "Microsoft") != NULL || strstr(buf, "WSL") != NULL) {
+        return 1;
+    }
+    return 0;
+#endif
+}

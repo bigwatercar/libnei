@@ -60,6 +60,17 @@ NEI_API int nei_get_os_version(char *buf, size_t size);
  */
 NEI_API int nei_get_kernel_version(char *buf, size_t size);
 
+/**
+ * @brief Detect whether the current process is running under WSL
+ *        (Windows Subsystem for Linux).
+ *
+ * On Linux, checks \c /proc/version for a \c "Microsoft" or \c "WSL"
+ * signature.  On all other platforms, always returns 0 (false).
+ *
+ * @return 1 if running inside WSL, 0 otherwise.
+ */
+NEI_API int nei_is_running_on_wsl(void);
+
 #ifdef __cplusplus
 }
 #endif

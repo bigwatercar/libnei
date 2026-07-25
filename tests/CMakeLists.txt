@@ -61,6 +61,7 @@ add_executable(
   message_pump_default_test.cpp
   path_util_test.cpp
   sequence_manager_test.cpp
+  shared_memory_test.cpp
   run_loop_test.cpp
   task_sequence_token_test.cpp
   task_traits_test.cpp
