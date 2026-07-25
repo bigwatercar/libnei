@@ -34,6 +34,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -77,7 +78,7 @@ class IoThread {
 // ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
-void RunServer(uint16_t port) {
+void RunServer(uint16_t port, bool hold) {
   const int kWorkers = 4;
   std::vector<std::unique_ptr<IoThread>> workers;
   for (int i = 0; i < kWorkers; ++i)
@@ -89,6 +90,12 @@ void RunServer(uint16_t port) {
   std::atomic<int64_t> accepted{0};
   std::atomic<int64_t> failed{0};
   nei::WaitableEvent ready(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  // When --hold is set, store accepted connections instead of closing them.
+  // This exhausts the process fd limit and forces the reserve-fd EMFILE
+  // recovery path to activate in the accept loop.
+  std::mutex held_mutex;
+  std::vector<std::unique_ptr<nei::net::TCPClientSocket>> held_socks;
 
   auto t_start = Clock::now();
 
@@ -104,7 +111,12 @@ void RunServer(uint16_t port) {
         [&](bool success, std::unique_ptr<nei::net::TCPClientSocket> sock) {
           if (success) {
             accepted.fetch_add(1);
-            sock->Close();
+            if (hold) {
+              std::lock_guard<std::mutex> lock(held_mutex);
+              held_socks.push_back(std::move(sock));
+            } else {
+              sock->Close();
+            }
           } else {
             failed.fetch_add(1);
           }
@@ -117,7 +129,15 @@ void RunServer(uint16_t port) {
 
   ready.Wait();
   std::cout << "[server] listening on 0.0.0.0:" << port
-            << "  (workers=" << kWorkers << ")" << std::endl;
+            << "  (workers=" << kWorkers << ", hold=" << (hold ? "yes" : "no")
+            << ")" << std::endl;
+
+  if (hold) {
+    std::cout << "[server] HOLD mode: accepted connections are NOT closed.\n"
+              << "[server] The fd limit will be exhausted, triggering EMFILE.\n"
+              << "[server] If the reserve-fd trick works, accepting will slow\n"
+              << "[server] but NOT stop — one drain per EMFILE cycle.\n";
+  }
 
   // Print progress every second until SIGINT / client finishes.
   int64_t prev = 0;
@@ -125,11 +145,17 @@ void RunServer(uint16_t port) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     int64_t cur = accepted.load();
     int64_t f   = failed.load();
+    size_t held = 0;
+    {
+      std::lock_guard<std::mutex> lock(held_mutex);
+      held = held_socks.size();
+    }
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                        Clock::now() - t_start).count();
     std::cout << "[server] accepted=" << cur
               << "  rate=" << (cur * 1000 / std::max<int64_t>(elapsed, 1))
-              << "/s  failed=" << f;
+              << "/s  failed=" << f
+              << "  held=" << held;
     if (prev == cur && elapsed > 5000 && cur > 0)
       std::cout << "  (drained)";
     std::cout << std::endl;
@@ -204,13 +230,21 @@ void RunClient(const std::string& host, uint16_t port, int total_conn) {
 // ---------------------------------------------------------------------------
 void PrintUsage(const char* prog) {
   std::cerr << "Usage:\n"
-            << "  Server:  " << prog << " --server  --port <N>\n"
+            << "  Server:  " << prog << " --server  --port <N>  [--hold]\n"
             << "  Client:  " << prog << " --client  --host <IP>  --port <N>  --conn <N>\n"
             << "\n"
+            << "Options:\n"
+            << "  --hold   Server holds accepted connections open (fd exhaustion test).\n"
+            << "           Without --hold, server closes each connection immediately.\n"
+            << "\n"
             << "Examples:\n"
-            << "  # WSL server + Windows client\n"
+            << "  # WSL server + Windows client (normal throughput)\n"
             << "  WSL>  " << prog << " --server --port 9000\n"
             << "  Win>  " << prog << " --client --host 127.0.0.1 --port 9000 --conn 10000\n"
+            << "\n"
+            << "  # WSL fd exhaustion test (reserve-fd trick verification)\n"
+            << "  WSL>  " << prog << " --server --port 9000 --hold\n"
+            << "  Win>  " << prog << " --client --host 127.0.0.1 --port 9000 --conn 2000\n"
             << "\n"
             << "  # Windows server + WSL client\n"
             << "  Win>  " << prog << " --server --port 9000\n"
@@ -225,6 +259,7 @@ int main(int argc, char* argv[]) {
 
   bool server_mode = false;
   bool client_mode = false;
+  bool hold = false;
   std::string host = "127.0.0.1";
   uint16_t port = 9000;
   int conn = 10000;
@@ -234,6 +269,8 @@ int main(int argc, char* argv[]) {
       server_mode = true;
     } else if (std::strcmp(argv[i], "--client") == 0) {
       client_mode = true;
+    } else if (std::strcmp(argv[i], "--hold") == 0) {
+      hold = true;
     } else if (std::strcmp(argv[i], "--host") == 0 && i + 1 < argc) {
       host = argv[++i];
     } else if (std::strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
@@ -259,7 +296,7 @@ int main(int argc, char* argv[]) {
 #endif
 
   if (server_mode) {
-    RunServer(port);
+    RunServer(port, hold);
   } else {
     RunClient(host, port, conn);
   }
