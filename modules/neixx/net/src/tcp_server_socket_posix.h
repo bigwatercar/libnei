@@ -59,6 +59,16 @@ class TCPServerSocket::Impl final
   int CreateListenSocket(const IPEndPoint& addr, int backlog);
 
   int listen_fd_ = -1;
+
+  // Reserve file descriptor opened once at Listen() time and held open
+  // specifically so that the accept loop can gracefully drain the TCP
+  // backlog when the process hits the fd limit (EMFILE).
+  // On EMFILE: close reserve_fd_ → accept4() (now has a free slot) →
+  // immediately close the accepted client → re-open /dev/null.
+  // This prevents the server from going permanently deaf while waiting
+  // for other connections to time out or close.
+  int reserve_fd_ = -1;
+
   std::atomic<bool> closed_{false};
   std::atomic<bool> orphaned_{false};
 

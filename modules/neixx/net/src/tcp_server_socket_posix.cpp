@@ -45,6 +45,12 @@ bool TCPServerSocket::Impl::Listen(
   if (listen_fd_ < 0)
     return false;
 
+  // Open a spare fd so that when the process hits the fd limit (EMFILE)
+  // we can temporarily close it, accept one connection from the TCP
+  // backlog, and immediately discard it — keeping the server responsive
+  // instead of going deaf for 100 ms.
+  reserve_fd_ = open("/dev/null", O_RDONLY | O_CLOEXEC);
+
   accept_callback_ = std::move(callback);
   io_runner_ = std::move(acceptor_runner);
   worker_selector_ = std::move(worker_selector);
@@ -97,6 +103,10 @@ void TCPServerSocket::Impl::Close() {
     close(listen_fd_);
     listen_fd_ = -1;
   }
+  if (reserve_fd_ >= 0) {
+    close(reserve_fd_);
+    reserve_fd_ = -1;
+  }
   lock.unlock();
 
   // Release self-hold (allows final deletion).
@@ -114,6 +124,10 @@ void TCPServerSocket::Impl::Shutdown() {
   if (listen_fd_ >= 0) {
     close(listen_fd_);
     listen_fd_ = -1;
+  }
+  if (reserve_fd_ >= 0) {
+    close(reserve_fd_);
+    reserve_fd_ = -1;
   }
   // NOTE: Do NOT release self-hold here.  Orphan() manages the self-hold
   // lifecycle  --  releasing too early causes UAF if the IO thread is still
@@ -176,32 +190,40 @@ void TCPServerSocket::Impl::OnFileCanReadWithoutBlocking(
             MessagePumpForIO::FdWatchController::Mode::READ, this);
         break;  // All pending connections drained.
       }
-      // Transient resource exhaustion (EMFILE / ENFILE)  --  the process has
-      // hit the file-descriptor limit.  level-triggered epoll will otherwise
-      // spin-loop the IO thread at 100 % CPU because the listen socket never
-      // stops being readable.  Stop watching, and re-arm after a 100 ms delay
-      // to give the system time to recover (e.g. other connections draining,
-      // the user raising ulimit -n, etc.).
+      // Transient resource exhaustion (EMFILE / ENFILE)  --  use the
+      // reserve fd trick to drain the TCP backlog without waiting.
+      //
+      // 1. Close the pre-opened /dev/null fd → one slot freed.
+      // 2. accept4() succeeds (kernel backlog has at least one pending).
+      // 3. Immediately close the accepted client (we just needed to
+      //    consume the backlog entry; the connection will be retried
+      //    by the client).
+      // 4. Re-open /dev/null to restore the reserve for next time.
+      //
+      // This avoids the 100 ms blind window where the server is deaf
+      // and all pending SYNs time out.
       if (errno == EMFILE || errno == ENFILE) {
-        watch_controller_.StopWatching();
-        DCHECK_MSG(io_runner_, "OnFileCanRead: io_runner_ is null for retry");
-        if (io_runner_) {
-          io_runner_->PostDelayedTask(
-              FROM_HERE,
-              BindOnce([](scoped_refptr<Impl> self) {
-                // Re-arm only if still alive  --  Close()/Shutdown() may
-                // have fired during the 100 ms window.
-                if (!self->closed_) {
-                  auto* pump = MessagePumpForIO::Current();
-                  if (pump) {
-                    self->watch_controller_.StartWatching(
-                        pump, self->listen_fd_,
-                        MessagePumpForIO::FdWatchController::Mode::READ,
-                        self.get());
-                  }
-                }
-              }, WrapRefCounted(this)),
-              TimeDelta::FromMilliseconds(100));
+        if (reserve_fd_ >= 0) {
+          close(reserve_fd_);
+          reserve_fd_ = -1;
+
+          int drain_fd = accept4(listen_fd_,
+                                 reinterpret_cast<struct sockaddr*>(&client_addr),
+                                 &addr_len, SOCK_NONBLOCK | SOCK_CLOEXEC);
+          if (drain_fd >= 0)
+            close(drain_fd);
+
+          reserve_fd_ = open("/dev/null", O_RDONLY | O_CLOEXEC);
+        }
+
+        // Re-arm for the next batch.  If still under fd pressure the
+        // loop will hit EMFILE again and repeat the drain.
+        auto* pump = MessagePumpForIO::Current();
+        if (pump) {
+          watch_controller_.StartWatching(
+              pump, listen_fd_,
+              MessagePumpForIO::FdWatchController::Mode::READ, this);
+          break;
         }
         break;
       }
