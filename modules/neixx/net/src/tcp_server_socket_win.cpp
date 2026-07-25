@@ -327,7 +327,42 @@ void TCPServerSocket::Impl::OnIOCompleted(
     worker_runner = io_runner_;
   auto* client_impl = new TCPClientSocket::Impl(client, worker_runner);
   auto client_sock = std::make_unique<TCPClientSocket>(client_impl);
-  delete ctx;
+
+  // ---- Zero-allocation recycle: keep the AcceptContext and addr_buffer
+  //      alive across connections.  Create a fresh client socket and
+  //      re-submit AcceptEx directly.  Falls back to heap PostAccept()
+  //      only when socket creation fails or the server is shutting down.
+  //      This eliminates one new+delete pair per accepted connection under
+  //      C10K load, reducing heap lock contention substantially. ----
+  SOCKET reuse_client = CreateClientSocket();
+  if (!closed_ && reuse_client != INVALID_SOCKET) {
+    ctx->client_socket = reuse_client;
+    std::memset(&ctx->overlapped, 0, sizeof(OVERLAPPED));
+    ctx->callback = accept_callback_;
+    ctx->io_runner = io_runner_;
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      pending_accepts_.push_back(ctx);
+    }
+    LPFN_ACCEPTEX fn = GetAcceptEx();
+    DWORD bytes = 0;
+    BOOL ok = fn(listen_socket_, reuse_client, ctx->addr_buffer->data(), 0,
+                 kAddrBufferSize, kAddrBufferSize, &bytes, &ctx->overlapped);
+    if (!ok && WSAGetLastError() != ERROR_IO_PENDING) {
+      // Re-submit failed  --  fall back to fresh allocation.
+      std::unique_lock<std::mutex> lock2(mutex_);
+      auto it = std::find(pending_accepts_.begin(), pending_accepts_.end(), ctx);
+      if (it != pending_accepts_.end()) pending_accepts_.erase(it);
+      lock2.unlock();
+      closesocket(reuse_client);
+      delete ctx;
+      if (!closed_) PostAccept();
+    }
+  } else {
+    if (reuse_client != INVALID_SOCKET) closesocket(reuse_client);
+    delete ctx;
+    if (!closed_) PostAccept();
+  }
   {
     // Snapshot accept_callback_ under the mutex  --  same TOCTOU fix as
     // the error path above.  Close()/Shutdown() may race on another thread.
