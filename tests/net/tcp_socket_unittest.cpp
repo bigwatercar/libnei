@@ -888,27 +888,70 @@ TEST_F(TcpSocketTest, ConnectAndListenWithIPv6Loopback) {
 }
 
 #if !defined(_WIN32)
-// Verifies that Listen() under fd pressure does not crash.  Precise EMFILE
-// path testing requires an epoll-free IO pump (see docs/TODO.md).
+// Verifies the server does not crash under rapid connection pressure.
+// The reserve fd trick (open /dev/null at Listen() time, used to drain
+// the TCP backlog on EMFILE) guarantees some connections are accepted
+// even when the process is near the fd limit.  A full end-to-end EMFILE
+// test requires lowering the per-process fd limit via setrlimit(), which
+// starves the IO pump itself (epoll + eventfd need fds) and causes
+// SIGSEGV on WSL kernels.  See docs/TODO.md for the blocked full-EMFILE
+// test plan.
 TEST_F(TcpSocketTest, ServerDoesNotCrashUnderFdPressure) {
-  WaitableEvent test_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  const uint16_t port = FindFreePort();
+  ASSERT_NE(port, 0);
 
-  io_runner_->PostTask(FROM_HERE, [this, &test_done]() {
-    auto server = std::make_unique<TCPServerSocket>();
-    const uint16_t port = FindFreePort();
-    if (port == 0) {
-      test_done.Signal();
-      return;
-    }
+  WaitableEvent server_ready(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::atomic<int> accepted{0};
+  std::atomic<bool> server_fatal{false};
+
+  auto server = std::make_shared<TCPServerSocket>();
+
+  io_runner_->PostTask(FROM_HERE, [&]() {
     bool ok = server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
-        [](bool, std::unique_ptr<TCPClientSocket>) {}, io_runner_);
-    (void)ok;  // may fail under fd pressure; the test is survival, not success
-    server->Close();
-    test_done.Signal();
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 512,
+        [&](bool success, std::unique_ptr<TCPClientSocket> client) {
+          if (success) {
+            accepted.fetch_add(1);
+            client->Close();
+          } else {
+            server_fatal.store(true);
+          }
+        },
+        io_runner_, {});
+    if (!ok) server_fatal.store(true);
+    server_ready.Signal();
   });
 
-  ASSERT_TRUE(test_done.TimedWait(std::chrono::seconds(5)));
+  server_ready.Wait();
+
+  // Fire 200 clients in rapid succession to stress the accept loop.
+  // WSL default ulimit is 1024, so 200 is well within safe range.
+  const int kClients = 200;
+  WaitableEvent all_done(WaitableEvent::ResetPolicy::kManual, false);
+  std::atomic<int> client_done{0};
+  std::vector<std::shared_ptr<TCPClientSocket>> clients;
+
+  for (int i = 0; i < kClients; ++i) {
+    auto client = std::make_shared<TCPClientSocket>();
+    clients.push_back(client);
+    client->Connect(
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+        [&all_done, &client_done, kClients](bool /*ok*/) {
+          if (client_done.fetch_add(1) + 1 >= kClients)
+            all_done.Signal();
+        },
+        io_runner_);
+  }
+
+  ASSERT_TRUE(all_done.TimedWait(std::chrono::seconds(10)));
+
+  int accepted_count = accepted.load();
+  EXPECT_GE(accepted_count, kClients - 5)
+      << "Server accepted " << accepted_count << " out of " << kClients
+      << " clients.  Accept loop may be blocking or too slow.";
+  EXPECT_FALSE(server_fatal.load());
+
+  server->Close();
 }
 #endif  // !_WIN32
 
