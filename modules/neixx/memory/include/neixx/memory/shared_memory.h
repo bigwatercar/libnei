@@ -190,9 +190,17 @@ class NEI_API WritableSharedMemoryRegion final {
 // ConvertToWritable() / ConvertToReadOnly() consume *this and return
 // the corresponding typed region.
 //
-// "Unsafe" because the caller is responsible for ensuring correct access
-// semantics — no compile-time guarantee that the handle actually supports
-// the requested mapping mode.
+// ⚠️  DANGER  ⚠️
+// "Unsafe" means NO compile-time access control.  If two processes both
+// Map() this region for writing, concurrent modification will cause data
+// races and memory corruption.  For multi-writer scenarios you MUST
+// synchronise externally — typically with a cross-process named mutex
+// (Windows) or a pthreads mutex placed inside a second shared-memory
+// region (POSIX).
+//
+// Prefer WritableSharedMemoryRegion → ConvertToReadOnly() for the
+// common producer-consumer pattern; use Unsafe only when you truly need
+// symmetric bidirectional shared state.
 // =============================================================================
 class NEI_API UnsafeSharedMemoryRegion final {
  public:
