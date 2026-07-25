@@ -13,7 +13,7 @@ API 语义、线程模型、死锁防御机制、Leaky Singleton 集成模式，
 - `modules/neixx/common/src/at_exit.cpp` — 实现
 - `modules/neixx/io/include/neixx/io/io_buffer.h` — IOBufferPool 声明（friend Traits）
 - `modules/neixx/io/src/io_buffer.cpp` — GetInstance() + LeakySingletonTraits 特化
-- `demo/at_exit_demo.cpp` — 完整集成演示
+- `examples/at_exit_example.cpp` — 完整集成演示
 - `tests/test_main.cpp` — 带全局 AtExitManager 的 GTest 自定义入口
 
 ---
@@ -544,6 +544,6 @@ int main(int argc, char** argv) {
 | `modules/neixx/common/src/at_exit.cpp` | AtExitManager 实现 |
 | `modules/neixx/io/include/neixx/io/io_buffer.h` | IOBufferPool 声明（friend Traits） |
 | `modules/neixx/io/src/io_buffer.cpp` | LeakySingletonTraits 特化 + GetInstance |
-| `demo/at_exit_demo.cpp` | 集成演示（含后台线程竞态测试） |
+| `examples/at_exit_example.cpp` | 集成演示（含后台线程竞态测试） |
 | `tests/test_main.cpp` | 带全局 AtExitManager 的 GTest 自定义入口 |
 | `docs/neixx_at_exit_technical.md` | 本文档 |

@@ -579,8 +579,8 @@ file->WriteAsync(buf, size, offset, callback);
 - `modules/neixx/process/include/neixx/process/child_process.h`
 - `modules/neixx/process/src/child_process_win.cpp`
 - `modules/neixx/process/src/child_process_posix.cpp`
-- `demo/pipe_stream_cross_process_win_demo.cpp`
-- `demo/pipe_stream_cross_process_posix_demo.cpp`
+- `examples/pipe_stream_cross_process_win_example.cpp`
+- `examples/pipe_stream_cross_process_posix_example.cpp`
 
 ### 2.2 模块定位
 
@@ -849,10 +849,10 @@ POSIX 下建议优先使用**两条 `pipe()` 的双单工模型**。
 
 ### 2.9 Demo 说明
 
-本轮新增两个 demo：
+本轮新增两个 example：
 
-- `demo/pipe_stream_cross_process_win_demo.cpp`
-- `demo/pipe_stream_cross_process_posix_demo.cpp`
+- `examples/pipe_stream_cross_process_win_example.cpp`
+- `examples/pipe_stream_cross_process_posix_example.cpp`
 
 #### 2.9.1 Windows demo
 

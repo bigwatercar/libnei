@@ -151,7 +151,7 @@ if(NEI_BUILD_BENCHMARKS)
 endif()
 
 if(NEI_BUILD_DEMOS)
-  add_subdirectory(demo)
+  add_subdirectory(examples)
 endif()
 
 install(

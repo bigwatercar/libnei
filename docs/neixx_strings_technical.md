@@ -503,7 +503,7 @@ const std::string roundtrip = nei::UTF16ToUTF8(utf16);
 
 示例程序位于：
 
-- `demo/string_util_demo.cpp`
+- `examples/string_util_example.cpp`
 
 基准程序位于：
 
