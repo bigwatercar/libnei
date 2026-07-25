@@ -34,11 +34,11 @@ neixx/net/
     └── WsaInit / EnsureWsa — Windows Winsock 一次性初始化（POSIX 空操作）
 ```
 
-**文件统计**：28 个文件（8 公共头 + 20 实现），~4,500 行代码
+**文件统计**：30 个文件（8 公共头 + 22 实现），~5,100 行代码
 
-**测试统计**：41 个测试用例（TCP 9 + DNS 21 + UDP 11），四象限全量 ~2,100 测试
+**测试统计**：42 个测试用例（TCP 12 + DNS 21 + UDP 11），四象限全量 ~2,300 测试
 
-**性能基准**：3 个网络 benchmark（TCP 吞吐量、连接压力、RTT）
+**性能基准**：4 个网络 benchmark（TCP 吞吐量、连接压力、RTT、跨系统）
 
 ---
 
@@ -345,18 +345,41 @@ server->Close();
 
 Acceptor 仅处理 `AcceptEx` / `accept4`，Worker 处理已连接 socket 的所有后续读写。两者运行在不同 I/O 线程上，通过 `RunnerSelector` 解耦。
 
-### 5.3 TCP 性能基准
+### 5.3 TCP 性能基准（2026-07-25 更新）
 
-| 基准 | 测试维度 | 最大规模 | Win 典型值 | WSL 典型值 |
-|------|---------|---------|-----------|-----------|
-| `tcp_loopback_bench` | 单连接吞吐量 | 10 GB | 1,282 MB/s @ 1MB buf | 9,576 MB/s @ 1MB buf |
-| `tcp_conn_stress_bench` | 并发连接建立/拆毁 | C10K (10k conn) | 820 conn/s | 19,881 conn/s |
+| 基准 | 测试维度 | 规模 | Win 典型值 | WSL 典型值 |
+|------|---------|------|-----------|-----------|
+| `tcp_loopback_bench` | 单连接吞吐 | 10 GB | 1,282 MB/s @ 1MB buf | 9,576 MB/s @ 1MB buf |
+| `tcp_conn_stress_bench` | 并发连接建立/拆毁 | C10K (10k conn) | **3,881 conn/s** | **25,486 conn/s** |
 | `tcp_rtt_bench` | 并发 Ping-Pong RTT | 5K conn | p50=18ms | p50=13ms |
+| `tcp_cross_bench` | 跨系统 WSL↔Win | C10K (10k conn) | Win→WSL 15,085 | WSL→Win 3,113 |
 
-**跨平台差距说明**：WSL localhost TCP 吞吐量是 Windows 的 **~7.5×**，连接建立速率 **~24×**。这不是库的开销差异——IOCP 的完成通知模型理论上优于 epoll 的就绪通知。差距源自 OS TCP 协议栈：
+**跨平台差距说明**：WSL localhost TCP 吞吐量是 Windows 的 ~7.5×，连接建立速率 ~6.6×。差距源自 OS TCP 协议栈——Linux `lo` 回环是纯内核态内存操作，Windows localhost 需穿越完整 NDIS + WFP 协议栈。
 
-- Linux `lo` 环回是**纯内核态内存操作**（零拷贝包路径）
-- Windows localhost 需穿越完整 **NDIS + WFP** 协议栈（每条 `socket` → `connect` → `closesocket` 都经过完整内核路径）
+### 5.4 C10K 架构优化详情（2026-07-25 全量落地）
+
+以下优化使 Windows C10K 连接吞吐从原始 **820 conn/s** 跃升至 **3,881 conn/s**（4.7× 提升）。
+
+| # | 优化 | 位置 | 效果 | 原理 |
+|---|------|------|:---:|------|
+| ① | AcceptEx 池 (1→64) | `tcp_server_socket_win` | +7% | 64 预投递 AcceptEx 填满内核 backlog，消除 NIC 丢包 |
+| ② | PostAccept 全路径重试 | `tcp_server_socket_win` | 防退化 | socket 创建/缓冲区分配失败时不永久缩水池子 |
+| ③ | IOCP TOCTOU 竞态修复 | `tcp_server_socket_win` | 正确性 | `accept_callback_` 在 `OnIOCompleted` 中加 `mutex_` 保护 |
+| ④ | **AcceptContext 就地回收** | `tcp_server_socket_win` | **+362%** | 消除每次 accept 的 `new`+`delete` 对，解除堆锁竞争 |
+| ⑤ | TcpOverlappedContext 缓存 | `tcp_client_socket_win` | 辅助 | 每 socket 单槽缓存消除 Read/Write 热路径堆分配 |
+| ⑥ | `SIO_LOOPBACK_FAST_PATH` | 双端 `_win.cpp` | 辅助 | Windows 8+ 内核 TCP 栈短路（仅 loopback 生效） |
+| ⑦ | POSIX EMFILE 熔断退避 | `tcp_server_socket_posix` | 防退化 | `EMFILE`/`ENFILE` 时停止 epoll + 100ms 延迟重试 |
+
+**关键发现**：瓶颈不在内核 API（`AcceptEx`/`WSASocketW`），而在 C++ 运行时的全局堆分配器锁。④ 将 `AcceptContext` 从"分配→释放→重新分配"改为"原地重置→复用"，消除了 C10K 热路径上 ~10,000 次/秒的堆分配/释放操作，是单点最大收益。
+
+### 5.5 跨系统（WSL↔Windows）性能特征
+
+| 方向 | 服务端 | 客户端 | 吞吐 | 瓶颈分析 |
+|------|:---:|:---:|:---:|------|
+| WSL→Win | WSL (Linux) | Windows | 3,113 | Windows 客户端 socket 创建 + WSL2 localhost 转发税(~20%) |
+| Win→WSL | Windows | WSL (Linux) | 15,085 | Linux 客户端无瓶颈，Windows 服务端受益于 ④ |
+
+WSL2 跨系统走 Hyper-V 虚拟交换机，性能介于纯本地和真实网络之间。Windows 作为客户端时受限于 `WSASocketW`→`ConnectEx` 的 ~1,000 conn/s/线程内核路径长度；Linux 客户端则几乎无此限制。
 
 ---
 
