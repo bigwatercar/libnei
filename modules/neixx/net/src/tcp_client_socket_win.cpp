@@ -165,8 +165,7 @@ void TCPClientSocket::Impl::StartOrphanDrain() {
   auto drain_buf = MakeRefCounted<IOBufferWithSize>(4096);
   // Mark this read as a drain read so OnIOCompleted won't fire the user
   // callback when orphaned_ is true.
-  auto* ctx = new TcpOverlappedContext();
-  ctx->op = TcpOverlappedContext::Op::kRead;
+  auto* ctx = AcquireReadCtx();
   ctx->buffer = drain_buf;
   ctx->buf_len = 4096;
   ctx->is_drain_read = true;
@@ -191,7 +190,8 @@ void TCPClientSocket::Impl::StartOrphanDrain() {
   int rc = WSARecv(socket_, &wsa_buf, 1, nullptr, &flags,
                    &ctx->overlapped, nullptr);
   if (rc == SOCKET_ERROR && WSAGetLastError() != ERROR_IO_PENDING) {
-    delete ctx;
+    // self_ref was set above; RecycleCtx clears it via Reset().
+    RecycleCtx(ctx);
     Close();  // Cleanup triggers ReleaseSelfHoldIfNeeded.
   }
 }
@@ -337,6 +337,53 @@ void TCPClientSocket::Impl::EnsurePumpRegistered() {
 }
 
 // =============================================================================
+// Zero-allocation context cache helpers
+// =============================================================================
+
+TcpOverlappedContext* TCPClientSocket::Impl::AcquireReadCtx() {
+  if (cached_read_ctx_) {
+    auto* ctx = cached_read_ctx_.release();
+    ctx->op = TcpOverlappedContext::Op::kRead;
+    return ctx;
+  }
+  auto* ctx = new TcpOverlappedContext();
+  ctx->op = TcpOverlappedContext::Op::kRead;
+  return ctx;
+}
+
+TcpOverlappedContext* TCPClientSocket::Impl::AcquireWriteCtx() {
+  if (cached_write_ctx_) {
+    auto* ctx = cached_write_ctx_.release();
+    ctx->op = TcpOverlappedContext::Op::kWrite;
+    return ctx;
+  }
+  auto* ctx = new TcpOverlappedContext();
+  ctx->op = TcpOverlappedContext::Op::kWrite;
+  return ctx;
+}
+
+void TCPClientSocket::Impl::RecycleCtx(TcpOverlappedContext* ctx) {
+  // Caller MUST have already extracted self_ref to avoid extending
+  // the Impl lifetime via the cached context.  Reset() clears all
+  // fields except `op`, which is re-set by Acquire*Ctx() on next use.
+  ctx->Reset();
+  if (ctx->op == TcpOverlappedContext::Op::kRead) {
+    if (!cached_read_ctx_)
+      cached_read_ctx_.reset(ctx);
+    else
+      delete ctx;
+  } else if (ctx->op == TcpOverlappedContext::Op::kWrite) {
+    if (!cached_write_ctx_)
+      cached_write_ctx_.reset(ctx);
+    else
+      delete ctx;
+  } else {
+    // Connect contexts are never cached  --  one-shot use.
+    delete ctx;
+  }
+}
+
+// =============================================================================
 // ReadAsync / WriteAsync
 // =============================================================================
 
@@ -377,8 +424,7 @@ void TCPClientSocket::Impl::ReadAsync(
     return;
   }
 
-  auto* ctx = new TcpOverlappedContext();
-  ctx->op = TcpOverlappedContext::Op::kRead;
+  auto* ctx = AcquireReadCtx();
   ctx->buffer = std::move(buf);
   ctx->buf_len = buf_len;
   ctx->read_cb = std::move(callback);
@@ -394,7 +440,8 @@ void TCPClientSocket::Impl::ReadAsync(
 
   if (rc == SOCKET_ERROR && WSAGetLastError() != ERROR_IO_PENDING) {
     auto cb = std::move(ctx->read_cb);
-    delete ctx;
+    // self_ref was set above; RecycleCtx clears it via Reset().
+    RecycleCtx(ctx);
     if (cb) {
       DCHECK_MSG(io_runner_, "WSARecv error without io_runner_");
       if (io_runner_) {
@@ -443,8 +490,7 @@ void TCPClientSocket::Impl::WriteAsync(
     return;
   }
 
-  auto* ctx = new TcpOverlappedContext();
-  ctx->op = TcpOverlappedContext::Op::kWrite;
+  auto* ctx = AcquireWriteCtx();
   ctx->buffer = std::move(buf);
   ctx->buf_len = buf_len;
   ctx->write_cb = std::move(callback);
@@ -459,7 +505,8 @@ void TCPClientSocket::Impl::WriteAsync(
 
   if (rc == SOCKET_ERROR && WSAGetLastError() != ERROR_IO_PENDING) {
     auto cb = std::move(ctx->write_cb);
-    delete ctx;
+    // self_ref was set above; RecycleCtx clears it via Reset().
+    RecycleCtx(ctx);
     if (cb) {
       DCHECK_MSG(io_runner_, "WSASend error without io_runner_");
       if (io_runner_) {
@@ -491,10 +538,10 @@ void TCPClientSocket::Impl::OnIOCompleted(
         setsockopt(socket_, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0);
       }
       auto cb = std::move(ctx->connect_cb);
-      // Self-protector: extract self_ref BEFORE delete ctx so Impl stays
+      // Self-protector: extract self_ref BEFORE recycling so Impl stays
       // alive through orphaned_ / callback dispatch below.
       scoped_refptr<Impl> self_protector = std::move(ctx->self_ref);
-      delete ctx;
+      RecycleCtx(ctx);
       if (orphaned_) {
         // Orphan path  --  drop the callback, no user notification.
         break;
@@ -518,7 +565,7 @@ void TCPClientSocket::Impl::OnIOCompleted(
       auto cb = std::move(ctx->read_cb);
       bool is_drain = ctx->is_drain_read;
       scoped_refptr<Impl> self_protector = std::move(ctx->self_ref);
-      delete ctx;
+      RecycleCtx(ctx);
       if (orphaned_ && !is_drain)
         break;
       if (cb) {
@@ -543,7 +590,7 @@ void TCPClientSocket::Impl::OnIOCompleted(
     case TcpOverlappedContext::Op::kWrite: {
       auto cb = std::move(ctx->write_cb);
       scoped_refptr<Impl> self_protector = std::move(ctx->self_ref);
-      delete ctx;
+      RecycleCtx(ctx);
       if (orphaned_) {
         OnOrphanWriteFlushed();
         break;

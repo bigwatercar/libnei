@@ -125,6 +125,17 @@ class TCPClientSocket::Impl final
   // extra reference to itself for background graceful shutdown.
   bool has_self_ref_ = false;
 
+  // ---- Zero-allocation hot-path -------
+  // Cached OVERLAPPED contexts recycled across I/O operations.
+  // TCP stream semantics guarantee at most one read / one write in-flight
+  // per socket, so a single-slot cache per direction is sufficient.
+  std::unique_ptr<TcpOverlappedContext> cached_read_ctx_;
+  std::unique_ptr<TcpOverlappedContext> cached_write_ctx_;
+
+  TcpOverlappedContext* AcquireReadCtx();
+  TcpOverlappedContext* AcquireWriteCtx();
+  void RecycleCtx(TcpOverlappedContext* ctx);
+
   // Must be the last member.
   WeakPtrFactory<Impl> weak_factory_;
 };
@@ -150,6 +161,20 @@ struct TcpOverlappedContext {
   // If true, this is a drain read posted by StartOrphanDrain().  OnIOCompleted
   // must NOT fire the user callback when orphaned_ is set.
   bool is_drain_read = false;
+
+  // Resets all fields to default state for safe re-use via object caching.
+  // Caller MUST have already extracted self_ref before calling Reset().
+  void Reset() {
+    buffer.reset();
+    buf_len = 0;
+    read_cb  = {};
+    write_cb = {};
+    connect_cb = {};
+    self_ref.reset();
+    is_drain_read = false;
+    std::memset(&overlapped, 0, sizeof(OVERLAPPED));
+    // op intentionally preserved  --  caller re-sets it on Acquire.
+  }
 };
 
 }  // namespace nei::net
