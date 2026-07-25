@@ -66,6 +66,12 @@ if(WIN32)
   target_link_libraries(tcp_rtt_bench PRIVATE ws2_32)
 endif()
 
+add_executable(tcp_cross_bench tcp_cross_bench.cpp)
+target_link_libraries(tcp_cross_bench PRIVATE nei::nei)
+if(WIN32)
+  target_link_libraries(tcp_cross_bench PRIVATE ws2_32)
+endif()
+
 if(WIN32)
   add_executable(pipe_stream_cross_process_bench
                  pipe_stream_cross_process_bench_win.cpp)
@@ -123,6 +129,7 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_copy_runtime_dlls(tcp_loopback_bench)
   nei_copy_runtime_dlls(tcp_conn_stress_bench)
   nei_copy_runtime_dlls(tcp_rtt_bench)
+  nei_copy_runtime_dlls(tcp_cross_bench)
 
 
   nei_set_utf8_encoding(log_bench)
@@ -137,6 +144,7 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_set_utf8_encoding(tcp_loopback_bench)
   nei_set_utf8_encoding(tcp_conn_stress_bench)
   nei_set_utf8_encoding(tcp_rtt_bench)
+  nei_set_utf8_encoding(tcp_cross_bench)
 
   if(NEI_BENCHMARK_SPDLOG AND TARGET log_bench_compare)
     nei_copy_runtime_dlls(log_bench_compare)
