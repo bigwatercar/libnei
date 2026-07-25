@@ -9,6 +9,10 @@
 
 #include <neixx/net/wsa_init.h>
 
+#ifndef SIO_LOOPBACK_FAST_PATH
+#define SIO_LOOPBACK_FAST_PATH _WSAIOW(IOC_VENDOR, 16)
+#endif
+
 namespace nei::net {
 
 // =============================================================================
@@ -250,6 +254,14 @@ bool TCPClientSocket::Impl::DoConnect(
                        nullptr, 0,
                        WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
   if (socket_ == INVALID_SOCKET) return false;
+
+  // Kernel-level TCP stack bypass for localhost (no-op on non-loopback).
+  {
+    int opt = 1;
+    DWORD bytes = 0;
+    WSAIoctl(socket_, SIO_LOOPBACK_FAST_PATH, &opt, sizeof(opt),
+             nullptr, 0, &bytes, nullptr, nullptr);
+  }
 
   // Disable Nagle for low-latency operation (consistent with accepted path).
   int nodelay = 1;

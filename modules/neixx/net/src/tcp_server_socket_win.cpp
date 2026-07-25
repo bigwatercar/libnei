@@ -393,6 +393,33 @@ void TCPServerSocket::Impl::OnIOCompleted(
   }
 }
 
+// =============================================================================
+// SIO_LOOPBACK_FAST_PATH  --  kernel-level TCP short-circuit for localhost
+// =============================================================================
+//
+// Windows 8 / Server 2012+ can bypass the full TCP/IP stack for loopback
+// connections, giving Linux-like throughput on localhost benchmarks.
+// The ioctl is silently ignored on non-loopback sockets (safe to call
+// unconditionally).
+//
+// SIO_LOOPBACK_FAST_PATH is defined in <mstcpip.h> but only with a recent
+// Windows SDK.  Define it here for portability.
+#ifndef SIO_LOOPBACK_FAST_PATH
+#define SIO_LOOPBACK_FAST_PATH _WSAIOW(IOC_VENDOR, 16)
+#endif
+namespace {
+void EnableLoopbackFastPath(SOCKET s) {
+  int opt = 1;
+  DWORD bytes = 0;
+  WSAIoctl(s, SIO_LOOPBACK_FAST_PATH, &opt, sizeof(opt),
+           nullptr, 0, &bytes, nullptr, nullptr);
+}
+}  // namespace
+
+// =============================================================================
+// TCPServerSocket::Impl  --  continued
+// =============================================================================
+
 SOCKET TCPServerSocket::Impl::CreateListenSocket(const IPEndPoint& addr,
                                                   int backlog) {
   struct sockaddr_storage sa = {};
@@ -416,6 +443,9 @@ SOCKET TCPServerSocket::Impl::CreateListenSocket(const IPEndPoint& addr,
   BOOL reuse = TRUE;
   setsockopt(s, SOL_SOCKET, SO_REUSEADDR,
              reinterpret_cast<char*>(&reuse), sizeof(reuse));
+
+  // Enable kernel-level TCP bypass for localhost connections.
+  EnableLoopbackFastPath(s);
 
   if (bind(s, reinterpret_cast<struct sockaddr*>(&sa), sa_len) == SOCKET_ERROR) {
     closesocket(s);
@@ -441,9 +471,12 @@ SOCKET TCPServerSocket::Impl::CreateClientSocket() {
       family = sa.ss_family;
     }
   }
-  return WSASocketW(family, SOCK_STREAM, IPPROTO_TCP,
-                    nullptr, 0,
-                    WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+  SOCKET s = WSASocketW(family, SOCK_STREAM, IPPROTO_TCP,
+                         nullptr, 0,
+                         WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+  if (s != INVALID_SOCKET)
+    EnableLoopbackFastPath(s);
+  return s;
 }
 
 scoped_refptr<IOBuffer> TCPServerSocket::Impl::CreateAddrBuffer() {
