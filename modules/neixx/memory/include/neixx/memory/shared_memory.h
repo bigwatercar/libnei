@@ -12,6 +12,11 @@
 
 namespace nei {
 
+// Forward declarations so friend declarations work in declaration order.
+class ReadOnlySharedMemoryRegion;
+class WritableSharedMemoryRegion;
+class UnsafeSharedMemoryRegion;
+
 // =============================================================================
 // SharedMemoryHandle — cross-platform, move-only wrapper for a shared-memory
 // kernel object (Windows section handle / POSIX fd) plus the region size.
@@ -66,6 +71,9 @@ class NEI_API ReadOnlySharedMemoryMapping final {
   const void* memory() const;
   std::size_t size() const;
 
+  // Internal factory — do not use in application code.
+  static ReadOnlySharedMemoryMapping CreateForPlatform(void* addr, std::size_t size);
+
  private:
   friend class ReadOnlySharedMemoryRegion;
   class Impl;
@@ -91,6 +99,9 @@ class NEI_API WritableSharedMemoryMapping final {
   bool is_valid() const;
   void* memory();
   std::size_t size() const;
+
+  // Internal factory — do not use in application code.
+  static WritableSharedMemoryMapping CreateForPlatform(void* addr, std::size_t size);
 
  private:
   friend class WritableSharedMemoryRegion;
@@ -124,7 +135,9 @@ class NEI_API ReadOnlySharedMemoryRegion final {
 
  private:
   friend class WritableSharedMemoryRegion;
-  // Constructed only via WritableSharedMemoryRegion::ConvertToReadOnly().
+  friend class UnsafeSharedMemoryRegion;
+  // Constructed only via WritableSharedMemoryRegion::ConvertToReadOnly()
+  // or UnsafeSharedMemoryRegion::ConvertToReadOnly().
   explicit ReadOnlySharedMemoryRegion(SharedMemoryHandle handle);
   class Impl;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
@@ -161,7 +174,61 @@ class NEI_API WritableSharedMemoryRegion final {
   ReadOnlySharedMemoryRegion ConvertToReadOnly() &&;
 
  private:
+  friend class UnsafeSharedMemoryRegion;
   explicit WritableSharedMemoryRegion(SharedMemoryHandle handle);
+  class Impl;
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
+  std::unique_ptr<Impl> impl_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
+};
+
+// =============================================================================
+// UnsafeSharedMemoryRegion — untyped shared memory region.
+//
+// Can be constructed from a received handle (e.g. via IPC).  Supports
+// mapping as either writable or read-only at the caller's discretion.
+// ConvertToWritable() / ConvertToReadOnly() consume *this and return
+// the corresponding typed region.
+//
+// "Unsafe" because the caller is responsible for ensuring correct access
+// semantics — no compile-time guarantee that the handle actually supports
+// the requested mapping mode.
+// =============================================================================
+class NEI_API UnsafeSharedMemoryRegion final {
+ public:
+  // Creates a new region of |size| bytes.  Equivalent to
+  // WritableSharedMemoryRegion::Create() but the region is not typed.
+  static UnsafeSharedMemoryRegion Create(std::size_t size);
+
+  // Adopts a handle received from another process (e.g. via IPC).
+  static UnsafeSharedMemoryRegion Deserialize(SharedMemoryHandle handle);
+
+  UnsafeSharedMemoryRegion();
+  ~UnsafeSharedMemoryRegion();
+
+  UnsafeSharedMemoryRegion(const UnsafeSharedMemoryRegion&) = delete;
+  UnsafeSharedMemoryRegion& operator=(const UnsafeSharedMemoryRegion&) = delete;
+  UnsafeSharedMemoryRegion(UnsafeSharedMemoryRegion&& other) noexcept;
+  UnsafeSharedMemoryRegion& operator=(UnsafeSharedMemoryRegion&& other) noexcept;
+
+  bool is_valid() const;
+  std::size_t size() const;
+
+  // Maps the region for writing.  May fail if the handle lacks write access.
+  WritableSharedMemoryMapping Map();
+
+  // Maps the region as read-only.
+  ReadOnlySharedMemoryMapping MapReadOnly();
+
+  // Converts to typed regions, consuming *this.
+  WritableSharedMemoryRegion ConvertToWritable() &&;
+  ReadOnlySharedMemoryRegion ConvertToReadOnly() &&;
+
+  // Transfers handle ownership for cross-process transfer.
+  SharedMemoryHandle TakeHandle() &&;
+
+ private:
+  explicit UnsafeSharedMemoryRegion(SharedMemoryHandle handle);
   class Impl;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;

@@ -59,6 +59,14 @@ std::size_t ReadOnlySharedMemoryMapping::size() const {
   return impl_ ? impl_->size() : 0;
 }
 
+// static
+ReadOnlySharedMemoryMapping ReadOnlySharedMemoryMapping::CreateForPlatform(
+    void* addr, std::size_t size) {
+  ReadOnlySharedMemoryMapping m;
+  m.impl_ = std::make_unique<ReadOnlySharedMemoryMapping::Impl>(addr, size);
+  return m;
+}
+
 // =============================================================================
 // WritableSharedMemoryMapping
 // =============================================================================
@@ -76,6 +84,14 @@ void* WritableSharedMemoryMapping::memory() {
 }
 std::size_t WritableSharedMemoryMapping::size() const {
   return impl_ ? impl_->size() : 0;
+}
+
+// static
+WritableSharedMemoryMapping WritableSharedMemoryMapping::CreateForPlatform(
+    void* addr, std::size_t size) {
+  WritableSharedMemoryMapping m;
+  m.impl_ = std::make_unique<WritableSharedMemoryMapping::Impl>(addr, size);
+  return m;
 }
 
 // =============================================================================
@@ -127,6 +143,46 @@ WritableSharedMemoryMapping WritableSharedMemoryRegion::Map() {
 }
 ReadOnlySharedMemoryRegion WritableSharedMemoryRegion::ConvertToReadOnly() && {
   return impl_ ? std::move(*impl_).ConvertToReadOnly() : ReadOnlySharedMemoryRegion();
+}
+
+// =============================================================================
+// UnsafeSharedMemoryRegion
+// =============================================================================
+
+UnsafeSharedMemoryRegion::UnsafeSharedMemoryRegion() = default;
+UnsafeSharedMemoryRegion::UnsafeSharedMemoryRegion(SharedMemoryHandle handle)
+    : impl_(std::make_unique<Impl>(std::move(handle))) {}
+UnsafeSharedMemoryRegion::~UnsafeSharedMemoryRegion() = default;
+UnsafeSharedMemoryRegion::UnsafeSharedMemoryRegion(UnsafeSharedMemoryRegion&&) noexcept = default;
+UnsafeSharedMemoryRegion& UnsafeSharedMemoryRegion::operator=(UnsafeSharedMemoryRegion&&) noexcept = default;
+
+bool UnsafeSharedMemoryRegion::is_valid() const {
+  return impl_ && impl_->is_valid();
+}
+std::size_t UnsafeSharedMemoryRegion::size() const {
+  return impl_ ? impl_->size() : 0;
+}
+UnsafeSharedMemoryRegion UnsafeSharedMemoryRegion::Create(std::size_t size) {
+  return Impl::Create(size);
+}
+UnsafeSharedMemoryRegion UnsafeSharedMemoryRegion::Deserialize(SharedMemoryHandle handle) {
+  if (!handle.is_valid()) return {};
+  return UnsafeSharedMemoryRegion(std::move(handle));
+}
+WritableSharedMemoryMapping UnsafeSharedMemoryRegion::Map() {
+  return impl_ ? impl_->Map() : WritableSharedMemoryMapping();
+}
+ReadOnlySharedMemoryMapping UnsafeSharedMemoryRegion::MapReadOnly() {
+  return impl_ ? impl_->MapReadOnly() : ReadOnlySharedMemoryMapping();
+}
+WritableSharedMemoryRegion UnsafeSharedMemoryRegion::ConvertToWritable() && {
+  return impl_ ? std::move(*impl_).ConvertToWritable() : WritableSharedMemoryRegion();
+}
+ReadOnlySharedMemoryRegion UnsafeSharedMemoryRegion::ConvertToReadOnly() && {
+  return impl_ ? std::move(*impl_).ConvertToReadOnly() : ReadOnlySharedMemoryRegion();
+}
+SharedMemoryHandle UnsafeSharedMemoryRegion::TakeHandle() && {
+  return impl_ ? std::move(*impl_).TakeHandle() : SharedMemoryHandle();
 }
 
 }  // namespace nei

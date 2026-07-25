@@ -182,6 +182,76 @@ WritableSharedMemoryRegion::Impl::ConvertToReadOnly() && {
   return ReadOnlySharedMemoryRegion(SharedMemoryHandle(std::move(ph), size_));
 }
 
+// =============================================================================
+// UnsafeSharedMemoryRegion::Impl
+// =============================================================================
+
+UnsafeSharedMemoryRegion::Impl::Impl(SharedMemoryHandle handle)
+    : fd_(handle.GetFd()), size_(handle.size()) {
+  if (fd_ >= 0) fd_ = dup(fd_);
+}
+
+UnsafeSharedMemoryRegion::Impl::~Impl() {
+  if (fd_ >= 0) close(fd_);
+}
+
+UnsafeSharedMemoryRegion UnsafeSharedMemoryRegion::Impl::Create(
+    std::size_t size) {
+  if (size == 0) return {};
+  int fd = CreateSharedMemoryFd(size);
+  if (fd < 0) return {};
+  PlatformHandle ph = PlatformHandle::FromNativeHandle(fd);
+  return UnsafeSharedMemoryRegion(SharedMemoryHandle(std::move(ph), size));
+}
+
+WritableSharedMemoryMapping UnsafeSharedMemoryRegion::Impl::Map() {
+  if (fd_ < 0) return {};
+  void* addr = MapSharedFd(fd_, size_, PROT_READ | PROT_WRITE);
+  if (!addr) return {};
+  return WritableSharedMemoryMapping::CreateForPlatform(addr, size_);
+}
+
+ReadOnlySharedMemoryMapping UnsafeSharedMemoryRegion::Impl::MapReadOnly() {
+  if (fd_ < 0) return {};
+  void* addr = MapSharedFd(fd_, size_, PROT_READ);
+  if (!addr) return {};
+  return ReadOnlySharedMemoryMapping::CreateForPlatform(addr, size_);
+}
+
+WritableSharedMemoryRegion UnsafeSharedMemoryRegion::Impl::ConvertToWritable() && {
+  if (fd_ < 0) return {};
+  PlatformHandle ph = PlatformHandle::FromNativeHandle(fd_);
+  fd_ = -1;
+  return WritableSharedMemoryRegion(SharedMemoryHandle(std::move(ph), size_));
+}
+
+ReadOnlySharedMemoryRegion UnsafeSharedMemoryRegion::Impl::ConvertToReadOnly() && {
+  if (fd_ < 0) return {};
+
+#if defined(F_SEAL_WRITE)
+  if (fcntl(fd_, F_ADD_SEALS, F_SEAL_WRITE) == 0) {
+    PlatformHandle ph = PlatformHandle::FromNativeHandle(fd_);
+    fd_ = -1;
+    return ReadOnlySharedMemoryRegion(SharedMemoryHandle(std::move(ph), size_));
+  }
+#endif
+
+  int ro_fd = ReopenReadOnly(fd_);
+  if (ro_fd < 0) return {};
+  close(fd_);
+  PlatformHandle ph = PlatformHandle::FromNativeHandle(ro_fd);
+  fd_ = -1;
+  return ReadOnlySharedMemoryRegion(SharedMemoryHandle(std::move(ph), size_));
+}
+
+SharedMemoryHandle UnsafeSharedMemoryRegion::Impl::TakeHandle() && {
+  PlatformHandle ph = PlatformHandle::FromNativeHandle(fd_);
+  fd_ = -1;
+  std::size_t sz = size_;
+  size_ = 0;
+  return SharedMemoryHandle(std::move(ph), sz);
+}
+
 }  // namespace nei
 
 #endif  // !defined(_WIN32)

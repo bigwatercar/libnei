@@ -87,6 +87,24 @@ class WritableSharedMemoryRegion::Impl final {
   std::size_t size_ = 0;
 };
 
+class UnsafeSharedMemoryRegion::Impl final {
+ public:
+  explicit Impl(SharedMemoryHandle handle);
+  ~Impl();
+  bool is_valid() const { return handle_ != nullptr; }
+  std::size_t size() const { return size_; }
+  WritableSharedMemoryMapping Map();
+  ReadOnlySharedMemoryMapping MapReadOnly();
+  WritableSharedMemoryRegion ConvertToWritable() &&;
+  ReadOnlySharedMemoryRegion ConvertToReadOnly() &&;
+  SharedMemoryHandle TakeHandle() &&;
+  static UnsafeSharedMemoryRegion Create(std::size_t size);
+
+ private:
+  void* handle_ = nullptr;
+  std::size_t size_ = 0;
+};
+
 }  // namespace nei
 
 #endif  // defined(_WIN32)
