@@ -15,8 +15,9 @@
 //
 //   Windows server + WSL client:
 //     Win:   tcp_cross_bench.exe --server --port 9000
-//     WSL:   ./tcp_cross_bench --client --host <Windows IP> --port 9000 --conn 10000
-//            (Windows IP = $(grep nameserver /etc/resolv.conf | awk '{print $2}'))
+//     WSL:   ./tcp_cross_bench --client --host <Windows-vEthernet-IP> --port 9000 --conn 10000
+//            (Windows IP = $(ip route show default | awk '/default/ {print $3}')  → typically 172.x.x.1)
+//            NOTE: Windows firewall may block inbound connections from WSL.
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -248,8 +249,9 @@ void PrintUsage(const char* prog) {
             << "\n"
             << "  # Windows server + WSL client\n"
             << "  Win>  " << prog << " --server --port 9000\n"
-            << "  WSL>  " << prog << " --client --host <Windows-IP> --port 9000 --conn 10000\n"
-            << "       (Windows IP = $(grep nameserver /etc/resolv.conf | awk '{print $2}'))\n";
+            << "  WSL>  " << prog << " --client --host <vEthernet-IP> --port 9000 --conn 10000\n"
+            << "       (vEthernet IP = $(ip route show default | awk '{print $3}'))\n"
+            << "       NOTE: Windows firewall may need to allow inbound port.\n";
 }
 
 }  // namespace
