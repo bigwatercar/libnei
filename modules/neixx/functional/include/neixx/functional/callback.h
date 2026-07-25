@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstring>
 #include <functional>
+#include <memory>
 #include <type_traits>
 #include <utility>
 
@@ -52,11 +53,11 @@ void InitOnceCallbackFromFunctor(OnceCallback<Args...> &cb, F &&functor) {
     cb.vtable_.invoke_and_destroy = [](char *storage, Args... args) {
       auto *fn = reinterpret_cast<Fn *>(storage);
       std::invoke(std::move(*fn), std::forward<Args>(args)...);
-      fn->~Fn();
+      std::destroy_at(fn);
     };
     cb.vtable_.destroy = [](char *storage) {
       auto *fn = reinterpret_cast<Fn *>(storage);
-      fn->~Fn();
+      std::destroy_at(fn);
     };
     new (cb.storage_) Fn(std::forward<F>(functor));
   } else {
@@ -70,12 +71,12 @@ void InitOnceCallbackFromFunctor(OnceCallback<Args...> &cb, F &&functor) {
     h->vt.invoke_and_destroy = [](char *storage, Args... args) {
       auto *ptr = *reinterpret_cast<HeapLayout **>(storage);
       std::invoke(std::move(ptr->fn), std::forward<Args>(args)...);
-      ptr->fn.~Fn();
+      std::destroy_at(&ptr->fn);
       callback_free(ptr, alignof(HeapLayout));
     };
     h->vt.destroy = [](char *storage) {
       auto *ptr = *reinterpret_cast<HeapLayout **>(storage);
-      ptr->fn.~Fn();
+      std::destroy_at(&ptr->fn);
       callback_free(ptr, alignof(HeapLayout));
     };
     new (&h->fn) Fn(std::forward<F>(functor));
@@ -119,7 +120,7 @@ void InitRepeatingCallbackFromFunctor(RepeatingCallback<Args...> &cb,
       new (dst) Fn(*reinterpret_cast<const Fn *>(src));
     };
     cb.vtable_.destroy = [](char *storage) {
-      reinterpret_cast<Fn *>(storage)->~Fn();
+      std::destroy_at(reinterpret_cast<Fn *>(storage));
     };
     new (cb.storage_) Fn(std::forward<F>(functor));
   } else {
@@ -144,7 +145,7 @@ void InitRepeatingCallbackFromFunctor(RepeatingCallback<Args...> &cb,
     h->vt.destroy = [](char *storage) {
       auto *ptr = *reinterpret_cast<HeapLayout **>(storage);
       if (ptr->ref_count.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        ptr->fn.~Fn();
+        std::destroy_at(&ptr->fn);
         callback_free(ptr, alignof(HeapLayout));
       }
     };
