@@ -42,13 +42,13 @@ WritableSharedMemoryMapping::Impl::~Impl() {
 // =============================================================================
 
 ReadOnlySharedMemoryRegion::Impl::Impl(SharedMemoryHandle handle)
-    : handle_(nullptr), size_(handle.size()) {
-  // Duplicate the handle so we have an independent reference.
-  void* src = handle.GetHandle();
-  if (src) {
-    ::DuplicateHandle(::GetCurrentProcess(), src,
-                      ::GetCurrentProcess(), &handle_,
-                      0, FALSE, DUPLICATE_SAME_ACCESS);
+    : handle_(nullptr), size_(0) {
+  // Zero-copy ownership transfer — no DuplicateHandle syscall.
+  std::size_t sz = handle.size();
+  PlatformHandle ph = std::move(handle).TakeHandle();
+  if (ph.is_valid()) {
+    handle_ = ph.ReleaseAsHandle();
+    size_ = sz;
   }
 }
 
@@ -77,12 +77,13 @@ SharedMemoryHandle ReadOnlySharedMemoryRegion::Impl::TakeHandle() && {
 // =============================================================================
 
 WritableSharedMemoryRegion::Impl::Impl(SharedMemoryHandle handle)
-    : handle_(nullptr), size_(handle.size()) {
-  void* src = handle.GetHandle();
-  if (src) {
-    ::DuplicateHandle(::GetCurrentProcess(), src,
-                      ::GetCurrentProcess(), &handle_,
-                      0, FALSE, DUPLICATE_SAME_ACCESS);
+    : handle_(nullptr), size_(0) {
+  // Zero-copy ownership transfer — no DuplicateHandle syscall.
+  std::size_t sz = handle.size();
+  PlatformHandle ph = std::move(handle).TakeHandle();
+  if (ph.is_valid()) {
+    handle_ = ph.ReleaseAsHandle();
+    size_ = sz;
   }
 }
 
@@ -132,17 +133,25 @@ WritableSharedMemoryRegion::Impl::ConvertToReadOnly() && {
                          size_));
 }
 
+SharedMemoryHandle WritableSharedMemoryRegion::Impl::TakeHandle() && {
+  void* h = handle_;
+  handle_ = nullptr;
+  return SharedMemoryHandle(
+      PlatformHandle::FromNativeHandle<NullHandleTraits>(h), size_);
+}
+
 // =============================================================================
 // UnsafeSharedMemoryRegion::Impl
 // =============================================================================
 
 UnsafeSharedMemoryRegion::Impl::Impl(SharedMemoryHandle handle)
-    : handle_(nullptr), size_(handle.size()) {
-  void* src = handle.GetHandle();
-  if (src) {
-    ::DuplicateHandle(::GetCurrentProcess(), src,
-                      ::GetCurrentProcess(), &handle_,
-                      0, FALSE, DUPLICATE_SAME_ACCESS);
+    : handle_(nullptr), size_(0) {
+  // Zero-copy ownership transfer — no DuplicateHandle syscall.
+  std::size_t sz = handle.size();
+  PlatformHandle ph = std::move(handle).TakeHandle();
+  if (ph.is_valid()) {
+    handle_ = ph.ReleaseAsHandle();
+    size_ = sz;
   }
 }
 
@@ -189,16 +198,13 @@ WritableSharedMemoryRegion UnsafeSharedMemoryRegion::Impl::ConvertToWritable() &
 
 ReadOnlySharedMemoryRegion UnsafeSharedMemoryRegion::Impl::ConvertToReadOnly() && {
   if (!handle_) return {};
-  void* ro_handle = nullptr;
-  if (!::DuplicateHandle(::GetCurrentProcess(), handle_,
-                         ::GetCurrentProcess(), &ro_handle,
-                         FILE_MAP_READ, FALSE, 0)) {
-    return {};
-  }
-  ::CloseHandle(handle_);
+  // Zero-copy: read-only protection is enforced by the type system —
+  // ReadOnlySharedMemoryRegion only calls MapViewOfFile with FILE_MAP_READ.
+  // No need for a DuplicateHandle syscall.
+  void* h = handle_;
   handle_ = nullptr;
   return ReadOnlySharedMemoryRegion(
-      SharedMemoryHandle(PlatformHandle::FromNativeHandle<NullHandleTraits>(ro_handle),
+      SharedMemoryHandle(PlatformHandle::FromNativeHandle<NullHandleTraits>(h),
                          size_));
 }
 

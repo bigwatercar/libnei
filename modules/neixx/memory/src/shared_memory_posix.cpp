@@ -22,8 +22,8 @@ namespace {
 
 int CreateSharedMemoryFd(std::size_t size) {
 #if defined(__linux__) && defined(MFD_CLOEXEC) && defined(MFD_ALLOW_SEALING)
-  // WSL2's memfd_create + F_SEAL_WRITE has a kernel bug where sealing a
-  // memfd causes ALL subsequent operations (including PROT_READ mmap and
+  // WSL2's memfd_create + fcntl sealing has a kernel bug where sealing
+  // a memfd causes ALL subsequent operations (including PROT_READ mmap and
   // dup) to fail with EPERM.  Fall back to shm_open on WSL.
   if (!::nei_is_running_on_wsl()) {
     int fd = memfd_create("nei_shm", MFD_CLOEXEC | MFD_ALLOW_SEALING);
@@ -105,12 +105,14 @@ WritableSharedMemoryMapping::Impl::~Impl() {
 // =============================================================================
 
 ReadOnlySharedMemoryRegion::Impl::Impl(SharedMemoryHandle handle)
-    : fd_(handle.GetFd()), size_(handle.size()) {
-  // We extracted the fd — prevent the handle from closing it on destruction.
-  // (The handle's Impl still owns it for now; we just borrow.)
-  // Actually, the handle still owns it.  We need to dup it or take ownership.
-  // Dup is safer — the handle can close its fd independently.
-  if (fd_ >= 0) fd_ = dup(fd_);
+    : fd_(-1), size_(0) {
+  // Zero-copy ownership transfer — no dup() syscall.
+  std::size_t sz = handle.size();
+  PlatformHandle ph = std::move(handle).TakeHandle();
+  if (ph.is_valid()) {
+    fd_ = ph.ReleaseAsFd();
+    size_ = sz;
+  }
 }
 
 ReadOnlySharedMemoryRegion::Impl::~Impl() {
@@ -139,8 +141,14 @@ SharedMemoryHandle ReadOnlySharedMemoryRegion::Impl::TakeHandle() && {
 // =============================================================================
 
 WritableSharedMemoryRegion::Impl::Impl(SharedMemoryHandle handle)
-    : fd_(handle.GetFd()), size_(handle.size()) {
-  if (fd_ >= 0) fd_ = dup(fd_);
+    : fd_(-1), size_(0) {
+  // Zero-copy ownership transfer — no dup() syscall.
+  std::size_t sz = handle.size();
+  PlatformHandle ph = std::move(handle).TakeHandle();
+  if (ph.is_valid()) {
+    fd_ = ph.ReleaseAsFd();
+    size_ = sz;
+  }
 }
 
 WritableSharedMemoryRegion::Impl::~Impl() {
@@ -170,15 +178,18 @@ WritableSharedMemoryRegion::Impl::ConvertToReadOnly() && {
   if (fd_ < 0) return {};
 
 #if defined(F_SEAL_WRITE)
-  if (fcntl(fd_, F_ADD_SEALS, F_SEAL_WRITE) == 0) {
-    // Kernel-level seal applied — fd becomes read-only at the VFS layer.
+  // Full seal set: prevents writes, shrinks, grows, and further sealing.
+  // This protects against malicious child processes calling ftruncate()
+  // which would cause SIGBUS in the parent on next access.
+  if (fcntl(fd_, F_ADD_SEALS,
+            F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) == 0) {
     PlatformHandle ph = PlatformHandle::FromNativeHandle(fd_);
     fd_ = -1;
     return ReadOnlySharedMemoryRegion(SharedMemoryHandle(std::move(ph), size_));
   }
 #endif
 
-  // Fallback: reopen as read-only.
+  // Fallback: reopen as read-only (for shm_open fds that don't support seals).
   int ro_fd = ReopenReadOnly(fd_);
   if (ro_fd < 0) return {};
   close(fd_);
@@ -187,13 +198,27 @@ WritableSharedMemoryRegion::Impl::ConvertToReadOnly() && {
   return ReadOnlySharedMemoryRegion(SharedMemoryHandle(std::move(ph), size_));
 }
 
+SharedMemoryHandle WritableSharedMemoryRegion::Impl::TakeHandle() && {
+  PlatformHandle ph = PlatformHandle::FromNativeHandle(fd_);
+  fd_ = -1;
+  std::size_t sz = size_;
+  size_ = 0;
+  return SharedMemoryHandle(std::move(ph), sz);
+}
+
 // =============================================================================
 // UnsafeSharedMemoryRegion::Impl
 // =============================================================================
 
 UnsafeSharedMemoryRegion::Impl::Impl(SharedMemoryHandle handle)
-    : fd_(handle.GetFd()), size_(handle.size()) {
-  if (fd_ >= 0) fd_ = dup(fd_);
+    : fd_(-1), size_(0) {
+  // Zero-copy ownership transfer — no dup() syscall.
+  std::size_t sz = handle.size();
+  PlatformHandle ph = std::move(handle).TakeHandle();
+  if (ph.is_valid()) {
+    fd_ = ph.ReleaseAsFd();
+    size_ = sz;
+  }
 }
 
 UnsafeSharedMemoryRegion::Impl::~Impl() {
@@ -234,7 +259,9 @@ ReadOnlySharedMemoryRegion UnsafeSharedMemoryRegion::Impl::ConvertToReadOnly() &
   if (fd_ < 0) return {};
 
 #if defined(F_SEAL_WRITE)
-  if (fcntl(fd_, F_ADD_SEALS, F_SEAL_WRITE) == 0) {
+  // Full seal set: prevents writes, shrinks, grows, and further sealing.
+  if (fcntl(fd_, F_ADD_SEALS,
+            F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) == 0) {
     PlatformHandle ph = PlatformHandle::FromNativeHandle(fd_);
     fd_ = -1;
     return ReadOnlySharedMemoryRegion(SharedMemoryHandle(std::move(ph), size_));

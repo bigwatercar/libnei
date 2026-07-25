@@ -173,6 +173,9 @@ class NEI_API WritableSharedMemoryRegion final {
   // Converts to a read-only region, consuming *this (move-only).
   ReadOnlySharedMemoryRegion ConvertToReadOnly() &&;
 
+  // Transfers handle ownership for cross-process transfer.
+  SharedMemoryHandle TakeHandle() &&;
+
  private:
   friend class UnsafeSharedMemoryRegion;
   explicit WritableSharedMemoryRegion(SharedMemoryHandle handle);

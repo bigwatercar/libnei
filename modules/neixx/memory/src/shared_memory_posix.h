@@ -75,6 +75,7 @@ class WritableSharedMemoryRegion::Impl final {
   std::size_t size() const { return size_; }
   WritableSharedMemoryMapping Map();
   ReadOnlySharedMemoryRegion ConvertToReadOnly() &&;
+  SharedMemoryHandle TakeHandle() &&;
   static WritableSharedMemoryRegion Create(std::size_t size);
 
  private:

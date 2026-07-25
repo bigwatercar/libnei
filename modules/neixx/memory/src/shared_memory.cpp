@@ -144,6 +144,9 @@ WritableSharedMemoryMapping WritableSharedMemoryRegion::Map() {
 ReadOnlySharedMemoryRegion WritableSharedMemoryRegion::ConvertToReadOnly() && {
   return impl_ ? std::move(*impl_).ConvertToReadOnly() : ReadOnlySharedMemoryRegion();
 }
+SharedMemoryHandle WritableSharedMemoryRegion::TakeHandle() && {
+  return impl_ ? std::move(*impl_).TakeHandle() : SharedMemoryHandle();
+}
 
 // =============================================================================
 // UnsafeSharedMemoryRegion
