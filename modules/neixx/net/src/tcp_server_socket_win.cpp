@@ -178,14 +178,34 @@ void TCPServerSocket::Impl::PostAccept() {
   if (closed_) return;
 
   LPFN_ACCEPTEX fn_accept_ex = GetAcceptEx();
-  if (!fn_accept_ex) return;
+  if (!fn_accept_ex) return;  // Fatal  --  WSAIoctl failed at startup.
 
   SOCKET client = CreateClientSocket();
-  if (client == INVALID_SOCKET) return;
+  if (client == INVALID_SOCKET) {
+    // Transient resource exhaustion (e.g. non-paged pool pressure).
+    // Re-post asynchronously so the pool does not permanently shrink.
+    DCHECK_MSG(io_runner_, "PostAccept: io_runner_ is null for retry");
+    if (io_runner_) {
+      lock.unlock();
+      io_runner_->PostTask(
+          FROM_HERE,
+          BindOnce([](TCPServerSocket::Impl* server) { server->PostAccept(); },
+                   this));
+    }
+    return;
+  }
 
   scoped_refptr<IOBuffer> addr_buf = CreateAddrBuffer();
   if (!addr_buf) {
     closesocket(client);
+    DCHECK_MSG(io_runner_, "PostAccept: io_runner_ is null for retry");
+    if (io_runner_) {
+      lock.unlock();
+      io_runner_->PostTask(
+          FROM_HERE,
+          BindOnce([](TCPServerSocket::Impl* server) { server->PostAccept(); },
+                   this));
+    }
     return;
   }
 
@@ -203,6 +223,7 @@ void TCPServerSocket::Impl::PostAccept() {
       kAddrBufferSize, kAddrBufferSize, &bytes, &ctx->overlapped);
 
   if (!ok && WSAGetLastError() != ERROR_IO_PENDING) {
+    // AcceptEx failed synchronously  --  clean up and retry.
     lock.lock();
     auto it = std::find(pending_accepts_.begin(), pending_accepts_.end(), ctx);
     if (it != pending_accepts_.end()) pending_accepts_.erase(it);
@@ -211,7 +232,7 @@ void TCPServerSocket::Impl::PostAccept() {
     delete ctx;
     // Re-post asynchronously to prevent stack overflow on persistent
     // AcceptEx failures (e.g. system resource exhaustion).
-    DCHECK_MSG(io_runner_, "PostAccept: io_runner_ is null");
+    DCHECK_MSG(io_runner_, "PostAccept: io_runner_ is null for retry");
     if (io_runner_) {
       io_runner_->PostTask(
           FROM_HERE,
