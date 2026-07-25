@@ -53,4 +53,7 @@ endif()
 # c-ares — asynchronous DNS resolver (3rdparty/)
 target_link_libraries(nei PRIVATE cares)
 
+# mbedTLS — TLS/SSL library (3rdparty/)
+target_link_libraries(nei PRIVATE mbedtls)
+
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

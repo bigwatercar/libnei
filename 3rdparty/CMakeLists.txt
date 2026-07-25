@@ -47,3 +47,31 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(HAVE_WRITEV 1 CACHE INTERNAL "writev() is POSIX")
   set(HAVE_GETTIMEOFDAY 1 CACHE INTERNAL "gettimeofday() is POSIX")
 endif()
+
+# ---------------------------------------------------------------------------
+# mbedTLS (Apache-2.0) — TLS/SSL library (v3.6.3 LTS)
+# ---------------------------------------------------------------------------
+# Build as a static library regardless of the top-level BUILD_SHARED_LIBS.
+# mbedTLS produces three library targets: mbedtls → mbedx509 → mbedcrypto.
+# Linking mbedtls is sufficient to pull in all three via CMake deps.
+set(BUILD_SHARED_LIBS_SAVED ${BUILD_SHARED_LIBS})
+set(BUILD_SHARED_LIBS OFF)
+
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(MBEDTLS_AS_SUBDIRECTORY ON CACHE BOOL "" FORCE)
+
+add_subdirectory(mbedtls)
+
+set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_SAVED})
+
+# mbedTLS vendored C code triggers MSVC warnings that our project promotes
+# to errors (/WX).  Suppress /WX per-target — covers main libs and bundled
+# third-party crypto (p256-m, everest).
+set(_mbedtls_targets mbedtls mbedx509 mbedcrypto p256m everest)
+foreach(tgt IN LISTS _mbedtls_targets)
+  if(TARGET ${tgt})
+    target_compile_options(${tgt} PRIVATE $<$<C_COMPILER_ID:MSVC>:/WX->)
+  endif()
+endforeach()
+unset(_mbedtls_targets)
