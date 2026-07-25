@@ -14,20 +14,16 @@ Remaining P3 items:
 
 ---
 
-## PipeStream — Known WSL Issues (4 tests disabled)
+## PipeStream — Known WSL Issues ✅ Resolved 2026-07-25
 
-Root cause: IO pump task queue wake-up race.  When I/O completes synchronously,
-the pump may enter `epoll_wait` / `GetQueuedCompletionStatus` before the posted
-callback is processed.
+Root cause was IO pump task queue wake-up race.  When I/O completed synchronously,
+the pump entered `epoll_wait` before the posted callback was processed.
 
-| Test | Symptom | Direction |
-|------|---------|-----------|
-| `PosixYieldQuotaPreventsStarvation` | Reader hangs | Verify on native Linux |
-| `WriteToDisconnectedPeerFailsCleanly` | Write callback never fires | Exceed pipe buffer to force EPIPE |
-| `RapidCancelAndRetryStateMachine` | Phase 2 read hangs | Pump task ordering on WSL |
-| `RapidWriteCancelAndRetry` | Same as above, write direction | Same |
+Fix: EPOLLONESHOT with explicit re-arm (completed 2026-07-22, verified 2026-07-25).
+All 4 previously-failing tests now pass on WSL.  Removed the `#if defined(__linux__)
+&& !defined(__WSL__)` compile-time guards.
 
-Action: run on native Linux; gate WSL-failing tests with `nei::IsRunningOnWsl()`.
+Verified: WSL 10/10, Windows 9/9 (PosixYieldQuota is POSIX-only).
 
 ---
 
