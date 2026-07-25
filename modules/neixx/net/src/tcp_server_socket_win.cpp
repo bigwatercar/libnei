@@ -27,6 +27,11 @@ constexpr DWORD kAddrBufferSize =
 // cause WSAECONNREFUSED when the kernel's backlog is exhausted.
 constexpr int kAcceptPoolSize = 64;
 
+// Delay before retrying a failed PostAccept (socket creation, buffer
+// allocation, or AcceptEx submission).  Prevents a tight infinite retry
+// loop from consuming 100% CPU under permanent resource exhaustion.
+constexpr auto kPostAcceptRetryDelay = TimeDelta::FromMilliseconds(10);
+
 // LPFN_ACCEPTEX function pointer  --  loaded once via WSAIoctl.
 LPFN_ACCEPTEX GetAcceptEx() {
   static LPFN_ACCEPTEX fn = nullptr;
@@ -187,10 +192,11 @@ void TCPServerSocket::Impl::PostAccept() {
     DCHECK_MSG(io_runner_, "PostAccept: io_runner_ is null for retry");
     if (io_runner_) {
       lock.unlock();
-      io_runner_->PostTask(
+      io_runner_->PostDelayedTask(
           FROM_HERE,
           BindOnce([](TCPServerSocket::Impl* server) { server->PostAccept(); },
-                   this));
+                   this),
+          kPostAcceptRetryDelay);
     }
     return;
   }
@@ -201,10 +207,11 @@ void TCPServerSocket::Impl::PostAccept() {
     DCHECK_MSG(io_runner_, "PostAccept: io_runner_ is null for retry");
     if (io_runner_) {
       lock.unlock();
-      io_runner_->PostTask(
+      io_runner_->PostDelayedTask(
           FROM_HERE,
           BindOnce([](TCPServerSocket::Impl* server) { server->PostAccept(); },
-                   this));
+                   this),
+          kPostAcceptRetryDelay);
     }
     return;
   }
@@ -230,14 +237,17 @@ void TCPServerSocket::Impl::PostAccept() {
     lock.unlock();
     closesocket(client);
     delete ctx;
-    // Re-post asynchronously to prevent stack overflow on persistent
-    // AcceptEx failures (e.g. system resource exhaustion).
+    // Re-post with delay to prevent a tight infinite retry loop from
+    // consuming 100 % CPU under permanent resource exhaustion (e.g.
+    // non-paged pool full).  Transient failures recover within a few
+    // ticks; permanent failures waste at most 100 retries/second/worker.
     DCHECK_MSG(io_runner_, "PostAccept: io_runner_ is null for retry");
     if (io_runner_) {
-      io_runner_->PostTask(
+      io_runner_->PostDelayedTask(
           FROM_HERE,
           BindOnce([](TCPServerSocket::Impl* server) { server->PostAccept(); },
-                   this));
+                   this),
+          kPostAcceptRetryDelay);
     }
   }
 }
