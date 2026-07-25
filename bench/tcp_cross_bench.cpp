@@ -291,7 +291,7 @@ int main(int argc, char* argv[]) {
   }
 
 #if defined(_WIN32)
-  // Windows: raise ephemeral port range for C10K client-side
+  // Windows: raise ephemeral port range for high-CPS client-side testing
   // TcpTimedWaitDelay and MaxUserPort are registry settings — not
   // programmable from user mode.  The benchmark batches connections
   // to avoid exhausting the default ~16K ephemeral ports.

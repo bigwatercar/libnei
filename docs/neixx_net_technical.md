@@ -345,23 +345,31 @@ server->Close();
 
 Acceptor 仅处理 `AcceptEx` / `accept4`，Worker 处理已连接 socket 的所有后续读写。两者运行在不同 I/O 线程上，通过 `RunnerSelector` 解耦。
 
-### 5.3 TCP 性能基准（2026-07-25 更新）
+### 5.3 TCP 性能基准（2026-07-26 更新）
 
-| 基准 | 测试维度 | 规模 | Win 典型值 | WSL 典型值 |
-|------|---------|------|-----------|-----------|
-| `tcp_loopback_bench` | 单连接吞吐 | 10 GB | 3,088 MB/s @ 1MB buf | 9,044 MB/s @ 1MB buf |
-| `tcp_conn_stress_bench` | 并发连接建立/拆毁 | C10K (10k conn) | **5,339 conn/s** | **26,916 conn/s** |
-| `tcp_rtt_bench` | 并发 Ping-Pong RTT | 5K conn | p50=15.7ms | p50=12.5ms |
-| `tcp_cross_bench` Win→Win | 本地回环 | 10k conn | **5,369 conn/s** | — |
-| `tcp_cross_bench` Win→WSL | 跨系统 | 10k conn | **5,187 conn/s** (客户端) | 4001 accept (瓶颈) |
-| `tcp_cross_bench` WSL→Win | 跨系统 | 10k conn | 10000 accept | **18,387 conn/s** (客户端) |
-| `tcp_cross_bench` WSL→WSL | 本地回环 | 10k conn | — | ~908 conn/s (共享CPU) |
+> **指标说明**：以下 `conn/s` 为 **CPS（Connections Per Second，短连接完成速率）**——
+> 累计 N 个连接（每个生命周期为 创建→TCP握手→accept→关闭），
+> 测量每秒能完成多少个完整的"建连→拆连"周期。**不是并发连接数**。
 
-**跨平台差距说明**：WSL localhost TCP 吞吐量是 Windows 的约 3×，连接建立速率约 5×。差距源自 OS TCP 协议栈——Linux `lo` 回环是纯内核态内存操作，Windows localhost 需穿越完整 NDIS + WFP 协议栈。WSL→WSL 方向因 client/server 共享同一 WSL 实例 CPU 而偏低。
+| 基准 | 测试维度 | 累计连接 | Win 典型值 | WSL 典型值 |
+|------|---------|---------|-----------|-----------|
+| `tcp_loopback_bench` | 单连接吞吐 | 10 GB 传输 | 3,088 MB/s @ 1MB | 9,044 MB/s @ 1MB |
+| `tcp_conn_stress_bench` | 短连接 CPS 吞吐 | 10k | **5,339 conn/s** | **26,916 conn/s** |
+| `tcp_rtt_bench` | 并发 Ping-Pong RTT | 5k | p50=15.7ms | p50=12.5ms |
+| `tcp_cross_bench` Win→Win | 本地回环 CPS | 10k | **5,369 conn/s** | — |
+| `tcp_cross_bench` Win→WSL | 跨系统 CPS | 10k | **5,187 conn/s** (客户端) | 4001 accept (瓶颈) |
+| `tcp_cross_bench` WSL→Win | 跨系统 CPS | 10k | 10000 accept | **18,387 conn/s** (客户端) |
+| `tcp_cross_bench` WSL→WSL | 本地回环 CPS | 10k | — | ~908 conn/s (共享CPU) |
 
-### 5.4 C10K 架构优化详情（2026-07-25 全量落地）
+**跨平台差距说明**：WSL localhost TCP 吞吐量是 Windows 的约 3×，短连接 CPS 约 5×。差距源自 OS TCP 协议栈——Linux `lo` 回环是纯内核态内存操作，Windows localhost 需穿越完整 NDIS + WFP 协议栈。WSL→WSL 方向因 client/server 共享同一 WSL 实例 CPU 而偏低。
 
-以下优化使 Windows C10K 连接吞吐从原始 **820 conn/s** 跃升至 **5,339 conn/s**（6.5× 提升）。
+### 5.4 短连接 CPS 架构优化详情（2026-07-26 全量落地）
+
+以下优化使 Windows 短连接 CPS 从原始 **820 conn/s** 跃升至 **5,339 conn/s**（6.5× 提升）。
+
+> 测试场景：累计 10k 连接，每个连接创建后立即关闭（connect → accept → close），
+> 测的是每秒完成几个完整周期，**不是** 10k 连接同时在线。
+> 真正并发连接数测试用 `tcp_cross_bench --hold`（约 496 并发耗尽 ulimit 512）。
 
 | # | 优化 | 位置 | 效果 | 原理 |
 |---|------|------|:---:|------|
@@ -373,16 +381,18 @@ Acceptor 仅处理 `AcceptEx` / `accept4`，Worker 处理已连接 socket 的所
 | ⑥ | `SIO_LOOPBACK_FAST_PATH` | 双端 `_win.cpp` | 辅助 | Windows 8+ 内核 TCP 栈短路（仅 loopback 生效） |
 | ⑦ | POSIX EMFILE reserve fd 熔断 | `tcp_server_socket_posix` | 防退化 | 预打开 `/dev/null` 占位 fd；`EMFILE`/`ENFILE` 时关闭→accept→排空→重建，零盲窗口 |
 
-**关键发现**：瓶颈不在内核 API（`AcceptEx`/`WSASocketW`），而在 C++ 运行时的全局堆分配器锁。④ 将 `AcceptContext` 从"分配→释放→重新分配"改为"原地重置→复用"，消除了 C10K 热路径上 ~10,000 次/秒的堆分配/释放操作，是单点最大收益。
+**关键发现**：瓶颈不在内核 API（`AcceptEx`/`WSASocketW`），而在 C++ 运行时的全局堆分配器锁。④ 将 `AcceptContext` 从"分配→释放→重新分配"改为"原地重置→复用"，消除了短连接热路径上 ~10,000 次/秒的堆分配/释放操作，是单点最大收益。
 
-### 5.5 跨系统（WSL↔Windows）性能特征
+### 5.5 跨系统（WSL↔Windows）短连接 CPS 特征
 
-| 方向 | 客户端 | 服务端 | 客户端速率 | 瓶颈分析 |
+| 方向 | 客户端 | 服务端 | 客户端 CPS | 瓶颈分析 |
 |------|:---:|:---:|:---:|------|
 | WSL→Win | WSL (Linux) | Windows | **18,387 conn/s** | Linux 客户端无瓶颈；Windows 服务端受益于 ④ 快速 accept |
 | Win→WSL | Windows | WSL (Linux) | **5,187 conn/s** | WSL accept 受限于约 300-600 conn/s 峰值；客户端 TCP 握手在内核层即完成 |
 
-WSL2 跨系统走 Hyper-V 虚拟交换机，性能介于纯本地和真实网络之间。WSL→Win 需使用 Windows 侧 `vEthernet (WSL)` 适配器的 IP（通常为 `172.x.x.1`，可通过 WSL 内 `ip route show default` 获取），而非 `127.0.0.1` 或 DNS 回环地址。Windows 防火墙可能会阻止入站连接，测试时需放行对应端口。
+> 以上均为短连接 CPS（累计 10k 连接，每个 accept 后立即关闭）。跨系统路径因 WSL2 的 Hyper-V 虚拟交换机而引入额外延迟。并发连接上限主要由 `ulimit -n` 和 reserve fd 机制决定，详见 §5.4。
+
+WSL→Win 需使用 Windows 侧 `vEthernet (WSL)` 适配器的 IP（通常为 `172.x.x.1`，可通过 WSL 内 `ip route show default` 获取），而非 `127.0.0.1` 或 DNS 回环地址。Windows 防火墙可能会阻止入站连接，测试时需放行对应端口。WSL 作为服务端时瓶颈在 accept 循环速率（~300-600/s），客户端连接在内核 TCP backlog 中已建立但未被应用层 accept；客户端进程退出时剩余 backlog 连接被 RST 丢弃。
 
 WSL 作为服务端时瓶颈在 accept 循环速率（~300-600/s），客户端连接在内核 TCP backlog 中已建立但未被应用层 accept；客户端进程退出时剩余 backlog 连接被 RST 丢弃。
 

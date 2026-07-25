@@ -1,7 +1,9 @@
-// libnei TCP connection stress benchmark  --  concurrent connect storm (C10K)
+// libnei TCP connection stress benchmark  --  short-lived connection CPS
 //
 // Server accepts and immediately closes; all clients connect concurrently.
-// Measures connection setup/teardown stability under concurrent load.
+// Measures CPS (connections per second) — the rate at which complete
+// connect→accept→close cycles are processed.  NOT concurrent connections.
+// For true concurrent-connection tests, use tcp_cross_bench --hold.
 //
 // Build: cmake --build build/linux-gcc-release-shared --target tcp_conn_stress_bench
 // Run:   ./build/linux-gcc-release-shared/bench/tcp_conn_stress_bench [total_connections]
