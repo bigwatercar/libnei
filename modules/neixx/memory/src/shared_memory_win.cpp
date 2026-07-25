@@ -2,8 +2,6 @@
 
 #include "shared_memory_win.h"
 
-#include <nei/debug/check.h>
-
 namespace nei {
 
 // =============================================================================

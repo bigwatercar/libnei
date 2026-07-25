@@ -10,7 +10,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <nei/debug/check.h>
 #include <nei/sys/os_info.h>
 
 namespace nei {
