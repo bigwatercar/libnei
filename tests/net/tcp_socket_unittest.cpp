@@ -146,6 +146,10 @@ TEST_F(TcpSocketTest, BasicHandshake) {
 
   EXPECT_TRUE(accepted.load());
   EXPECT_TRUE(connected.load());
+
+  // Break reference cycle: accept callback captures server shared_ptr,
+  // which would keep the Impl (and its WeakPtrFactory) alive past TearDown.
+  server->Shutdown();
 }
 
 // ===========================================================================
@@ -242,6 +246,9 @@ TEST_F(TcpSocketTest, AsyncStreamTransfer) {
 
   ASSERT_TRUE(transfer_done.TimedWait(std::chrono::seconds(5)));
   EXPECT_TRUE(data_match.load()) << "1 MB data should match byte-for-byte";
+
+  // Break reference cycle: accept callback captures server shared_ptr.
+  server->Shutdown();
 }
 
 // ===========================================================================
@@ -851,15 +858,20 @@ TEST_F(TcpSocketTest, ConnectAndListenWithIPv6Loopback) {
   std::atomic<bool> accepted{false};
   std::atomic<bool> connected{false};
 
+  // Declared at test scope so we can break the accept-callback reference
+  // cycle after the test completes.
+  std::shared_ptr<TCPServerSocket> server;
+
   io_runner_->PostTask(FROM_HERE,
-      [this, &accepted_done, &connected_done, &accepted, &connected]() {
+      [this, &accepted_done, &connected_done, &accepted, &connected,
+       &server]() {
     uint8_t ipv6_loopback[16] = {};
     ipv6_loopback[15] = 1;
 
     const uint16_t port = FindFreePort();
     IPEndPoint bind_addr(IPAddress::FromIPv6(ipv6_loopback), port);
 
-    auto server = std::make_shared<TCPServerSocket>();
+    server = std::make_shared<TCPServerSocket>();
     ASSERT_TRUE(server->Listen(
         bind_addr, 1,
         [&accepted, &accepted_done, server](bool ok,
@@ -885,6 +897,10 @@ TEST_F(TcpSocketTest, ConnectAndListenWithIPv6Loopback) {
   ASSERT_TRUE(connected_done.TimedWait(std::chrono::seconds(5)));
   EXPECT_TRUE(accepted.load());
   EXPECT_TRUE(connected.load());
+
+  // Break reference cycle: accept callback captures server shared_ptr.
+  if (server)
+    server->Shutdown();
 }
 
 #if !defined(_WIN32)
