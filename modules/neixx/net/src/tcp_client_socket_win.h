@@ -154,5 +154,20 @@ struct TcpOverlappedContext {
 
 }  // namespace nei::net
 
+// =============================================================================
+// C10K guidance constants
+//
+// WSARecv / WSASend pin user buffers in the kernel's Non-Paged Pool.
+// Posting 64 KB reads on 10 000 idle connections wastes ~640 MB of locked
+// kernel memory and may cause WSAENOBUFS.  Prefer 4 KB for initial reads
+// on long-lived idle connections; resize only after the peer sends data.
+//
+// For the extreme case, use a zero-byte WSARecv trick: post a 0-byte read,
+// and when IOCP wakes you (the peer has data), allocate a real buffer and
+// perform a synchronous recv().  This keeps kernel memory near zero for
+// idle sockets.
+// =============================================================================
+constexpr std::size_t kDefaultRecvBufferSize = 4096;  // 4 KB
+
 #endif  // _WIN32
 #endif  // NEIXX_NET_TCP_CLIENT_SOCKET_WIN_H_

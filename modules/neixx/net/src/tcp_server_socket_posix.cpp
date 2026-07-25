@@ -176,10 +176,33 @@ void TCPServerSocket::Impl::OnFileCanReadWithoutBlocking(
             MessagePumpForIO::FdWatchController::Mode::READ, this);
         break;  // All pending connections drained.
       }
-      // Transient resource exhaustion (EMFILE / ENFILE)  --  just wait for the
-      // next epoll trigger.  Do NOT stop watching; the server stays alive.
+      // Transient resource exhaustion (EMFILE / ENFILE)  --  the process has
+      // hit the file-descriptor limit.  level-triggered epoll will otherwise
+      // spin-loop the IO thread at 100 % CPU because the listen socket never
+      // stops being readable.  Stop watching, and re-arm after a 100 ms delay
+      // to give the system time to recover (e.g. other connections draining,
+      // the user raising ulimit -n, etc.).
       if (errno == EMFILE || errno == ENFILE) {
-        // Transient FD exhaustion  --  retry on next epoll trigger.
+        watch_controller_.StopWatching();
+        DCHECK_MSG(io_runner_, "OnFileCanRead: io_runner_ is null for retry");
+        if (io_runner_) {
+          io_runner_->PostDelayedTask(
+              FROM_HERE,
+              BindOnce([](scoped_refptr<Impl> self) {
+                // Re-arm only if still alive  --  Close()/Shutdown() may
+                // have fired during the 100 ms window.
+                if (!self->closed_) {
+                  auto* pump = MessagePumpForIO::Current();
+                  if (pump) {
+                    self->watch_controller_.StartWatching(
+                        pump, self->listen_fd_,
+                        MessagePumpForIO::FdWatchController::Mode::READ,
+                        self.get());
+                  }
+                }
+              }, WrapRefCounted(this)),
+              TimeDelta::FromMilliseconds(100));
+        }
         break;
       }
       // Fatal error (EBADF, etc.)  --  stop watching and notify the caller

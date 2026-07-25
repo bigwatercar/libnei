@@ -22,6 +22,11 @@ namespace {
 constexpr DWORD kAddrBufferSize =
     sizeof(struct sockaddr_storage) + 16;
 
+// Number of concurrently-pending AcceptEx calls to keep in the kernel.
+// For C10K connection storms, 64-128 entries prevent NIC-layer drops that
+// cause WSAECONNREFUSED when the kernel's backlog is exhausted.
+constexpr int kAcceptPoolSize = 64;
+
 // LPFN_ACCEPTEX function pointer  --  loaded once via WSAIoctl.
 LPFN_ACCEPTEX GetAcceptEx() {
   static LPFN_ACCEPTEX fn = nullptr;
@@ -78,7 +83,11 @@ bool TCPServerSocket::Impl::Listen(
       pump, reinterpret_cast<NativeIOHandle>(listen_socket_),
       MessagePumpForIO::FdWatchController::Mode::READ, this);
 
-  PostAccept();
+  // Seed the kernel AcceptEx pool with 64 pending entries so that C10K
+  // connection storms do not overflow the listen backlog and cause
+  // WSAECONNREFUSED at the NIC level.  Each consumed completion triggers
+  // a single PostAccept() replenishment in OnIOCompleted.
+  PostAcceptBatch(kAcceptPoolSize);
   return true;
 }
 
@@ -157,6 +166,11 @@ void TCPServerSocket::Impl::Orphan() {
       ReleaseSelfHoldUnderLock(lock);
     }
   }
+}
+
+void TCPServerSocket::Impl::PostAcceptBatch(int count) {
+  for (int i = 0; i < count; ++i)
+    PostAccept();
 }
 
 void TCPServerSocket::Impl::PostAccept() {
@@ -252,13 +266,22 @@ void TCPServerSocket::Impl::OnIOCompleted(
   if (error_code != 0) {
     closesocket(client);
     delete ctx;
-    if (accept_callback_) {
+    // Snapshot accept_callback_ under the mutex to prevent a TOCTOU race
+    // with Close()/Shutdown() (which reset or move the callback on another
+    // thread).  The lock guarantees we either get a valid callback or an
+    // empty one  --  never a half-destroyed std::function.
+    AcceptCallback cb;
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      cb = accept_callback_;
+    }
+    if (cb) {
       DCHECK_MSG(io_runner_, "OnIOCompleted: io_runner_ is null");
       if (io_runner_) {
+        // Lock-free dispatch: callback copied under lock, fired outside.
         io_runner_->PostTask(FROM_HERE,
-                         BindOnce([](TCPServerSocket::AcceptCallback c) {
-                                    c(false, nullptr); },
-                                  accept_callback_));
+                         BindOnce([](AcceptCallback c) { c(false, nullptr); },
+                                  std::move(cb)));
       }
     }
     return;
@@ -274,14 +297,24 @@ void TCPServerSocket::Impl::OnIOCompleted(
   auto* client_impl = new TCPClientSocket::Impl(client, worker_runner);
   auto client_sock = std::make_unique<TCPClientSocket>(client_impl);
   delete ctx;
-  if (accept_callback_) {
-    DCHECK_MSG(io_runner_, "OnIOCompleted: io_runner_ is null");
-    if (io_runner_) {
-      io_runner_->PostTask(
-          FROM_HERE,
-          BindOnce([](TCPServerSocket::AcceptCallback c,
-                      std::unique_ptr<TCPClientSocket> s) { c(true, std::move(s)); },
-                   accept_callback_, std::move(client_sock)));
+  {
+    // Snapshot accept_callback_ under the mutex  --  same TOCTOU fix as
+    // the error path above.  Close()/Shutdown() may race on another thread.
+    AcceptCallback cb;
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      cb = accept_callback_;
+    }
+    if (cb) {
+      DCHECK_MSG(io_runner_, "OnIOCompleted: io_runner_ is null");
+      if (io_runner_) {
+        // Lock-free dispatch: callback copied under lock, fired outside.
+        io_runner_->PostTask(
+            FROM_HERE,
+            BindOnce([](AcceptCallback c,
+                        std::unique_ptr<TCPClientSocket> s) { c(true, std::move(s)); },
+                     std::move(cb), std::move(client_sock)));
+      }
     }
   }
 

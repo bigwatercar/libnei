@@ -82,6 +82,11 @@ class TCPServerSocket::Impl final
 
   void PostAccept();
 
+  // Posts |count| AcceptEx calls in a tight loop to fill the kernel's
+  // pending-accept queue.  C10K connection storms require a deep pool
+  // (64-128 entries) to avoid WSAECONNREFUSED from the NIC layer.
+  void PostAcceptBatch(int count);
+
   SOCKET CreateListenSocket(const IPEndPoint& addr, int backlog);
   SOCKET CreateClientSocket();
   scoped_refptr<IOBuffer> CreateAddrBuffer();
