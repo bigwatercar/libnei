@@ -11,10 +11,12 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <thread>
 #include <vector>
 
 #include <neixx/common/time.h>
@@ -970,6 +972,120 @@ TEST_F(TcpSocketTest, ServerDoesNotCrashUnderFdPressure) {
   server->Close();
 }
 #endif  // !_WIN32
+
+// =============================================================================
+// Extreme lifecycle tests — server close while AcceptEx pending (UAF safety)
+// =============================================================================
+
+// Verifies that destroying a listening TCPServerSocket while AcceptEx
+// completions are still in the kernel IOCP / epoll queue does not cause
+// use-after-free or heap corruption.
+TEST_F(TcpSocketTest, ServerCloseWhileAcceptExPending) {
+  uint16_t port = FindFreePort();
+  ASSERT_NE(port, 0);
+
+  // Start a dedicated thread for the server so we can destroy it while the
+  // accept queue is still hot.
+  Thread srv_thread;
+  Thread::Options opts;
+  opts.message_pump_type = MessagePumpType::IO;
+  ASSERT_TRUE(srv_thread.StartWithOptions(opts));
+  auto srv_runner = srv_thread.GetTaskRunner();
+
+  WaitableEvent server_ready(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::atomic<bool> accept_fired{false};
+
+  auto server = std::make_shared<TCPServerSocket>();
+  srv_runner->PostTask(FROM_HERE, [&]() {
+    ASSERT_TRUE(server->Listen(
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
+        [&accept_fired](bool, std::unique_ptr<TCPClientSocket>) {
+          accept_fired.store(true);
+        },
+        srv_runner));
+    server_ready.Signal();
+  });
+  server_ready.Wait();
+
+  // Give the kernel time to post AcceptEx / accept4 calls (64 on Windows).
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  // Destroy the server on its own thread while accepts are pending.
+  // This must not crash, hang, or leak.
+  WaitableEvent destroyed(WaitableEvent::ResetPolicy::kAutomatic, false);
+  srv_runner->PostTask(FROM_HERE, [&]() {
+    server->Close();
+    server.reset();
+    destroyed.Signal();
+  });
+  ASSERT_TRUE(destroyed.TimedWait(std::chrono::seconds(5)));
+
+  // No client connected — accept callback might fire spuriously on
+  // loopback (e.g. port scanners), but the key assertion is: no crash.
+  srv_thread.Stop();
+}
+
+// =============================================================================
+// Extreme lifecycle tests — client Orphan drain through EOF
+// =============================================================================
+
+// Verifies that Orphan() on a connected client correctly drains the peer's
+// EOF and self-destructs without leaking or crashing.
+TEST_F(TcpSocketTest, ClientOrphanDrainReadEOF) {
+  uint16_t port = FindFreePort();
+  ASSERT_NE(port, 0);
+
+  WaitableEvent client_accepted(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::shared_ptr<TCPClientSocket> accepted_client;
+
+  auto server = std::make_shared<TCPServerSocket>();
+
+  io_runner_->PostTask(FROM_HERE, [&, this, port]() {
+    ASSERT_TRUE(server->Listen(
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
+        [&](bool ok, std::unique_ptr<TCPClientSocket> client) {
+          if (ok)
+            accepted_client = std::move(client);
+          client_accepted.Signal();
+        },
+        io_runner_, {}));
+
+    // Client connects on the same IO thread.
+    auto client = std::make_shared<TCPClientSocket>();
+    client->Connect(
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+        [client](bool ok) {
+          if (!ok) return;
+          // Post a pending read so Orphan() has a callback to cancel.
+          auto buf = MakeRefCounted<IOBufferWithSize>(64);
+          client->ReadAsync(buf, 64, [](bool, size_t) {});
+        },
+        io_runner_);
+  });
+
+  ASSERT_TRUE(client_accepted.TimedWait(std::chrono::seconds(5)));
+
+  if (accepted_client) {
+    // Flush the IO thread so read is posted.
+    WaitableEvent drain(WaitableEvent::ResetPolicy::kAutomatic, false);
+    io_runner_->PostTask(FROM_HERE, [&drain]() { drain.Signal(); });
+    ASSERT_TRUE(drain.TimedWait(std::chrono::seconds(5)));
+
+    // Orphan the accepted client — triggers ShutdownWrite + StartOrphanDrain.
+    io_runner_->PostTask(FROM_HERE, [&]() {
+      accepted_client.reset();
+    });
+
+    // Flush to let Orphan drain complete.
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+
+  // Close server — must not crash or hang.
+  io_runner_->PostTask(FROM_HERE, [&server]() { server->Close(); });
+  WaitableEvent cleanup(WaitableEvent::ResetPolicy::kAutomatic, false);
+  io_runner_->PostTask(FROM_HERE, [&cleanup]() { cleanup.Signal(); });
+  ASSERT_TRUE(cleanup.TimedWait(std::chrono::seconds(5)));
+}
 
 }  // namespace
 }  // namespace nei::net

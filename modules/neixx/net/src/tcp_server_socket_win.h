@@ -30,25 +30,7 @@
 
 namespace nei::net {
 
-// =============================================================================
-// AcceptContext  --  per-accept OVERLAPPED state
-// =============================================================================
-//
-// AcceptEx requires a pre-allocated client socket and a contiguous buffer
-// large enough for both local and remote sockaddr structures plus 16 bytes
-// of padding on each side.
-struct AcceptContext {
-  OVERLAPPED overlapped = {};
-  SOCKET client_socket = INVALID_SOCKET;
-
-  // Storage for AcceptEx: [local addr (16B pad + sockaddr)] [remote addr (16B
-  // pad + sockaddr)].  AcceptEx writes both into this buffer.
-  scoped_refptr<IOBuffer> addr_buffer;
-
-  // The callback to fire on the target runner.
-  TCPServerSocket::AcceptCallback callback;
-  scoped_refptr<TaskRunner> io_runner;
-};
+struct AcceptContext;
 
 // =============================================================================
 // TCPServerSocket::Impl (Windows: AcceptEx + IOCP via CompletionWatcher)

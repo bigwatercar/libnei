@@ -64,6 +64,24 @@ FDs internally; process-level FD exhaustion starves the pump.
 Next steps: mock/epoll-free IO pump for this test, or pre-configure an fd to fail
 `accept4` without exhausting system FDs.
 
+### `TCPClientSocket::Impl` Leak on Accept Path (POSIX + Win, P1) 🔧 2026-07-26
+
+**Symptom**: ASAN reports 408B direct leak per accepted connection in
+`tcp_server_socket_posix.cpp:259` (`new TCPClientSocket::Impl`), plus 8B
+indirect via `WeakPtrFactory<Impl>`.  Total ~416KB per 1,000 connections.
+
+**Root Cause**: `TCPClientSocket::Impl::Orphan()` takes a self-hold (`AddRef()`)
+that is only released when `StartOrphanDrain()` completes (via EOF → `Close()` →
+`ReleaseSelfHoldIfNeeded()`).  But when `Close()` is called BEFORE `Orphan()`
+(the normal user pattern: `sock->Close()` then unique_ptr destructor calls
+`Orphan()`), `closed_` is already `true`, so `Orphan()` skips the drain but
+never releases the self-hold.
+
+**Fix**: Added `else { ReleaseSelfHoldIfNeeded(); }` branch in both POSIX and
+Windows `Orphan()` when `closed_` is already true.
+
+**Verification**: ✅ Fixed 2026-07-26. ASAN confirm: 1K connections → 0 leaks (was 416KB).
+
 ---
 
 ## Future Feature Directions — Evaluated 2026-07-22

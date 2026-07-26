@@ -199,6 +199,7 @@ void RunClient(const std::string& host, uint16_t port, int total_conn) {
           nei::net::IPEndPoint(addr, port),
           [client, &done, &fail, total_conn, batch_rem, &batch_done](bool ok) {
             if (!ok) fail.fetch_add(1);
+            client->Close();  // Explicit close before shared_ptr release.
             if (done.fetch_add(1) + 1 >= total_conn) {
               // last connection — no extra signal needed beyond batch_done
             }

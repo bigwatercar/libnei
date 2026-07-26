@@ -354,18 +354,18 @@ Acceptor 仅处理 `AcceptEx` / `accept4`，Worker 处理已连接 socket 的所
 | 基准 | 测试维度 | 累计连接 | Win 典型值 | WSL 典型值 |
 |------|---------|---------|-----------|-----------|
 | `tcp_loopback_bench` | 单连接吞吐 | 10 GB 传输 | 3,088 MB/s @ 1MB | 9,044 MB/s @ 1MB |
-| `tcp_conn_stress_bench` | 短连接 CPS 吞吐 | 10k | **5,339 conn/s** | **26,916 conn/s** |
+| `tcp_conn_stress_bench` | 短连接 CPS 吞吐 | 10k | **4,589 conn/s** | **26,874 conn/s** |
 | `tcp_rtt_bench` | 并发 Ping-Pong RTT | 5k | p50=15.7ms | p50=12.5ms |
-| `tcp_cross_bench` Win→Win | 本地回环 CPS | 10k | **5,369 conn/s** | — |
-| `tcp_cross_bench` Win→WSL | 跨系统 CPS | 10k | **5,187 conn/s** (客户端) | 4001 accept (瓶颈) |
-| `tcp_cross_bench` WSL→Win | 跨系统 CPS | 10k | 10000 accept | **18,387 conn/s** (客户端) |
-| `tcp_cross_bench` WSL→WSL | 本地回环 CPS | 10k | — | ~908 conn/s (共享CPU) |
+| `tcp_cross_bench` Win→Win | 本地回环 CPS | 10k | **4,299 conn/s** | — |
+| `tcp_cross_bench` Win→WSL | 跨系统 CPS | 10k | **4,586 conn/s** (客户端) | 4001 accept (瓶颈) |
+| `tcp_cross_bench` WSL→Win | 跨系统 CPS | 10k | 10000 accept | **19,301 conn/s** (客户端) |
+| `tcp_cross_bench` WSL→WSL | 本地回环 CPS | 10k | — | **21,382 conn/s** |
 
-**跨平台差距说明**：WSL localhost TCP 吞吐量是 Windows 的约 3×，短连接 CPS 约 5×。差距源自 OS TCP 协议栈——Linux `lo` 回环是纯内核态内存操作，Windows localhost 需穿越完整 NDIS + WFP 协议栈。WSL→WSL 方向因 client/server 共享同一 WSL 实例 CPU 而偏低。
+**跨平台差距说明**：WSL localhost TCP 吞吐量是 Windows 的约 3×，短连接 CPS 约 5-6×。差距源自 OS TCP 协议栈——Linux `lo` 回环是纯内核态内存操作，Windows localhost 需穿越完整 NDIS + WFP 协议栈。WSL→WSL 方向因 client/server 共享同一 WSL 实例 CPU 而在 ASAN 模式下偏低（~1,600），Release 模式下恢复正常（~21,000）。
 
 ### 5.4 短连接 CPS 架构优化详情（2026-07-26 全量落地）
 
-以下优化使 Windows 短连接 CPS 从原始 **820 conn/s** 跃升至 **5,339 conn/s**（6.5× 提升）。
+以下优化使 Windows 短连接 CPS 从原始 **820 conn/s** 跃升至当前 **4,589 conn/s**（5.6× 提升）。
 
 > 测试场景：累计 10k 连接，每个连接创建后立即关闭（connect → accept → close），
 > 测的是每秒完成几个完整周期，**不是** 10k 连接同时在线。

@@ -131,8 +131,9 @@ void TCPClientSocket::Impl::Orphan() {
       // Pending write still in flight  --  replace the user callback with
       // our internal flush-then-shutdown callback.  Do NOT send FIN yet;
       // the write data hasn't reached the network.
-      write_cb_ = [this](bool /*success*/, std::size_t /*bytes*/) {
-        OnOrphanWriteFlushed();
+      auto self = scoped_refptr<Impl>(this);
+      write_cb_ = [self](bool /*success*/, std::size_t /*bytes*/) {
+        self->OnOrphanWriteFlushed();
       };
       return;
     }
@@ -145,6 +146,12 @@ void TCPClientSocket::Impl::Orphan() {
   if (!closed_) {
     ShutdownWrite();
     StartOrphanDrain();
+  } else {
+    // Close() was called before the shell destructor (e.g. user called
+    // sock->Close() and then let the unique_ptr go out of scope).
+    // In that case the socket is already closed, no drain is needed,
+    // but the self-hold taken above must be released now.
+    ReleaseSelfHoldIfNeeded();
   }
 }
 

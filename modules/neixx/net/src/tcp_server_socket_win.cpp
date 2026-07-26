@@ -14,6 +14,30 @@
 namespace nei::net {
 
 // =============================================================================
+// AcceptContext  --  per-accept OVERLAPPED state
+// =============================================================================
+//
+// Defined here (not in the header) because it holds a scoped_refptr<Impl>,
+// and Impl is fully defined in the header.  scoped_refptr needs the complete
+// type to invoke AddRef/Release.
+struct AcceptContext {
+  OVERLAPPED overlapped = {};
+  SOCKET client_socket = INVALID_SOCKET;
+
+  // Storage for AcceptEx: [local addr (16B pad + sockaddr)] [remote addr (16B
+  // pad + sockaddr)].  AcceptEx writes both into this buffer.
+  scoped_refptr<IOBuffer> addr_buffer;
+
+  // The callback to fire on the target runner.
+  TCPServerSocket::AcceptCallback callback;
+  scoped_refptr<TaskRunner> io_runner;
+
+  // Strong reference to Impl — keeps the server alive until this
+  // AcceptEx completion is processed by the IOCP pump.
+  scoped_refptr<TCPServerSocket::Impl> self_ref;
+};
+
+// =============================================================================
 // AcceptEx function pointer loading
 // =============================================================================
 namespace {
@@ -121,9 +145,10 @@ void TCPServerSocket::Impl::Close() {
     closesocket(listen_socket_);
     listen_socket_ = INVALID_SOCKET;
   }
-  // Clear pending  --  IOCP completions will still fire with was_pending=false
-  // and self-cleanup.
-  pending_accepts_.clear();
+  // Do NOT clear pending_accepts_.  The IOCP kernel queue still holds
+  // OVERLAPPED buffers for in-flight AcceptEx calls.  OnIOCompleted will
+  // drain them one by one when the ABORTED completions arrive.  Each
+  // AcceptContext holds a self_ref to keep the Impl alive until then.
   lock.unlock();
 
   // Release self-hold (allows final deletion).
@@ -142,7 +167,7 @@ void TCPServerSocket::Impl::Shutdown() {
     closesocket(listen_socket_);
     listen_socket_ = INVALID_SOCKET;
   }
-  pending_accepts_.clear();
+  // Do NOT clear pending_accepts_ — same reason as Close().
   // NOTE: Do NOT release self-hold here.  Orphan() manages the self-hold
   // lifecycle  --  releasing too early causes UAF when IOCP completions for
   // pending AcceptEx calls are still in the queue.
@@ -194,8 +219,8 @@ void TCPServerSocket::Impl::PostAccept() {
       lock.unlock();
       io_runner_->PostDelayedTask(
           FROM_HERE,
-          BindOnce([](TCPServerSocket::Impl* server) { server->PostAccept(); },
-                   this),
+          BindOnce([](scoped_refptr<Impl> self) { self->PostAccept(); },
+                   WrapRefCounted(this)),
           kPostAcceptRetryDelay);
     }
     return;
@@ -209,8 +234,8 @@ void TCPServerSocket::Impl::PostAccept() {
       lock.unlock();
       io_runner_->PostDelayedTask(
           FROM_HERE,
-          BindOnce([](TCPServerSocket::Impl* server) { server->PostAccept(); },
-                   this),
+          BindOnce([](scoped_refptr<Impl> self) { self->PostAccept(); },
+                   WrapRefCounted(this)),
           kPostAcceptRetryDelay);
     }
     return;
@@ -221,6 +246,7 @@ void TCPServerSocket::Impl::PostAccept() {
   ctx->addr_buffer = addr_buf;
   ctx->callback = accept_callback_;
   ctx->io_runner = io_runner_;
+  ctx->self_ref = WrapRefCounted(this);
   pending_accepts_.push_back(ctx);
   lock.unlock();
 
@@ -245,8 +271,8 @@ void TCPServerSocket::Impl::PostAccept() {
     if (io_runner_) {
       io_runner_->PostDelayedTask(
           FROM_HERE,
-          BindOnce([](TCPServerSocket::Impl* server) { server->PostAccept(); },
-                   this),
+          BindOnce([](scoped_refptr<Impl> self) { self->PostAccept(); },
+                   WrapRefCounted(this)),
           kPostAcceptRetryDelay);
     }
   }
@@ -262,6 +288,9 @@ void TCPServerSocket::Impl::OnIOCompleted(
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   auto* ctx = CONTAINING_RECORD(overlapped_context, AcceptContext,
                                   overlapped);
+  // Transfer self_ref to a local — keeps Impl alive for the duration of
+  // this call, even if Close()/Orphan() tries to tear it down.
+  scoped_refptr<Impl> self_ref = std::move(ctx->self_ref);
   SOCKET client = ctx->client_socket;
 
   bool was_pending = false;
@@ -288,7 +317,7 @@ void TCPServerSocket::Impl::OnIOCompleted(
         ReleaseSelfHoldUnderLock(lock2);
       }
     }
-    return;
+    return;  // self_ref released here → may delete Impl
   }
 
   // Normal path  --  ctx was pending; post another accept unless closed.

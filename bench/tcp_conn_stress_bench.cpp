@@ -181,6 +181,7 @@ void RunStressTest(int total_connections) {
             if (!ok) {
               client_fail.fetch_add(1);
             }
+            client->Close();  // Explicit close to trigger proper cleanup.
             if (client_done.fetch_add(1) + 1 == total_connections) {
               all_done.Signal();
             }

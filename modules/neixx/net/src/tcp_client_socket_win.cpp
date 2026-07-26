@@ -144,6 +144,9 @@ void TCPClientSocket::Impl::Orphan() {
             self->StartOrphanDrain();
           }, WrapRefCounted(this)));
     }
+  } else {
+    // Close() was called before the shell destructor — release self-hold.
+    ReleaseSelfHoldIfNeeded();
   }
 }
 

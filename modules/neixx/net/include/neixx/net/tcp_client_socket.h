@@ -19,6 +19,8 @@ class TaskRunner;
 
 namespace net {
 
+class TLSServerSocket;
+
 // =============================================================================
 // TCPClientSocket  --  async TCP connect + read/write
 // =============================================================================
@@ -60,13 +62,6 @@ class NEI_API TCPClientSocket : public AsyncInputStream,
                ConnectCallback callback,
                scoped_refptr<TaskRunner> io_runner);
 
-  // Returns the IO TaskRunner this socket is bound to.  All ReadAsync /
-  // WriteAsync callbacks are guaranteed to execute on this runner.
-  // For accepted sockets, this is the worker thread selected during
-  // TCPServerSocket accept.  For Connect()-ed sockets, this is the
-  // io_runner passed to Connect().
-  scoped_refptr<TaskRunner> io_task_runner() const;
-
   // ---- AsyncInputStream ------------------------------------------------
 
   void ReadAsync(scoped_refptr<IOBuffer> buf,
@@ -100,6 +95,11 @@ class NEI_API TCPClientSocket : public AsyncInputStream,
   explicit TCPClientSocket(Impl* impl);
 
  private:
+  friend class TLSServerSocket;
+
+  // Returns the IO TaskRunner this socket is bound to.
+  scoped_refptr<TaskRunner> io_task_runner() const;
+
   Impl* impl_ = nullptr;  // Raw pointer  --  lifetime managed by RefCountedThreadSafe
 };
 
