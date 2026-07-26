@@ -75,6 +75,12 @@ if(WIN32)
   target_link_libraries(tcp_cross_bench PRIVATE ws2_32)
 endif()
 
+add_executable(tls_throughput_bench tls_throughput_bench.cpp)
+target_link_libraries(tls_throughput_bench PRIVATE nei::nei mbedtls mbedx509 mbedcrypto)
+if(WIN32)
+  target_link_libraries(tls_throughput_bench PRIVATE ws2_32)
+endif()
+
 if(WIN32)
   add_executable(pipe_stream_cross_process_bench
                  pipe_stream_cross_process_bench_win.cpp)
