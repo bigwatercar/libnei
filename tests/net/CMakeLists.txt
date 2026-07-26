@@ -1,6 +1,9 @@
 # TCP socket unit tests
 target_sources(nei_tests PRIVATE tcp_socket_unittest.cpp)
 
+# TLS socket unit tests
+target_sources(nei_tests PRIVATE tls_socket_unittest.cpp)
+
 # UDP socket unit tests
 target_sources(nei_tests PRIVATE udp_socket_unittest.cpp)
 

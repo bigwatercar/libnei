@@ -25,6 +25,17 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# On Linux/Unix, hide all symbols by default.  Public API symbols are
+# explicitly exported via NEI_API (__attribute__((visibility("default")))).
+# This prevents third-party static libraries (mbedtls, c-ares) from leaking
+# their symbols into libnei.so's public ABI.
+if(NOT WIN32)
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+  set(CMAKE_C_VISIBILITY_PRESET hidden)
+  set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+  set(CMAKE_VISIBILITY_INLINES_HIDDEN YES)
+endif()
+
 # Treat source and execution character sets as UTF-8 on MSVC.
 # Without this flag, MSVC encodes \uXXXX escapes in narrow string
 # literals using the system ANSI code page (e.g. CP936), producing
@@ -104,12 +115,10 @@ endif()
 if(BUILD_SHARED_LIBS)
   target_compile_definitions(nei PRIVATE NEI_EXPORTS)
   if(NOT WIN32)
-    set_target_properties(
-      nei
-      PROPERTIES C_VISIBILITY_PRESET hidden
-                 CXX_VISIBILITY_PRESET hidden
-                 VISIBILITY_INLINES_HIDDEN YES
-                 POSITION_INDEPENDENT_CODE ON
+    # Hide all symbols originating from static libraries (mbedtls, c-ares, etc.)
+    # so they don't leak into the public ABI of libnei.so.
+    target_link_options(nei PRIVATE
+      -Wl,--exclude-libs,ALL
     )
   endif()
 else()

@@ -6,6 +6,12 @@ set(NEIXX_NET_SOURCES
   include/neixx/net/tcp_server_socket.h
   include/neixx/net/tcp_client_socket.h
   include/neixx/net/udp_socket.h
+  include/neixx/net/ssl_context.h
+  src/ssl_context.cpp
+  include/neixx/net/tls_client_socket.h
+  src/tls_client_socket.cpp
+  include/neixx/net/tls_server_socket.h
+  src/tls_server_socket.cpp
   src/ip_address.cpp
   src/host_resolver_impl.h
   src/host_resolver_impl.cpp
