@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <nei/macros/nei_export.h>
 
@@ -94,6 +95,16 @@ class NEI_API SSLContext {
   // verification).  Required when PeerVerify::kRequired is used with
   // TLS 1.3.  Ignored for Mode::Server.
   void SetHostname(const std::string& hostname);
+
+  // ---------------------------------------------------------------------------
+  // ALPN (Application-Layer Protocol Negotiation)
+  // ---------------------------------------------------------------------------
+
+  // Sets the list of supported ALPN protocols in client preference order.
+  // Each string must be a single protocol ID (e.g. "h2", "http/1.1").
+  // The negotiated protocol is available post-handshake via the
+  // TLSClientSocket.
+  void SetAlpnProtocols(const std::vector<std::string>& protocols);
 
   // ---------------------------------------------------------------------------
   // Internal accessors — for TLSClientSocket / TLSServerSocket Impl

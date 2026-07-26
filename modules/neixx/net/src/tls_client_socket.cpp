@@ -3,13 +3,13 @@
 
 #include <algorithm>
 #include <cstring>
-#include <mutex>
 
 #include <mbedtls/ssl.h>
 
 #include <nei/debug/check.h>
 #include <neixx/functional/bind.h>
 #include <neixx/memory/ref_counted.h>
+#include <neixx/task/sequence_checker.h>
 
 namespace nei::net {
 
@@ -18,16 +18,18 @@ static constexpr size_t kTlsChunkSize = 16384;
 // =============================================================================
 // BIO callbacks — send accumulates, recv drains from buffer
 // =============================================================================
+//
+// All BIO operations execute on the IO thread that owns the TLSClientSocket
+// (guaranteed by mbedtls being called only from our DCHECK'd entry points).
+// No locking is needed — the entire state machine is single-threaded.
 
 struct TlsBioCtx {
   std::vector<unsigned char> send_buf;
-  std::mutex send_mutex;
   std::vector<unsigned char> recv_buf;
 };
 
 static int BioSend(void* ctx, const unsigned char* data, size_t len) {
   auto* bio = static_cast<TlsBioCtx*>(ctx);
-  std::lock_guard<std::mutex> lock(bio->send_mutex);
   bio->send_buf.insert(bio->send_buf.end(), data, data + len);
   return static_cast<int>(len);
 }
@@ -55,6 +57,10 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     mbedtls_ssl_set_bio(&ssl_, &bio_, BioSend, BioRecv, nullptr);
     if (!ctx->hostname().empty())
       mbedtls_ssl_set_hostname(&ssl_, ctx->hostname().c_str());
+    // The constructor may run on an arbitrary thread; the sequence checker
+    // will bind to the IO thread on the first DCHECK call (in StartHandshake
+    // or the first transport callback via OnTcpConnect/RunHandshakeLoop).
+    DETACH_FROM_SEQUENCE(sequence_checker_);
   }
 
   ~Impl() { mbedtls_ssl_free(&ssl_); }
@@ -80,6 +86,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
 
   void ReadAsync(scoped_refptr<IOBuffer> buf, size_t len,
                  AsyncInputStream::IOReadCallback cb) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     if (state_ != State::Connected) {
       PostFail(std::move(cb));
       return;
@@ -90,6 +97,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
 
   void WriteAsync(scoped_refptr<IOBuffer> buf, size_t len,
                   AsyncOutputStream::IOWriteCallback cb) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     if (state_ != State::Connected) {
       PostFail(std::move(cb));
       return;
@@ -99,6 +107,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
   }
 
   void Close() {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     if (state_ == State::Closed) return;
     state_ = State::Closed;
     if (handshake_done_)
@@ -113,6 +122,11 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     ClearPending();
   }
 
+  std::string GetNegotiatedProtocol() const {
+    const char* proto = mbedtls_ssl_get_alpn_protocol(&ssl_);
+    return proto ? std::string(proto) : std::string();
+  }
+
  private:
   enum class State { Idle, Handshaking, Connected, Closed };
 
@@ -124,6 +138,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
   }
 
   void RunHandshakeLoop() {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     if (handshake_completed_)
       return;
     for (;;) {
@@ -139,12 +154,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
       // ServerHello).  We must flush pending sends FIRST, regardless
       // of the return code — otherwise the ClientHello stays stuck
       // in our memory buffer and the peer never receives it.
-      bool has_pending_send;
-      {
-        std::lock_guard<std::mutex> lock(bio_.send_mutex);
-        has_pending_send = !bio_.send_buf.empty();
-      }
-      if (has_pending_send) {
+      if (!bio_.send_buf.empty()) {
         FlushBioAsync();
         return;
       }
@@ -164,6 +174,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     auto buf = MakeRefCounted<IOBufferWithSize>(kTlsChunkSize);
     transport_->ReadAsync(buf, kTlsChunkSize,
         [self = scoped_refptr<Impl>(this), buf](bool ok, size_t n) {
+          if (self->state_ == State::Closed) return;
           if (!ok) { self->NotifyConnect(false); return; }
           if (n > 0) {
             self->bio_.recv_buf.insert(self->bio_.recv_buf.end(),
@@ -175,10 +186,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
 
   void FlushBioAsync() {
     std::vector<unsigned char> data;
-    {
-      std::lock_guard<std::mutex> lock(bio_.send_mutex);
-      data.swap(bio_.send_buf);
-    }
+    data.swap(bio_.send_buf);
     if (data.empty()) {
       RunHandshakeLoop();
       return;
@@ -187,6 +195,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     std::memcpy(wbuf->data(), data.data(), data.size());
     transport_->WriteAsync(wbuf, data.size(),
         [self = scoped_refptr<Impl>(this)](bool ok, size_t) {
+          if (self->state_ == State::Closed) return;
           if (!ok) { self->NotifyConnect(false); return; }
           self->RunHandshakeLoop();
         });
@@ -194,10 +203,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
 
   void FlushBioThenNotify() {
     std::vector<unsigned char> data;
-    {
-      std::lock_guard<std::mutex> lock(bio_.send_mutex);
-      data.swap(bio_.send_buf);
-    }
+    data.swap(bio_.send_buf);
     if (data.empty()) {
       state_ = State::Connected;
       handshake_done_ = true;
@@ -208,6 +214,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     std::memcpy(wbuf->data(), data.data(), data.size());
     transport_->WriteAsync(wbuf, data.size(),
         [self = scoped_refptr<Impl>(this)](bool ok, size_t) {
+          if (self->state_ == State::Closed) return;
           if (!ok) { self->NotifyConnect(false); return; }
           self->state_ = State::Connected;
           self->handshake_done_ = true;
@@ -217,6 +224,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
 
   // ----- Post-handshake -----
   void TryReadDecrypt() {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     int ret = mbedtls_ssl_read(&ssl_,
         reinterpret_cast<unsigned char*>(read_buf_->data()), read_len_);
     if (ret > 0) {
@@ -229,6 +237,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
       auto chunk = MakeRefCounted<IOBufferWithSize>(kTlsChunkSize);
       transport_->ReadAsync(chunk, kTlsChunkSize,
           [self = scoped_refptr<Impl>(this), chunk](bool ok, size_t n) {
+            if (self->state_ == State::Closed) return;
             if (!ok) { self->NotifyReadError(); return; }
             self->bio_.recv_buf.insert(self->bio_.recv_buf.end(),
                                        chunk->data(), chunk->data() + n);
@@ -240,6 +249,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
   }
 
   void TryWriteEncrypt() {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     int ret = mbedtls_ssl_write(&ssl_,
         reinterpret_cast<const unsigned char*>(write_buf_->data()), write_len_);
     if (ret > 0) {
@@ -263,10 +273,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     if (write_in_flight_)
       return;  // Completion callback will drain send_buf when current write finishes.
     std::vector<unsigned char> data;
-    {
-      std::lock_guard<std::mutex> lock(bio_.send_mutex);
-      data.swap(bio_.send_buf);
-    }
+    data.swap(bio_.send_buf);
     if (data.empty())
       return;
     write_in_flight_ = true;
@@ -274,6 +281,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     std::memcpy(wbuf->data(), data.data(), data.size());
     transport_->WriteAsync(wbuf, data.size(),
         [self = scoped_refptr<Impl>(this)](bool, size_t) {
+          if (self->state_ == State::Closed) return;
           self->write_in_flight_ = false;
           // Flush any data that accumulated during the write.
           self->FlushBio();
@@ -327,6 +335,8 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
   AsyncInputStream::IOReadCallback read_cb_;
   scoped_refptr<IOBuffer> write_buf_;  size_t write_len_ = 0;
   AsyncOutputStream::IOWriteCallback write_cb_;
+
+  DECLARE_SEQUENCE_CHECKER(sequence_checker_);
 };
 
 // =============================================================================
@@ -373,5 +383,9 @@ void TLSClientSocket::WriteAsync(scoped_refptr<IOBuffer> buf, size_t len,
 }
 
 void TLSClientSocket::Close() { impl_->Close(); }
+
+std::string TLSClientSocket::GetNegotiatedProtocol() const {
+  return impl_->GetNegotiatedProtocol();
+}
 
 }  // namespace nei::net

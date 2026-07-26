@@ -49,6 +49,7 @@ class TCPClientSocket::Impl final
                   AsyncOutputStream::IOWriteCallback callback);
   void Close();
   void ShutdownWrite();
+  scoped_refptr<TaskRunner> io_task_runner() const { return io_runner_; }
 
   // RefCountedThreadSafe release path  --  calls Close() and then the
   // implicit destructor chain.

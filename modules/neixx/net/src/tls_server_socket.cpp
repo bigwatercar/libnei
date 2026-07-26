@@ -32,13 +32,18 @@ class TLSServerSocket::Impl final : public RefCountedThreadSafe<Impl> {
 
   void OnAccept(bool ok, std::unique_ptr<TCPClientSocket> tcp) {
     if (!ok) { if (cb_) cb_(false, nullptr); return; }
+    // The underlying TCP socket is already bound to a specific IO worker
+    // thread (via TCPServerSocket's RunnerSelector during accept).  The
+    // TLS state machine MUST run on the same thread — extracting the
+    // runner from the TCP socket guarantees thread affinity.
+    scoped_refptr<TaskRunner> io_runner = tcp->io_task_runner();
     auto tls = new TLSClientSocket(std::move(tcp), ctx_);
     tls->StartHandshake(
         [self = scoped_refptr<Impl>(this), tls](bool s) {
           std::unique_ptr<TLSClientSocket> owned(tls);
           if (self->cb_) self->cb_(s, std::move(owned));
         },
-        PickWorker());
+        std::move(io_runner));
   }
 
   SSLContext* ctx_;

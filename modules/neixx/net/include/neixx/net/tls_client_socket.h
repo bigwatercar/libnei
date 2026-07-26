@@ -78,6 +78,11 @@ class NEI_API TLSClientSocket : public AsyncInputStream,
                   IOWriteCallback callback) override;
   void Close() override;
 
+  // Returns the ALPN protocol negotiated during the TLS handshake.
+  // Empty string if ALPN was not configured or the handshake has not
+  // completed.
+  std::string GetNegotiatedProtocol() const;
+
  private:
   class Impl;
   Impl* impl_ = nullptr;

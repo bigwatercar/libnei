@@ -9,6 +9,8 @@
 #include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
 
+#include <nei/log/log.h>
+
 namespace nei::net {
 
 // =============================================================================
@@ -61,7 +63,7 @@ class SSLContext::Impl {
         cert_pem.size());
     if (ret != 0) {
       char buf[128]; mbedtls_strerror(ret, buf, sizeof(buf));
-      fprintf(stderr, "[SSLContext] cert parse: %s\n", buf);
+      NEI_LOG(NEI_L_ERROR, "[SSLContext] cert parse: %s", buf);
       return false;
     }
 
@@ -72,14 +74,14 @@ class SSLContext::Impl {
         key_pem.size(), pwd, 0, mbedtls_ctr_drbg_random, &drbg_);
     if (ret != 0) {
       char buf[128]; mbedtls_strerror(ret, buf, sizeof(buf));
-      fprintf(stderr, "[SSLContext] key parse: %s\n", buf);
+      NEI_LOG(NEI_L_ERROR, "[SSLContext] key parse: %s", buf);
       return false;
     }
 
     ret = mbedtls_ssl_conf_own_cert(&config_, &server_cert_, &private_key_);
     if (ret != 0) {
       char buf[128]; mbedtls_strerror(ret, buf, sizeof(buf));
-      fprintf(stderr, "[SSLContext] conf_own_cert: %s\n", buf);
+      NEI_LOG(NEI_L_ERROR, "[SSLContext] conf_own_cert: %s", buf);
       return false;
     }
     return true;
@@ -104,6 +106,18 @@ class SSLContext::Impl {
 
   void SetHostname(const std::string& hostname) {
     hostname_ = hostname;
+  }
+
+  void SetAlpnProtocols(const std::vector<std::string>& protocols) {
+    alpn_strings_ = protocols;
+    alpn_ptrs_.clear();
+    for (const auto& p : alpn_strings_)
+      alpn_ptrs_.push_back(p.c_str());
+    alpn_ptrs_.push_back(nullptr);  // sentinel
+    if (!alpn_strings_.empty()) {
+      mbedtls_ssl_conf_alpn_protocols(
+          &config_, alpn_ptrs_.data());
+    }
   }
 
   // ---- Accessors ----
@@ -131,6 +145,8 @@ class SSLContext::Impl {
   SSLContext::Mode mode_;
   PeerVerify peer_verify_;
   std::string hostname_;
+  std::vector<std::string> alpn_strings_;
+  std::vector<const char*> alpn_ptrs_;
   mbedtls_ssl_config config_;
   mbedtls_x509_crt server_cert_;
   mbedtls_pk_context private_key_;
@@ -161,6 +177,10 @@ void SSLContext::SetPeerVerify(PeerVerify mode) {
 
 void SSLContext::SetHostname(const std::string& hostname) {
   impl_->SetHostname(hostname);
+}
+
+void SSLContext::SetAlpnProtocols(const std::vector<std::string>& protocols) {
+  impl_->SetAlpnProtocols(protocols);
 }
 
 mbedtls_ssl_config* SSLContext::config() {

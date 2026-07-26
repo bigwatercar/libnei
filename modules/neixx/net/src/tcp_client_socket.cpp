@@ -42,6 +42,10 @@ void TCPClientSocket::WriteAsync(scoped_refptr<IOBuffer> buf,
   impl_->WriteAsync(std::move(buf), buf_len, std::move(callback));
 }
 
+scoped_refptr<TaskRunner> TCPClientSocket::io_task_runner() const {
+  return impl_ ? impl_->io_task_runner() : nullptr;
+}
+
 void TCPClientSocket::Close() { if (impl_) impl_->Close(); }
 
 void TCPClientSocket::ShutdownWrite() { if (impl_) impl_->ShutdownWrite(); }

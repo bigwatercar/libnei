@@ -11,6 +11,7 @@
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/net/ip_end_point.h>
+#include <neixx/task/task_runner.h>
 
 namespace nei {
 
@@ -58,6 +59,13 @@ class NEI_API TCPClientSocket : public AsyncInputStream,
   bool Connect(const IPEndPoint& addr,
                ConnectCallback callback,
                scoped_refptr<TaskRunner> io_runner);
+
+  // Returns the IO TaskRunner this socket is bound to.  All ReadAsync /
+  // WriteAsync callbacks are guaranteed to execute on this runner.
+  // For accepted sockets, this is the worker thread selected during
+  // TCPServerSocket accept.  For Connect()-ed sockets, this is the
+  // io_runner passed to Connect().
+  scoped_refptr<TaskRunner> io_task_runner() const;
 
   // ---- AsyncInputStream ------------------------------------------------
 
