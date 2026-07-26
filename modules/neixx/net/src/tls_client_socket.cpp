@@ -149,7 +149,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
 
   void RunHandshakeLoop() {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    if (handshake_completed_)
+    if (handshake_completed_ || state_ == State::Closed)
       return;
     for (;;) {
       int ret = mbedtls_ssl_handshake(&ssl_);
