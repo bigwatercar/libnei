@@ -26,6 +26,7 @@ static constexpr size_t kTlsChunkSize = 16384;
 struct TlsBioCtx {
   std::vector<unsigned char> send_buf;
   std::vector<unsigned char> recv_buf;
+  size_t recv_offset = 0;  // Read cursor — avoids O(N²) memmove on erase.
 };
 
 static int BioSend(void* ctx, const unsigned char* data, size_t len) {
@@ -36,11 +37,20 @@ static int BioSend(void* ctx, const unsigned char* data, size_t len) {
 
 static int BioRecv(void* ctx, unsigned char* buf, size_t len) {
   auto* bio = static_cast<TlsBioCtx*>(ctx);
-  if (bio->recv_buf.empty())
+  size_t available = bio->recv_buf.size() - bio->recv_offset;
+  if (available == 0)
     return MBEDTLS_ERR_SSL_WANT_READ;
-  size_t n = std::min(len, bio->recv_buf.size());
-  std::memcpy(buf, bio->recv_buf.data(), n);
-  bio->recv_buf.erase(bio->recv_buf.begin(), bio->recv_buf.begin() + n);
+  size_t n = std::min(len, available);
+  std::memcpy(buf, bio->recv_buf.data() + bio->recv_offset, n);
+  bio->recv_offset += n;
+  // Compact when the gap exceeds 64 KB — one bulk memmove instead of
+  // one per mbedtls record (~16 KB), avoiding O(N²) on high-throughput
+  // streams.
+  if (bio->recv_offset > 65536) {
+    bio->recv_buf.erase(bio->recv_buf.begin(),
+                        bio->recv_buf.begin() + bio->recv_offset);
+    bio->recv_offset = 0;
+  }
   return static_cast<int>(n);
 }
 
@@ -175,11 +185,12 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     transport_->ReadAsync(buf, kTlsChunkSize,
         [self = scoped_refptr<Impl>(this), buf](bool ok, size_t n) {
           if (self->state_ == State::Closed) return;
-          if (!ok) { self->NotifyConnect(false); return; }
-          if (n > 0) {
-            self->bio_.recv_buf.insert(self->bio_.recv_buf.end(),
-                                       buf->data(), buf->data() + n);
-          }
+          // n == 0 is TCP EOF — the peer sent FIN.  Must NOT retry,
+          // or we enter an infinite spin (ReadAsync → EOF →
+          // RunHandshakeLoop → WANT_READ → ReadAsync → EOF → ...).
+          if (!ok || n == 0) { self->NotifyConnect(false); return; }
+          self->bio_.recv_buf.insert(self->bio_.recv_buf.end(),
+                                     buf->data(), buf->data() + n);
           self->RunHandshakeLoop();
         });
   }
@@ -238,7 +249,8 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
       transport_->ReadAsync(chunk, kTlsChunkSize,
           [self = scoped_refptr<Impl>(this), chunk](bool ok, size_t n) {
             if (self->state_ == State::Closed) return;
-            if (!ok) { self->NotifyReadError(); return; }
+            // n == 0 is TCP EOF — the peer sent FIN mid-stream.
+            if (!ok || n == 0) { self->NotifyReadError(); return; }
             self->bio_.recv_buf.insert(self->bio_.recv_buf.end(),
                                        chunk->data(), chunk->data() + n);
             self->TryReadDecrypt();
