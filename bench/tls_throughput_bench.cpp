@@ -239,7 +239,7 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
           // The inner ReadAsync callback holds a strong reference
           // to keep do_read alive while a read is pending.
           std::weak_ptr<std::function<void()>> do_read_weak = do_read;
-          *do_read = [=, do_read_weak]() {
+          *do_read = [=]() {
             auto chunk = nei::MakeRefCounted<nei::IOBufferWithSize>(buffer_size);
             sock->ReadAsync(chunk, buffer_size,
                 [=, dr = do_read_weak.lock()](bool s, size_t n) {
@@ -271,7 +271,7 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
           auto do_write = std::make_shared<std::function<void()>>();
           // Same weak_ptr pattern as do_read above.
           std::weak_ptr<std::function<void()>> do_write_weak = do_write;
-          *do_write = [=, do_write_weak]() {
+          *do_write = [=]() {
             size_t remain = total_bytes - *offset;
             if (remain == 0) {
               client->Close();

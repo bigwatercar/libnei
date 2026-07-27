@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <deque>
 
 #include <mbedtls/ssl.h>
 
@@ -24,34 +25,50 @@ static constexpr size_t kTlsChunkSize = 16384;
 // No locking is needed — the entire state machine is single-threaded.
 
 struct TlsBioCtx {
-  std::vector<unsigned char> send_buf;
-  std::vector<unsigned char> recv_buf;
-  size_t recv_offset = 0;  // Read cursor — avoids O(N²) memmove on erase.
+  // Read path: zero-copy queue.  Transport ReadAsync callbacks push
+  // {IOBuffer, byte_count} records; BioRecv drains from the front.
+  struct RecvRecord {
+    scoped_refptr<IOBuffer> buf;
+    size_t len = 0;
+  };
+  std::deque<RecvRecord> recv_queue;
+  size_t recv_head_offset = 0;  // consumed bytes from front buffer
+
+  // Write path: BioSend wraps ciphertext into IOBufferWithSize and
+  // pushes here.  FlushBio drains the queue with write serialization.
+  struct SendRecord {
+    scoped_refptr<IOBuffer> buf;
+    size_t len = 0;
+  };
+  std::deque<SendRecord> send_queue;
 };
 
 static int BioSend(void* ctx, const unsigned char* data, size_t len) {
   auto* bio = static_cast<TlsBioCtx*>(ctx);
-  bio->send_buf.insert(bio->send_buf.end(), data, data + len);
+  // The ONLY copy on the write path: ciphertext → IOBufferWithSize.
+  auto wbuf = MakeRefCounted<IOBufferWithSize>(len);
+  std::memcpy(wbuf->data(), data, len);
+  bio->send_queue.push_back({std::move(wbuf), len});
   return static_cast<int>(len);
 }
 
 static int BioRecv(void* ctx, unsigned char* buf, size_t len) {
   auto* bio = static_cast<TlsBioCtx*>(ctx);
-  size_t available = bio->recv_buf.size() - bio->recv_offset;
-  if (available == 0)
-    return MBEDTLS_ERR_SSL_WANT_READ;
-  size_t n = std::min(len, available);
-  std::memcpy(buf, bio->recv_buf.data() + bio->recv_offset, n);
-  bio->recv_offset += n;
-  // Compact when the gap exceeds 64 KB — one bulk memmove instead of
-  // one per mbedtls record (~16 KB), avoiding O(N²) on high-throughput
-  // streams.
-  if (bio->recv_offset > 65536) {
-    bio->recv_buf.erase(bio->recv_buf.begin(),
-                        bio->recv_buf.begin() + bio->recv_offset);
-    bio->recv_offset = 0;
+  while (!bio->recv_queue.empty()) {
+    auto& front = bio->recv_queue.front();
+    size_t remain = front.len - bio->recv_head_offset;
+    if (remain == 0) {
+      bio->recv_queue.pop_front();
+      bio->recv_head_offset = 0;
+      continue;
+    }
+    // The ONLY copy on the read path: IOBuffer → mbedtls buffer.
+    size_t n = std::min(len, remain);
+    std::memcpy(buf, front.buf->data() + bio->recv_head_offset, n);
+    bio->recv_head_offset += n;
+    return static_cast<int>(n);
   }
-  return static_cast<int>(n);
+  return MBEDTLS_ERR_SSL_WANT_READ;
 }
 
 // =============================================================================
@@ -123,8 +140,8 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     if (handshake_done_)
       mbedtls_ssl_close_notify(&ssl_);
     // Initiate flush-then-close: if there is buffered data still in
-    // send_buf or a WriteAsync still in flight, we wait for the
-    // transport write to finish and drain send_buf, then close.
+    // send_queue or a WriteAsync still in flight, we wait for the
+    // transport write to finish and drain send_queue, then close.
     CloseAfterFlush();
   }
 
@@ -135,11 +152,11 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
   }
 
   // Called by Close() and by FlushBio's completion callback.
-  // If send_buf still has data or a transport write is in flight,
+  // If send_queue still has data or a transport write is in flight,
   // waits for the flush to complete.  Otherwise closes transport.
   void CloseAfterFlush() {
-    if (!bio_.send_buf.empty() || write_in_flight_) {
-      if (!write_in_flight_ && !bio_.send_buf.empty())
+    if (!bio_.send_queue.empty() || write_in_flight_) {
+      if (!write_in_flight_ && !bio_.send_queue.empty())
         FlushBio();
       return;  // FlushBio completion will call CloseAfterFlush again
     }
@@ -184,7 +201,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
       // ServerHello).  We must flush pending sends FIRST, regardless
       // of the return code — otherwise the ClientHello stays stuck
       // in our memory buffer and the peer never receives it.
-      if (!bio_.send_buf.empty()) {
+      if (!bio_.send_queue.empty()) {
         FlushBioAsync();
         return;
       }
@@ -209,48 +226,31 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
           // or we enter an infinite spin (ReadAsync → EOF →
           // RunHandshakeLoop → WANT_READ → ReadAsync → EOF → ...).
           if (!ok || n == 0) { self->NotifyConnect(false); return; }
-          self->bio_.recv_buf.insert(self->bio_.recv_buf.end(),
-                                     buf->data(), buf->data() + n);
+          self->bio_.recv_queue.push_back({buf, n});
           self->RunHandshakeLoop();
         });
   }
 
   void FlushBioAsync() {
-    std::vector<unsigned char> data;
-    data.swap(bio_.send_buf);
-    if (data.empty()) {
+    if (bio_.send_queue.empty()) {
       RunHandshakeLoop();
       return;
     }
-    auto wbuf = MakeRefCounted<IOBufferWithSize>(data.size());
-    std::memcpy(wbuf->data(), data.data(), data.size());
-    transport_->WriteAsync(wbuf, data.size(),
-        [self = scoped_refptr<Impl>(this)](bool ok, size_t) {
-          if (self->state_ == State::Closed || self->state_ == State::Closing) return;
-          if (!ok) { self->NotifyConnect(false); return; }
-          self->RunHandshakeLoop();
-        });
+    FlushBio([this] { RunHandshakeLoop(); });
   }
 
   void FlushBioThenNotify() {
-    std::vector<unsigned char> data;
-    data.swap(bio_.send_buf);
-    if (data.empty()) {
+    if (bio_.send_queue.empty()) {
       state_ = State::Connected;
       handshake_done_ = true;
       NotifyConnect(true);
       return;
     }
-    auto wbuf = MakeRefCounted<IOBufferWithSize>(data.size());
-    std::memcpy(wbuf->data(), data.data(), data.size());
-    transport_->WriteAsync(wbuf, data.size(),
-        [self = scoped_refptr<Impl>(this)](bool ok, size_t) {
-          if (self->state_ == State::Closed || self->state_ == State::Closing) return;
-          if (!ok) { self->NotifyConnect(false); return; }
-          self->state_ = State::Connected;
-          self->handshake_done_ = true;
-          self->NotifyConnect(true);
-        });
+    FlushBio([this] {
+      state_ = State::Connected;
+      handshake_done_ = true;
+      NotifyConnect(true);
+    });
   }
 
   // ----- Post-handshake -----
@@ -271,8 +271,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
             if (self->state_ == State::Closed || self->state_ == State::Closing) return;
             // n == 0 is TCP EOF — the peer sent FIN mid-stream.
             if (!ok || n == 0) { self->NotifyReadError(); return; }
-            self->bio_.recv_buf.insert(self->bio_.recv_buf.end(),
-                                       chunk->data(), chunk->data() + n);
+            self->bio_.recv_queue.push_back({chunk, n});
             self->TryReadDecrypt();
           });
       return;
@@ -301,22 +300,23 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     NotifyWriteError();
   }
 
-  void FlushBio() {
+  void FlushBio(std::function<void()> on_flushed = {}) {
     if (write_in_flight_)
-      return;  // Completion callback will drain send_buf when current write finishes.
-    std::vector<unsigned char> data;
-    data.swap(bio_.send_buf);
-    if (data.empty())
+      return;  // Completion callback drains send_queue when current write finishes.
+    if (bio_.send_queue.empty()) {
+      if (on_flushed) on_flushed();
       return;
+    }
     write_in_flight_ = true;
-    auto wbuf = MakeRefCounted<IOBufferWithSize>(data.size());
-    std::memcpy(wbuf->data(), data.data(), data.size());
-    transport_->WriteAsync(wbuf, data.size(),
-        [self = scoped_refptr<Impl>(this)](bool, size_t) {
+    auto& front = bio_.send_queue.front();
+    transport_->WriteAsync(front.buf, front.len,
+        [self = scoped_refptr<Impl>(this),
+         on_flushed = std::move(on_flushed)](bool, size_t) {
           if (self->state_ == State::Closed) return;
+          self->bio_.send_queue.pop_front();
           self->write_in_flight_ = false;
-          // Flush any data that accumulated during the write.
-          self->FlushBio();
+          // Drain next — pass on_flushed so it fires only when queue is empty.
+          self->FlushBio(std::move(on_flushed));
           if (self->state_ == State::Closing)
             self->CloseAfterFlush();
         });
