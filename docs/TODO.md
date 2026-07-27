@@ -1,6 +1,26 @@
 ﻿# libnei — TODO & Roadmap
 
-**Updated**: 2026-07-22
+**Updated**: 2026-07-27
+
+---
+
+## Known Minor Leaks (P3)
+
+### `IoThread` dtor: WeakPtrFactory::InternalFlag residual (~1KB) 🔧 2026-07-27
+
+**Symptom**: ASAN reports ~1KB (17 allocations) indirect leak when an `IoThread`
+is destroyed — `WeakPtrFactory<internal::TaskQueue>::InternalFlag` objects not
+fully released because outstanding `WeakPtr`s still reference them.
+
+**Impact**: negligible — fixed ~1KB regardless of data size or thread count,
+reclaimed by OS at process exit.  No OOM risk, no performance degradation.
+
+**Affected benches**: `tls_throughput_bench`, `tcp_loopback_bench`, any bench
+creating an `IoThread`.
+
+**Next steps**: investigate `SequenceManager::Shutdown()` / `TaskQueue` cleanup
+to ensure `WeakPtrFactory` invalidation drains all outstanding `WeakPtr`s before
+the factory is destroyed.  Low priority.
 
 ---
 
