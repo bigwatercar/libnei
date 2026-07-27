@@ -39,6 +39,9 @@ target_link_libraries(task_thread_bench PRIVATE nei::nei)
 add_executable(task_threadpool_bench task_threadpool_bench.cpp)
 target_link_libraries(task_threadpool_bench PRIVATE nei::nei)
 
+add_executable(post_job_bench post_job_bench.cpp)
+target_link_libraries(post_job_bench PRIVATE nei::nei)
+
 add_executable(task_priority_perf_demo task_priority_perf_demo.cpp)
 target_link_libraries(task_priority_perf_demo PRIVATE nei::nei)
 

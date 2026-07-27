@@ -16,12 +16,15 @@
   include/neixx/task/task_runner.h
   include/neixx/task/task_traits.h
   include/neixx/task/thread_checker.h
+  include/neixx/task/post_job.h
   include/neixx/task/thread_pool_instance.h
   include/neixx/task/thread_pool.h
   include/neixx/task/thread_task_runner_handle.h
   include/neixx/task/timer.h
+  include/neixx/task/internal/job_task_source.h
   src/internal/delayed_task_manager.cpp
   src/internal/delayed_task_manager.h
+  src/internal/job_task_source.cpp
   src/internal/pooled_task_runner_utils.cpp
   src/internal/pooled_task_runner_utils.h
   src/internal/pooled_task_source.cpp
@@ -30,6 +33,7 @@
   src/internal/task_tracing.cpp
   src/message_loop/message_pump_default.cpp
   src/message_loop/message_pump_default.h
+  src/post_job.cpp
   src/run_loop.cpp
   src/scoped_blocking_call.cpp
   src/sequence_manager.cpp

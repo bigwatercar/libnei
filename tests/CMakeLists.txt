@@ -109,6 +109,11 @@ add_executable(
 )
 target_link_libraries(ref_counted_compile_fail PRIVATE nei::nei)
 
+add_executable(
+  post_job_smoke_test EXCLUDE_FROM_ALL post_job_smoke_test.cpp
+)
+target_link_libraries(post_job_smoke_test PRIVATE nei::nei)
+
 # MSVC + shared libs: put nei.dll and googletest DLLs next to nei_tests.exe (and
 # sync googletest DLLs to nei.dll's output dir) so gtest_discover_tests and
 # ctest can run the executable without PATH tricks.
