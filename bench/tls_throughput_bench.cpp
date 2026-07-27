@@ -334,9 +334,9 @@ int main(int argc, char* argv[]) {
   if (argc > 1) total_mb = static_cast<size_t>(std::atoll(argv[1]));
   if (argc > 2) buffer_kb = static_cast<size_t>(std::atoll(argv[2]));
 
-  if (total_mb == 0 || total_mb > 1024) {
+  if (total_mb == 0 || total_mb > 8192) {
     std::cerr << "Usage: " << argv[0] << " [total_MB=10] [buffer_KB=64]\n"
-              << "  total_MB: 1..1024 (default 10)\n"
+              << "  total_MB: 1..8192 (default 10)\n"
               << "  buffer_KB: 4..1024 (default 64)\n";
     return 1;
   }
