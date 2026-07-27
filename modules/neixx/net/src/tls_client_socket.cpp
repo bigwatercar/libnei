@@ -118,15 +118,35 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
 
   void Close() {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    if (state_ == State::Closed) return;
-    state_ = State::Closed;
+    if (state_ == State::Closed || state_ == State::Closing) return;
+    state_ = State::Closing;
     if (handshake_done_)
       mbedtls_ssl_close_notify(&ssl_);
+    // Initiate flush-then-close: if there is buffered data still in
+    // send_buf or a WriteAsync still in flight, we wait for the
+    // transport write to finish and drain send_buf, then close.
+    CloseAfterFlush();
+  }
+
+  void Orphan() {
+    state_ = State::Closed;
     transport_->Close();
     ClearPending();
   }
 
-  void Orphan() {
+  // Called by Close() and by FlushBio's completion callback.
+  // If send_buf still has data or a transport write is in flight,
+  // waits for the flush to complete.  Otherwise closes transport.
+  void CloseAfterFlush() {
+    if (!bio_.send_buf.empty() || write_in_flight_) {
+      if (!write_in_flight_ && !bio_.send_buf.empty())
+        FlushBio();
+      return;  // FlushBio completion will call CloseAfterFlush again
+    }
+    FinalClose();
+  }
+
+  void FinalClose() {
     state_ = State::Closed;
     transport_->Close();
     ClearPending();
@@ -138,7 +158,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
   }
 
  private:
-  enum class State { Idle, Handshaking, Connected, Closed };
+  enum class State { Idle, Handshaking, Connected, Closing, Closed };
 
   // ----- Handshake -----
   void OnTcpConnect(bool ok) {
@@ -149,7 +169,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
 
   void RunHandshakeLoop() {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    if (handshake_completed_ || state_ == State::Closed)
+    if (handshake_completed_ || state_ == State::Closed || state_ == State::Closing)
       return;
     for (;;) {
       int ret = mbedtls_ssl_handshake(&ssl_);
@@ -184,7 +204,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     auto buf = MakeRefCounted<IOBufferWithSize>(kTlsChunkSize);
     transport_->ReadAsync(buf, kTlsChunkSize,
         [self = scoped_refptr<Impl>(this), buf](bool ok, size_t n) {
-          if (self->state_ == State::Closed) return;
+          if (self->state_ == State::Closed || self->state_ == State::Closing) return;
           // n == 0 is TCP EOF — the peer sent FIN.  Must NOT retry,
           // or we enter an infinite spin (ReadAsync → EOF →
           // RunHandshakeLoop → WANT_READ → ReadAsync → EOF → ...).
@@ -206,7 +226,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     std::memcpy(wbuf->data(), data.data(), data.size());
     transport_->WriteAsync(wbuf, data.size(),
         [self = scoped_refptr<Impl>(this)](bool ok, size_t) {
-          if (self->state_ == State::Closed) return;
+          if (self->state_ == State::Closed || self->state_ == State::Closing) return;
           if (!ok) { self->NotifyConnect(false); return; }
           self->RunHandshakeLoop();
         });
@@ -225,7 +245,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     std::memcpy(wbuf->data(), data.data(), data.size());
     transport_->WriteAsync(wbuf, data.size(),
         [self = scoped_refptr<Impl>(this)](bool ok, size_t) {
-          if (self->state_ == State::Closed) return;
+          if (self->state_ == State::Closed || self->state_ == State::Closing) return;
           if (!ok) { self->NotifyConnect(false); return; }
           self->state_ = State::Connected;
           self->handshake_done_ = true;
@@ -248,7 +268,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
       auto chunk = MakeRefCounted<IOBufferWithSize>(kTlsChunkSize);
       transport_->ReadAsync(chunk, kTlsChunkSize,
           [self = scoped_refptr<Impl>(this), chunk](bool ok, size_t n) {
-            if (self->state_ == State::Closed) return;
+            if (self->state_ == State::Closed || self->state_ == State::Closing) return;
             // n == 0 is TCP EOF — the peer sent FIN mid-stream.
             if (!ok || n == 0) { self->NotifyReadError(); return; }
             self->bio_.recv_buf.insert(self->bio_.recv_buf.end(),
@@ -297,6 +317,8 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
           self->write_in_flight_ = false;
           // Flush any data that accumulated during the write.
           self->FlushBio();
+          if (self->state_ == State::Closing)
+            self->CloseAfterFlush();
         });
   }
 

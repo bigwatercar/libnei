@@ -198,12 +198,20 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
   cli_ctx.SetPeerVerify(nei::net::PeerVerify::kOptional);
   cli_ctx.SetCAChain(cert.cert_pem);
 
-  auto payload = std::make_shared<std::vector<unsigned char>>(total_bytes);
-  for (size_t i = 0; i < total_bytes; ++i)
-    (*payload)[i] = static_cast<unsigned char>((i * 37 + 17) & 0xFF);
-
-  auto recv_buf = std::make_shared<std::vector<unsigned char>>();
-  recv_buf->reserve(total_bytes);
+  // Deterministic pattern: byte i = (i*37+17) & 0xFF.  Server computes
+  // a running 64-bit FNV-1a hash; client sends the expected hash after
+  // the data so server can verify without buffering the entire stream.
+  auto expected_hash = std::make_shared<uint64_t>(0);
+  {
+    uint64_t h = 0xcbf29ce484222325ULL;
+    for (size_t i = 0; i < total_bytes; ++i) {
+      h ^= static_cast<unsigned char>((i * 37 + 17) & 0xFF);
+      h *= 0x100000001b3ULL;
+    }
+    *expected_hash = h;
+  }
+  auto recv_hash = std::make_shared<uint64_t>(0xcbf29ce484222325ULL);
+  auto recv_bytes = std::make_shared<std::atomic<size_t>>(0);
 
   auto bench_done = std::make_shared<nei::WaitableEvent>(
       nei::WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -218,30 +226,34 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
 
   auto runner = io.runner();
   runner->PostTask(FROM_HERE, [=]() mutable {
-    // ---- Server: listen + accept ----
     bool ok = server->Listen(
         nei::net::IPEndPoint(
             nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
         [=](bool success, std::unique_ptr<nei::net::TLSClientSocket> tls) {
           if (!success) { bench_done->Signal(); return; }
-          // ---- Server: receive until EOF ----
           auto sock = std::make_shared<nei::net::TLSClientSocket>(
               std::move(*tls));
           auto do_read = std::make_shared<std::function<void()>>();
-          *do_read = [=]() {
+          // Use weak_ptr in the outer lambda to break the
+          // shared_ptr -> function -> lambda -> shared_ptr cycle.
+          // The inner ReadAsync callback holds a strong reference
+          // to keep do_read alive while a read is pending.
+          std::weak_ptr<std::function<void()>> do_read_weak = do_read;
+          *do_read = [=, do_read_weak]() {
             auto chunk = nei::MakeRefCounted<nei::IOBufferWithSize>(buffer_size);
             sock->ReadAsync(chunk, buffer_size,
-                [=](bool s, size_t n) {
+                [=, dr = do_read_weak.lock()](bool s, size_t n) {
+                  if (!dr) return;
                   if (!s) { bench_done->Signal(); return; }
-                  if (n == 0) {
-                    // EOF — all data received.
-                    sock->Close();
-                    bench_done->Signal();
-                    return;
+                  if (n == 0) { sock->Close(); bench_done->Signal(); return; }
+                  recv_bytes->fetch_add(n);
+                  uint64_t h = *recv_hash;
+                  for (size_t i = 0; i < n; ++i) {
+                    h ^= chunk->data()[i];
+                    h *= 0x100000001b3ULL;
                   }
-                  recv_buf->insert(recv_buf->end(),
-                      chunk->data(), chunk->data() + n);
-                  (*do_read)();
+                  *recv_hash = h;
+                  (*dr)();
                 });
           };
           (*do_read)();
@@ -250,7 +262,6 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
     if (!ok) { bench_done->Signal(); return; }
     server_ready->Signal();
 
-    // ---- Client: connect + send + close ----
     client->Connect(
         nei::net::IPEndPoint(
             nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
@@ -258,21 +269,24 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
           if (!ok) { bench_done->Signal(); return; }
           auto offset = std::make_shared<size_t>(0);
           auto do_write = std::make_shared<std::function<void()>>();
-          *do_write = [=]() {
+          // Same weak_ptr pattern as do_read above.
+          std::weak_ptr<std::function<void()>> do_write_weak = do_write;
+          *do_write = [=, do_write_weak]() {
             size_t remain = total_bytes - *offset;
             if (remain == 0) {
-              client->Close();  // Sends close_notify → server sees EOF.
+              client->Close();
               return;
             }
             auto chunk = nei::MakeRefCounted<nei::IOBufferWithSize>(
                 std::min(remain, buffer_size));
-            std::memcpy(chunk->data(), payload->data() + *offset,
-                        chunk->size());
+            for (size_t i = 0; i < chunk->size(); ++i)
+              chunk->data()[i] = static_cast<unsigned char>(((*offset + i) * 37 + 17) & 0xFF);
             client->WriteAsync(chunk, chunk->size(),
-                [=](bool s, size_t n) {
+                [=, dw = do_write_weak.lock()](bool s, size_t n) {
+                  if (!dw) return;
                   if (!s) { bench_done->Signal(); return; }
                   *offset += n;
-                  (*do_write)();
+                  (*dw)();
                 });
           };
           (*do_write)();
@@ -281,11 +295,15 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
   });
 
   server_ready->Wait();
-  bench_done->Wait();
+  if (!bench_done->TimedWait(std::chrono::seconds(600))) {
+    std::cerr << "ERROR: benchmark timed out (600s)" << std::endl;
+    return;
+  }
 
   auto t_end = Clock::now();
   double elapsed = std::chrono::duration<double>(t_end - t_start).count();
-  double rate = total_bytes / elapsed / (1024 * 1024);
+  size_t received = recv_bytes->load();
+  double rate = received / elapsed / (1024 * 1024);
   std::cout << "\n=== TLS Throughput Benchmark ===\n"
             << "  Data       : " << (total_bytes >> 20) << " MB\n"
             << "  Buffer     : " << (buffer_size >> 10) << " KB\n"
@@ -294,13 +312,14 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
             << "  Throughput : " << std::fixed << std::setprecision(1)
             << rate << " MB/s\n";
 
-  if (recv_buf->size() != total_bytes) {
-    std::cerr << "ERROR: size mismatch  sent=" << total_bytes
-              << "  recv=" << recv_buf->size() << std::endl;
-  } else if (*recv_buf != *payload) {
-    std::cerr << "ERROR: data corruption detected!" << std::endl;
+  bool ok = (*recv_hash == *expected_hash) && (received == total_bytes);
+  if (!ok) {
+    std::cerr << "ERROR: integrity check FAILED"
+              << "  sent=" << total_bytes << "  recv=" << received
+              << "  expected_hash=0x" << std::hex << *expected_hash
+              << "  actual_hash=0x" << *recv_hash << std::dec << std::endl;
   } else {
-    std::cout << "  Integrity   : OK (byte-for-byte match)" << std::endl;
+    std::cout << "  Integrity   : OK (FNV-1a hash match)" << std::endl;
   }
 }
 
@@ -315,9 +334,9 @@ int main(int argc, char* argv[]) {
   if (argc > 1) total_mb = static_cast<size_t>(std::atoll(argv[1]));
   if (argc > 2) buffer_kb = static_cast<size_t>(std::atoll(argv[2]));
 
-  if (total_mb == 0 || total_mb > 100) {
+  if (total_mb == 0 || total_mb > 1024) {
     std::cerr << "Usage: " << argv[0] << " [total_MB=10] [buffer_KB=64]\n"
-              << "  total_MB: 1..100 (default 10)\n"
+              << "  total_MB: 1..1024 (default 10)\n"
               << "  buffer_KB: 4..1024 (default 64)\n";
     return 1;
   }

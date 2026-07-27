@@ -101,33 +101,45 @@ void RunBenchmark(size_t buffer_size, size_t total_mb) {
   IoThread srv_thread("bench-srv");
   IoThread cli_thread("bench-cli");
 
-  nei::WaitableEvent bench_done(
+  // All shared state is heap-allocated via shared_ptr so that IO thread
+  // callbacks never reference stack variables (avoids use-after-free on
+  // early return / timeout).
+  auto bench_done = std::make_shared<nei::WaitableEvent>(
       nei::WaitableEvent::ResetPolicy::kAutomatic, false);
-  std::atomic<size_t> server_bytes{0};
+  auto server_bytes = std::make_shared<std::atomic<size_t>>(0);
 
   auto server = std::make_shared<nei::net::TCPServerSocket>();
   auto client = std::make_shared<nei::net::TCPClientSocket>();
 
   // ---- Server: accept + drain ----
   srv_thread.runner()->PostTask(FROM_HERE,
-      [&, buffer_size, srv_runner = srv_thread.runner()]() {
+      [server, port, buffer_size, bench_done, server_bytes,
+       srv_runner = srv_thread.runner()]() {
     bool ok = server->Listen(
         nei::net::IPEndPoint(
             nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
-        [&bench_done, &server_bytes, buffer_size](bool success,
-                         std::unique_ptr<nei::net::TCPClientSocket> acc) {
-          if (!success) { bench_done.Signal(); return; }
-          auto sock = std::make_shared<
-              std::unique_ptr<nei::net::TCPClientSocket>>(std::move(acc));
+        [bench_done, server_bytes, buffer_size,
+         srv_runner](bool success,
+                     std::unique_ptr<nei::net::TCPClientSocket> acc) {
+          if (!success) { bench_done->Signal(); return; }
+          // Transfer ownership from unique_ptr to shared_ptr.
+          auto sock = std::shared_ptr<nei::net::TCPClientSocket>(std::move(acc));
           auto buf = nei::MakeRefCounted<nei::IOBufferWithSize>(buffer_size);
           auto total = std::make_shared<std::atomic<size_t>>(0);
           auto do_read = std::make_shared<std::function<void()>>();
-          *do_read = [&bench_done, &server_bytes, sock, buf, total, do_read, buffer_size]() {
-            (*sock)->ReadAsync(buf, buffer_size,
-                [&bench_done, &server_bytes, total, do_read](bool s, size_t n) {
+          // The do_read lambda captures a weak_ptr to itself (breaks cycle),
+          // but the inner ReadAsync callback captures a strong shared_ptr to
+          // keep do_read alive while a read is pending.
+          std::weak_ptr<std::function<void()>> do_read_weak = do_read;
+          *do_read = [bench_done, server_bytes, sock, buf, total, do_read_weak,
+                      buffer_size]() {
+            sock->ReadAsync(buf, buffer_size,
+                [bench_done, server_bytes, total, do_read = do_read_weak.lock()](bool s, size_t n) {
+                  // If do_read is gone, we are shutting down — bail out.
+                  if (!do_read) return;
                   if (!s || n == 0) {
-                    server_bytes.store(total->load());
-                    bench_done.Signal();
+                    server_bytes->store(total->load());
+                    bench_done->Signal();
                     return;
                   }
                   total->fetch_add(n);
@@ -137,7 +149,7 @@ void RunBenchmark(size_t buffer_size, size_t total_mb) {
           (*do_read)();
         },
         srv_runner);
-    if (!ok) { std::cerr << "server Listen failed" << std::endl; bench_done.Signal(); }
+    if (!ok) { std::cerr << "server Listen failed" << std::endl; bench_done->Signal(); }
   });
 
   // ---- Client: connect + write until done ----
@@ -145,20 +157,26 @@ void RunBenchmark(size_t buffer_size, size_t total_mb) {
   std::memset(write_buf->data(), 0, buffer_size);
 
   cli_thread.runner()->PostTask(FROM_HERE,
-      [&, buffer_size, cli_runner = cli_thread.runner(), write_buf]() {
+      [client, port, buffer_size, total_bytes, bench_done, server_bytes,
+       write_buf, cli_runner = cli_thread.runner()]() {
     client->Connect(
         nei::net::IPEndPoint(
             nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
-        [&bench_done, &server_bytes, client, write_buf, total_bytes, buffer_size](bool ok) {
-          if (!ok) { std::cerr << "connect failed" << std::endl; bench_done.Signal(); return; }
+        [bench_done, server_bytes, client, write_buf, total_bytes,
+         buffer_size](bool ok) {
+          if (!ok) { std::cerr << "connect failed" << std::endl; bench_done->Signal(); return; }
           auto rem = std::make_shared<std::atomic<size_t>>(total_bytes);
           auto dw = std::make_shared<std::function<void()>>();
-          *dw = [&bench_done, client, write_buf, rem, dw, buffer_size]() {
+          // Same pattern: weak self-reference in the outer lambda,
+          // strong reference in the inner WriteAsync callback.
+          std::weak_ptr<std::function<void()>> dw_weak = dw;
+          *dw = [bench_done, client, write_buf, rem, dw_weak, buffer_size]() {
             size_t chunk = std::min(buffer_size, rem->load());
-            if (chunk == 0) { client->ShutdownWrite(); return; }
+            if (chunk == 0) { client->Close(); return; }
             client->WriteAsync(write_buf, chunk,
-                [&bench_done, rem, dw](bool s, size_t n) {
-                  if (!s) { bench_done.Signal(); return; }
+                [bench_done, rem, dw = dw_weak.lock()](bool s, size_t n) {
+                  if (!dw) return;
+                  if (!s) { bench_done->Signal(); return; }
                   rem->fetch_sub(n);
                   (*dw)();
                 });
@@ -168,12 +186,19 @@ void RunBenchmark(size_t buffer_size, size_t total_mb) {
         cli_runner);
   });
 
+  // Timeout scales with data size.  The 4KB buffer is the slowest path;
+  // at ~80 MB/s (Debug ASAN), 1 GB takes ~12 s.  Use a conservative
+  // minimum of 120 s and scale at 30 s/GB (roughly 3× margin for Debug).
+  auto timeout_s = std::max(120, static_cast<int>(total_mb * 30 / 1024));
   auto t0 = Clock::now();
-  bench_done.Wait();
+  if (!bench_done->TimedWait(std::chrono::seconds(timeout_s))) {
+    std::cerr << "  ERROR: benchmark timed out (" << timeout_s << "s)" << std::endl;
+    return;
+  }
   auto t1 = Clock::now();
 
   double elapsed = std::chrono::duration<double>(t1 - t0).count();
-  double mb = static_cast<double>(server_bytes.load()) / (1024.0 * 1024.0);
+  double mb = static_cast<double>(server_bytes->load()) / (1024.0 * 1024.0);
   double mbps = (elapsed > 0.001) ? mb / elapsed : 0.0;
 
   std::cout << "  " << std::setw(7) << (buffer_size / 1024) << " KB  |  "
@@ -191,8 +216,12 @@ int main(int argc, char* argv[]) {
   nei::net::EnsureWsa();
 #endif
   nei::AtExitManager at_exit;
-  nei::ThreadPoolInstance::CreateAndStart(
-      nei::ThreadPoolInstance::InitParams{});
+
+  // ThreadPoolInstance is not used by this benchmark (it creates its own
+  // IoThreads).  Keeping a pool alive leaks its internal TaskQueues and
+  // WeakPtrFactory bookkeeping (~3 MB across repeated runs).
+  // nei::ThreadPoolInstance::CreateAndStart(
+  //     nei::ThreadPoolInstance::InitParams{});
 
   size_t total_mb = 1024;
   if (argc > 1) total_mb = static_cast<size_t>(std::atoi(argv[1]));
@@ -209,6 +238,6 @@ int main(int argc, char* argv[]) {
     RunBenchmark(sz, total_mb);
 
   std::cout << std::endl;
-  nei::ThreadPoolInstance::Shutdown();
+  // nei::ThreadPoolInstance::Shutdown();
   return 0;
 }

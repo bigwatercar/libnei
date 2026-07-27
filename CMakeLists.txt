@@ -163,8 +163,18 @@ if(NEI_BUILD_DEMOS)
   add_subdirectory(examples)
 endif()
 
+# Static builds need the third-party libs in the export set because they
+# are linked into libnei.a and CMake requires all transitive dependencies.
+# Shared builds only export nei — mbedtls/c-ares are PRIVATE and do not
+# leak into the public ABI (visibility hidden + --exclude-libs,ALL).
+if(BUILD_SHARED_LIBS)
+  set(_nei_install_targets nei)
+else()
+  set(_nei_install_targets nei c-ares mbedtls mbedx509 mbedcrypto everest p256m)
+endif()
+
 install(
-  TARGETS nei
+  TARGETS ${_nei_install_targets}
   EXPORT neiTargets
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/$<CONFIG>
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/$<CONFIG>
