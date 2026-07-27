@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #ifndef NEIXX_TASK_TASK_RUNNER_H_
 #define NEIXX_TASK_TASK_RUNNER_H_
@@ -16,8 +16,8 @@
 
 namespace nei {
 
-using OnceClosure = OnceCallback<>;
-using RepeatingClosure = RepeatingCallback<>;
+// using OnceClosure = OnceCallback<void()>;
+// using RepeatingClosure = RepeatingCallback<void()>;
 
 namespace internal {
 class TaskQueue;

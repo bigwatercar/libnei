@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #ifndef NEI_TASK_CALLBACK_H
 #define NEI_TASK_CALLBACK_H
@@ -16,63 +16,60 @@
 
 namespace nei {
 
-// Forward declarations for the backward-compat aliases at the bottom.
-template <typename... Args>
+template <typename Signature>
 class OnceCallback;
 
-template <typename... Args>
+template <typename Signature>
 class RepeatingCallback;
 
 namespace detail {
 
-// SBO buffer size for OnceCallback: 48 bytes allows most small lambdas and
-// small bind objects to be stored inline without heap allocation.
 constexpr std::size_t ONCE_SBO_SIZE = 48;
 constexpr std::size_t ONCE_SBO_ALIGN = alignof(std::max_align_t);
 
-// --- OnceCallback VTable (signature-dependent) -------------------------------
-//
-// Each OnceCallback<Args...> instantiation has its own VTable type so that
-// invoke_and_destroy receives the correct argument types.
-template <typename... Args>
+template <typename R, typename... Args>
 struct OnceCallbackVTable {
-  void (*invoke_and_destroy)(char *storage, Args... args);
+  R (*invoke_and_destroy)(char *storage, Args... args);
   void (*destroy)(char *storage);
 };
 
-// --- InitOnceCallbackFromFunctor (SBO / heap dispatch) -----------------------
-//
-// Constructs the vtable and storage for a OnceCallback<Args...> from an
-// arbitrary callable F that is invocable with Args....
-template <typename F, typename... Args>
-void InitOnceCallbackFromFunctor(OnceCallback<Args...> &cb, F &&functor) {
+template <typename R, typename F, typename... Args>
+void InitOnceCallbackFromFunctor(OnceCallback<R(Args...)> &cb, F &&functor) {
   using Fn = std::decay_t<F>;
-  using VTable = OnceCallbackVTable<Args...>;
+  using VTable = OnceCallbackVTable<R, Args...>;
 
   if constexpr (is_sbo_eligible_v<Fn, ONCE_SBO_SIZE, ONCE_SBO_ALIGN>) {
-    cb.vtable_.invoke_and_destroy = [](char *storage, Args... args) {
+    cb.vtable_.invoke_and_destroy = [](char *storage, Args... args) -> R {
       auto *fn = reinterpret_cast<Fn *>(storage);
-      std::invoke(std::move(*fn), std::forward<Args>(args)...);
-      std::destroy_at(fn);
+      if constexpr (std::is_void_v<R>) {
+        std::invoke(std::move(*fn), std::forward<Args>(args)...);
+        std::destroy_at(fn);
+      } else {
+        R r = std::invoke(std::move(*fn), std::forward<Args>(args)...);
+        std::destroy_at(fn);
+        return r;
+      }
     };
     cb.vtable_.destroy = [](char *storage) {
-      auto *fn = reinterpret_cast<Fn *>(storage);
-      std::destroy_at(fn);
+      std::destroy_at(reinterpret_cast<Fn *>(storage));
     };
     new (cb.storage_) Fn(std::forward<F>(functor));
   } else {
-    struct HeapLayout {
-      VTable vt;
-      Fn fn;
-    };
-
+    struct HeapLayout { VTable vt; Fn fn; };
     auto *h = static_cast<HeapLayout *>(
         callback_alloc(sizeof(HeapLayout), alignof(HeapLayout)));
-    h->vt.invoke_and_destroy = [](char *storage, Args... args) {
+    h->vt.invoke_and_destroy = [](char *storage, Args... args) -> R {
       auto *ptr = *reinterpret_cast<HeapLayout **>(storage);
-      std::invoke(std::move(ptr->fn), std::forward<Args>(args)...);
-      std::destroy_at(&ptr->fn);
-      callback_free(ptr, alignof(HeapLayout));
+      if constexpr (std::is_void_v<R>) {
+        std::invoke(std::move(ptr->fn), std::forward<Args>(args)...);
+        std::destroy_at(&ptr->fn);
+        callback_free(ptr, alignof(HeapLayout));
+      } else {
+        R r = std::invoke(std::move(ptr->fn), std::forward<Args>(args)...);
+        std::destroy_at(&ptr->fn);
+        callback_free(ptr, alignof(HeapLayout));
+        return r;
+      }
     };
     h->vt.destroy = [](char *storage) {
       auto *ptr = *reinterpret_cast<HeapLayout **>(storage);
@@ -85,36 +82,26 @@ void InitOnceCallbackFromFunctor(OnceCallback<Args...> &cb, F &&functor) {
   }
 }
 
-// --- RepeatingCallback VTable (signature-dependent) ---------------------------
-//
-// Each RepeatingCallback<Args...> instantiation has its own VTable type that
-// supports non-consuming invocation (const storage) plus copy/destroy for
-// the shared-ownership model.
-template <typename... Args>
+template <typename R, typename... Args>
 struct RepeatingVTable {
-  void (*invoke)(const char *storage, Args... args);  // non-consuming
+  R (*invoke)(const char *storage, Args... args);
   void (*copy_construct)(char *dst, const char *src);
   void (*destroy)(char *storage);
 };
 
-// SBO parameters for RepeatingCallback - mirror OnceCallback for consistency.
 constexpr std::size_t REPEATING_SBO_SIZE = ONCE_SBO_SIZE;
 constexpr std::size_t REPEATING_SBO_ALIGN = ONCE_SBO_ALIGN;
 
-// --- InitRepeatingCallbackFromFunctor (SBO / heap dispatch) -------------------
-//
-// Constructs the vtable and storage for a RepeatingCallback<Args...> from an
-// arbitrary copyable callable F that is invocable with Args....
-template <typename F, typename... Args>
-void InitRepeatingCallbackFromFunctor(RepeatingCallback<Args...> &cb,
+template <typename R, typename F, typename... Args>
+void InitRepeatingCallbackFromFunctor(RepeatingCallback<R(Args...)> &cb,
                                        F &&functor) {
   using Fn = std::decay_t<F>;
-  using VTable = RepeatingVTable<Args...>;
+  using VTable = RepeatingVTable<R, Args...>;
 
   if constexpr (is_sbo_eligible_v<Fn, REPEATING_SBO_SIZE, REPEATING_SBO_ALIGN>) {
-    cb.vtable_.invoke = [](const char *storage, Args... args) {
+    cb.vtable_.invoke = [](const char *storage, Args... args) -> R {
       auto *fn = const_cast<Fn *>(reinterpret_cast<const Fn *>(storage));
-      std::invoke(*fn, std::forward<Args>(args)...);
+      return std::invoke(*fn, std::forward<Args>(args)...);
     };
     cb.vtable_.copy_construct = [](char *dst, const char *src) {
       new (dst) Fn(*reinterpret_cast<const Fn *>(src));
@@ -129,13 +116,12 @@ void InitRepeatingCallbackFromFunctor(RepeatingCallback<Args...> &cb,
       std::atomic<int> ref_count;
       Fn fn;
     };
-
     auto *h = static_cast<HeapLayout *>(
         callback_alloc(sizeof(HeapLayout), alignof(HeapLayout)));
-    h->vt.invoke = [](const char *storage, Args... args) {
+    h->vt.invoke = [](const char *storage, Args... args) -> R {
       auto *ptr = const_cast<HeapLayout *>(
           *reinterpret_cast<HeapLayout *const *>(storage));
-      std::invoke(ptr->fn, std::forward<Args>(args)...);
+      return std::invoke(ptr->fn, std::forward<Args>(args)...);
     };
     h->vt.copy_construct = [](char *dst, const char *src) {
       auto *ptr = *reinterpret_cast<HeapLayout *const *>(src);
@@ -163,45 +149,22 @@ void InitRepeatingCallbackFromFunctor(RepeatingCallback<Args...> &cb,
 #pragma warning(disable : 4324)
 #endif
 
-// =============================================================================
-// OnceCallback<Args...>  --  move-only, single-shot callable wrapper
-// =============================================================================
-//
-// Template on argument types.  OnceCallback<> is the void() specialization
-// (equivalent to the pre-template OnceCallback).
-//
-// SBO storage (48 bytes) + signature-specific vtable (16 bytes).
-// Lifecycle methods are inline in the header; each signature gets its own
-// instantiation in the calling TU.
-//
-// Usage:
-//   OnceCallback<> cb = BindOnce(&DoWork);         // void()   --  PostTask compat
-//   OnceCallback<const AddressList&> cb = [](const AddressList& a) { ... };
-//
-template <typename... Args>
-class OnceCallback : public CallbackBase {
+template <typename R, typename... Args>
+class OnceCallback<R(Args...)> : public CallbackBase {
 public:
-  OnceCallback() noexcept
-      : vtable_{nullptr, nullptr} {
+  OnceCallback() noexcept : vtable_{nullptr, nullptr} {
     std::memset(storage_, 0, detail::ONCE_SBO_SIZE);
   }
+  ~OnceCallback() { if (vtable_.destroy) vtable_.destroy(storage_); }
 
-  ~OnceCallback() {
-    if (vtable_.destroy)
-      vtable_.destroy(storage_);
-  }
-
-  OnceCallback(OnceCallback &&other) noexcept
-      : vtable_(other.vtable_) {
+  OnceCallback(OnceCallback &&other) noexcept : vtable_(other.vtable_) {
     std::memcpy(storage_, other.storage_, detail::ONCE_SBO_SIZE);
     other.vtable_ = {nullptr, nullptr};
     std::memset(other.storage_, 0, detail::ONCE_SBO_SIZE);
   }
-
   OnceCallback &operator=(OnceCallback &&other) noexcept {
     if (this != &other) {
-      if (vtable_.destroy)
-        vtable_.destroy(storage_);
+      if (vtable_.destroy) vtable_.destroy(storage_);
       vtable_ = other.vtable_;
       std::memcpy(storage_, other.storage_, detail::ONCE_SBO_SIZE);
       other.vtable_ = {nullptr, nullptr};
@@ -209,110 +172,78 @@ public:
     }
     return *this;
   }
-
   OnceCallback(const OnceCallback &) = delete;
   OnceCallback &operator=(const OnceCallback &) = delete;
 
-  explicit operator bool() const noexcept {
-    return vtable_.invoke_and_destroy != nullptr;
-  }
+  explicit operator bool() const noexcept { return vtable_.invoke_and_destroy != nullptr; }
+  bool IsNull() const noexcept { return vtable_.invoke_and_destroy == nullptr; }
 
-  bool IsNull() const noexcept {
-    return vtable_.invoke_and_destroy == nullptr;
-  }
-
-  // Run the callback with arguments.  Consumes *this (move-only).
-  void Run(Args... args) && {
+  R Run(Args... args) && {
     if (vtable_.invoke_and_destroy) {
-      vtable_.invoke_and_destroy(storage_, std::forward<Args>(args)...);
+      if constexpr (std::is_void_v<R>) {
+        vtable_.invoke_and_destroy(storage_, std::forward<Args>(args)...);
+      } else {
+        R result = vtable_.invoke_and_destroy(storage_, std::forward<Args>(args)...);
+        vtable_ = {nullptr, nullptr};
+        std::memset(storage_, 0, detail::ONCE_SBO_SIZE);
+        return result;
+      }
       vtable_ = {nullptr, nullptr};
       std::memset(storage_, 0, detail::ONCE_SBO_SIZE);
     }
+    if constexpr (!std::is_void_v<R>) return R{};
   }
 
-  // Implicit conversion from any callable compatible with Args....
   template <typename F,
-            typename = std::enable_if_t<
-                !std::is_same_v<std::decay_t<F>, OnceCallback>>>
+            typename = std::enable_if_t<!std::is_same_v<std::decay_t<F>, OnceCallback>>>
   /*implicit*/ OnceCallback(F &&functor) {
-    detail::InitOnceCallbackFromFunctor(*this, std::forward<F>(functor));
+    detail::InitOnceCallbackFromFunctor<R>(*this, std::forward<F>(functor));
   }
 
-  detail::OnceCallbackVTable<Args...> vtable_;                            // 16 bytes
-  alignas(detail::ONCE_SBO_ALIGN) char storage_[detail::ONCE_SBO_SIZE];   // 48 bytes
+  detail::OnceCallbackVTable<R, Args...> vtable_;
+  alignas(detail::ONCE_SBO_ALIGN) char storage_[detail::ONCE_SBO_SIZE];
 
-  template <typename F, typename... A>
-  friend void detail::InitOnceCallbackFromFunctor(OnceCallback<A...> &cb,
-                                                   F &&functor);
+  template <typename RR, typename F, typename... A>
+  friend void detail::InitOnceCallbackFromFunctor(OnceCallback<RR(A...)> &, F &&);
 };
 
-// =============================================================================
-// RepeatingCallback<Args...>  --  copyable, multi-shot callable wrapper
-// =============================================================================
-//
-// Same SBO (48 bytes) + heap fallback as OnceCallback, but with shared-ownership
-// copy semantics (ref-counted for heap, copy-construct for SBO).
-//
-// Usage:
-//   RepeatingCallback<int> cb = [](int x) { return x * 2; };
-//   cb.Run(42);  // callable repeatedly
-//
-template <typename... Args>
-class RepeatingCallback : public CallbackBase {
+template <typename R, typename... Args>
+class RepeatingCallback<R(Args...)> : public CallbackBase {
 public:
-  RepeatingCallback() noexcept
-      : vtable_{nullptr, nullptr, nullptr} {
+  RepeatingCallback() noexcept : vtable_{nullptr, nullptr, nullptr} {
     std::memset(storage_, 0, detail::REPEATING_SBO_SIZE);
   }
+  ~RepeatingCallback() { if (vtable_.destroy) vtable_.destroy(storage_); }
 
-  ~RepeatingCallback() {
-    if (vtable_.destroy)
-      vtable_.destroy(storage_);
+  RepeatingCallback(const RepeatingCallback &other) noexcept : vtable_(other.vtable_) {
+    if (vtable_.copy_construct) vtable_.copy_construct(storage_, other.storage_);
+    else std::memset(storage_, 0, detail::REPEATING_SBO_SIZE);
   }
-
-  RepeatingCallback(const RepeatingCallback &other) noexcept
-      : vtable_(other.vtable_) {
-    if (vtable_.copy_construct)
-      vtable_.copy_construct(storage_, other.storage_);
-    else
-      std::memset(storage_, 0, detail::REPEATING_SBO_SIZE);
-  }
-
   RepeatingCallback &operator=(const RepeatingCallback &other) noexcept {
     if (this != &other) {
-      if (vtable_.destroy)
-        vtable_.destroy(storage_);
+      if (vtable_.destroy) vtable_.destroy(storage_);
       vtable_ = other.vtable_;
-      if (vtable_.copy_construct)
-        vtable_.copy_construct(storage_, other.storage_);
-      else
-        std::memset(storage_, 0, detail::REPEATING_SBO_SIZE);
+      if (vtable_.copy_construct) vtable_.copy_construct(storage_, other.storage_);
+      else std::memset(storage_, 0, detail::REPEATING_SBO_SIZE);
     }
     return *this;
   }
-
-  RepeatingCallback(RepeatingCallback &&other) noexcept
-      : vtable_(other.vtable_) {
+  RepeatingCallback(RepeatingCallback &&other) noexcept : vtable_(other.vtable_) {
     if (vtable_.copy_construct) {
-      // SBO: move the functor by copy-constructing into this, then destroy.
       vtable_.copy_construct(storage_, other.storage_);
       vtable_.destroy(other.storage_);
     } else {
-      // Heap: just transfer the pointer.
       std::memcpy(storage_, other.storage_, sizeof(void *));
     }
     other.vtable_ = {nullptr, nullptr, nullptr};
     std::memset(other.storage_, 0, detail::REPEATING_SBO_SIZE);
   }
-
   RepeatingCallback &operator=(RepeatingCallback &&other) noexcept {
     if (this != &other) {
-      if (vtable_.destroy)
-        vtable_.destroy(storage_);
+      if (vtable_.destroy) vtable_.destroy(storage_);
       vtable_ = other.vtable_;
       if (vtable_.copy_construct) {
-        vtable_.copy_construct(storage_, other.storage_);
-        vtable_.destroy(other.storage_);
+        vtable_.copy_construct(storage_, other.storage_); vtable_.destroy(other.storage_);
       } else {
         std::memcpy(storage_, other.storage_, sizeof(void *));
       }
@@ -322,61 +253,46 @@ public:
     return *this;
   }
 
-  explicit operator bool() const noexcept {
-    return vtable_.invoke != nullptr;
-  }
-
-  bool IsNull() const noexcept {
-    return vtable_.invoke == nullptr;
-  }
+  explicit operator bool() const noexcept { return vtable_.invoke != nullptr; }
+  bool IsNull() const noexcept { return vtable_.invoke == nullptr; }
 
   RepeatingCallback &operator=(std::nullptr_t) noexcept {
-    if (vtable_.destroy)
-      vtable_.destroy(storage_);
+    if (vtable_.destroy) vtable_.destroy(storage_);
     vtable_ = {nullptr, nullptr, nullptr};
     std::memset(storage_, 0, detail::REPEATING_SBO_SIZE);
     return *this;
   }
 
-  void Run(Args... args) const {
-    if (vtable_.invoke)
-      vtable_.invoke(storage_, std::forward<Args>(args)...);
+  R Run(Args... args) const {
+    if (vtable_.invoke) return vtable_.invoke(storage_, std::forward<Args>(args)...);
+    if constexpr (!std::is_void_v<R>) return R{};
   }
 
-  // Implicit conversion from any copyable callable (not nullptr_t).
   template <typename F,
-            typename = std::enable_if_t<
-                !std::is_same_v<std::decay_t<F>, RepeatingCallback> &&
-                !std::is_same_v<std::decay_t<F>, OnceCallback<Args...>> &&
-                !std::is_null_pointer_v<std::decay_t<F>>>>
+            typename = std::enable_if_t<!std::is_same_v<std::decay_t<F>, RepeatingCallback> &&
+                                        !std::is_null_pointer_v<std::decay_t<F>>>>
   /*implicit*/ RepeatingCallback(F &&functor) {
-    detail::InitRepeatingCallbackFromFunctor(*this, std::forward<F>(functor));
+    detail::InitRepeatingCallbackFromFunctor<R>(*this, std::forward<F>(functor));
   }
-
-  // nullptr_t creates an empty (falsy) callback.
   /*implicit*/ RepeatingCallback(std::nullptr_t) noexcept {
     vtable_ = {nullptr, nullptr, nullptr};
     std::memset(storage_, 0, detail::REPEATING_SBO_SIZE);
   }
 
-  detail::RepeatingVTable<Args...> vtable_;
-  alignas(detail::REPEATING_SBO_ALIGN)
-      mutable char storage_[detail::REPEATING_SBO_SIZE];
+  detail::RepeatingVTable<R, Args...> vtable_;
+  alignas(detail::REPEATING_SBO_ALIGN) mutable char storage_[detail::REPEATING_SBO_SIZE];
 
-  template <typename F, typename... A>
-  friend void detail::InitRepeatingCallbackFromFunctor(
-      RepeatingCallback<A...> &cb, F &&functor);
+  template <typename RR, typename F, typename... A>
+  friend void detail::InitRepeatingCallbackFromFunctor(RepeatingCallback<RR(A...)> &, F &&);
 };
 
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
 
-} // namespace nei
+using OnceClosure     = OnceCallback<void()>;
+using RepeatingClosure = RepeatingCallback<void()>;
 
-// --- Backward-compatible aliases ---------------------------------------------
-// These are defined in task_runner.h:
-//   using OnceClosure = nei::OnceCallback<>;
-//   using RepeatingClosure = nei::RepeatingCallback<>;
+}  // namespace nei
 
-#endif // NEI_TASK_CALLBACK_H
+#endif  // NEI_TASK_CALLBACK_H

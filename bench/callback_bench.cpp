@@ -59,7 +59,7 @@ void BenchOnceNonSbo(int iterations) {
   for (int i = 0; i < iterations; ++i) {
     int64_t result = 0;
     LargePayload payload{i, i + 1, i + 2, i + 3, i + 4, i + 5, i + 6, i + 7};
-    OnceCallback<> cb = [&result, p = std::move(payload)]() {
+    OnceCallback<void()> cb = [&result, p = std::move(payload)]() {
       result = p.Sum();
     };
     std::move(cb).Run();
@@ -82,12 +82,12 @@ void BenchRepeatingNonSbo(int iterations) {
   auto t0 = Clock::now();
 
   LargePayload base{10, 20, 30, 40, 50, 60, 70, 80};
-  RepeatingCallback<> cb = [p = base, &sink, i = 0]() mutable {
+  RepeatingCallback<void()> cb = [p = base, &sink, i = 0]() mutable {
     sink ^= p.Sum() + (++i);
   };
 
   for (int i = 0; i < iterations; ++i) {
-    RepeatingCallback<> replica = cb;  // heap copy (non-SBO)
+    RepeatingCallback<void()> replica = cb;  // heap copy (non-SBO)
     replica.Run();
   }
 
@@ -109,12 +109,12 @@ void BenchMixedSboNonSbo(int iterations) {
   for (int i = 0; i < iterations; ++i) {
     if (i % 2 == 0) {
       // SBO path — small lambda (just an int capture)
-      OnceCallback<> cb = [&sink, v = i, i]() { sink ^= v + i; };
+      OnceCallback<void()> cb = [&sink, v = i, i]() { sink ^= v + i; };
       std::move(cb).Run();
     } else {
       // Non-SBO path — large payload
       LargePayload payload{i, i, i, i, i, i, i, i};
-      OnceCallback<> cb = [&sink, p = std::move(payload), i]() {
+      OnceCallback<void()> cb = [&sink, p = std::move(payload), i]() {
         sink ^= p.Sum() + i;
       };
       std::move(cb).Run();

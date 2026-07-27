@@ -50,7 +50,7 @@ class NEI_API FilePathWatcher final {
   // Callback signature: void(const std::string& relative_path, ChangeType type).
   // The callback may be invoked multiple times (once per detected change).
   // It is always invoked on the bound TaskRunner.
-  using Callback = RepeatingCallback<const std::string&, ChangeType>;
+  using Callback = RepeatingCallback<void(const std::string&, ChangeType)>;
 
   // Constructs a watcher that dispatches callbacks on |task_runner|.
   // The task_runner must be backed by a MessagePumpForIO on platforms that

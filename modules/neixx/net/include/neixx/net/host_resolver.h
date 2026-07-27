@@ -29,7 +29,7 @@ namespace net {
 // Move-only callback receiving the resolved address list.
 // OnceCallback<const AddressList&> guarantees no unnecessary copies;
 // the AddressList is moved through the dual-thread trampoline.
-using ResolveCallback = OnceCallback<const AddressList&>;
+using ResolveCallback = OnceCallback<void(const AddressList&)>;
 
 // =============================================================================
 // HostResolverOptions  --  DNS resolution configuration backed by c-ares.

@@ -3,7 +3,7 @@
 #include <neixx/common/location.h>
 #include <neixx/functional/bind.h>
 #include <neixx/functional/callback.h>
-#include <neixx/task/task_runner.h>  // for OnceClosure alias
+#include <neixx/task/task_runner.h>  // for OnceCallback<void()> alias
 
 #include <functional>
 #include <memory>
@@ -18,13 +18,13 @@ namespace {
 // =============================================================================
 
 TEST(OnceCallbackTest, DefaultConstructedIsNull) {
-  OnceCallback<> cb;
+  OnceCallback<void()> cb;
   EXPECT_FALSE(cb);
 }
 
 TEST(OnceCallbackTest, LambdaVoid) {
   int called = 0;
-  OnceCallback<> cb = [&called]() { called = 1; };
+  OnceCallback<void()> cb = [&called]() { called = 1; };
   EXPECT_TRUE(cb);
   std::move(cb).Run();
   EXPECT_EQ(called, 1);
@@ -32,7 +32,7 @@ TEST(OnceCallbackTest, LambdaVoid) {
 
 TEST(OnceCallbackTest, LambdaWithIntParam) {
   int result = 0;
-  OnceCallback<int> cb = [&result](int x) { result = x; };
+  OnceCallback<void(int)> cb = [&result](int x) { result = x; };
   EXPECT_TRUE(cb);
   std::move(cb).Run(42);
   EXPECT_EQ(result, 42);
@@ -40,7 +40,7 @@ TEST(OnceCallbackTest, LambdaWithIntParam) {
 
 TEST(OnceCallbackTest, LambdaWithStringParam) {
   std::string captured;
-  OnceCallback<std::string> cb = [&captured](std::string s) {
+  OnceCallback<void(std::string)> cb = [&captured](std::string s) {
     captured = std::move(s);
   };
   std::move(cb).Run("hello");
@@ -49,7 +49,7 @@ TEST(OnceCallbackTest, LambdaWithStringParam) {
 
 TEST(OnceCallbackTest, LambdaWithConstRefParam) {
   std::string received;
-  OnceCallback<const std::string&> cb = [&received](const std::string& s) {
+  OnceCallback<void(const std::string&)> cb = [&received](const std::string& s) {
     received = s;
   };
   std::string input = "world";
@@ -59,7 +59,7 @@ TEST(OnceCallbackTest, LambdaWithConstRefParam) {
 
 TEST(OnceCallbackTest, LambdaWithMoveOnlyParam) {
   std::unique_ptr<int> received;
-  OnceCallback<std::unique_ptr<int>> cb =
+  OnceCallback<void(std::unique_ptr<int>)> cb =
       [&received](std::unique_ptr<int> p) {
         received = std::move(p);
       };
@@ -72,7 +72,7 @@ TEST(OnceCallbackTest, LambdaWithMoveOnlyParam) {
 TEST(OnceCallbackTest, LambdaWithMultipleParams) {
   int sum = 0;
   std::string concat;
-  OnceCallback<int, const std::string&> cb =
+  OnceCallback<void(int, const std::string&)> cb =
       [&sum, &concat](int x, const std::string& s) {
         sum = x;
         concat = s;
@@ -88,8 +88,8 @@ TEST(OnceCallbackTest, LambdaWithMultipleParams) {
 
 TEST(OnceCallbackTest, MoveConstructor) {
   int called = 0;
-  OnceCallback<> cb1 = [&called]() { called = 1; };
-  OnceCallback<> cb2 = std::move(cb1);
+  OnceCallback<void()> cb1 = [&called]() { called = 1; };
+  OnceCallback<void()> cb2 = std::move(cb1);
   EXPECT_FALSE(cb1);  // moved-from
   EXPECT_TRUE(cb2);
   std::move(cb2).Run();
@@ -98,8 +98,8 @@ TEST(OnceCallbackTest, MoveConstructor) {
 
 TEST(OnceCallbackTest, MoveAssignment) {
   int called = 0;
-  OnceCallback<int> cb1 = [&called](int x) { called = x; };
-  OnceCallback<int> cb2;
+  OnceCallback<void(int)> cb1 = [&called](int x) { called = x; };
+  OnceCallback<void(int)> cb2;
   cb2 = std::move(cb1);
   EXPECT_FALSE(cb1);
   EXPECT_TRUE(cb2);
@@ -111,7 +111,7 @@ TEST(OnceCallbackTest, DestroyWithoutRunning) {
   int destroyed = 0;
   {
     auto guard = std::make_unique<int>(42);
-    OnceCallback<> cb = [g = std::move(guard), &destroyed]() {
+    OnceCallback<void()> cb = [g = std::move(guard), &destroyed]() {
       destroyed = *g;
     };
     EXPECT_TRUE(cb);
@@ -125,7 +125,7 @@ TEST(OnceCallbackTest, DestroyWithoutRunning) {
 // =============================================================================
 
 TEST(OnceCallbackTest, RunConsumesCallback) {
-  OnceCallback<int> cb = [](int x) { (void)x; };
+  OnceCallback<void(int)> cb = [](int x) { (void)x; };
   EXPECT_TRUE(cb);
   std::move(cb).Run(1);
   EXPECT_FALSE(cb);  // consumed
@@ -141,7 +141,7 @@ void FreeFunction(int* out, int x) {
 
 TEST(OnceCallbackTest, BindOnceVoid) {
   int result = 0;
-  OnceCallback<> cb = BindOnce(&FreeFunction, &result, 5);
+  OnceCallback<void()> cb = BindOnce(&FreeFunction, &result, 5);
   EXPECT_TRUE(cb);
   std::move(cb).Run();  // no args needed — bound via BindOnce
   EXPECT_EQ(result, 5);
@@ -159,19 +159,19 @@ struct LargeFunctor {
 
 TEST(OnceCallbackTest, LargeFunctorFallsBackToHeap) {
   int called = 0;
-  OnceCallback<> cb = LargeFunctor{{}, &called};
+  OnceCallback<void()> cb = LargeFunctor{{}, &called};
   EXPECT_TRUE(cb);
   std::move(cb).Run();
   EXPECT_EQ(called, 1);
 }
 
 // =============================================================================
-// OnceCallback with OnceClosure alias
+// OnceCallback with OnceCallback<void()> alias
 // =============================================================================
 
-TEST(OnceCallbackTest, OnceClosureAlias) {
+TEST(OnceCallbackTest, OnceCallbackVoidAlias) {
   int called = 0;
-  OnceClosure cb = [&called]() { called = 1; };
+  OnceCallback<void()> cb = [&called]() { called = 1; };
   std::move(cb).Run();
   EXPECT_EQ(called, 1);
 }

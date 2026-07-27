@@ -17,7 +17,7 @@ namespace nei {
 // Binds a callable and zero or more arguments into a move-only OnceCallback.
 //
 template <typename F, typename... Args>
-OnceCallback<> BindOnce(F &&functor, Args &&...args) {
+OnceCallback<void()> BindOnce(F &&functor, Args &&...args) {
   using Fn = std::decay_t<F>;
   using BoundArgs = std::tuple<detail::bind_arg_storage_t<std::decay_t<Args>>...>;
   static_assert(std::is_invocable_v<Fn, detail::bind_arg_storage_t<std::decay_t<Args>>...>,
@@ -35,7 +35,7 @@ OnceCallback<> BindOnce(F &&functor, Args &&...args) {
     }
     std::apply([&](auto &...a) { std::invoke(std::move(fn), detail::UnwrapBoundArg(a)...); }, args);
   };
-  return OnceCallback<>(std::move(bound_lambda));
+  return OnceCallback<void()>(std::move(bound_lambda));
 }
 
 // --- BindRepeating -----------------------------------------------------------
@@ -45,7 +45,7 @@ OnceCallback<> BindOnce(F &&functor, Args &&...args) {
 // even when the bound types are not copyable (e.g. unique_ptr).
 //
 template <typename F, typename... Args>
-RepeatingCallback<> BindRepeating(F &&functor, Args &&...args) {
+RepeatingCallback<void()> BindRepeating(F &&functor, Args &&...args) {
   using Fn = std::decay_t<F>;
   using BoundArgs = std::tuple<detail::bind_arg_storage_t<std::decay_t<Args>>...>;
   static_assert((!detail::is_passed_wrapper_v<std::decay_t<Args>> && ...),
@@ -62,7 +62,7 @@ RepeatingCallback<> BindRepeating(F &&functor, Args &&...args) {
       Storage{Fn(std::forward<F>(functor)),
               BoundArgs(detail::StoreBoundArg(std::forward<Args>(args))...)});
 
-  return RepeatingCallback<>([shared]() {
+  return RepeatingCallback<void()>([shared]() {
     if constexpr (sizeof...(Args) > 0) {
       if constexpr (detail::is_weak_ptr_v<std::decay_t<std::tuple_element_t<0, BoundArgs>>>) {
         if (!std::get<0>(shared->bound))

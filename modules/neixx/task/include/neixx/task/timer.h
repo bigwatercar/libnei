@@ -72,7 +72,7 @@ class NEI_API OneShotTimer final {
   // Starts the timer. |task| will be run on the bound sequence after |delay|.
   // If the timer is already running, it is first stopped.
   // Must be called on the bound sequence.
-  void Start(const Location& from_here, TimeDelta delay, OnceCallback<> task);
+  void Start(const Location& from_here, TimeDelta delay, OnceCallback<void()> task);
 
   // Stops the timer. Invalidates outstanding WeakPtrs so any queued delayed
   // task is silently dropped, and immediately resets the user closure.
@@ -107,7 +107,7 @@ class NEI_API RepeatingTimer final {
   // Starts the timer. |task| will be run repeatedly every |delay| on the
   // bound sequence until Stop() is called.
   // Must be called on the bound sequence.
-  void Start(const Location& from_here, TimeDelta delay, RepeatingCallback<> task);
+  void Start(const Location& from_here, TimeDelta delay, RepeatingCallback<void()> task);
 
   // Stops the timer. Invalidates outstanding WeakPtrs and resets the user task.
   // Safe to call from within the user callback (re-entrancy safe).

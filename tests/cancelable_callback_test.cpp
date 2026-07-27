@@ -198,7 +198,7 @@ TEST_F(CancelableOnceClosureTest, MoveAssignmentReleasesOldAndCancels) {
   auto task2 = MakeTask([&new_ran] { new_ran.store(true); });
 
   // 发出旧任务的 callback() 句柄
-  OnceCallback<> old_cb = task1.callback();
+  OnceCallback<void()> old_cb = task1.callback();
 
   // 移动赋值覆盖
   task1 = std::move(task2);
@@ -226,7 +226,7 @@ TEST_F(CancelableOnceClosureTest, EmptyConstructorSafeToCancelAndRun) {
 
 TEST_F(CancelableOnceClosureTest, DestructorAutoCancelsOutstandingCallback) {
   std::atomic<bool> ran{false};
-  OnceCallback<> cb;
+  OnceCallback<void()> cb;
 
   {
     auto task = MakeTask([&ran] { ran.store(true); });

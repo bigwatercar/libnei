@@ -30,7 +30,7 @@ namespace nei {
 class CancelableOnceClosure::Impl
     : public RefCountedThreadSafe<CancelableOnceClosure::Impl> {
  public:
-  explicit Impl(OnceCallback<> task) : task_(std::move(task)) {}
+  explicit Impl(OnceCallback<void()> task) : task_(std::move(task)) {}
 
   // ---------------------------------------------------------------------------
   // Run()  --  执行闭包（若未取消且未执行过）
@@ -40,7 +40,7 @@ class CancelableOnceClosure::Impl
   //   此设计防止业务回调内部重入 CancelableOnceClosure 时引发死锁。
   // ---------------------------------------------------------------------------
   void Run() {
-    OnceCallback<> local_task;
+    OnceCallback<void()> local_task;
     {
       AutoLock lock(lock_);
       if (cancelled_ || !task_)
@@ -62,7 +62,7 @@ class CancelableOnceClosure::Impl
   //   大块内存等），不等待任何调度到期。
   // ---------------------------------------------------------------------------
   void Cancel() {
-    OnceCallback<> local_task;
+    OnceCallback<void()> local_task;
     {
       AutoLock lock(lock_);
       if (cancelled_)
@@ -93,7 +93,7 @@ class CancelableOnceClosure::Impl
   // 注意：此方法本身是 const 且不加锁（仅 AddRef），线程安全由 Run()
   // 内部的 Lock 保证。
   // ---------------------------------------------------------------------------
-  OnceCallback<> AsCallback() {
+  OnceCallback<void()> AsCallback() {
     scoped_refptr<Impl> self(this);
     return BindOnce(
         [](scoped_refptr<Impl> impl) {
@@ -106,7 +106,7 @@ class CancelableOnceClosure::Impl
   friend class RefCountedThreadSafe<Impl>;
 
   mutable Lock lock_;
-  OnceCallback<> task_;
+  OnceCallback<void()> task_;
   bool cancelled_ = false;
 };
 
@@ -116,7 +116,7 @@ class CancelableOnceClosure::Impl
 
 CancelableOnceClosure::CancelableOnceClosure() = default;
 
-CancelableOnceClosure::CancelableOnceClosure(OnceCallback<> closure)
+CancelableOnceClosure::CancelableOnceClosure(OnceCallback<void()> closure)
     : impl_(new Impl(std::move(closure))) {
   impl_->AddRef();
 }
@@ -171,9 +171,9 @@ CancelableOnceClosure::operator bool() const {
   return impl_ && impl_->HasTask();
 }
 
-OnceCallback<> CancelableOnceClosure::callback() {
+OnceCallback<void()> CancelableOnceClosure::callback() {
   if (!impl_)
-    return OnceCallback<>();
+    return OnceCallback<void()>();
   return impl_->AsCallback();
 }
 

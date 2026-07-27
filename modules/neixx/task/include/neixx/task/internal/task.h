@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #ifndef NEIXX_TASK_INTERNAL_TASK_H_
 #define NEIXX_TASK_INTERNAL_TASK_H_
@@ -15,7 +15,7 @@ namespace nei {
 namespace internal {
 
 struct Task {
-  OnceCallback<> task;
+  OnceCallback<void()> task;
   Location posted_from{"", 0, ""};
   TimeTicks enqueue_time;
   TimeTicks delayed_run_time;

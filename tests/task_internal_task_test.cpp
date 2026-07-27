@@ -12,7 +12,7 @@ Task MakeTask(const TimeTicks& delayed_run_time,
               std::int64_t sequence_num,
               SequenceToken sequence_token = SequenceToken()) {
   return Task{
-      OnceCallback<>(),
+      OnceCallback<void()>(),
       Location{"task_internal_task_test.cpp", 1, "MakeTask"},
       TimeTicks(),
       delayed_run_time,
