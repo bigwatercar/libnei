@@ -57,13 +57,27 @@ std::size_t JobTaskSource::GetTaskId() const {
 }
 
 void JobTaskSource::RunWorkerLoop() {
-  running_workers_.fetch_add(1, std::memory_order_acquire);
-  while (!ShouldYield()) { task_.Run(this); MaybeSpawnWorkers(); }
+  running_workers_.fetch_add(1, std::memory_order_acq_rel);
+  int iter = 0;
+  while (!ShouldYield()) {
+    task_.Run(this);
+    // Throttle: re-evaluate concurrency every 64 iterations to avoid
+    // calling max_concurrency_cb_ twice per tiny work slice.
+    if ((++iter & 63) == 0)
+      MaybeSpawnWorkers();
+  }
   OnWorkerExited();
 }
 
 void JobTaskSource::PostWorkers(int count) {
   if (!runner_ || count <= 0) return;
+  // Consume pending concurrency increases so completion detection does
+  // not deadlock (pending was only ever incremented, never decremented).
+  int pending = pending_concurrency_increases_.load(std::memory_order_acquire);
+  if (pending > 0) {
+    int consume = (count < pending) ? count : pending;
+    pending_concurrency_increases_.fetch_sub(consume, std::memory_order_release);
+  }
   assigned_workers_.fetch_add(count, std::memory_order_release);
   auto self = shared_from_this();
   for (int i = 0; i < count; ++i)
@@ -91,19 +105,31 @@ void JobTaskSource::PostInitialWorkers(int count) {
 
 void JobTaskSource::Join(bool steal_work) {
   if (steal_work) {
+    // If the job is already completed, avoid re-entering the work loop
+    // (e.g. double-Join from CancelAndSync + destructor).
+    if (is_completed_.load(std::memory_order_acquire)) {
+      completion_event_.Wait();
+      return;
+    }
+
     // Work-stealing: the calling thread participates as a worker.
-    // It is exempt from concurrency-contraction yield (via tls_is_joiner_).
-    // It also does NOT decrement assigned_workers_ — only pool-posted
-    // workers do that.
+    // It is exempt from concurrency-contraction yield (via tls_is_joiner).
     tls_is_joiner = true;
-    running_workers_.fetch_add(1, std::memory_order_acquire);
-    while (!ShouldYield()) { task_.Run(this); MaybeSpawnWorkers(); }
+    running_workers_.fetch_add(1, std::memory_order_acq_rel);
+    int iter = 0;
+    while (!ShouldYield()) {
+      task_.Run(this);
+      if ((++iter & 63) == 0)
+        MaybeSpawnWorkers();
+    }
     int prev_running = running_workers_.fetch_sub(1, std::memory_order_release);
     DCHECK_GT(prev_running, 0);
     if (prev_running == 1) {
+      // The joiner finished all work — signal completion even if some
+      // pool workers are still posted.  They will start, see is_completed_,
+      // yield immediately, and clean up assigned_workers_ harmlessly.
       int pending = pending_concurrency_increases_.load(std::memory_order_acquire);
-      int assigned = assigned_workers_.load(std::memory_order_acquire);
-      if (pending <= 0 && assigned <= 0) {
+      if (pending <= 0) {
         is_completed_.store(true, std::memory_order_release);
         completion_event_.Signal();
       }

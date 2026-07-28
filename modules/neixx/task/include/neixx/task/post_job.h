@@ -14,6 +14,10 @@
 
 namespace nei {
 
+namespace internal {
+class JobTaskSource;
+}  // namespace internal
+
 using MaxConcurrencyCallback = RepeatingCallback<size_t(size_t worker_count)>;
 
 class NEI_API JobDelegate {
@@ -47,9 +51,9 @@ class NEI_API JobHandle {
       MaxConcurrencyCallback max_concurrency_cb, int initial_workers = 0);
 
  private:
-  class Impl;
-  explicit JobHandle(std::unique_ptr<Impl> impl);
-  std::unique_ptr<Impl> impl_;
+  explicit JobHandle(std::shared_ptr<internal::JobTaskSource> source);
+  std::shared_ptr<internal::JobTaskSource> source_;
+  bool detached_ = false;
 };
 
 inline JobHandle PostJob(const Location& from_here, TaskTraits traits,
