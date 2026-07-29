@@ -2,14 +2,15 @@
 
 ## 1. 文档概述
 
-本文档对 `neixx/net` 网络子系统的全部公开组件进行综合技术说明，涵盖数据结构层（`IPAddress` / `IPEndPoint` / `AddressList`）、DNS 解析层（`HostResolver`）、传输层（`TCPClientSocket` / `TCPServerSocket` / `UDPSocket`）的 API 语义、线程模型、跨平台架构、生命周期管理、测试覆盖与性能基准。
+本文档对 `neixx/net` 网络子系统的全部公开组件进行综合技术说明，涵盖数据结构层（`IPAddress` / `IPEndPoint` / `AddressList`）、DNS 解析层（`HostResolver`）、传输层（`TCPClientSocket` / `TCPServerSocket` / `UDPSocket` / `TLSClientSocket` / `TLSServerSocket`）的 API 语义、线程模型、跨平台架构、生命周期管理、测试覆盖与性能基准。
 
 本文档基于以下源码：
 
 - `modules/neixx/net/include/neixx/net/*.h`（8 个公开头文件）
 - `modules/neixx/net/src/*.cpp` / `*.h`（20 个实现文件）
 - `tests/net/*.cpp`（3 个测试文件，41 个测试用例）
-- `bench/tcp_*.cpp`（3 个网络性能基准测试）
+- `bench/tcp_*.cpp`（4 个网络性能基准测试）
+- `bench/tls_throughput_bench.cpp`（TLS 吞吐量基准测试）
 
 ## 2. 模块总览
 
@@ -27,6 +28,11 @@ neixx/net/
 │   ├── TCPClientSocket    — 异步 TCP 客户端（继承 AsyncInputStream + AsyncOutputStream）
 │   └── TCPServerSocket    — 异步 TCP 服务器（多反应器 Accept）
 │
+├── 传输层（TLS）
+│   ├── TLSClientSocket    — 异步 TLS 流（mbedTLS，继承 AsyncInputStream + AsyncOutputStream）
+│   ├── TLSServerSocket    — 异步 TLS 服务器
+│   └── SSLContext         — TLS 配置（证书、私钥、CA、ALPN）
+│
 ├── 传输层（UDP）
 │   └── UDPSocket          — 异步 UDP 数据报套接字（独立接口，不继承流接口）
 │
@@ -38,7 +44,7 @@ neixx/net/
 
 **测试统计**：42 个测试用例（TCP 12 + DNS 21 + UDP 11），四象限全量 ~2,300 测试
 
-**性能基准**：4 个网络 benchmark（TCP 吞吐量、连接压力、RTT、跨系统）
+**性能基准**：5 个网络 benchmark（TCP 吞吐量、连接压力、RTT、跨系统、TLS 吞吐量）
 
 ---
 
@@ -354,6 +360,8 @@ Acceptor 仅处理 `AcceptEx` / `accept4`，Worker 处理已连接 socket 的所
 | 基准 | 测试维度 | 累计连接 | Win 典型值 | WSL 典型值 |
 |------|---------|---------|-----------|-----------|
 | `tcp_loopback_bench` | 单连接吞吐 | 10 GB 传输 | 3,088 MB/s @ 1MB | 9,044 MB/s @ 1MB |
+| `tcp_throughput_bench` | 单连接吞吐（单线程） | 10 MB 传输 | **240 MB/s @ 32KB** | — |
+| `tls_throughput_bench` | TLS 单连接吞吐 | 10 MB 传输 | **61 MB/s @ 16KB** | — |
 | `tcp_conn_stress_bench` | 短连接 CPS 吞吐 | 10k | **4,589 conn/s** | **26,874 conn/s** |
 | `tcp_rtt_bench` | 并发 Ping-Pong RTT | 5k | p50=15.7ms | p50=12.5ms |
 | `tcp_cross_bench` Win→Win | 本地回环 CPS | 10k | **4,299 conn/s** | — |
@@ -396,9 +404,77 @@ WSL→Win 需使用 Windows 侧 `vEthernet (WSL)` 适配器的 IP（通常为 `1
 
 WSL 作为服务端时瓶颈在 accept 循环速率（~300-600/s），客户端连接在内核 TCP backlog 中已建立但未被应用层 accept；客户端进程退出时剩余 backlog 连接被 RST 丢弃。
 
+### 5.6 `tcp_throughput_bench` 缓冲区大小甜点
+
+2026-07-29 新增 `tcp_throughput_bench`（单 IO 线程、10MB 传输、FNV-1a 完整性验证）：
+
+| 缓冲 | 吞吐 (MB/s) | 备注 |
+|-----:|:----------|------|
+| 4 KB | 68 | |
+| 8 KB | 129 | |
+| 16 KB | 182 | |
+| 24 KB | 188 | |
+| **32 KB** | **240** | ★ 甜点 |
+| 48 KB | 181 | |
+| 64 KB | 177 | |
+| 128 KB | 212 | 次峰 |
+
+**结论**：32KB 是 Windows loopback 上 IOCP 批量完成 + L1 缓存局部性的最优交点。
+128KB 的次峰源于 IOCP 完成次数减半（640→320 次），抵消了缓存劣势。
+
 ---
 
-## 6. 传输层 — UDP
+## 6. 传输层 — TLS
+
+### 6.1 TLSClientSocket — 异步 TLS 流
+
+`TLSClientSocket` 在 `TCPClientSocket` 之上添加 mbedTLS 加密/解密，实现
+`AsyncInputStream` 和 `AsyncOutputStream`，可替换 TCP socket 使用。
+
+```cpp
+class TLSClientSocket : public AsyncInputStream, public AsyncOutputStream {
+  TLSClientSocket(std::unique_ptr<TCPClientSocket> transport, SSLContext* ctx);
+  void Connect(const IPEndPoint& addr, ConnectCallback cb, scoped_refptr<TaskRunner> runner);
+  void StartHandshake(ConnectCallback cb, scoped_refptr<TaskRunner> runner);  // 服务端
+  void ReadAsync(scoped_refptr<IOBuffer> buf, size_t len, IOReadCallback cb) override;
+  void WriteAsync(scoped_refptr<IOBuffer> buf, size_t len, IOWriteCallback cb) override;
+  void Close() override;
+};
+```
+
+### 6.2 TLSServerSocket — 异步 TLS 服务端
+
+```cpp
+class TLSServerSocket {
+  using AcceptCallback = std::function<void(bool, std::unique_ptr<TLSClientSocket>)>;
+  bool Listen(const IPEndPoint& addr, int backlog, AcceptCallback cb,
+              scoped_refptr<TaskRunner> runner, RunnerSelector selector = {});
+  void Close();
+};
+```
+
+### 6.3 `tls_throughput_bench` 缓冲区大小甜点
+
+2026-07-29 — mbedTLS 默认 `MBEDTLS_SSL_OUT_CONTENT_LEN = 16384`（TLS 记录上限）。
+超过此值的缓冲会被 `ssl_write_real()` 内部截断，导致浪费：
+
+| 缓冲 | 吞吐 (MB/s) | TLS 记录/次 | 浪费率 |
+|-----:|:----------|:---------:|:-----:|
+| 4 KB | 42 | 1（不满） | 0% |
+| 8 KB | 51 | 1（不满） | 0% |
+| 12 KB | 57 | 1（不满） | 0% |
+| **16 KB** | **58** | 1（满） | **0%** | ★ 甜点 |
+| 20 KB | 60 | 1 | 20% |
+| 32 KB | 57 | 1 | 50% |
+| 64 KB | 50 | 1 | 75% |
+| 128 KB | 39 | 1 | 87.5% |
+
+**结论**：16KB 是甜点——恰好填满一个 TLS 记录，零浪费，跨平台一致。
+超过 16KB 时 mbedTLS 截断，多余缓冲空间浪费且增加 PostTask 往返开销。
+
+---
+
+## 7. 传输层 — UDP
 
 ### 6.1 模块定位
 
@@ -713,7 +789,7 @@ timer.Start(FROM_HERE, TimeDelta::FromSeconds(30),
 
 ---
 
-## 7. 平台基础设施
+## 8. 平台基础设施
 
 ### 7.1 WsaInit / EnsureWsa()
 
@@ -738,7 +814,7 @@ namespace nei::net { void EnsureWsa(); }
 
 ---
 
-## 8. 架构设计原则
+## 9. 架构设计原则
 
 ### 8.1 跨平台抽象模式
 
@@ -769,7 +845,7 @@ namespace nei::net { void EnsureWsa(); }
 
 ---
 
-## 9. 测试矩阵
+## 10. 测试矩阵
 
 ### 9.1 全量统计
 
