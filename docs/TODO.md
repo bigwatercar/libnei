@@ -153,3 +153,18 @@ Linux: `libudev`/netlink.
 | 2 | HTTP/WebSocket Server | Builds on TCP |
 | 3 | SSL/TLS | Heavy dep, needed for HTTP/2 |
 | 4 | Device Monitoring | No Chromium reference |
+
+---
+
+## IOBuffer::data() 返回类型改为 unsigned char* (P2)
+
+**背景**: 2026-07-29 `tls_throughput_bench` 哈希校验失败，根因是 MSVC 上 `char`
+为 signed，`chunk->data()[i]` 与 `uint64_t` XOR 时发生符号扩展。修复方式是在调用处
+加 `static_cast<unsigned char>()`。治本方案是将 `IOBuffer::data()` 返回类型从
+`char*` 改为 `unsigned char*`，从 API 层面消除此类 bug。
+
+**影响范围**: ~111 处引用，主要是 `memcpy`/`ReadFile`/`WriteFile`（接受 `void*`，
+无需 cast）和少量 `std::string::assign` / `std::string_view`（需要 cast）。
+
+**方案**: 将 `data()` 和 `data() const` 返回 `unsigned char*` / `const unsigned char*`，
+内部 `data_` 成员同步改类型。现有调用处若编译报错，加 `reinterpret_cast<const char*>()`。
