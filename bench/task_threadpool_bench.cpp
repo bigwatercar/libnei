@@ -287,24 +287,24 @@ int main(int argc, char* argv[]) {
   BenchmarkResult result_multithread = RunMultiThreadPostBenchmark(*runner, task_count);
   all_results.push_back({"Multi-threaded PostTask (4 threads, sequenced)", result_multithread});
 
-  // ---- Concurrent runner scenarios ----
-  nei::scoped_refptr<nei::TaskRunner> concurrent_runner = pool.CreateParallelTaskRunner();
-  if (!concurrent_runner) {
+  // ---- Parallel runner scenarios ----
+  nei::scoped_refptr<nei::TaskRunner> parallel_runner = pool.CreateParallelTaskRunner();
+  if (!parallel_runner) {
     std::cerr << "CreateParallelTaskRunner returned null." << '\n';
     return 1;
   }
 
   g_sum_sink.store(0, std::memory_order_relaxed);
   g_executed_task_count.store(0, std::memory_order_relaxed);
-  BenchmarkResult result_concurrent = RunAddBenchmark(*concurrent_runner, task_count);
-  all_results.push_back({"Concurrent PostTask (single-thread post)", result_concurrent});
+  BenchmarkResult result_parallel = RunAddBenchmark(*parallel_runner, task_count);
+  all_results.push_back({"Parallel PostTask (single-thread post)", result_parallel});
 
   g_sum_sink.store(0, std::memory_order_relaxed);
   g_executed_task_count.store(0, std::memory_order_relaxed);
-  BenchmarkResult result_concurrent_mt =
-      RunMultiThreadPostBenchmark(*concurrent_runner, task_count);
+  BenchmarkResult result_parallel_mt =
+      RunMultiThreadPostBenchmark(*parallel_runner, task_count);
   all_results.push_back(
-      {"Concurrent Multi-threaded PostTask (4 threads)", result_concurrent_mt});
+      {"Parallel Multi-threaded PostTask (4 threads)", result_parallel_mt});
 
   nei::internal::SetTaskTracingEnabled(previous_tracing_enabled);
   (void)pool.Shutdown();

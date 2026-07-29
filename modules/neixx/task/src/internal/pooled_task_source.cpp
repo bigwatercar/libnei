@@ -87,7 +87,7 @@ TaskQueue* PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout,
           continue;
         }
 
-        if (entry.queue->is_concurrent()) {
+        if (entry.queue->is_parallel()) {
           // ---- Pixel-level Chromium alignment ----
           //
           // Mirrors PriorityQueue + TaskSource::WillRunTask() in
@@ -193,9 +193,9 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue* queue) {
 
     QueueState& state = it->second;
 
-    // Concurrent queues: ensure the queue is in the heap if it has work,
+    // Parallel queues: ensure the queue is in the heap if it has work,
     // then notify workers so they pick it up.
-    if (queue->is_concurrent()) {
+    if (queue->is_parallel()) {
       // Single HasImmediateWork() call to avoid acquiring the TaskQueue
       // lock twice on the hot PostTask path.
       const bool has_work = queue->HasImmediateWork();
@@ -299,9 +299,9 @@ void PooledTaskSource::OnTaskQueueProcessed(TaskQueue* queue) {
       return;
     }
 
-    // Concurrent queues are always in the heap; no in_flight or
+    // Parallel queues are always in the heap; no in_flight or
     // re-enqueue logic to unwind.
-    if (queue->is_concurrent()) {
+    if (queue->is_parallel()) {
       state.reenqueue_requested = false;
       return;
     }

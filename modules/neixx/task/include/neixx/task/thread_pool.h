@@ -59,13 +59,13 @@ class NEI_API ThreadPool final {
   scoped_refptr<TaskRunner> CreateSequencedTaskRunner(
       const TaskTraits& traits = TaskTraits());
 
-  /// Creates a TaskRunner whose tasks may run concurrently on different
+  /// Creates a TaskRunner whose tasks may run in parallel on different
   /// worker threads.  Unlike sequenced runners, there is no guarantee of
-  /// serial execution; tasks posted to a concurrent runner may execute in
+  /// serial execution; tasks posted to a parallel runner may execute in
   /// any order and on any available worker.
   ///
   /// NOTE: Callers must ensure their tasks are thread-safe when using a
-  /// concurrent runner.
+  /// parallel runner.
   scoped_refptr<TaskRunner> CreateParallelTaskRunner(
       const TaskTraits& traits = TaskTraits());
 

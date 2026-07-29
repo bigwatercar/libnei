@@ -45,12 +45,12 @@ constexpr std::size_t kTaskBatchSize = 64;
 constexpr std::size_t kMinTasksPerQueueTurn = 32;
 constexpr std::size_t kMaxTasksPerQueueTurn = 128;
 constexpr std::size_t kSaturatedBatchesToGrow = 2;
-// Concurrent-queue per-handoff budget bounds.  Keep these smaller than
+// Parallel-queue per-handoff budget bounds.  Keep these smaller than
 // the sequenced-queue bounds so that multiple workers can interleave on
-// a hot concurrent queue without excessive contention on the TaskQueue
+// a hot parallel queue without excessive contention on the TaskQueue
 // lock, while still amortizing the shard-lock and dequeue overhead.
-constexpr std::size_t kMinConcurrentTasksPerTurn = 4;
-constexpr std::size_t kMaxConcurrentTasksPerTurn = 32;
+constexpr std::size_t kMinParallelTasksPerTurn = 4;
+constexpr std::size_t kMaxParallelTasksPerTurn = 32;
 constexpr std::int64_t kBackpressureWarningThreshold = 10'000;
 
 /// Maps a task's scheduling class to the OS thread priority that should be
@@ -177,29 +177,29 @@ class WorkerThread final : public PlatformThread::Delegate {
     }
   }
 
-  // Adapts the concurrent-queue per-handoff budget.  Uses the same
+  // Adapts the parallel-queue per-handoff budget.  Uses the same
   // saturation heuristic as AdaptTurnBudget() but with a separate,
   // smaller budget range so that other workers still get a chance to
-  // interleave on hot concurrent queues.
-  void AdaptConcurrentBudget(std::size_t taken, std::size_t requested) {
+  // interleave on hot parallel queues.
+  void AdaptParallelBudget(std::size_t taken, std::size_t requested) {
     if (requested == 0) {
       return;
     }
 
     if (taken == requested) {
-      ++consecutive_concurrent_saturated_batches_;
-      if (consecutive_concurrent_saturated_batches_ >= kSaturatedBatchesToGrow) {
-        dynamic_concurrent_budget_ =
-            std::min(kMaxConcurrentTasksPerTurn, dynamic_concurrent_budget_ * 2);
-        consecutive_concurrent_saturated_batches_ = 0;
+      ++consecutive_parallel_saturated_batches_;
+      if (consecutive_parallel_saturated_batches_ >= kSaturatedBatchesToGrow) {
+        dynamic_parallel_budget_ =
+            std::min(kMaxParallelTasksPerTurn, dynamic_parallel_budget_ * 2);
+        consecutive_parallel_saturated_batches_ = 0;
       }
       return;
     }
 
-    consecutive_concurrent_saturated_batches_ = 0;
+    consecutive_parallel_saturated_batches_ = 0;
     if (taken * 2 <= requested) {
-      dynamic_concurrent_budget_ =
-          std::max(kMinConcurrentTasksPerTurn, dynamic_concurrent_budget_ / 2);
+      dynamic_parallel_budget_ =
+          std::max(kMinParallelTasksPerTurn, dynamic_parallel_budget_ / 2);
     }
   }
 
@@ -247,7 +247,7 @@ class WorkerThread final : public PlatformThread::Delegate {
 
       std::size_t remaining_budget = dynamic_turn_budget_;
 
-      // For concurrent queues, use a separate (smaller) dynamic budget
+      // For parallel queues, use a separate (smaller) dynamic budget
       // instead of the hard-coded 1-task limit.  This amortizes the
       // shard-lock and TaskQueue-lock overhead across multiple tasks
       // while still keeping the handoff short enough for other workers
@@ -256,8 +256,8 @@ class WorkerThread final : public PlatformThread::Delegate {
       // WillRunTask() was already called inside GetNextTaskQueueTimed(),
       // which atomically reserved a worker slot for us.  We hold that
       // slot until DidProcessTask() releases it below.
-      if (queue->is_concurrent()) {
-        remaining_budget = dynamic_concurrent_budget_;
+      if (queue->is_parallel()) {
+        remaining_budget = dynamic_parallel_budget_;
       }
 
       while (remaining_budget > 0) {
@@ -266,8 +266,8 @@ class WorkerThread final : public PlatformThread::Delegate {
         std::array<internal::Task, kTaskBatchSize> batch;
         const std::size_t task_count =
             queue->TakeImmediateTasks(batch.data(), request_count);
-        if (queue->is_concurrent()) {
-          AdaptConcurrentBudget(task_count, request_count);
+        if (queue->is_parallel()) {
+          AdaptParallelBudget(task_count, request_count);
         } else {
           AdaptTurnBudget(task_count, request_count);
         }
@@ -359,7 +359,7 @@ class WorkerThread final : public PlatformThread::Delegate {
       // This pixel-mirrors TaskTracker::RunAndPopNextTask() in chromium:
       //   const bool task_source_must_be_queued = task_source.DidProcessTask();
       //   if (task_source_must_be_queued) return task_source;
-      if (queue->is_concurrent()) {
+      if (queue->is_parallel()) {
         if (queue->DidProcessTask()) {
           source_->ReEnqueueTaskQueue(queue);
         }
@@ -390,9 +390,9 @@ class WorkerThread final : public PlatformThread::Delegate {
   /// Adaptive per-queue processing budget for this worker thread.
   std::size_t dynamic_turn_budget_ = kTaskBatchSize;
   std::size_t consecutive_saturated_batches_ = 0;
-  /// Adaptive per-queue processing budget for concurrent queues.
-  std::size_t dynamic_concurrent_budget_ = kMinConcurrentTasksPerTurn;
-  std::size_t consecutive_concurrent_saturated_batches_ = 0;
+  /// Adaptive per-queue processing budget for parallel queues.
+  std::size_t dynamic_parallel_budget_ = kMinParallelTasksPerTurn;
+  std::size_t consecutive_parallel_saturated_batches_ = 0;
 
   std::string name_;
   PlatformThread::Handle handle_;
@@ -490,8 +490,8 @@ class ThreadPool::Impl {
     internal::TaskQueue* raw_queue = queue.get();
     WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
 
-    // Mark as concurrent so PooledTaskSource skips the in_flight guard.
-    raw_queue->set_concurrent(true);
+    // Mark as parallel so PooledTaskSource skips the in_flight guard.
+    raw_queue->set_parallel(true);
 
     task_source_.RegisterTaskQueue(raw_queue);
     delayed_task_manager_.AddQueue(raw_queue);

@@ -278,20 +278,20 @@ class TaskQueue::Impl {
     on_task_enqueued_callback_ = std::move(callback);
   }
 
-  bool is_concurrent() const {
-    // concurrent_ is set once before the queue is handed to the pool
+  bool is_parallel() const {
+    // parallel_ is set once before the queue is handed to the pool
     // and never mutated afterwards  --  no lock needed.
-    return concurrent_;
+    return parallel_;
   }
 
-  void set_concurrent(bool concurrent) {
-    concurrent_ = concurrent;
+  void set_parallel(bool parallel) {
+    parallel_ = parallel;
   }
 
   // ---- Chromium-aligned WillRunTask / DidProcessTask ----
 
   TaskQueue::RunStatus WillRunTask() {
-    if (!concurrent_) {
+    if (!parallel_) {
       return TaskQueue::RunStatus::kDisallowed;
     }
 
@@ -311,7 +311,7 @@ class TaskQueue::Impl {
       return TaskQueue::RunStatus::kDisallowed;
     }
 
-    if (current >= TaskQueue::kMaxConcurrentWorkers) {
+    if (current >= TaskQueue::kMaxParallelWorkers) {
       // Last (or beyond-last) slot taken: saturated.
       // The caller must remove this queue from the ready heap.
       return TaskQueue::RunStatus::kAllowedSaturated;
@@ -323,7 +323,7 @@ class TaskQueue::Impl {
   }
 
   bool DidProcessTask() {
-    if (!concurrent_) {
+    if (!parallel_) {
       return false;
     }
 
@@ -344,7 +344,7 @@ class TaskQueue::Impl {
     //   reenqueue = (new_max_concurrency > worker_count_after)
     // and the caller (RunAndPopNextTask) checks:
     //   if (task_source_must_be_queued) return task_source;
-    if (prev >= TaskQueue::kMaxConcurrentWorkers) {
+    if (prev >= TaskQueue::kMaxParallelWorkers) {
       // Was saturated before this release; now has headroom.
       // Re-enqueue if work remains so idle workers can pick it up.
       // Use HasImmediateWork() (acquires lock_) rather than
@@ -355,17 +355,17 @@ class TaskQueue::Impl {
     return false;
   }
 
-  size_t GetRemainingConcurrency() const {
-    if (!concurrent_) {
+  size_t GetRemainingParallelism() const {
+    if (!parallel_) {
       // Sequenced: at most one worker.
       return running_worker_count_.load(std::memory_order_acquire) == 0 ? 1 : 0;
     }
     const int running =
         running_worker_count_.load(std::memory_order_acquire);
-    if (running >= TaskQueue::kMaxConcurrentWorkers) {
+    if (running >= TaskQueue::kMaxParallelWorkers) {
       return 0;
     }
-    return static_cast<size_t>(TaskQueue::kMaxConcurrentWorkers - running);
+    return static_cast<size_t>(TaskQueue::kMaxParallelWorkers - running);
   }
 
  private:
@@ -403,7 +403,7 @@ class TaskQueue::Impl {
   SequenceToken sequence_token_ = SequenceToken::Create();
   bool shut_down_ = false;
   bool reject_new_tasks_ = false;
-  bool concurrent_ = false;
+  bool parallel_ = false;
   std::deque<Task> immediate_fifo_queue_;
   std::int64_t immediate_sequence_num_ = 0;
   std::int64_t delayed_sequence_num_ = 0;
@@ -498,12 +498,12 @@ WeakPtr<TaskQueue> TaskQueue::GetWeakPtr() {
   return impl_->GetWeakPtr();
 }
 
-bool TaskQueue::is_concurrent() const {
-  return impl_->is_concurrent();
+bool TaskQueue::is_parallel() const {
+  return impl_->is_parallel();
 }
 
-void TaskQueue::set_concurrent(bool concurrent) {
-  impl_->set_concurrent(concurrent);
+void TaskQueue::set_parallel(bool parallel) {
+  impl_->set_parallel(parallel);
 }
 
 TaskQueue::RunStatus TaskQueue::WillRunTask() {
@@ -514,8 +514,8 @@ bool TaskQueue::DidProcessTask() {
   return impl_->DidProcessTask();
 }
 
-size_t TaskQueue::GetRemainingConcurrency() const {
-  return impl_->GetRemainingConcurrency();
+size_t TaskQueue::GetRemainingParallelism() const {
+  return impl_->GetRemainingParallelism();
 }
 
 }  // namespace internal

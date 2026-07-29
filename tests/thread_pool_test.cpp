@@ -642,8 +642,8 @@ TEST(ThreadPoolTest, RunsTasksInCurrentSequenceFalseForDifferentRunner) {
 // CreateParallelTaskRunner
 // =============================================================================
 
-// Concurrent runners allow tasks to execute in parallel on multiple workers.
-TEST(ThreadPoolTest, ConcurrentRunnerAllowsParallelExecution) {
+// Parallel runners allow tasks to execute in parallel on multiple workers.
+TEST(ThreadPoolTest, ParallelRunnerAllowsParallelExecution) {
   // Use enough workers to enable parallel execution.
   ThreadPool pool({4});
   scoped_refptr<TaskRunner> runner = pool.CreateParallelTaskRunner();
@@ -674,7 +674,7 @@ TEST(ThreadPoolTest, ConcurrentRunnerAllowsParallelExecution) {
   }
 
   ASSERT_TRUE(done.TimedWait(std::chrono::seconds(10)));
-  // Concurrent runners should allow > 1 tasks to run in parallel.
+  // Parallel runners should allow > 1 tasks to run in parallel.
   EXPECT_GT(max_running.load(), 1);
   pool.Shutdown();
 }
