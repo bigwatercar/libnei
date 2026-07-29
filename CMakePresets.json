@@ -162,8 +162,11 @@
       "displayName": "Windows MSVC Debug ASAN",
       "description": "Debug build for Windows with MSVC + AddressSanitizer",
       "inherits": "windows-msvc-debug-shared",
-      "toolchainFile": "${sourceDir}/cmake/toolchain-asan-msvc.cmake",
       "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "/fsanitize=address",
+        "CMAKE_C_FLAGS": "/fsanitize=address",
+        "CMAKE_EXE_LINKER_FLAGS": "/fsanitize=address",
+        "CMAKE_SHARED_LINKER_FLAGS": "/fsanitize=address",
         "NEI_BUILD_BENCHMARKS": "OFF"
       }
     },
@@ -172,8 +175,11 @@
       "displayName": "Linux GCC Debug ASAN",
       "description": "Debug build for Linux with GCC + AddressSanitizer",
       "inherits": "linux-gcc-debug-shared",
-      "toolchainFile": "${sourceDir}/cmake/toolchain-asan-gcc.cmake",
       "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-fsanitize=address -fno-omit-frame-pointer -g",
+        "CMAKE_C_FLAGS": "-fsanitize=address -fno-omit-frame-pointer -g",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address",
         "NEI_BUILD_BENCHMARKS": "OFF"
       }
     }
