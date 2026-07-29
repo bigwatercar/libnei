@@ -3,6 +3,8 @@
 // Measures raw TCP throughput (MB/s) without TLS overhead.
 // Verifies data integrity via FNV-1a hash comparison.
 //
+// Server and client run on separate IO threads to maximize throughput.
+//
 // Build: cmake --build build/linux-gcc-release-shared --target tcp_throughput_bench
 // Run:   ./tcp_throughput_bench [total_MB] [buffer_size]
 //        default: 10 MB, 64 KB buffer
@@ -99,9 +101,10 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
   const uint16_t port = FindFreePort();
   if (port == 0) { std::cerr << "ERROR: no free port" << std::endl; return; }
 
-  // Single IO thread — avoids cross-thread race between client send
-  // and server receive that causes truncated reads on WSL.
-  IoThread io("tcp-bench");
+  // Separate IO threads — server and client run concurrently to
+  // saturate loopback bandwidth (single-thread serializes send/recv).
+  IoThread srv_io("tcp-bench-srv");
+  IoThread cli_io("tcp-bench-cli");
 
   // Deterministic pattern: byte i = (i*37+17) & 0xFF.
   // Pre-compute expected FNV-1a hash for integrity verification.
@@ -127,8 +130,11 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
 
   auto t_start = Clock::now();
 
-  auto runner = io.runner();
-  runner->PostTask(FROM_HERE, [=]() mutable {
+  auto srv_runner = srv_io.runner();
+  auto cli_runner = cli_io.runner();
+
+  // --- Server: listen + read loop on srv_runner ---
+  srv_runner->PostTask(FROM_HERE, [=]() {
     bool ok = server->Listen(
         nei::net::IPEndPoint(
             nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
@@ -136,10 +142,6 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
           if (!success) { bench_done->Signal(); return; }
           auto sock = std::shared_ptr<nei::net::TCPClientSocket>(conn.release());
           auto do_read = std::make_shared<std::function<void()>>();
-          // Use weak_ptr in the outer lambda to break the
-          // shared_ptr -> function -> lambda -> shared_ptr cycle.
-          // The inner ReadAsync callback holds a strong reference
-          // to keep do_read alive while a read is pending.
           std::weak_ptr<std::function<void()>> do_read_weak = do_read;
           *do_read = [=]() {
             auto chunk = nei::MakeRefCounted<nei::IOBufferWithSize>(buffer_size);
@@ -160,10 +162,13 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
           };
           (*do_read)();
         },
-        runner);
+        srv_runner);
     if (!ok) { bench_done->Signal(); return; }
     server_ready->Signal();
+  });
 
+  // --- Client: connect + write loop on cli_runner ---
+  cli_runner->PostTask(FROM_HERE, [=]() {
     client->Connect(
         nei::net::IPEndPoint(
             nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
@@ -171,7 +176,6 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
           if (!ok) { bench_done->Signal(); return; }
           auto offset = std::make_shared<size_t>(0);
           auto do_write = std::make_shared<std::function<void()>>();
-          // Same weak_ptr pattern as do_read above.
           std::weak_ptr<std::function<void()>> do_write_weak = do_write;
           *do_write = [=]() {
             size_t remain = total_bytes - *offset;
@@ -193,7 +197,7 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
           };
           (*do_write)();
         },
-        runner);
+        cli_runner);
   });
 
   server_ready->Wait();

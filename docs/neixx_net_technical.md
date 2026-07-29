@@ -360,8 +360,8 @@ Acceptor 仅处理 `AcceptEx` / `accept4`，Worker 处理已连接 socket 的所
 | 基准 | 测试维度 | 累计连接 | Win 典型值 | WSL 典型值 |
 |------|---------|---------|-----------|-----------|
 | `tcp_loopback_bench` | 单连接吞吐 | 10 GB 传输 | 3,088 MB/s @ 1MB | 9,044 MB/s @ 1MB |
-| `tcp_throughput_bench` | 单连接吞吐（单线程） | 10 MB 传输 | **240 MB/s @ 32KB** | — |
-| `tls_throughput_bench` | TLS 单连接吞吐 | 10 MB 传输 | **61 MB/s @ 16KB** | — |
+| `tcp_throughput_bench` | 单连接吞吐（双线程+验证） | 1 GB 传输 | **509 MB/s @ 512KB** | — |
+| `tls_throughput_bench` | TLS 单连接吞吐（单线程+验证） | 10 MB 传输 | **61 MB/s @ 16KB** | — |
 | `tcp_conn_stress_bench` | 短连接 CPS 吞吐 | 10k | **4,589 conn/s** | **26,874 conn/s** |
 | `tcp_rtt_bench` | 并发 Ping-Pong RTT | 5k | p50=15.7ms | p50=12.5ms |
 | `tcp_cross_bench` Win→Win | 本地回环 CPS | 10k | **4,299 conn/s** | — |
@@ -406,21 +406,22 @@ WSL 作为服务端时瓶颈在 accept 循环速率（~300-600/s），客户端�
 
 ### 5.6 `tcp_throughput_bench` 缓冲区大小甜点
 
-2026-07-29 新增 `tcp_throughput_bench`（单 IO 线程、10MB 传输、FNV-1a 完整性验证）：
+2026-07-29 新增 `tcp_throughput_bench`（双 IO 线程、1GB 传输、FNV-1a 完整性验证）。
+服务端和客户端分别运行在独立 IO 线程上，避免单线程串行化收发。
 
 | 缓冲 | 吞吐 (MB/s) | 备注 |
 |-----:|:----------|------|
-| 4 KB | 68 | |
-| 8 KB | 129 | |
-| 16 KB | 182 | |
-| 24 KB | 188 | |
-| **32 KB** | **240** | ★ 甜点 |
-| 48 KB | 181 | |
-| 64 KB | 177 | |
-| 128 KB | 212 | 次峰 |
+| 16 KB | 314 | |
+| 32 KB | 437 | |
+| 64 KB | 269 | |
+| 128 KB | 335 | |
+| 256 KB | 285 | |
+| **512 KB** | **509** | ★ 甜点 |
+| 1 MB | 385 | |
 
-**结论**：32KB 是 Windows loopback 上 IOCP 批量完成 + L1 缓存局部性的最优交点。
-128KB 的次峰源于 IOCP 完成次数减半（640→320 次），抵消了缓存劣势。
+**结论**：512KB 是甜点，在 IOCP 批量完成和缓存局部性之间取得最优平衡。
+对比 `tcp_loopback_bench`（3,088 MB/s @ 1MB，不验证数据），本 benchmark 的 509 MB/s
+包含 FNV-1a 每字节哈希验证的 CPU 开销（~1 秒/GB），是可验证吞吐量。
 
 ---
 
