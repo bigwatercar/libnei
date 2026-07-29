@@ -156,6 +156,26 @@
       "cacheVariables": {
         "BUILD_SHARED_LIBS": "ON"
       }
+    },
+    {
+      "name": "windows-msvc-debug-asan",
+      "displayName": "Windows MSVC Debug ASAN",
+      "description": "Debug build for Windows with MSVC + AddressSanitizer",
+      "inherits": "windows-msvc-debug-shared",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-asan-msvc.cmake",
+      "cacheVariables": {
+        "NEI_BUILD_BENCHMARKS": "OFF"
+      }
+    },
+    {
+      "name": "linux-gcc-debug-asan",
+      "displayName": "Linux GCC Debug ASAN",
+      "description": "Debug build for Linux with GCC + AddressSanitizer",
+      "inherits": "linux-gcc-debug-shared",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-asan-gcc.cmake",
+      "cacheVariables": {
+        "NEI_BUILD_BENCHMARKS": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -210,6 +230,14 @@
     {
       "name": "linux-gcc-release-shared",
       "configurePreset": "linux-gcc-release-shared"
+    },
+    {
+      "name": "windows-msvc-debug-asan",
+      "configurePreset": "windows-msvc-debug-asan"
+    },
+    {
+      "name": "linux-gcc-debug-asan",
+      "configurePreset": "linux-gcc-debug-asan"
     }
   ],
   "testPresets": [
@@ -282,6 +310,16 @@
     {
       "name": "linux-gcc-release-shared",
       "configurePreset": "linux-gcc-release-shared",
+      "inherits": "test-base"
+    },
+    {
+      "name": "windows-msvc-debug-asan",
+      "configurePreset": "windows-msvc-debug-asan",
+      "inherits": "test-base"
+    },
+    {
+      "name": "linux-gcc-debug-asan",
+      "configurePreset": "linux-gcc-debug-asan",
       "inherits": "test-base"
     }
   ]
