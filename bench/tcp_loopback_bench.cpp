@@ -233,7 +233,7 @@ int main(int argc, char* argv[]) {
   std::cout << "  Buffer  |  Data   |  Elapsed  |  Throughput" << std::endl;
   std::cout << "----------|---------|-----------|------------" << std::endl;
 
-  std::vector<size_t> sizes = {4096, 8192, 16384, 32768, 65536, 131072, 262144, 1048576};
+  std::vector<size_t> sizes = {4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576};
   for (auto sz : sizes)
     RunBenchmark(sz, total_mb);
 
