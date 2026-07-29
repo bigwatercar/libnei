@@ -89,9 +89,9 @@ scoped_refptr<TaskRunner> ThreadPoolInstance::CreateSequencedTaskRunner(
   return pool_.CreateSequencedTaskRunner(traits);
 }
 
-scoped_refptr<TaskRunner> ThreadPoolInstance::CreateConcurrentTaskRunner(
+scoped_refptr<TaskRunner> ThreadPoolInstance::CreateParallelTaskRunner(
     const TaskTraits& traits) {
-  return pool_.CreateConcurrentTaskRunner(traits);
+  return pool_.CreateParallelTaskRunner(traits);
 }
 
 }  // namespace nei

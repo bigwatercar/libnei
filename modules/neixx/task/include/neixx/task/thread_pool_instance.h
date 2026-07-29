@@ -61,7 +61,7 @@ class NEI_API ThreadPoolInstance final {
       const TaskTraits& traits = TaskTraits());
 
   /// Creates a concurrent TaskRunner on the global pool (for PostJob).
-  scoped_refptr<TaskRunner> CreateConcurrentTaskRunner(
+  scoped_refptr<TaskRunner> CreateParallelTaskRunner(
       const TaskTraits& traits = TaskTraits());
 
   ThreadPoolInstance(const ThreadPoolInstance&) = delete;

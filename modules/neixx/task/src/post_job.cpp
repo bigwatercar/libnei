@@ -47,7 +47,7 @@ JobHandle JobHandle::PostJob(const Location& from_here, TaskTraits traits,
   ThreadPoolInstance* pool = ThreadPoolInstance::Get();
   DCHECK(pool);
   static scoped_refptr<TaskRunner> cached_runner =
-      pool->CreateConcurrentTaskRunner(TaskTraits());
+      pool->CreateParallelTaskRunner(TaskTraits());
   source->SetRunner(cached_runner);
   source->PostInitialWorkers(initial_workers);
   return JobHandle(std::move(source));

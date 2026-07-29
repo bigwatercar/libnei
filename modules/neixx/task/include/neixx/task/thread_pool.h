@@ -66,7 +66,7 @@ class NEI_API ThreadPool final {
   ///
   /// NOTE: Callers must ensure their tasks are thread-safe when using a
   /// concurrent runner.
-  scoped_refptr<TaskRunner> CreateConcurrentTaskRunner(
+  scoped_refptr<TaskRunner> CreateParallelTaskRunner(
       const TaskTraits& traits = TaskTraits());
 
   /// Posts a barrier task to every registered queue and blocks until all

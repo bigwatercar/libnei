@@ -480,7 +480,7 @@ class ThreadPool::Impl {
     return TaskRunner::CreateForThreadPool(raw_queue, traits);
   }
 
-  scoped_refptr<TaskRunner> CreateConcurrentTaskRunner(const TaskTraits& traits) {
+  scoped_refptr<TaskRunner> CreateParallelTaskRunner(const TaskTraits& traits) {
     AutoLock lock(lock_);
     if (is_shutdown_) {
       return nullptr;
@@ -729,8 +729,8 @@ scoped_refptr<TaskRunner> ThreadPool::CreateSequencedTaskRunner(const TaskTraits
   return impl_->CreateSequencedTaskRunner(traits);
 }
 
-scoped_refptr<TaskRunner> ThreadPool::CreateConcurrentTaskRunner(const TaskTraits& traits) {
-  return impl_->CreateConcurrentTaskRunner(traits);
+scoped_refptr<TaskRunner> ThreadPool::CreateParallelTaskRunner(const TaskTraits& traits) {
+  return impl_->CreateParallelTaskRunner(traits);
 }
 
 void ThreadPool::FlushForTesting() {

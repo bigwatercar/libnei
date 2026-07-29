@@ -288,9 +288,9 @@ int main(int argc, char* argv[]) {
   all_results.push_back({"Multi-threaded PostTask (4 threads, sequenced)", result_multithread});
 
   // ---- Concurrent runner scenarios ----
-  nei::scoped_refptr<nei::TaskRunner> concurrent_runner = pool.CreateConcurrentTaskRunner();
+  nei::scoped_refptr<nei::TaskRunner> concurrent_runner = pool.CreateParallelTaskRunner();
   if (!concurrent_runner) {
-    std::cerr << "CreateConcurrentTaskRunner returned null." << '\n';
+    std::cerr << "CreateParallelTaskRunner returned null." << '\n';
     return 1;
   }
 

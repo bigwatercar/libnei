@@ -639,14 +639,14 @@ TEST(ThreadPoolTest, RunsTasksInCurrentSequenceFalseForDifferentRunner) {
 }
 
 // =============================================================================
-// CreateConcurrentTaskRunner
+// CreateParallelTaskRunner
 // =============================================================================
 
 // Concurrent runners allow tasks to execute in parallel on multiple workers.
 TEST(ThreadPoolTest, ConcurrentRunnerAllowsParallelExecution) {
   // Use enough workers to enable parallel execution.
   ThreadPool pool({4});
-  scoped_refptr<TaskRunner> runner = pool.CreateConcurrentTaskRunner();
+  scoped_refptr<TaskRunner> runner = pool.CreateParallelTaskRunner();
   ASSERT_TRUE(runner);
 
   constexpr int kTaskCount = 8;
