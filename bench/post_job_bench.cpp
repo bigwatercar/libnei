@@ -125,7 +125,7 @@ int main() {
   // Bench 3: Per-worker scaling (no contention)
   {
     Hdr("Bench 3: Per-worker scaling (10M ops/worker)");
-    const uint64_t O = 1000000000ull;
+    const uint64_t O = 10000000;
 
     struct alignas(64) P {
       std::atomic<uint64_t> v{0};
