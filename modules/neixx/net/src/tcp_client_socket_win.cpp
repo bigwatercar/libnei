@@ -190,7 +190,7 @@ void TCPClientSocket::Impl::StartOrphanDrain() {
   };
 
   WSABUF wsa_buf;
-  wsa_buf.buf = ctx->buffer->data();
+  wsa_buf.buf = reinterpret_cast<CHAR*>(ctx->buffer->data());
   wsa_buf.len = static_cast<ULONG>(ctx->buf_len);
 
   DWORD flags = 0;
@@ -446,7 +446,7 @@ void TCPClientSocket::Impl::ReadAsync(
   ctx->self_ref = WrapRefCounted(this);  // Keep Impl alive until IOCP completion.
 
   WSABUF wsa_buf;
-  wsa_buf.buf = ctx->buffer->data();
+  wsa_buf.buf = reinterpret_cast<CHAR*>(ctx->buffer->data());
   wsa_buf.len = static_cast<ULONG>(buf_len);
 
   DWORD flags = 0;
@@ -512,7 +512,7 @@ void TCPClientSocket::Impl::WriteAsync(
   ctx->self_ref = WrapRefCounted(this);  // Keep Impl alive until IOCP completion.
 
   WSABUF wsa_buf;
-  wsa_buf.buf = ctx->buffer->data();
+  wsa_buf.buf = reinterpret_cast<CHAR*>(ctx->buffer->data());
   wsa_buf.len = static_cast<ULONG>(buf_len);
 
   int rc = WSASend(socket_, &wsa_buf, 1, nullptr, 0,

@@ -146,7 +146,7 @@ void RunDemo(const std::string& host, uint16_t port) {
                           std::cout << "[4] Received " << n << " bytes:"
                                     << std::endl;
                           std::cout.write(
-                              read_buf->data(),
+                              reinterpret_cast<const char*>(read_buf->data()),
                               static_cast<std::streamsize>(n));
                           std::cout << std::endl;
 

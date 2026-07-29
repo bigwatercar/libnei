@@ -164,7 +164,7 @@ struct PipeBenchState {
 
     payload = AcquireBuffer(chunk_size);
     for (std::size_t i = 0; i < chunk_size; ++i) {
-      payload.buf->data()[i] = static_cast<char>((i * 131u + 17u) & 0xFFu);
+      payload.buf->data()[i] = static_cast<unsigned char>((i * 131u + 17u) & 0xFFu);
     }
 
     started = Clock::now();

@@ -303,7 +303,7 @@ void UDPSocket::Impl::DoSendTo(scoped_refptr<IOBuffer> buf,
   ctx->self_ref = WrapRefCounted(this);
 
   WSABUF wsa_buf;
-  wsa_buf.buf = ctx->buffer->data();
+  wsa_buf.buf = reinterpret_cast<CHAR*>(ctx->buffer->data());
   wsa_buf.len = static_cast<ULONG>(buf_len);
 
   pending_io_count_.fetch_add(1, std::memory_order_relaxed);
@@ -383,7 +383,7 @@ void UDPSocket::Impl::DoRecvFrom(scoped_refptr<IOBuffer> buf,
   // peer_addr and peer_addr_len are already initialized in the struct.
 
   WSABUF wsa_buf;
-  wsa_buf.buf = ctx->buffer->data();
+  wsa_buf.buf = reinterpret_cast<CHAR*>(ctx->buffer->data());
   wsa_buf.len = static_cast<ULONG>(buf_len);
 
   pending_io_count_.fetch_add(1, std::memory_order_relaxed);

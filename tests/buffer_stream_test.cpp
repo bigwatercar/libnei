@@ -48,7 +48,7 @@ TEST(BufferInputStreamTest, MultipleReadsAdvanceCursor) {
       call_count++;
       EXPECT_TRUE(ok);
       EXPECT_EQ(n, static_cast<std::size_t>(expected));
-      received.append(buf->data(), n);
+      received.append(reinterpret_cast<const char*>(buf->data()), n);
     });
   }
 

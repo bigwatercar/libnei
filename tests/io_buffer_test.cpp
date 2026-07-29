@@ -27,10 +27,10 @@ TEST(IOBufferTest, WrappedIOBufferUsesExternalStorageWithoutCopy) {
   char external[16] = {};
   external[3] = 'x';
 
-  scoped_refptr<WrappedIOBuffer> wrapped(new WrappedIOBuffer(external));
+  scoped_refptr<WrappedIOBuffer> wrapped(new WrappedIOBuffer(reinterpret_cast<unsigned char*>(external)));
   ASSERT_TRUE(wrapped);
-  ASSERT_EQ(wrapped->data(), external);
-  EXPECT_EQ(wrapped->data()[3], 'x');
+    ASSERT_EQ(wrapped->data(), reinterpret_cast<unsigned char*>(external));
+  EXPECT_EQ(wrapped->data()[3], static_cast<unsigned char>('x'));
 
   wrapped->data()[4] = 'y';
   EXPECT_EQ(external[4], 'y');
@@ -40,7 +40,7 @@ TEST(IOBufferTest, DrainableIOBufferTracksOffsetAndRemainingBytes) {
   scoped_refptr<IOBufferWithSize> base(new IOBufferWithSize(32));
   ASSERT_TRUE(base);
   for (std::size_t i = 0; i < base->size(); ++i) {
-    base->data()[i] = static_cast<char>(i);
+    base->data()[i] = static_cast<unsigned char>(i);
   }
 
   scoped_refptr<DrainableIOBuffer> drainable(
@@ -100,7 +100,7 @@ TEST(IOBufferTest, IOBufferPoolReusesReleased4KBuffer) {
   pool.PurgeMemory();
   pool.SetBucketLimitForTesting(4096u, 8u);
 
-  char* first_ptr = nullptr;
+  unsigned char* first_ptr = nullptr;
   {
     scoped_refptr<IOBufferWithSize> first = pool.AcquireBuffer(1024);
     ASSERT_TRUE(first);

@@ -299,7 +299,7 @@ TEST_F(UdpSocketTest, HighConcurrencyDrain) {
     // than silently queuing internally.
     for (int i = 0; i < kDatagramCount; ++i) {
       auto send_buf = MakeRefCounted<IOBufferWithSize>(kPayloadSize);
-      std::memset(send_buf->data(), static_cast<char>(i & 0xFF), kPayloadSize);
+      std::memset(send_buf->data(), static_cast<unsigned char>(i & 0xFF), kPayloadSize);
       sock->SendTo(send_buf, kPayloadSize, bound,
                    [state](bool ok, int /*n*/) {
                      state->sent.fetch_add(1, std::memory_order_relaxed);
@@ -555,7 +555,7 @@ TEST_F(UdpSocketTest, MultiplePendingRecvFrom) {
     // Send kNumPackets with index-tagged payloads.
     for (int i = 0; i < kNumPackets; ++i) {
       auto send_buf = MakeRefCounted<IOBufferWithSize>(32);
-      std::memset(send_buf->data(), static_cast<char>(i), 32);
+      std::memset(send_buf->data(), static_cast<unsigned char>(i), 32);
       sock->SendTo(send_buf, 32, bound,
                    [&](bool /*ok*/, int /*n*/) {
                      send_count.fetch_add(1, std::memory_order_relaxed);

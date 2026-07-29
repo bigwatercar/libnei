@@ -173,7 +173,7 @@ TEST_F(TcpSocketTest, AsyncStreamTransfer) {
                                     this, port, kTransferSize]() {
     auto ref_buf = MakeRefCounted<IOBufferWithSize>(kTransferSize);
     for (std::size_t i = 0; i < kTransferSize; ++i)
-      ref_buf->data()[i] = static_cast<char>(i & 0xFF);
+      ref_buf->data()[i] = static_cast<unsigned char>(i & 0xFF);
 
     auto recv_buf = MakeRefCounted<IOBufferWithSize>(kTransferSize);
     std::memset(recv_buf->data(), 0, kTransferSize);
@@ -505,7 +505,7 @@ TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
     // ---- client side: write 1 MB then destroy immediately ----
     auto send_buf = MakeRefCounted<IOBufferWithSize>(kTransferSize);
     for (std::size_t i = 0; i < kTransferSize; ++i)
-      send_buf->data()[i] = static_cast<char>(i & 0xFF);
+      send_buf->data()[i] = static_cast<unsigned char>(i & 0xFF);
 
     auto client = std::make_shared<TCPClientSocket>();
     client->Connect(

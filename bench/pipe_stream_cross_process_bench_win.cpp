@@ -426,7 +426,7 @@ bool RunParent(std::size_t payload_size, int iterations, Stats* stats_out) {
 
     auto payload = AcquireBuffer(payload_size);
     for (std::size_t i = 0; i < payload_size; ++i) {
-      payload.buf->data()[i] = static_cast<char>((i * 17u + 3u) & 0xFFu);
+      payload.buf->data()[i] = static_cast<unsigned char>((i * 17u + 3u) & 0xFFu);
     }
 
     state->input = input;

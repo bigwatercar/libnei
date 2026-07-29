@@ -75,7 +75,7 @@ bool RunChild(int read_fd, int write_fd) {
                 return;
               }
 
-              const std::string request(read_holder.buf->data(), n);
+              const std::string request(reinterpret_cast<const char*>(read_holder.buf->data()), n);
               std::cout << "[child] received: " << request << std::endl;
               if (request != "ping from parent") {
                 done.Signal();
@@ -134,7 +134,7 @@ bool RunParent(pid_t child_pid, int write_fd, int read_fd) {
             [&done, &ok, &response, read_holder, input](bool success,
                                                         std::size_t n) {
               if (success && n > 0) {
-                response.assign(read_holder.buf->data(), n);
+                response.assign(reinterpret_cast<const char*>(read_holder.buf->data()), n);
                 ok.store(response == "pong from child",
                          std::memory_order_release);
               }

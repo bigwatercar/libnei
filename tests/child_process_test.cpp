@@ -141,7 +141,7 @@ static void IssuePullRead(const std::shared_ptr<PullReadState>& state) {
           if (state->on_eof) state->on_eof();
           return;
         }
-        if (state->on_chunk) state->on_chunk(buf->data(), bytes);
+        if (state->on_chunk) state->on_chunk(reinterpret_cast<const char*>(buf->data()), bytes);
         buf.reset();
         IssuePullRead(state);
       });

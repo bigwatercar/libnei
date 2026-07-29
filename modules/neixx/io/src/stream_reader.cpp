@@ -139,7 +139,7 @@ void StreamReader::ReadString(std::size_t bytes_to_read,
           std::string output;
           if (success && bytes_read > 0) {
             const std::size_t bounded = (std::min)(bytes_read, sized_buffer->size());
-            output.assign(sized_buffer->data(), bounded);
+            output.assign(reinterpret_cast<const char*>(sized_buffer->data()), bounded);
           } else {
             success = false;
           }

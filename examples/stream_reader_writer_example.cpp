@@ -97,7 +97,7 @@ class DemoAsyncOutputStream final : public nei::AsyncOutputStream {
           {
             std::lock_guard<std::mutex> guard(state->lock);
             if (!state->output_closed) {
-              state->payload.append(buf->data(), buf_len);
+              state->payload.append(reinterpret_cast<const char*>(buf->data()), buf_len);
               ok = true;
             }
           }

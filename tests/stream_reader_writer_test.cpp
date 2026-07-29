@@ -124,7 +124,7 @@ class FakeAsyncOutputStream final : public AsyncOutputStream {
         [state, buf = std::move(buf), buf_len, callback = std::move(callback)]() mutable {
           if (state->succeed) {
             std::lock_guard<std::mutex> guard(state->lock);
-            state->written_payload.append(buf->data(), buf_len);
+            state->written_payload.append(reinterpret_cast<const char*>(buf->data()), buf_len);
             callback(true, buf_len);
           } else {
             callback(false, 0u);

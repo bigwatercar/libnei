@@ -52,18 +52,18 @@ std::size_t DefaultBucketLimit(std::size_t block_size) {
 
 }  // namespace
 
-IOBuffer::IOBuffer(char* data) : data_(data) {}
+IOBuffer::IOBuffer(unsigned char* data) : data_(data) {}
 
 IOBuffer::~IOBuffer() = default;
 
 IOBufferWithSize::IOBufferWithSize(std::size_t size)
     : IOBufferWithSize(size,
-                       std::make_unique<char[]>(std::max<std::size_t>(1u, size)),
+                       std::make_unique<unsigned char[]>(std::max<std::size_t>(1u, size)),
                        nullptr,
                        nullptr) {}
 
 IOBufferWithSize::IOBufferWithSize(std::size_t size,
-                                   std::unique_ptr<char[]> storage,
+                                   std::unique_ptr<unsigned char[]> storage,
                                    RecycleFunc recycle_func,
                                    void* recycle_context)
     : IOBuffer(storage.get()),
@@ -80,7 +80,7 @@ IOBufferWithSize::~IOBufferWithSize() {
   }
 }
 
-WrappedIOBuffer::WrappedIOBuffer(char* data) : IOBuffer(data) {}
+WrappedIOBuffer::WrappedIOBuffer(unsigned char* data) : IOBuffer(data) {}
 
 WrappedIOBuffer::~WrappedIOBuffer() = default;
 
@@ -145,7 +145,7 @@ scoped_refptr<IOBufferWithSize> IOBufferPool::AcquireBuffer(std::size_t size) {
   DCHECK_GT(size, 0u);
   const std::size_t normalized_size = NormalizeBucketSize(std::max<std::size_t>(1u, size));
 
-  std::unique_ptr<char[]> storage;
+  std::unique_ptr<unsigned char[]> storage;
   if (IsPooledBucket(normalized_size)) {
     std::lock_guard<std::mutex> lock(lock_);
     Bucket& bucket = GetOrCreateBucket(normalized_size);
@@ -156,7 +156,7 @@ scoped_refptr<IOBufferWithSize> IOBufferPool::AcquireBuffer(std::size_t size) {
   }
 
   if (storage == nullptr) {
-    storage = std::make_unique<char[]>(normalized_size);
+    storage = std::make_unique<unsigned char[]>(normalized_size);
   }
 
   IOBufferWithSize::RecycleFunc recycle_func = nullptr;
@@ -197,7 +197,7 @@ IOBufferPool::~IOBufferPool() = default;
 // static
 void IOBufferPool::RecycleStorageThunk(void* context,
                                        std::size_t block_size,
-                                       std::unique_ptr<char[]> storage) {
+                                       std::unique_ptr<unsigned char[]> storage) {
   if (context == nullptr || storage == nullptr) {
     return;
   }
@@ -206,7 +206,7 @@ void IOBufferPool::RecycleStorageThunk(void* context,
 }
 
 void IOBufferPool::RecycleStorage(std::size_t block_size,
-                                  std::unique_ptr<char[]> storage) {
+                                  std::unique_ptr<unsigned char[]> storage) {
   DCHECK(storage != nullptr);
   if (!IsPooledBucket(block_size) || storage == nullptr) {
     return;

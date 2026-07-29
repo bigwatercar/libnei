@@ -614,7 +614,7 @@ TEST_F(PipeStreamTest, RapidCancelAndRetryStateMachine) {
                  [&received, &phase2_done, holder, stream2](
                      bool ok, std::size_t n) {
                    if (ok && n > 0)
-                     received.assign(holder.buf->data(), n);
+                     received.assign(reinterpret_cast<const char*>(holder.buf->data()), n);
                    phase2_done.Signal();
                  });
   });

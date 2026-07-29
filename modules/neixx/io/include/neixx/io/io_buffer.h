@@ -17,29 +17,30 @@ namespace nei {
 
 // Base reference-counted byte buffer view.
 //
-// IOBuffer only models pointer semantics (`char* data()`). Ownership of the
-// underlying memory is defined by subclasses. The destructor is protected so
-// callers cannot delete through raw pointers; use scoped_refptr instead.
+// IOBuffer models pointer semantics (`unsigned char* data()`).  The return
+// type is unsigned char to prevent MSVC sign-extension bugs when individual
+// bytes are promoted to wider integer types (e.g. XOR with uint64_t).
+// Ownership of the underlying memory is defined by subclasses.
 class NEI_API IOBuffer : public RefCountedThreadSafe<IOBuffer> {
  public:
   // Returns mutable storage start. May be null for empty/unbound wrappers.
-  char* data() { return data_; }
+  unsigned char* data() { return data_; }
   // Returns immutable storage start. May be null for empty/unbound wrappers.
-  const char* data() const { return data_; }
+  const unsigned char* data() const { return data_; }
 
   IOBuffer(const IOBuffer&) = delete;
   IOBuffer& operator=(const IOBuffer&) = delete;
 
  protected:
-  explicit IOBuffer(char* data);
+  explicit IOBuffer(unsigned char* data);
   virtual ~IOBuffer();
 
-  void set_data(char* data) { data_ = data; }
+  void set_data(unsigned char* data) { data_ = data; }
 
  private:
   friend class RefCountedThreadSafe<IOBuffer>;
 
-  char* data_ = nullptr;
+  unsigned char* data_ = nullptr;
 };
 
 class IOBufferPool;
@@ -62,10 +63,10 @@ class NEI_API IOBufferWithSize : public IOBuffer {
  protected:
   using RecycleFunc = void (*)(void* context,
                                std::size_t block_size,
-                               std::unique_ptr<char[]> storage);
+                               std::unique_ptr<unsigned char[]> storage);
 
   IOBufferWithSize(std::size_t size,
-                   std::unique_ptr<char[]> storage,
+                   std::unique_ptr<unsigned char[]> storage,
                    RecycleFunc recycle_func,
                    void* recycle_context);
   ~IOBufferWithSize() override;
@@ -73,7 +74,7 @@ class NEI_API IOBufferWithSize : public IOBuffer {
  private:
   friend class IOBufferPool;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
-  std::unique_ptr<char[]> storage_;
+  std::unique_ptr<unsigned char[]> storage_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
   std::size_t size_ = 0;
   RecycleFunc recycle_func_ = nullptr;
@@ -86,7 +87,7 @@ class NEI_API WrappedIOBuffer final : public IOBuffer {
   //
   // The wrapped pointer must outlive this wrapper. Destruction never frees
   // the wrapped memory.
-  explicit WrappedIOBuffer(char* data);
+  explicit WrappedIOBuffer(unsigned char* data);
 
   WrappedIOBuffer(const WrappedIOBuffer&) = delete;
   WrappedIOBuffer& operator=(const WrappedIOBuffer&) = delete;
@@ -153,7 +154,7 @@ class NEI_API IOBufferPool {
   struct Bucket {
     std::size_t block_size = 0;
     std::size_t max_cached_blocks = 0;
-    std::vector<std::unique_ptr<char[]>> free_blocks;
+    std::vector<std::unique_ptr<unsigned char[]>> free_blocks;
   };
 
   IOBufferPool();
@@ -166,8 +167,8 @@ class NEI_API IOBufferPool {
 
   static void RecycleStorageThunk(void* context,
                                   std::size_t block_size,
-                                  std::unique_ptr<char[]> storage);
-  void RecycleStorage(std::size_t block_size, std::unique_ptr<char[]> storage);
+                                  std::unique_ptr<unsigned char[]> storage);
+  void RecycleStorage(std::size_t block_size, std::unique_ptr<unsigned char[]> storage);
 
   std::size_t NormalizeBucketSize(std::size_t requested_size) const;
   Bucket& GetOrCreateBucket(std::size_t block_size);

@@ -136,7 +136,7 @@ bool RunDemo(nei::AsyncFile& file,
     return false;
   }
   const std::size_t read_size = bytes_read.load(std::memory_order_acquire);
-  const std::string read_text(read_buf->data(), read_size);
+  const std::string read_text(reinterpret_cast<const char*>(read_buf->data()), read_size);
   if (!read_ok.load(std::memory_order_acquire) || read_text != payload_text) {
     std::cerr << "[demo] ReadAsync failed, error="
               << read_error.load(std::memory_order_acquire)

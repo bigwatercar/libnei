@@ -93,7 +93,7 @@ void AsyncLineReader::IssueNextRead(const std::shared_ptr<State>& state) {
         // calling the parse helper so that OnChunkReceived can work with
         // state->text_buffer directly.
         if (ok && bytes_read > 0) {
-          state->text_buffer.append(buf->data(), bytes_read);
+          state->text_buffer.append(reinterpret_cast<const char*>(buf->data()), bytes_read);
         }
         // Release our ref on buf now; the pool recycle hook (if set) will
         // return it automatically via IOBufferWithSize::~IOBufferWithSize().
