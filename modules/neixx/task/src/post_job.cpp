@@ -1,8 +1,6 @@
 #include <neixx/task/post_job.h>
-#include <memory>
 #include <nei/debug/check.h>
 #include <neixx/task/thread_pool_instance.h>
-#include <neixx/task/internal/job_task_source.h>
 
 namespace nei {
 
@@ -13,7 +11,7 @@ JobHandle::~JobHandle() {
 }
 JobHandle::JobHandle(JobHandle&&) noexcept = default;
 JobHandle& JobHandle::operator=(JobHandle&&) noexcept = default;
-JobHandle::JobHandle(std::shared_ptr<internal::JobTaskSource> source)
+JobHandle::JobHandle(scoped_refptr<internal::JobTaskSource> source)
     : source_(std::move(source)) {}
 
 void JobHandle::Join() {
@@ -43,8 +41,9 @@ JobHandle JobHandle::PostJob(const Location& from_here, TaskTraits traits,
     RepeatingCallback<void(JobDelegate*)> task,
     MaxConcurrencyCallback max_concurrency_cb, int initial_workers) {
   DCHECK(task); DCHECK(max_concurrency_cb);
-  auto source = std::make_shared<internal::JobTaskSource>(
-      std::move(task), std::move(max_concurrency_cb), initial_workers);
+  scoped_refptr<internal::JobTaskSource> source(
+      new internal::JobTaskSource(
+          std::move(task), std::move(max_concurrency_cb), initial_workers));
   ThreadPoolInstance* pool = ThreadPoolInstance::Get();
   DCHECK(pool);
   static scoped_refptr<TaskRunner> cached_runner =

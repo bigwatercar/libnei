@@ -16,6 +16,7 @@
   include/neixx/task/task_runner.h
   include/neixx/task/task_traits.h
   include/neixx/task/thread_checker.h
+  include/neixx/task/job_delegate.h
   include/neixx/task/post_job.h
   include/neixx/task/thread_pool_instance.h
   include/neixx/task/thread_pool.h

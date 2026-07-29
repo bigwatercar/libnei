@@ -3,31 +3,17 @@
 #ifndef NEIXX_TASK_POST_JOB_H_
 #define NEIXX_TASK_POST_JOB_H_
 
-#include <cstddef>
 #include <cstdint>
-#include <memory>
 
 #include <nei/macros/nei_export.h>
 #include <neixx/common/location.h>
 #include <neixx/functional/callback.h>
+#include <neixx/memory/ref_counted.h>
+#include <neixx/task/internal/job_task_source.h>
+#include <neixx/task/job_delegate.h>
 #include <neixx/task/task_traits.h>
 
 namespace nei {
-
-namespace internal {
-class JobTaskSource;
-}  // namespace internal
-
-using MaxConcurrencyCallback = RepeatingCallback<size_t(size_t worker_count)>;
-
-class NEI_API JobDelegate {
- public:
-  virtual ~JobDelegate() = default;
-  virtual bool ShouldYield() = 0;
-  virtual bool IsCompleted() const = 0;
-  virtual void NotifyConcurrencyIncrease(std::int32_t count) = 0;
-  virtual std::size_t GetTaskId() const = 0;
-};
 
 class NEI_API JobHandle {
  public:
@@ -51,8 +37,8 @@ class NEI_API JobHandle {
       MaxConcurrencyCallback max_concurrency_cb, int initial_workers = 0);
 
  private:
-  explicit JobHandle(std::shared_ptr<internal::JobTaskSource> source);
-  std::shared_ptr<internal::JobTaskSource> source_;
+  explicit JobHandle(scoped_refptr<internal::JobTaskSource> source);
+  scoped_refptr<internal::JobTaskSource> source_;
   bool detached_ = false;
 };
 

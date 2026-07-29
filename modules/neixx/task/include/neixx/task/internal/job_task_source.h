@@ -12,7 +12,7 @@
 #include <neixx/functional/callback.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/task/post_job.h>
+#include <neixx/task/job_delegate.h>
 #include <neixx/task/task_runner.h>
 #include <neixx/task/task_traits.h>
 
@@ -20,7 +20,7 @@ namespace nei {
 namespace internal {
 
 class NEI_API JobTaskSource final : public JobDelegate,
-    public std::enable_shared_from_this<JobTaskSource> {
+    public RefCountedThreadSafe<JobTaskSource> {
  public:
   JobTaskSource(RepeatingCallback<void(JobDelegate*)> task,
                 MaxConcurrencyCallback max_concurrency_cb, int initial_workers);

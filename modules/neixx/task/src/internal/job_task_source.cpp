@@ -79,12 +79,15 @@ void JobTaskSource::PostWorkers(int count) {
     pending_concurrency_increases_.fetch_sub(consume, std::memory_order_release);
   }
   assigned_workers_.fetch_add(count, std::memory_order_release);
-  auto self = shared_from_this();
+  scoped_refptr<JobTaskSource> self(this);
   for (int i = 0; i < count; ++i)
     runner_->PostTask(FROM_HERE, [self]() { self->RunWorkerLoop(); });
 }
 
 void JobTaskSource::MaybeSpawnWorkers() {
+  // Bail out if already completed — prevents calling max_concurrency_cb_
+  // after the joiner has signalled completion and client stack is gone.
+  if (is_completed_.load(std::memory_order_acquire)) return;
   if (!runner_ || !max_concurrency_cb_) return;
   int running = running_workers_.load(std::memory_order_acquire);
   int assigned = assigned_workers_.load(std::memory_order_acquire);
@@ -114,6 +117,10 @@ void JobTaskSource::Join(bool steal_work) {
 
     // Work-stealing: the calling thread participates as a worker.
     // It is exempt from concurrency-contraction yield (via tls_is_joiner).
+    // The joiner does NOT touch assigned_workers_ — pool workers handle
+    // their own cleanup.  When the joiner finishes all work (pending <= 0)
+    // it signals completion immediately; straggler pool workers will see
+    // is_completed_ in ShouldYield and exit harmlessly.
     tls_is_joiner = true;
     running_workers_.fetch_add(1, std::memory_order_acq_rel);
     int iter = 0;
@@ -125,9 +132,6 @@ void JobTaskSource::Join(bool steal_work) {
     int prev_running = running_workers_.fetch_sub(1, std::memory_order_release);
     DCHECK_GT(prev_running, 0);
     if (prev_running == 1) {
-      // The joiner finished all work — signal completion even if some
-      // pool workers are still posted.  They will start, see is_completed_,
-      // yield immediately, and clean up assigned_workers_ harmlessly.
       int pending = pending_concurrency_increases_.load(std::memory_order_acquire);
       if (pending <= 0) {
         is_completed_.store(true, std::memory_order_release);
