@@ -249,7 +249,7 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
                   recv_bytes->fetch_add(n);
                   uint64_t h = *recv_hash;
                   for (size_t i = 0; i < n; ++i) {
-                    h ^= chunk->data()[i];
+                    h ^= static_cast<unsigned char>(chunk->data()[i]);
                     h *= 0x100000001b3ULL;
                   }
                   *recv_hash = h;
