@@ -99,6 +99,7 @@ void TCPClientSocket::Impl::Close() {
 }
 
 void TCPClientSocket::Impl::DoCloseCleanup(int fd) {
+  StopKeepAliveMonitor();
   read_controller_.StopWatching();
   write_controller_.StopWatching();
   if (fd >= 0) {
@@ -113,6 +114,11 @@ void TCPClientSocket::Impl::ShutdownWrite() {
 
 void TCPClientSocket::Impl::Orphan() {
   if (orphaned_.exchange(true)) return;
+
+  // Clear the keep-alive dead callback so the timer (if running) won't
+  // spuriously fire it during graceful shutdown.  The timer itself will
+  // be stopped later in DoCloseCleanup() on the IO thread.
+  keep_alive_dead_cb_ = {};
 
   {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -615,6 +621,111 @@ bool TCPClientSocket::Impl::EndPointToSockAddr(
     return false;
   }
   return true;
+}
+
+// =============================================================================
+// Keep-Alive
+// =============================================================================
+
+bool TCPClientSocket::Impl::SetKeepAlive(const KeepAliveConfig& config) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  if (!connected_ || fd_ < 0)
+    return false;
+
+  if (!config.enable) {
+    int opt = 0;
+    if (setsockopt(fd_, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt)) != 0)
+      return false;
+    keep_alive_enabled_ = false;
+    return true;
+  }
+
+  int opt = 1;
+  if (setsockopt(fd_, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt)) != 0)
+    return false;
+
+  // TCP_KEEPIDLE: seconds before the first keep-alive probe.
+  int idle = static_cast<int>(config.idle_time.InSeconds());
+  if (idle < 1) idle = 1;  // Minimum 1 second.
+  setsockopt(fd_, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+
+  // TCP_KEEPINTVL: seconds between subsequent probes.
+  int interval = static_cast<int>(config.probe_interval.InSeconds());
+  if (interval < 1) interval = 1;
+  setsockopt(fd_, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
+
+  // TCP_KEEPCNT: number of unacknowledged probes before declaring dead.
+  int count = config.probe_count;
+  if (count < 1) count = 1;
+  setsockopt(fd_, IPPROTO_TCP, TCP_KEEPCNT, &count, sizeof(count));
+
+  keep_alive_enabled_ = true;
+  return true;
+}
+
+void TCPClientSocket::Impl::StartKeepAliveMonitor(TimeDelta check_interval,
+                                                  OnceCallback<void()> on_dead) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK_MSG(connected_, "StartKeepAliveMonitor: socket not connected");
+
+  // Stop any existing monitor first.
+  StopKeepAliveMonitor();
+
+  if (!on_dead)
+    return;
+
+  keep_alive_dead_cb_ = std::move(on_dead);
+
+  // Create the RepeatingTimer on the IO thread's task runner.
+  keep_alive_timer_ = std::make_unique<RepeatingTimer>(io_runner_);
+  keep_alive_timer_->Start(
+      FROM_HERE, check_interval,
+      BindRepeating([](scoped_refptr<Impl> self) { self->OnKeepAliveCheck(); },
+                    WrapRefCounted(this)));
+}
+
+void TCPClientSocket::Impl::StopKeepAliveMonitor() {
+  // May be called from any thread via the shell's StopKeepAliveMonitor().
+  // Trampoline to the IO thread if needed.
+  if (io_runner_ && !io_runner_->BelongsToCurrentThread()) {
+    io_runner_->PostTask(
+        FROM_HERE,
+        BindOnce([](scoped_refptr<Impl> self) { self->StopKeepAliveMonitor(); },
+                 WrapRefCounted(this)));
+    return;
+  }
+
+  keep_alive_timer_.reset();
+  keep_alive_dead_cb_ = {};
+}
+
+void TCPClientSocket::Impl::OnKeepAliveCheck() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+  if (closed_ || fd_ < 0 || orphaned_) {
+    // Socket already dead or shutting down  --  stop the timer.
+    auto cb = std::move(keep_alive_dead_cb_);
+    keep_alive_timer_.reset();
+    if (cb)
+      std::move(cb).Run();
+    return;
+  }
+
+  // Poll SO_ERROR to detect whether TCP keep-alive has marked the socket
+  // as dead.  getsockopt(SO_ERROR) returns the pending socket error and
+  // clears it.  A non-zero value indicates the connection is dead.
+  int error = 0;
+  socklen_t error_len = sizeof(error);
+  int rc = getsockopt(fd_, SOL_SOCKET, SO_ERROR, &error, &error_len);
+
+  if (rc != 0 || error != 0) {
+    // Socket is dead  --  stop the timer and fire the callback.
+    auto cb = std::move(keep_alive_dead_cb_);
+    keep_alive_timer_.reset();
+    if (cb)
+      std::move(cb).Run();
+  }
+  // Otherwise the socket is still healthy; the RepeatingTimer will fire again.
 }
 
 }  // namespace nei::net

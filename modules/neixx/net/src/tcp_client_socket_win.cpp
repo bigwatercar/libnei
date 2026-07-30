@@ -5,6 +5,8 @@
 #include <cstring>
 #include <utility>
 
+#include <mstcpip.h>
+
 #include <nei/debug/check.h>
 
 #include <neixx/net/wsa_init.h>
@@ -102,6 +104,7 @@ void TCPClientSocket::Impl::Close() {
 }
 
 void TCPClientSocket::Impl::DoCloseCleanup(SOCKET s) {
+  StopKeepAliveMonitor();
   controller_.StopWatching();
   if (s != INVALID_SOCKET) {
     closesocket(s);
@@ -115,6 +118,11 @@ void TCPClientSocket::Impl::ShutdownWrite() {
 
 void TCPClientSocket::Impl::Orphan() {
   if (orphaned_.exchange(true)) return;
+
+  // Clear the keep-alive dead callback so the timer (if running) won't
+  // spuriously fire it during graceful shutdown.  The timer itself will
+  // be stopped later in DoCloseCleanup() on the IO thread.
+  keep_alive_dead_cb_ = {};
 
   // Clear user callbacks to prevent UAF.
   // On Windows, callbacks are stored inside TcpOverlappedContext on the
@@ -653,6 +661,113 @@ bool TCPClientSocket::Impl::EndPointToSockAddr(
     return false;
   }
   return true;
+}
+
+// =============================================================================
+// Keep-Alive
+// =============================================================================
+
+bool TCPClientSocket::Impl::SetKeepAlive(const KeepAliveConfig& config) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  if (!connected_ || socket_ == INVALID_SOCKET)
+    return false;
+
+  if (!config.enable) {
+    // Disable keep-alive.  Pass a zeroed tcp_keepalive struct with onoff=0.
+    struct tcp_keepalive ka_off = {};
+    DWORD bytes = 0;
+    int rc = WSAIoctl(socket_, SIO_KEEPALIVE_VALS, &ka_off, sizeof(ka_off),
+                      nullptr, 0, &bytes, nullptr, nullptr);
+    if (rc != 0)
+      return false;
+    keep_alive_enabled_ = false;
+    return true;
+  }
+
+  struct tcp_keepalive {
+    u_long onoff;
+    u_long keepalivetime;     // idle time in ms
+    u_long keepaliveinterval; // interval in ms
+  };
+
+  tcp_keepalive ka = {};
+  ka.onoff = 1;
+  ka.keepalivetime = static_cast<u_long>(config.idle_time.InMilliseconds());
+  ka.keepaliveinterval = static_cast<u_long>(config.probe_interval.InMilliseconds());
+
+  DWORD bytes = 0;
+  int rc = WSAIoctl(socket_, SIO_KEEPALIVE_VALS, &ka, sizeof(ka),
+                    nullptr, 0, &bytes, nullptr, nullptr);
+
+  if (rc == 0)
+    keep_alive_enabled_ = true;
+  return rc == 0;
+}
+
+void TCPClientSocket::Impl::StartKeepAliveMonitor(TimeDelta check_interval,
+                                                  OnceCallback<void()> on_dead) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK_MSG(connected_, "StartKeepAliveMonitor: socket not connected");
+
+  // Stop any existing monitor first.
+  StopKeepAliveMonitor();
+
+  if (!on_dead)
+    return;
+
+  keep_alive_dead_cb_ = std::move(on_dead);
+
+  // Create the RepeatingTimer on the IO thread's task runner.
+  keep_alive_timer_ = std::make_unique<RepeatingTimer>(io_runner_);
+  keep_alive_timer_->Start(
+      FROM_HERE, check_interval,
+      BindRepeating([](scoped_refptr<Impl> self) { self->OnKeepAliveCheck(); },
+                    WrapRefCounted(this)));
+}
+
+void TCPClientSocket::Impl::StopKeepAliveMonitor() {
+  // May be called from any thread via the shell's StopKeepAliveMonitor().
+  // Trampoline to the IO thread if needed.
+  if (io_runner_ && !io_runner_->BelongsToCurrentThread()) {
+    io_runner_->PostTask(
+        FROM_HERE,
+        BindOnce([](scoped_refptr<Impl> self) { self->StopKeepAliveMonitor(); },
+                 WrapRefCounted(this)));
+    return;
+  }
+
+  keep_alive_timer_.reset();
+  keep_alive_dead_cb_ = {};
+}
+
+void TCPClientSocket::Impl::OnKeepAliveCheck() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+  if (closed_ || socket_ == INVALID_SOCKET || orphaned_) {
+    // Socket already dead or shutting down  --  stop the timer.
+    auto cb = std::move(keep_alive_dead_cb_);
+    keep_alive_timer_.reset();
+    if (cb)
+      std::move(cb).Run();
+    return;
+  }
+
+  // Poll SO_ERROR to detect whether TCP keep-alive has marked the socket
+  // as dead.  On Windows, getsockopt(SO_ERROR) returns the pending socket
+  // error and clears it.  A non-zero value indicates the connection is dead.
+  int error = 0;
+  int error_len = sizeof(error);
+  int rc = getsockopt(socket_, SOL_SOCKET, SO_ERROR,
+                      reinterpret_cast<char*>(&error), &error_len);
+
+  if (rc != 0 || error != 0) {
+    // Socket is dead  --  stop the timer and fire the callback.
+    auto cb = std::move(keep_alive_dead_cb_);
+    keep_alive_timer_.reset();
+    if (cb)
+      std::move(cb).Run();
+  }
+  // Otherwise the socket is still healthy; the RepeatingTimer will fire again.
 }
 
 }  // namespace nei::net

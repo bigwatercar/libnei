@@ -12,6 +12,7 @@
 namespace nei::net {
 class SSLContext;
 class TLSClientSocket;
+struct KeepAliveConfig;
 
 class NEI_API TLSServerSocket {
  public:
@@ -24,6 +25,12 @@ class NEI_API TLSServerSocket {
   bool Listen(const IPEndPoint& addr, int backlog, AcceptCallback callback,
               scoped_refptr<TaskRunner> runner, RunnerSelector selector = {});
   void Close();
+
+  // Configures OS-level TCP keep-alive on all future accepted connections.
+  // The configuration is applied to the underlying TCP socket before the
+  // TLS handshake starts.  Already-accepted connections are not affected.
+  void SetKeepAlive(const KeepAliveConfig& config);
+
  private:
   class Impl;
   Impl* impl_ = nullptr;

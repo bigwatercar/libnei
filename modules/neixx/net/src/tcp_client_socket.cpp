@@ -50,4 +50,19 @@ void TCPClientSocket::Close() { if (impl_) impl_->Close(); }
 
 void TCPClientSocket::ShutdownWrite() { if (impl_) impl_->ShutdownWrite(); }
 
+bool TCPClientSocket::SetKeepAlive(const KeepAliveConfig& config) {
+  return impl_ ? impl_->SetKeepAlive(config) : false;
+}
+
+void TCPClientSocket::StartKeepAliveMonitor(TimeDelta check_interval,
+                                            OnceCallback<void()> on_dead) {
+  if (impl_)
+    impl_->StartKeepAliveMonitor(check_interval, std::move(on_dead));
+}
+
+void TCPClientSocket::StopKeepAliveMonitor() {
+  if (impl_)
+    impl_->StopKeepAliveMonitor();
+}
+
 }  // namespace nei::net

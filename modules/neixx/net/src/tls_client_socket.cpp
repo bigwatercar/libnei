@@ -174,6 +174,20 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     return proto ? std::string(proto) : std::string();
   }
 
+  // ---- Keep-Alive (delegates to underlying TCP transport) -----------
+  bool SetKeepAlive(const KeepAliveConfig& config) {
+    return transport_->SetKeepAlive(config);
+  }
+
+  void StartKeepAliveMonitor(TimeDelta check_interval,
+                             OnceCallback<void()> on_dead) {
+    transport_->StartKeepAliveMonitor(check_interval, std::move(on_dead));
+  }
+
+  void StopKeepAliveMonitor() {
+    transport_->StopKeepAliveMonitor();
+  }
+
  private:
   enum class State { Idle, Handshaking, Connected, Closing, Closed };
 
@@ -420,6 +434,19 @@ void TLSClientSocket::Close() { impl_->Close(); }
 
 std::string TLSClientSocket::GetNegotiatedProtocol() const {
   return impl_->GetNegotiatedProtocol();
+}
+
+bool TLSClientSocket::SetKeepAlive(const KeepAliveConfig& config) {
+  return impl_->SetKeepAlive(config);
+}
+
+void TLSClientSocket::StartKeepAliveMonitor(TimeDelta check_interval,
+                                            OnceCallback<void()> on_dead) {
+  impl_->StartKeepAliveMonitor(check_interval, std::move(on_dead));
+}
+
+void TLSClientSocket::StopKeepAliveMonitor() {
+  impl_->StopKeepAliveMonitor();
 }
 
 }  // namespace nei::net

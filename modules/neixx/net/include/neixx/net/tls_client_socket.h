@@ -83,6 +83,20 @@ class NEI_API TLSClientSocket : public AsyncInputStream,
   // completed.
   std::string GetNegotiatedProtocol() const;
 
+  // ---- Keep-Alive (delegates to underlying TCP transport) ---------------
+
+  // Enables or disables OS-level TCP keep-alive on the underlying socket.
+  // Must be called after a successful handshake.
+  bool SetKeepAlive(const KeepAliveConfig& config);
+
+  // Starts a periodic health-check timer on the underlying TCP socket.
+  // Delegates to TCPClientSocket::StartKeepAliveMonitor.
+  void StartKeepAliveMonitor(TimeDelta check_interval,
+                             OnceCallback<void()> on_dead);
+
+  // Stops the keep-alive health monitor on the underlying TCP socket.
+  void StopKeepAliveMonitor();
+
  private:
   class Impl;
   Impl* impl_ = nullptr;

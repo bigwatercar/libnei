@@ -24,6 +24,7 @@
 #include <neixx/task/message_loop/message_pump_io.h>
 #include <neixx/task/task_runner.h>
 #include <neixx/task/thread_checker.h>
+#include <neixx/task/timer.h>
 
 namespace nei::net {
 
@@ -50,6 +51,12 @@ class TCPClientSocket::Impl final
   void Close();
   void ShutdownWrite();
   scoped_refptr<TaskRunner> io_task_runner() const { return io_runner_; }
+
+  // Keep-Alive
+  bool SetKeepAlive(const KeepAliveConfig& config);
+  void StartKeepAliveMonitor(TimeDelta check_interval,
+                             OnceCallback<void()> on_dead);
+  void StopKeepAliveMonitor();
 
   // RefCountedThreadSafe release path  --  calls Close() and then the
   // implicit destructor chain.
@@ -128,6 +135,14 @@ class TCPClientSocket::Impl final
   // is bound to a single io_runner_).  If Multi-Reactor worker dispatch is
   // added in the future, this should become std::atomic<bool>.
   bool is_drain_read_in_flight_ = false;
+
+  // ---- Keep-Alive ------------------------------------------------
+  void OnKeepAliveCheck();
+  bool keep_alive_enabled_ = false;
+  // PIMPL timer for periodic health checks.  Created lazily on first
+  // StartKeepAliveMonitor() call, destroyed when monitor is stopped.
+  std::unique_ptr<class RepeatingTimer> keep_alive_timer_;
+  OnceCallback<void()> keep_alive_dead_cb_;
 
   // Must be the last member.
   WeakPtrFactory<Impl> weak_factory_;

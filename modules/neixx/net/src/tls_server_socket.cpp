@@ -25,6 +25,10 @@ class TLSServerSocket::Impl final : public RefCountedThreadSafe<Impl> {
 
   void Close() { if (server_) server_->Close(); }
 
+  void SetKeepAlive(const KeepAliveConfig& config) {
+    keep_alive_config_ = config;
+  }
+
  private:
   scoped_refptr<TaskRunner> PickWorker() {
     return selector_ ? selector_() : runner_;
@@ -37,6 +41,11 @@ class TLSServerSocket::Impl final : public RefCountedThreadSafe<Impl> {
     // TLS state machine MUST run on the same thread — extracting the
     // runner from the TCP socket guarantees thread affinity.
     scoped_refptr<TaskRunner> io_runner = tcp->io_task_runner();
+
+    // Apply keep-alive configuration before TLS handshake.
+    if (keep_alive_config_.enable)
+      tcp->SetKeepAlive(keep_alive_config_);
+
     auto tls = new TLSClientSocket(std::move(tcp), ctx_);
     tls->StartHandshake(
         [self = scoped_refptr<Impl>(this), tls](bool s) {
@@ -51,6 +60,7 @@ class TLSServerSocket::Impl final : public RefCountedThreadSafe<Impl> {
   AcceptCallback cb_;
   RunnerSelector selector_;
   scoped_refptr<TaskRunner> runner_;
+  KeepAliveConfig keep_alive_config_;
 };
 
 TLSServerSocket::TLSServerSocket(SSLContext* ctx) : impl_(new Impl(ctx)) { impl_->AddRef(); }
@@ -60,5 +70,9 @@ bool TLSServerSocket::Listen(const IPEndPoint& a, int b, AcceptCallback cb,
   return impl_->Listen(a, b, std::move(cb), std::move(r), std::move(s));
 }
 void TLSServerSocket::Close() { impl_->Close(); }
+
+void TLSServerSocket::SetKeepAlive(const KeepAliveConfig& config) {
+  impl_->SetKeepAlive(config);
+}
 
 }  // namespace nei::net
