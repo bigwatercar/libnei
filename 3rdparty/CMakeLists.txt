@@ -65,13 +65,20 @@ add_subdirectory(mbedtls)
 
 set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_SAVED})
 
-# mbedTLS vendored C code triggers MSVC warnings that our project promotes
-# to errors (/WX).  Suppress /WX per-target — covers main libs and bundled
-# third-party crypto (p256-m, everest).
+# mbedTLS vendored C code triggers numerous MSVC warnings (C4244, C4200,
+# C4295, C4701, etc.) that are harmless but noisy.  Suppress all compiler
+# warnings for third-party targets — we don't own this code.
 set(_mbedtls_targets mbedtls mbedx509 mbedcrypto p256m everest)
 foreach(tgt IN LISTS _mbedtls_targets)
   if(TARGET ${tgt})
-    target_compile_options(${tgt} PRIVATE $<$<C_COMPILER_ID:MSVC>:/WX->)
+    target_compile_options(${tgt} PRIVATE
+      $<$<C_COMPILER_ID:MSVC>:/w /WX->)
   endif()
 endforeach()
 unset(_mbedtls_targets)
+
+# c-ares also triggers C4267 warnings.  Suppress likewise.
+if(TARGET c-ares)
+  target_compile_options(c-ares PRIVATE
+    $<$<C_COMPILER_ID:MSVC>:/wd4267 /WX->)
+endif()
