@@ -1,4 +1,4 @@
-#include "job_task_source.h"
+#include <neixx/task/internal/job_task_source.h>
 #include <algorithm>
 #include <atomic>
 #include <limits>
@@ -63,7 +63,9 @@ std::size_t JobTaskSource::GetTaskId() const {
   static thread_local const JobTaskSource *tls_src = nullptr;
   if (tls_src != this) {
     tls_src = this;
-    tls_id = const_cast<JobTaskSource *>(this)->AssignTaskId();
+    // next_task_id_ is mutable so AssignTaskId() can be called on a
+    // const JobTaskSource without a const_cast.
+    tls_id = AssignTaskId();
   }
   return tls_id;
 }
@@ -84,17 +86,58 @@ void JobTaskSource::RunWorkerLoop() {
 void JobTaskSource::PostWorkers(int count) {
   if (!runner_ || count <= 0)
     return;
-  // Consume pending concurrency increases so completion detection does
-  // not deadlock (pending was only ever incremented, never decremented).
+
+  // Consume pending concurrency increases BEFORE the is_completed_ /
+  // is_cancelled_ checks below.  This is load-bearing: if
+  // NotifyConcurrencyIncrease() incremented |pending| and then another
+  // thread set is_completed_ before we reach this function, we must
+  // still consume the pending count.  Otherwise |pending| would stay
+  // permanently > 0, blocking all future completion signals.
   int pending = pending_concurrency_increases_.load(std::memory_order_acquire);
   if (pending > 0) {
     int consume = (count < pending) ? count : pending;
     pending_concurrency_increases_.fetch_sub(consume, std::memory_order_release);
   }
+
+  // Re-check is_completed_ / is_cancelled_ AFTER consuming pending.
+  // If the job already finished, there is no point posting workers
+  // that would immediately see is_completed_ in ShouldYield() and exit.
+  if (is_completed_.load(std::memory_order_acquire))
+    return;
+  if (is_cancelled_.load(std::memory_order_acquire))
+    return;
+
+  // Increment assigned_workers_ BEFORE posting so that completion
+  // detection cannot fire prematurely (it checks assigned_workers_ <= 0).
+  // Track how many PostTask calls actually succeed so we can roll back
+  // the counter for silently-dropped tasks.
   assigned_workers_.fetch_add(count, std::memory_order_release);
   scoped_refptr<JobTaskSource> self(this);
-  for (int i = 0; i < count; ++i)
-    runner_->PostTask(FROM_HERE, [self]() { self->RunWorkerLoop(); });
+  int posted = 0;
+  for (int i = 0; i < count; ++i) {
+    if (runner_->PostTask(FROM_HERE, [self]() { self->RunWorkerLoop(); })) {
+      ++posted;
+    }
+  }
+
+  // Roll back assigned_workers_ for tasks that were silently dropped
+  // (e.g. queue shutdown).  Without this, assigned_workers_ would never
+  // reach zero and completion would deadlock.
+  int dropped = count - posted;
+  if (dropped > 0) {
+    assigned_workers_.fetch_sub(dropped, std::memory_order_release);
+    // If we were the only source of pending workers and all posts failed,
+    // re-evaluate completion right now so the job does not hang.
+    int prev_running = running_workers_.load(std::memory_order_acquire);
+    if (prev_running == 0) {
+      int remaining_pending = pending_concurrency_increases_.load(std::memory_order_acquire);
+      int remaining_assigned = assigned_workers_.load(std::memory_order_acquire);
+      if (remaining_pending <= 0 && remaining_assigned <= 0) {
+        is_completed_.store(true, std::memory_order_release);
+        completion_event_.Signal();
+      }
+    }
+  }
 }
 
 void JobTaskSource::MaybeSpawnWorkers() {
@@ -102,13 +145,20 @@ void JobTaskSource::MaybeSpawnWorkers() {
   // after the joiner has signalled completion and client stack is gone.
   if (is_completed_.load(std::memory_order_acquire))
     return;
+  // Bail out if cancelled — no point spawning workers that will yield
+  // immediately in ShouldYield().
+  if (is_cancelled_.load(std::memory_order_acquire))
+    return;
   if (!runner_ || !max_concurrency_cb_)
     return;
   int running = running_workers_.load(std::memory_order_acquire);
   int assigned = assigned_workers_.load(std::memory_order_acquire);
+  // |assigned| already includes |running| (every running worker was
+  // assigned), so we only need to subtract |assigned| to avoid double-
+  // counting.  Formally: need = desired - assigned, where assigned =
+  // running + queued.
   size_t desired = max_concurrency_cb_.Run(static_cast<size_t>(running));
-  // need = desired - (already running + already assigned)
-  int need = static_cast<int>(desired) - running - assigned;
+  int need = static_cast<int>(desired) - assigned;
   if (need > 0)
     PostWorkers(need);
 }
@@ -140,10 +190,13 @@ void JobTaskSource::Join(bool steal_work) {
 
     // Work-stealing: the calling thread participates as a worker.
     // It is exempt from concurrency-contraction yield (via tls_is_joiner).
-    // The joiner does NOT touch assigned_workers_ — pool workers handle
-    // their own cleanup.  When the joiner finishes all work (pending <= 0)
-    // it signals completion immediately; straggler pool workers will see
-    // is_completed_ in ShouldYield and exit harmlessly.
+    //
+    // The joiner is NOT counted in assigned_workers_ — it is a volunteer
+    // that steps in to help finish remaining work.  It signals completion
+    // when it is the last thread running AND there are no pending
+    // concurrency increases.  Pool workers that were assigned but not yet
+    // started will see is_completed_ in ShouldYield() and exit harmlessly
+    // without touching user callbacks, so there is no UAF risk.
     tls_is_joiner = true;
     running_workers_.fetch_add(1, std::memory_order_acq_rel);
     int iter = 0;
@@ -155,6 +208,12 @@ void JobTaskSource::Join(bool steal_work) {
     int prev_running = running_workers_.fetch_sub(1, std::memory_order_release);
     DCHECK_GT(prev_running, 0);
     if (prev_running == 1) {
+      // The joiner only checks pending_concurrency_increases_, NOT
+      // assigned_workers_.  assigned_workers_ tracks workers that were
+      // explicitly posted through PostWorkers; any stragglers will see
+      // is_completed_ in ShouldYield() and exit without invoking the
+      // user callback.  Checking assigned_workers_ here would deadlock
+      // because the joiner itself was never counted in that atomic.
       int pending = pending_concurrency_increases_.load(std::memory_order_acquire);
       if (pending <= 0) {
         is_completed_.store(true, std::memory_order_release);
@@ -176,7 +235,7 @@ void JobTaskSource::UpdatePriority(TaskPriority p) {
   priority_.store(static_cast<int>(p), std::memory_order_release);
 }
 
-std::size_t JobTaskSource::AssignTaskId() {
+std::size_t JobTaskSource::AssignTaskId() const {
   return next_task_id_.fetch_add(1, std::memory_order_relaxed);
 }
 

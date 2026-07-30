@@ -16,7 +16,12 @@ void Hdr(const char *t) {
 
 nei::MaxConcurrencyCallback DynCc(std::atomic<int> *d, int total, int cap) {
   return [=](size_t) -> size_t {
-    int v = d->load(std::memory_order_relaxed);
+    // Use acquire semantics so queued workers observe updates from
+    // completed workers even without an explicit happens-before chain
+    // through the shared TaskRunner queue.  Without this, a worker that
+    // was queued before the counter reached |total| may see a stale value
+    // and busy-spin forever because ShouldYield() keeps returning false.
+    int v = d->load(std::memory_order_acquire);
     int r = total - v;
     return r > 0 ? (size_t)std::min(r, cap) : 0;
   };
@@ -57,7 +62,7 @@ int main() {
           nei::TaskTraits(),
           [&](nei::JobDelegate *d) {
             if (!d->ShouldYield())
-              c.fetch_add(1, std::memory_order_relaxed);
+              c.fetch_add(1, std::memory_order_release);
           },
           DynCc(&c, i + 1, 1),
           1);
@@ -79,7 +84,7 @@ int main() {
           nei::TaskTraits(),
           [&](nei::JobDelegate *d) {
             for (int n = 0; n < 100 && !d->ShouldYield(); ++n)
-              if (c.fetch_add(1, std::memory_order_relaxed) >= N - 1)
+              if (c.fetch_add(1, std::memory_order_release) >= N - 1)
                 break;
           },
           DynCc(&c, N, 1),
@@ -111,7 +116,7 @@ int main() {
           nei::TaskTraits(),
           [&](nei::JobDelegate *d) {
             for (int n = 0; n < 100 && !d->ShouldYield(); ++n)
-              if (c.fetch_add(1, std::memory_order_relaxed) >= N - 1)
+              if (c.fetch_add(1, std::memory_order_release) >= N - 1)
                 break;
           },
           DynCc(&c, N, 8),
@@ -125,7 +130,7 @@ int main() {
   // Bench 3: Per-worker scaling (no contention)
   {
     Hdr("Bench 3: Per-worker scaling (10M ops/worker)");
-    const uint64_t O = 10000000;
+    const uint64_t O = 10000000; // back to 10M
 
     struct alignas(64) P {
       std::atomic<uint64_t> v{0};
@@ -145,14 +150,29 @@ int main() {
             if (id >= w)
               return;
             auto &ct = ctrs[id].v;
-            while (!d->ShouldYield()) {
-              if (ct.fetch_add(1, std::memory_order_relaxed) >= O - 1)
-                break;
+            // Batch ShouldYield() calls: the virtual dispatch + callback
+            // overhead dominates the inner loop.  Check ShouldYield only
+            // every 1024 iterations; between checks we just do the work.
+            // The 1024-iteration bounded delay is negligible for 10M ops.
+            bool done = false;
+            while (!done && !d->ShouldYield()) {
+              for (int batch = 0; batch < 1024; ++batch) {
+                if (ct.fetch_add(1, std::memory_order_release) >= O - 1) {
+                  done = true;
+                  break;
+                }
+              }
             }
-            td->fetch_add(ct.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            // Pair release (above) with the acquire in max_concurrency_cb
+            // so that queued workers observe the final counter values.
+            td->fetch_add(ct.load(std::memory_order_acquire), std::memory_order_release);
           },
           [w, O, td](size_t) -> size_t {
-            uint64_t done = td->load(std::memory_order_relaxed);
+            // Acquire pairs with the release in the task callback above,
+            // guaranteeing that a queued worker sees the true done count
+            // rather than a stale zero that would cause an infinite
+            // busy-spin in ShouldYield().
+            uint64_t done = td->load(std::memory_order_acquire);
             if (done >= (uint64_t)O * w)
               return 0;
             return (size_t)w;

@@ -9,6 +9,7 @@
 #include <nei/macros/nei_export.h>
 #include <neixx/common/location.h>
 #include <neixx/functional/callback.h>
+#include <neixx/task/internal/job_task_source.h>
 #include <neixx/task/job_delegate.h>
 #include <neixx/task/task_traits.h>
 

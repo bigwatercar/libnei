@@ -47,7 +47,7 @@ private:
   void OnWorkerExited();
   void PostWorkers(int count);
   void MaybeSpawnWorkers();
-  std::size_t AssignTaskId();
+  std::size_t AssignTaskId() const;
 
   RepeatingCallback<void(JobDelegate *)> task_;
   MaxConcurrencyCallback max_concurrency_cb_;
@@ -60,7 +60,10 @@ private:
   std::atomic<bool> is_cancelled_{false};
   WaitableEvent completion_event_;
   std::atomic<int> priority_;
-  std::atomic<std::size_t> next_task_id_{0};
+  // mutable so that GetTaskId() (const) can assign ids on first access
+  // without a const_cast.  Atomic mutation through a const method is
+  // logically const because it does not change observable state.
+  mutable std::atomic<std::size_t> next_task_id_{0};
 };
 
 } // namespace internal
