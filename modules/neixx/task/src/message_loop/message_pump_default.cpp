@@ -25,6 +25,7 @@ class MessagePumpDefault::Impl {
   }
 
   void ExitRunLoop(int run_depth) {
+    (void)run_depth;
     AutoLock lock(state_lock_);
     DCHECK(run_depth_ == run_depth);
     --run_depth_;

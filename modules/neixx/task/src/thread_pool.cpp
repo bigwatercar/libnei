@@ -18,9 +18,9 @@
 #include <nei/log/log.h>
 #include <neixx/synchronization/condition_variable.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/task/internal/task.h>
-#include <neixx/task/internal/task_queue.h>
-#include <neixx/task/internal/task_tracing.h>
+#include "internal/task.h"
+#include "internal/task_queue.h"
+#include "internal/task_tracing_internal.h"
 #include <neixx/task/scoped_blocking_call.h>
 #include <neixx/task/sequence_manager.h>
 #include <neixx/task/task_observer.h>
@@ -317,7 +317,10 @@ class WorkerThread final : public PlatformThread::Delegate {
               task_observer_ ? task_observer_->load(std::memory_order_acquire)
                              : nullptr;
           if (observer) {
-            observer->OnTaskStarted(task, queue_delay);
+            const ObservedTask observed{task.posted_from, task.enqueue_time,
+                task.delayed_run_time, task.sequence_num,
+                task.sequence_token, task.traits};
+            observer->OnTaskStarted(observed, queue_delay);
           }
 
           const TimeTicks run_start = TimeTicks::Now();
@@ -327,7 +330,10 @@ class WorkerThread final : public PlatformThread::Delegate {
           internal::RecordTaskExecutionCompleted();
 
           if (observer) {
-            observer->OnTaskCompleted(task, run_duration);
+            const ObservedTask observed{task.posted_from, task.enqueue_time,
+                task.delayed_run_time, task.sequence_num,
+                task.sequence_token, task.traits};
+            observer->OnTaskCompleted(observed, run_duration);
           }
 
           // -- Restore Baseline Priority ------------------------------------

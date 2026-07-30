@@ -11,7 +11,7 @@
 #include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/common/time.h>
 #include <neixx/memory/weak_ptr.h>
-#include <neixx/task/internal/task.h>
+#include "task.h"
 #include <neixx/task/sequence_token.h>
 #include <neixx/task/task_traits.h>
 

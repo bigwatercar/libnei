@@ -426,7 +426,7 @@ TEST(ThreadPoolTest, TaskObserverReceivesCallbacksWithPostedFrom) {
     std::atomic<int> completed{0};
     std::atomic<bool> had_posted_from{false};
 
-    void OnTaskStarted(const internal::Task& task, TimeDelta) override {
+    void OnTaskStarted(const ObservedTask& task, TimeDelta) override {
       started.fetch_add(1, std::memory_order_relaxed);
       if (!task.posted_from.is_null()) {
         had_posted_from.store(true, std::memory_order_relaxed);
@@ -434,7 +434,7 @@ TEST(ThreadPoolTest, TaskObserverReceivesCallbacksWithPostedFrom) {
         (void)loc;
       }
     }
-    void OnTaskCompleted(const internal::Task&, TimeDelta) override {
+    void OnTaskCompleted(const ObservedTask&, TimeDelta) override {
       completed.fetch_add(1, std::memory_order_relaxed);
     }
   };

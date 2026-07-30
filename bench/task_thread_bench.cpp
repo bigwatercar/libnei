@@ -1,6 +1,6 @@
 #include <neixx/functional/bind.h>
 #include <neixx/common/location.h>
-#include <neixx/task/internal/task_tracing.h>
+#include <neixx/task/task_tracing.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/threading/thread.h>
 

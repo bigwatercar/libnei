@@ -61,4 +61,5 @@ class NEI_API JobTaskSource final : public JobDelegate,
 
 }  // namespace internal
 }  // namespace nei
+
 #endif  // NEIXX_TASK_INTERNAL_JOB_TASK_SOURCE_H_

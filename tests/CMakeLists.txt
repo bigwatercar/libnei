@@ -91,6 +91,7 @@ target_include_directories(
   nei_tests PRIVATE ${PROJECT_SOURCE_DIR}/modules/neixx/io/src
                     ${PROJECT_SOURCE_DIR}/modules/neixx/process/src
                     ${PROJECT_SOURCE_DIR}/modules/neixx/net/src
+                    ${PROJECT_SOURCE_DIR}/modules/neixx/task/src
                     ${PROJECT_SOURCE_DIR}/3rdparty/mbedtls/include
 )
 

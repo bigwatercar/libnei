@@ -4,8 +4,9 @@
 #include <limits>
 #include <utility>
 
-#include <neixx/task/internal/task_tracing.h>
-#include <neixx/task/internal/task_queue.h>
+#include <neixx/task/task_tracing.h>
+#include "internal/task_tracing_internal.h"
+#include "internal/task_queue.h"
 #include "internal/pooled_task_runner_utils.h"
 #include <neixx/trace_event/trace_event.h>
 

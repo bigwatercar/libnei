@@ -1,4 +1,6 @@
-#include <neixx/task/internal/task_tracing.h>
+#include <neixx/task/task_tracing.h>
+
+#include "task_tracing_internal.h"
 
 #include <algorithm>
 #include <atomic>

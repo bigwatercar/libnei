@@ -1,4 +1,4 @@
-#include <neixx/task/internal/job_task_source.h>
+#include "job_task_source.h"
 #include <algorithm>
 #include <atomic>
 #include <limits>
@@ -155,6 +155,7 @@ void JobTaskSource::OnWorkerExited() {
   int prev_running = running_workers_.fetch_sub(1, std::memory_order_release);
   DCHECK_GT(prev_running, 0);
   int prev_assigned = assigned_workers_.fetch_sub(1, std::memory_order_release);
+  (void)prev_assigned;
   DCHECK_GT(prev_assigned, 0);
   if (prev_running == 1) {
     int pending = pending_concurrency_increases_.load(std::memory_order_acquire);

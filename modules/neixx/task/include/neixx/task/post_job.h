@@ -4,12 +4,11 @@
 #define NEIXX_TASK_POST_JOB_H_
 
 #include <cstdint>
+#include <memory>
 
 #include <nei/macros/nei_export.h>
 #include <neixx/common/location.h>
 #include <neixx/functional/callback.h>
-#include <neixx/memory/ref_counted.h>
-#include <neixx/task/internal/job_task_source.h>
 #include <neixx/task/job_delegate.h>
 #include <neixx/task/task_traits.h>
 
@@ -37,9 +36,8 @@ class NEI_API JobHandle {
       MaxConcurrencyCallback max_concurrency_cb, int initial_workers = 0);
 
  private:
-  explicit JobHandle(scoped_refptr<internal::JobTaskSource> source);
-  scoped_refptr<internal::JobTaskSource> source_;
-  bool detached_ = false;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 inline JobHandle PostJob(const Location& from_here, TaskTraits traits,

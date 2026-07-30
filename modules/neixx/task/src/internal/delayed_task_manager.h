@@ -11,7 +11,7 @@
 #include <neixx/common/time.h>
 #include <neixx/synchronization/lock.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/task/internal/task_queue.h>
+#include "task_queue.h"
 #include <neixx/threading/platform_thread.h>
 
 namespace nei {

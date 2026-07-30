@@ -1,12 +1,11 @@
 #pragma once
 
-#ifndef NEIXX_TASK_INTERNAL_TASK_TRACING_H_
-#define NEIXX_TASK_INTERNAL_TASK_TRACING_H_
+#ifndef NEIXX_TASK_TASK_TRACING_H_
+#define NEIXX_TASK_TASK_TRACING_H_
 
 #include <cstdint>
 
 #include <nei/macros/nei_export.h>
-#include <neixx/task/internal/task.h>
 
 namespace nei {
 namespace internal {
@@ -21,15 +20,6 @@ struct TaskTracingStats {
   std::int64_t max_queue_delay_us = 0;
 };
 
-NEI_API void RecordWeakPtrExpiredPost();
-NEI_API void RecordTaskPosted();
-NEI_API void RecordTaskExecutionStarted(const Task& task);
-// Batch variant: caller supplies the current time captured once per DoWork
-// batch to avoid a TimeTicks::Now() call per task.
-NEI_API void RecordTaskExecutionStarted(const Task& task, TimeTicks batch_now);
-NEI_API void RecordTaskExecutionCompleted();
-NEI_API void RecordTaskCancelledBeforeRun();
-
 // Runtime toggle for task tracing overhead. Enabled by default.
 NEI_API bool IsTaskTracingEnabled();
 NEI_API void SetTaskTracingEnabled(bool enabled);
@@ -40,4 +30,4 @@ NEI_API void ResetTaskTracingStatsForTesting();
 }  // namespace internal
 }  // namespace nei
 
-#endif  // NEIXX_TASK_INTERNAL_TASK_TRACING_H_
+#endif  // NEIXX_TASK_TASK_TRACING_H_

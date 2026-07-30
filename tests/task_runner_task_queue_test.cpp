@@ -8,8 +8,8 @@
 #include <vector>
 
 #include <neixx/common/time.h>
-#include <neixx/task/internal/task.h>
-#include <neixx/task/internal/task_queue.h>
+#include "internal/task.h"
+#include "internal/task_queue.h"
 #include <neixx/task/task_runner.h>
 
 namespace nei {

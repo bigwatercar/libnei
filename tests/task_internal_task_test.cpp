@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <neixx/common/time.h>
-#include <neixx/task/internal/task.h>
+#include "internal/task.h"
 
 namespace nei {
 namespace internal {

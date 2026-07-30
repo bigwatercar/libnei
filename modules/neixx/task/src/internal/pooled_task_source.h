@@ -12,7 +12,7 @@
 #include <neixx/common/time.h>
 #include <neixx/synchronization/condition_variable.h>
 #include <neixx/synchronization/lock.h>
-#include <neixx/task/internal/task_queue.h>
+#include "task_queue.h"
 
 namespace nei {
 namespace internal {

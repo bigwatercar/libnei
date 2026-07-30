@@ -1,8 +1,6 @@
 ﻿set(NEIXX_TASK_SOURCES
   include/neixx/task/bind_post_task.h
-  include/neixx/task/internal/task_queue.h
-  include/neixx/task/internal/task_tracing.h
-  include/neixx/task/internal/task.h
+  include/neixx/task/task_tracing.h
   include/neixx/task/message_loop/message_pump_default.h
   include/neixx/task/message_loop/message_pump_io.h
   include/neixx/task/message_loop/message_pump_type.h
@@ -22,16 +20,19 @@
   include/neixx/task/thread_pool.h
   include/neixx/task/thread_task_runner_handle.h
   include/neixx/task/timer.h
-  include/neixx/task/internal/job_task_source.h
   src/internal/delayed_task_manager.cpp
   src/internal/delayed_task_manager.h
   src/internal/job_task_source.cpp
+  src/internal/job_task_source.h
   src/internal/pooled_task_runner_utils.cpp
   src/internal/pooled_task_runner_utils.h
   src/internal/pooled_task_source.cpp
   src/internal/pooled_task_source.h
+  src/internal/task.h
   src/internal/task_queue.cpp
+  src/internal/task_queue.h
   src/internal/task_tracing.cpp
+  src/internal/task_tracing_internal.h
   src/message_loop/message_pump_default.cpp
   src/message_loop/message_pump_default.h
   src/post_job.cpp

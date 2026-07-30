@@ -164,3 +164,22 @@ Linux: `libudev`/netlink.
 **方案**: 将 `data()` 返回 `unsigned char*`，内部 `data_` 同步改类型。
 `WSABUF.buf` 赋值处加 `reinterpret_cast<CHAR*>`，`std::string` / `ostream::write`
 调用处加 `reinterpret_cast<const char*>`。共修改 21 个文件，四象限零回归。
+
+---
+
+## PostJob 接口参数对齐 Chromium (P2) 🔧 2026-07-30
+
+**现状**: `PostJob(from_here, traits, ...)` 的 `from_here` 和 `traits` 参数被
+`(void)` 丢弃，`CreateParallelTaskRunner(TaskTraits())` 硬编码默认优先级，
+丢失了调用方指定的优先级控制和调用位置追踪能力。
+
+**Chromium 参考**: `base/task/post_job.cc`
+- `from_here` → 存入 `JobTaskSource`，崩溃报告/tracing 中显示 PostJob 位置
+- `traits` → 控制 worker 线程优先级（BEST_EFFORT/USER_VISIBLE/USER_BLOCKING）
+  和 ThreadPolicy
+- `GetCurrentTaskImportance()` → 继承当前线程的重要性
+
+**方案**:
+1. `JobTaskSource` 构造函数接收 `Location` 和 `TaskTraits`
+2. `PostJob` 将 `traits` 透传给 `CreateParallelTaskRunner`
+3. `from_here` 存入 `JobTaskSource` 用于 `posted_from()` 查询

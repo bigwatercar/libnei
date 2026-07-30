@@ -1,45 +1,53 @@
 #include <neixx/task/post_job.h>
+
 #include <nei/debug/check.h>
+#include <neixx/memory/ref_counted.h>
+#include "internal/job_task_source.h"
 #include <neixx/task/thread_pool_instance.h>
 
 namespace nei {
 
+struct JobHandle::Impl {
+  scoped_refptr<internal::JobTaskSource> source;
+  bool detached = false;
+};
+
 JobHandle::JobHandle() = default;
 JobHandle::~JobHandle() {
-  if (!detached_ && source_)
-    source_->Join(true);
+  if (impl_ && !impl_->detached && impl_->source)
+    impl_->source->Join(true);
 }
 JobHandle::JobHandle(JobHandle&&) noexcept = default;
 JobHandle& JobHandle::operator=(JobHandle&&) noexcept = default;
-JobHandle::JobHandle(scoped_refptr<internal::JobTaskSource> source)
-    : source_(std::move(source)) {}
 
 void JobHandle::Join() {
-  if (source_) source_->Join(true);
+  if (impl_ && impl_->source) impl_->source->Join(true);
 }
 void JobHandle::Cancel() {
-  if (source_) source_->Cancel();
+  if (impl_ && impl_->source) impl_->source->Cancel();
 }
 void JobHandle::CancelAndSync() {
-  if (source_) { source_->Cancel(); source_->Join(true); }
+  if (impl_ && impl_->source) { impl_->source->Cancel(); impl_->source->Join(true); }
 }
 bool JobHandle::IsCompleted() const {
-  return source_ ? source_->is_completed() : true;
+  return impl_ && impl_->source ? impl_->source->is_completed() : true;
 }
 void JobHandle::NotifyConcurrencyIncrease(std::int32_t c) {
-  if (source_) source_->NotifyConcurrencyIncrease(c);
+  if (impl_ && impl_->source) impl_->source->NotifyConcurrencyIncrease(c);
 }
 void JobHandle::UpdatePriority(TaskPriority p) {
-  if (source_) source_->UpdatePriority(p);
+  if (impl_ && impl_->source) impl_->source->UpdatePriority(p);
 }
 void JobHandle::Detach() {
-  detached_ = true;
+  if (impl_) impl_->detached = true;
 }
 
 // static
 JobHandle JobHandle::PostJob(const Location& from_here, TaskTraits traits,
     RepeatingCallback<void(JobDelegate*)> task,
     MaxConcurrencyCallback max_concurrency_cb, int initial_workers) {
+  (void)from_here;
+  (void)traits;
   DCHECK(task); DCHECK(max_concurrency_cb);
   scoped_refptr<internal::JobTaskSource> source(
       new internal::JobTaskSource(
@@ -50,7 +58,9 @@ JobHandle JobHandle::PostJob(const Location& from_here, TaskTraits traits,
       pool->CreateParallelTaskRunner(TaskTraits());
   source->SetRunner(cached_runner);
   source->PostInitialWorkers(initial_workers);
-  return JobHandle(std::move(source));
+  JobHandle handle;
+  handle.impl_.reset(new Impl{std::move(source)});
+  return handle;
 }
 
 }  // namespace nei

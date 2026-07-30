@@ -8,10 +8,11 @@
 
 #include <nei/debug/check.h>
 #include <neixx/synchronization/lock.h>
-#include <neixx/task/internal/task.h>
-#include <neixx/task/internal/task_queue.h>
+#include "internal/task.h"
+#include "internal/task_queue.h"
 #include <neixx/trace_event/trace_event.h>
-#include <neixx/task/internal/task_tracing.h>
+#include <neixx/task/task_tracing.h>
+#include "internal/task_tracing_internal.h"
 #include <neixx/task/message_loop/message_pump_default.h>
 #include <neixx/threading/thread_local_storage.h>
 
