@@ -10,8 +10,7 @@ namespace {
 // by running tests with: --gtest_death_test_style=threadsafe
 class CheckMacroCDeathTest : public ::testing::Test {};
 
-
-}  // namespace
+} // namespace
 
 TEST(CheckMacroCTest, CheckPassDoesNotCrash) {
   CHECK(1 == 1);

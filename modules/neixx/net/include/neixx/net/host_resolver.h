@@ -29,7 +29,7 @@ namespace net {
 // Move-only callback receiving the resolved address list.
 // OnceCallback<const AddressList&> guarantees no unnecessary copies;
 // the AddressList is moved through the dual-thread trampoline.
-using ResolveCallback = OnceCallback<void(const AddressList&)>;
+using ResolveCallback = OnceCallback<void(const AddressList &)>;
 
 // =============================================================================
 // HostResolverOptions  --  DNS resolution configuration backed by c-ares.
@@ -65,8 +65,8 @@ struct NEI_API HostResolverOptions {
 };
 
 // Comparison operators for std::map key ordering and equality.
-NEI_API bool operator<(const HostResolverOptions& a, const HostResolverOptions& b);
-NEI_API bool operator==(const HostResolverOptions& a, const HostResolverOptions& b);
+NEI_API bool operator<(const HostResolverOptions &a, const HostResolverOptions &b);
+NEI_API bool operator==(const HostResolverOptions &a, const HostResolverOptions &b);
 
 // Asynchronous DNS hostname resolver.
 //
@@ -87,16 +87,16 @@ NEI_API bool operator==(const HostResolverOptions& a, const HostResolverOptions&
 //                    [](const AddressList& addrs) { ... },
 //                    my_task_runner);
 class NEI_API HostResolver {
- public:
+public:
   // Forward declaration for PIMPL.  Defined in src/host_resolver_impl.h.
   class Impl;
 
   HostResolver();
-  explicit HostResolver(const HostResolverOptions& options);
+  explicit HostResolver(const HostResolverOptions &options);
   ~HostResolver();
 
-  HostResolver(const HostResolver&) = delete;
-  HostResolver& operator=(const HostResolver&) = delete;
+  HostResolver(const HostResolver &) = delete;
+  HostResolver &operator=(const HostResolver &) = delete;
 
   // Initiates an asynchronous hostname resolution.
   //
@@ -111,17 +111,15 @@ class NEI_API HostResolver {
   //                  Must not be null.
   //
   // Returns true if the request was successfully queued.
-  bool Resolve(const std::string& host,
-               ResolveCallback callback,
-               scoped_refptr<TaskRunner> target_runner);
+  bool Resolve(const std::string &host, ResolveCallback callback, scoped_refptr<TaskRunner> target_runner);
 
- private:
+private:
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
-}  // namespace net
-}  // namespace nei
+} // namespace net
+} // namespace nei
 
-#endif  // NEIXX_NET_HOST_RESOLVER_H_
+#endif // NEIXX_NET_HOST_RESOLVER_H_

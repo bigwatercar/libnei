@@ -37,8 +37,7 @@ extern "C" {
  *       to other shortcuts.  Callers should check and resolve iteratively
  *       if needed.
  */
-NEI_API int nei_win_resolve_shortcut(const char *lnk_path,
-                                     char *buf, size_t size);
+NEI_API int nei_win_resolve_shortcut(const char *lnk_path, char *buf, size_t size);
 
 #ifdef __cplusplus
 }
@@ -59,15 +58,14 @@ NEI_API int nei_win_resolve_shortcut(const char *lnk_path,
  * @return The resolved target path, or an empty path on failure.
  */
 inline std::filesystem::path nei_win_resolve_shortcut(const char *lnk_path) {
-    char buf[4096];
-    int len = ::nei_win_resolve_shortcut(lnk_path, buf, sizeof(buf));
-    if (len < 0) return {};
+  char buf[4096];
+  int len = ::nei_win_resolve_shortcut(lnk_path, buf, sizeof(buf));
+  if (len < 0)
+    return {};
 #if __cplusplus >= 202002L
-    return std::filesystem::path(
-        std::u8string(reinterpret_cast<const char8_t *>(buf),
-                      static_cast<size_t>(len)));
+  return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(buf), static_cast<size_t>(len)));
 #else
-    return std::filesystem::u8path(std::string(buf, static_cast<size_t>(len)));
+  return std::filesystem::u8path(std::string(buf, static_cast<size_t>(len)));
 #endif
 }
 

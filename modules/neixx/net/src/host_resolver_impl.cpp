@@ -32,7 +32,7 @@
 namespace nei {
 template <>
 struct WeakPtrThreadSafe<net::HostResolver::Impl> : std::true_type {};
-}  // namespace nei
+} // namespace nei
 
 namespace nei::net {
 
@@ -41,22 +41,19 @@ namespace nei::net {
 // =============================================================================
 namespace {
 
-IPEndPoint SockAddrToIPEndPoint(const struct sockaddr* addr,
-                                socklen_t addr_len) {
+IPEndPoint SockAddrToIPEndPoint(const struct sockaddr *addr, socklen_t addr_len) {
   if (!addr || addr_len == 0)
     return IPEndPoint();
 
   if (addr->sa_family == AF_INET && addr_len >= sizeof(struct sockaddr_in)) {
-    const auto* in4 = reinterpret_cast<const struct sockaddr_in*>(addr);
-    IPAddress ip(IPAddress::Family::kIPv4,
-                 reinterpret_cast<const uint8_t*>(&in4->sin_addr));
+    const auto *in4 = reinterpret_cast<const struct sockaddr_in *>(addr);
+    IPAddress ip(IPAddress::Family::kIPv4, reinterpret_cast<const uint8_t *>(&in4->sin_addr));
     return IPEndPoint(ip, ntohs(in4->sin_port));
   }
 
   if (addr->sa_family == AF_INET6 && addr_len >= sizeof(struct sockaddr_in6)) {
-    const auto* in6 = reinterpret_cast<const struct sockaddr_in6*>(addr);
-    IPAddress ip(IPAddress::Family::kIPv6,
-                 reinterpret_cast<const uint8_t*>(&in6->sin6_addr));
+    const auto *in6 = reinterpret_cast<const struct sockaddr_in6 *>(addr);
+    IPAddress ip(IPAddress::Family::kIPv6, reinterpret_cast<const uint8_t *>(&in6->sin6_addr));
     return IPEndPoint(ip, ntohs(in6->sin6_port));
   }
 
@@ -73,22 +70,20 @@ struct QueryContext {
   scoped_refptr<TaskRunner> target_runner;
 };
 
-}  // namespace
+} // namespace
 
 // =============================================================================
 // ConvertAresAddrInfo  --  convert ares_addrinfo linked list -> AddressList
 // =============================================================================
 
-AddressList ConvertAresAddrInfo(const struct ares_addrinfo* result) {
+AddressList ConvertAresAddrInfo(const struct ares_addrinfo *result) {
   AddressList addresses;
   if (!result) {
     return addresses;
   }
 
-  for (const struct ares_addrinfo_node* node = result->nodes; node != nullptr;
-       node = node->ai_next) {
-    IPEndPoint ep = SockAddrToIPEndPoint(node->ai_addr,
-                                         static_cast<socklen_t>(node->ai_addrlen));
+  for (const struct ares_addrinfo_node *node = result->nodes; node != nullptr; node = node->ai_next) {
+    IPEndPoint ep = SockAddrToIPEndPoint(node->ai_addr, static_cast<socklen_t>(node->ai_addrlen));
     if (!ep.address().IsUnspecified()) {
       addresses.push_back(std::move(ep));
     }
@@ -103,10 +98,9 @@ AddressList ConvertAresAddrInfo(const struct ares_addrinfo* result) {
 
 namespace {
 
-void OnAresCallback(void* arg, int status, int /*timeouts*/,
-                    struct ares_addrinfo* result) {
+void OnAresCallback(void *arg, int status, int /*timeouts*/, struct ares_addrinfo *result) {
   // Take ownership of the query context.
-  std::unique_ptr<QueryContext> query(static_cast<QueryContext*>(arg));
+  std::unique_ptr<QueryContext> query(static_cast<QueryContext *>(arg));
 
   // If the HostResolver has been destroyed, silently drop.
   if (!query->weak_self) {
@@ -123,28 +117,27 @@ void OnAresCallback(void* arg, int status, int /*timeouts*/,
   }
 
   // Post the user callback to the target runner.
-  auto deliver = BindPostTask(query->target_runner,
-                               std::move(query->user_callback));
+  auto deliver = BindPostTask(query->target_runner, std::move(query->user_callback));
   std::move(deliver).Run(std::move(addresses));
 }
 
-}  // namespace
+} // namespace
 
 // =============================================================================
 // HostResolver shell (PIMPL forwarding)
 // =============================================================================
 
 HostResolver::HostResolver()
-    : impl_(std::make_unique<Impl>()) {}
+    : impl_(std::make_unique<Impl>()) {
+}
 
-HostResolver::HostResolver(const HostResolverOptions& options)
-    : impl_(std::make_unique<Impl>(options)) {}
+HostResolver::HostResolver(const HostResolverOptions &options)
+    : impl_(std::make_unique<Impl>(options)) {
+}
 
 HostResolver::~HostResolver() = default;
 
-bool HostResolver::Resolve(const std::string& host,
-                           ResolveCallback callback,
-                           scoped_refptr<TaskRunner> target_runner) {
+bool HostResolver::Resolve(const std::string &host, ResolveCallback callback, scoped_refptr<TaskRunner> target_runner) {
   return impl_->Resolve(host, std::move(callback), std::move(target_runner));
 }
 
@@ -153,17 +146,19 @@ bool HostResolver::Resolve(const std::string& host,
 // =============================================================================
 
 HostResolver::Impl::Impl()
-    : Impl(HostResolverOptions{}) {}
+    : Impl(HostResolverOptions{}) {
+}
 
-HostResolver::Impl::Impl(const HostResolverOptions& options)
-    : options_(options),
-      weak_factory_(this, FROM_HERE_MEMBER) {}
+HostResolver::Impl::Impl(const HostResolverOptions &options)
+    : options_(options)
+    , weak_factory_(this, FROM_HERE_MEMBER) {
+}
 
 HostResolver::Impl::~Impl() = default;
 
-bool HostResolver::Impl::Resolve(const std::string& host,
-                                  ResolveCallback callback,
-                                  scoped_refptr<TaskRunner> target_runner) {
+bool HostResolver::Impl::Resolve(const std::string &host,
+                                 ResolveCallback callback,
+                                 scoped_refptr<TaskRunner> target_runner) {
   DCHECK(target_runner);
 
   if (host.empty()) {
@@ -174,20 +169,15 @@ bool HostResolver::Impl::Resolve(const std::string& host,
   }
 
   // Build the query context (heap-allocated, owned by the c-ares callback).
-  auto* query = new QueryContext{
-      weak_factory_.GetWeakPtr(),
-      std::move(callback),
-      std::move(target_runner)
-  };
+  auto *query = new QueryContext{weak_factory_.GetWeakPtr(), std::move(callback), std::move(target_runner)};
 
   struct ares_addrinfo_hints hints = {};
   hints.ai_family = options_.address_family;
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_protocol = IPPROTO_TCP;
 
-  CaresContext::Get()->Resolve(host, options_, &hints, OnAresCallback, query,
-                               query->target_runner);
+  CaresContext::Get()->Resolve(host, options_, &hints, OnAresCallback, query, query->target_runner);
   return true;
 }
 
-}  // namespace nei::net
+} // namespace nei::net

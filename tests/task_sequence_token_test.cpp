@@ -43,11 +43,11 @@ TEST(SequenceTokenTest, CreateGeneratesUniqueValuesAcrossThreads) {
     });
   }
 
-  for (auto& worker : workers) {
+  for (auto &worker : workers) {
     worker.join();
   }
 
   EXPECT_EQ(all_values.size(), static_cast<std::size_t>(kThreads * kPerThread));
 }
 
-}  // namespace nei
+} // namespace nei

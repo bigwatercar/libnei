@@ -40,9 +40,7 @@ bool EqualsChar(CharT lhs, CharT rhs, CompareCase compare_case) {
 }
 
 template <typename CharT>
-bool StartsWithT(std::basic_string_view<CharT> input,
-                 std::basic_string_view<CharT> prefix,
-                 CompareCase compare_case) {
+bool StartsWithT(std::basic_string_view<CharT> input, std::basic_string_view<CharT> prefix, CompareCase compare_case) {
 #if __cplusplus >= 202002L
   if (compare_case == CompareCase::kSensitive) {
     return input.starts_with(prefix);
@@ -60,9 +58,7 @@ bool StartsWithT(std::basic_string_view<CharT> input,
 }
 
 template <typename CharT>
-bool EndsWithT(std::basic_string_view<CharT> input,
-               std::basic_string_view<CharT> suffix,
-               CompareCase compare_case) {
+bool EndsWithT(std::basic_string_view<CharT> input, std::basic_string_view<CharT> suffix, CompareCase compare_case) {
 #if __cplusplus >= 202002L
   if (compare_case == CompareCase::kSensitive) {
     return input.ends_with(suffix);
@@ -155,10 +151,8 @@ bool StringAppendV(std::string *dest, const char *format, va_list args) {
 
   va_list fill_args;
   va_copy(fill_args, args);
-  const int written = std::vsnprintf(dest->data() + original_size,
-                                     static_cast<std::size_t>(required) + 1,
-                                     format,
-                                     fill_args);
+  const int written =
+      std::vsnprintf(dest->data() + original_size, static_cast<std::size_t>(required) + 1, format, fill_args);
   va_end(fill_args);
 
   if (written < 0) {
@@ -170,10 +164,8 @@ bool StringAppendV(std::string *dest, const char *format, va_list args) {
     dest->resize(original_size + static_cast<std::size_t>(written));
     va_list retry_args;
     va_copy(retry_args, args);
-    const int retried_written = std::vsnprintf(dest->data() + original_size,
-                                               static_cast<std::size_t>(written) + 1,
-                                               format,
-                                               retry_args);
+    const int retried_written =
+        std::vsnprintf(dest->data() + original_size, static_cast<std::size_t>(written) + 1, format, retry_args);
     va_end(retry_args);
 
     if (retried_written < 0) {
@@ -190,9 +182,7 @@ bool StringAppendV(std::string *dest, const char *format, va_list args) {
 }
 
 template <typename CharT>
-int CompareT(std::basic_string_view<CharT> lhs,
-             std::basic_string_view<CharT> rhs,
-             CompareCase compare_case) {
+int CompareT(std::basic_string_view<CharT> lhs, std::basic_string_view<CharT> rhs, CompareCase compare_case) {
   const std::size_t min_len = lhs.size() < rhs.size() ? lhs.size() : rhs.size();
   for (std::size_t i = 0; i < min_len; ++i) {
     const CharT lc = (compare_case == CompareCase::kInsensitiveASCII) ? ToLowerASCIIChar(lhs[i]) : lhs[i];
@@ -350,9 +340,9 @@ std::string TruncateUTF8(std::string_view input, std::size_t byte_limit) {
 
 #if __cplusplus >= 202002L
 std::u8string TruncateUTF8(std::u8string_view input, std::size_t byte_limit) {
-  std::string tmp = TruncateUTF8(std::string_view(
-      reinterpret_cast<const char*>(input.data()), input.size()), byte_limit);
-  return std::u8string(reinterpret_cast<const char8_t*>(tmp.data()), tmp.size());
+  std::string tmp =
+      TruncateUTF8(std::string_view(reinterpret_cast<const char *>(input.data()), input.size()), byte_limit);
+  return std::u8string(reinterpret_cast<const char8_t *>(tmp.data()), tmp.size());
 }
 #endif
 

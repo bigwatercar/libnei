@@ -22,7 +22,7 @@
 #include <neixx/strings/utf_string_conversions.h>
 
 #if NEI_BENCH_HAS_FMT
-  #include <fmt/format.h>
+#include <fmt/format.h>
 #endif
 
 namespace {
@@ -88,14 +88,17 @@ static bool ensure_output_dir(const std::string &out_dir) {
 #ifdef _WIN32
   /* out_dir is UTF-8; convert to UTF-16 for CreateDirectoryW. */
   const int wlen = MultiByteToWideChar(CP_UTF8, 0, out_dir.c_str(), -1, NULL, 0);
-  if (wlen <= 0) return false;
+  if (wlen <= 0)
+    return false;
   wchar_t *wdir = (wchar_t *)malloc((size_t)wlen * sizeof(wchar_t));
-  if (wdir == NULL) return false;
+  if (wdir == NULL)
+    return false;
   MultiByteToWideChar(CP_UTF8, 0, out_dir.c_str(), -1, wdir, wlen);
   const BOOL ok = CreateDirectoryW(wdir, NULL);
   const DWORD err = GetLastError();
   free(wdir);
-  if (ok || err == ERROR_ALREADY_EXISTS) return true;
+  if (ok || err == ERROR_ALREADY_EXISTS)
+    return true;
   return false;
 #else
   if (mkdir(out_dir.c_str(), 0755) == 0 || errno == EEXIST) {
@@ -160,8 +163,7 @@ void run_log_benchmark(const std::string &name, std::function<void()> log_func, 
   std::cout << "  Enqueue logs/sec: " << (1000000.0 / enqueue_avg) << "\n";
   std::cout << "  E2E logs/sec: " << (1000000.0 / e2e_avg) << "\n";
   std::cout << "  Runtime stats: producer_spins=" << stats.producer_spin_loops
-            << ", flush_wait_loops=" << stats.flush_wait_loops
-            << ", consumer_wakeups=" << stats.consumer_wakeups
+            << ", flush_wait_loops=" << stats.flush_wait_loops << ", consumer_wakeups=" << stats.consumer_wakeups
             << ", ring_hwm=" << stats.ring_high_watermark << "\n\n";
 }
 
@@ -205,8 +207,7 @@ void run_vlog_benchmark(const std::string &name, std::function<void()> log_func,
   std::cout << "  Enqueue logs/sec: " << (1000000.0 / enqueue_avg) << "\n";
   std::cout << "  E2E logs/sec: " << (1000000.0 / e2e_avg) << "\n";
   std::cout << "  Runtime stats: producer_spins=" << stats.producer_spin_loops
-            << ", flush_wait_loops=" << stats.flush_wait_loops
-            << ", consumer_wakeups=" << stats.consumer_wakeups
+            << ", flush_wait_loops=" << stats.flush_wait_loops << ", consumer_wakeups=" << stats.consumer_wakeups
             << ", ring_hwm=" << stats.ring_high_watermark << "\n\n";
 }
 
@@ -256,8 +257,7 @@ void run_file_log_benchmark(const std::string &name,
     std::cout << "  Enqueue logs/sec: " << (1000000.0 / enqueue_avg) << "\n";
     std::cout << "  E2E logs/sec: " << (1000000.0 / e2e_avg) << "\n";
     std::cout << "  Runtime stats: producer_spins=" << stats.producer_spin_loops
-              << ", flush_wait_loops=" << stats.flush_wait_loops
-              << ", consumer_wakeups=" << stats.consumer_wakeups
+              << ", flush_wait_loops=" << stats.flush_wait_loops << ", consumer_wakeups=" << stats.consumer_wakeups
               << ", ring_hwm=" << stats.ring_high_watermark << "\n";
   }
 
@@ -389,11 +389,16 @@ int main(int argc, char **argv) {
   run_log_benchmark("Log Info (alternating 2 fmts)", []() {
     static int counter = 0;
     if ((++counter) & 1) {
-      nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
-               "test message %s", "test");
+      nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", "test message %s", "test");
     } else {
-      nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
-               "another msg=%d, val=%s", 42, "hello");
+      nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
+               NEI_L_INFO,
+               __FILE__,
+               __LINE__,
+               "benchmark",
+               "another msg=%d, val=%s",
+               42,
+               "hello");
     }
   });
 
@@ -401,14 +406,19 @@ int main(int argc, char **argv) {
     static int counter = 0;
     int idx = (++counter) % 3;
     if (idx == 0) {
-      nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
-               "test message %s", "test");
+      nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", "test message %s", "test");
     } else if (idx == 1) {
-      nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
-               "another msg=%d, val=%s", 42, "hello");
+      nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
+               NEI_L_INFO,
+               __FILE__,
+               __LINE__,
+               "benchmark",
+               "another msg=%d, val=%s",
+               42,
+               "hello");
     } else {
-      nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
-               "third fmt %d %d %d", 1, 2, 3);
+      nei_llog(
+          NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", "third fmt %d %d %d", 1, 2, 3);
     }
   });
 
@@ -416,11 +426,9 @@ int main(int argc, char **argv) {
   run_vlog_benchmark("Log Verbose (alternating 2 fmts)", []() {
     static int counter = 0;
     if ((++counter) & 1) {
-      nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark",
-               "verbose message %s", "verbose");
+      nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", "verbose message %s", "verbose");
     } else {
-      nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark",
-               "verbose %d items", 42);
+      nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", "verbose %d items", 42);
     }
   });
 
@@ -431,38 +439,49 @@ int main(int argc, char **argv) {
 
   // Level-based: nei_llog (C printf) vs fmt::format + nei_llog_literal
   run_log_benchmark("Log Info (C printf)", []() {
-    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
-             "number=%d, string=%s, float=%.2f", 42, "hello", 3.14);
+    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
+             NEI_L_INFO,
+             __FILE__,
+             __LINE__,
+             "benchmark",
+             "number=%d, string=%s, float=%.2f",
+             42,
+             "hello",
+             3.14);
   });
 
   run_log_benchmark("Log Info ({fmt} literal)", []() {
     auto msg = fmt::format("number={}, string={}, float={:.2f}", 42, "hello", 3.14);
-    nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
-                     msg.data(), msg.size());
+    nei_llog_literal(
+        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", msg.data(), msg.size());
   });
 
   // Simple format string (less overhead skew)
   run_log_benchmark("Log Info simple (C printf)", []() {
-    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
-             "test message %s", "test");
+    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", "test message %s", "test");
   });
 
   run_log_benchmark("Log Info simple ({fmt} literal)", []() {
     auto msg = fmt::format("test message {}", "test");
-    nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
-                     msg.data(), msg.size());
+    nei_llog_literal(
+        NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", msg.data(), msg.size());
   });
 
   // Verbose: nei_vlog (C printf) vs fmt::format + nei_vlog_literal
   run_vlog_benchmark("Log Verbose (C printf)", []() {
-    nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark",
-             "verbose number=%d, string=%s", 42, "verbose");
+    nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
+             1,
+             __FILE__,
+             __LINE__,
+             "benchmark",
+             "verbose number=%d, string=%s",
+             42,
+             "verbose");
   });
 
   run_vlog_benchmark("Log Verbose ({fmt} literal)", []() {
     auto msg = fmt::format("verbose number={}, string={}", 42, "verbose");
-    nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark",
-                     msg.data(), msg.size());
+    nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", msg.data(), msg.size());
   });
 
   // File-based comparison
@@ -472,8 +491,15 @@ int main(int argc, char **argv) {
   run_file_log_benchmark(
       "File Log Info (C printf)",
       []() {
-        nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
-                 "number=%d, string=%s, float=%.2f", 42, "hello", 3.14);
+        nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
+                 NEI_L_INFO,
+                 __FILE__,
+                 __LINE__,
+                 "benchmark",
+                 "number=%d, string=%s, float=%.2f",
+                 42,
+                 "hello",
+                 3.14);
       },
       join_path(out_dir, "log_bench_c_printf.log"));
 
@@ -481,8 +507,8 @@ int main(int argc, char **argv) {
       "File Log Info ({fmt} literal)",
       []() {
         auto msg = fmt::format("number={}, string={}, float={:.2f}", 42, "hello", 3.14);
-        nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
-                         msg.data(), msg.size());
+        nei_llog_literal(
+            NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", msg.data(), msg.size());
       },
       join_path(out_dir, "log_bench_fmt_literal.log"));
 #endif // NEI_BENCH_HAS_FMT
@@ -526,7 +552,7 @@ int main(int argc, char **argv) {
                  "hello",
                  3);
       },
-              join_path(out_dir, "log_bench_format.log"));
+      join_path(out_dir, "log_bench_format.log"));
 
   run_file_log_benchmark(
       "File Log Verbose",
@@ -540,11 +566,17 @@ int main(int argc, char **argv) {
       []() {
         static int counter = 0;
         if ((++counter) & 1) {
-          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
-                   "test message %s", "test");
+          nei_llog(
+              NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark", "test message %s", "test");
         } else {
-          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "benchmark",
-                   "another msg=%d, val=%s", 42, "hello");
+          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
+                   NEI_L_INFO,
+                   __FILE__,
+                   __LINE__,
+                   "benchmark",
+                   "another msg=%d, val=%s",
+                   42,
+                   "hello");
         }
       },
       join_path(out_dir, "log_bench_alternating.log"));
@@ -554,11 +586,9 @@ int main(int argc, char **argv) {
       []() {
         static int counter = 0;
         if ((++counter) & 1) {
-          nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark",
-                   "verbose message %s", "verbose");
+          nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", "verbose message %s", "verbose");
         } else {
-          nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark",
-                   "verbose %d items", 42);
+          nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", "verbose %d items", 42);
         }
       },
       join_path(out_dir, "log_bench_verbose_alternating.log"));

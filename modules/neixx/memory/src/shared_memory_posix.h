@@ -14,81 +14,142 @@
 namespace nei {
 
 class SharedMemoryHandle::Impl final {
- public:
+public:
   Impl(PlatformHandle handle, std::size_t size);
   ~Impl();
-  bool is_valid() const { return fd_ >= 0 && size_ > 0; }
-  std::size_t size() const { return size_; }
-  int fd() const { return fd_; }
+
+  bool is_valid() const {
+    return fd_ >= 0 && size_ > 0;
+  }
+
+  std::size_t size() const {
+    return size_;
+  }
+
+  int fd() const {
+    return fd_;
+  }
+
   PlatformHandle TakeHandle();
 
- private:
+private:
   int fd_ = -1;
   std::size_t size_ = 0;
 };
 
 class ReadOnlySharedMemoryMapping::Impl final {
- public:
+public:
   Impl() = default;
-  explicit Impl(void* addr, std::size_t size) : addr_(addr), size_(size) {}
+
+  explicit Impl(void *addr, std::size_t size)
+      : addr_(addr)
+      , size_(size) {
+  }
+
   ~Impl();
-  bool is_valid() const { return addr_ != nullptr; }
-  const void* memory() const { return addr_; }
-  std::size_t size() const { return size_; }
- private:
-  void* addr_ = nullptr;
+
+  bool is_valid() const {
+    return addr_ != nullptr;
+  }
+
+  const void *memory() const {
+    return addr_;
+  }
+
+  std::size_t size() const {
+    return size_;
+  }
+
+private:
+  void *addr_ = nullptr;
   std::size_t size_ = 0;
 };
 
 class WritableSharedMemoryMapping::Impl final {
- public:
+public:
   Impl() = default;
-  explicit Impl(void* addr, std::size_t size) : addr_(addr), size_(size) {}
+
+  explicit Impl(void *addr, std::size_t size)
+      : addr_(addr)
+      , size_(size) {
+  }
+
   ~Impl();
-  bool is_valid() const { return addr_ != nullptr; }
-  void* memory() { return addr_; }
-  std::size_t size() const { return size_; }
- private:
-  void* addr_ = nullptr;
+
+  bool is_valid() const {
+    return addr_ != nullptr;
+  }
+
+  void *memory() {
+    return addr_;
+  }
+
+  std::size_t size() const {
+    return size_;
+  }
+
+private:
+  void *addr_ = nullptr;
   std::size_t size_ = 0;
 };
 
 class ReadOnlySharedMemoryRegion::Impl final {
- public:
+public:
   explicit Impl(SharedMemoryHandle handle);
   ~Impl();
-  bool is_valid() const { return fd_ >= 0; }
-  std::size_t size() const { return size_; }
+
+  bool is_valid() const {
+    return fd_ >= 0;
+  }
+
+  std::size_t size() const {
+    return size_;
+  }
+
   ReadOnlySharedMemoryMapping Map();
   SharedMemoryHandle TakeHandle() &&;
 
- private:
+private:
   int fd_ = -1;
   std::size_t size_ = 0;
 };
 
 class WritableSharedMemoryRegion::Impl final {
- public:
+public:
   explicit Impl(SharedMemoryHandle handle);
   ~Impl();
-  bool is_valid() const { return fd_ >= 0; }
-  std::size_t size() const { return size_; }
+
+  bool is_valid() const {
+    return fd_ >= 0;
+  }
+
+  std::size_t size() const {
+    return size_;
+  }
+
   WritableSharedMemoryMapping Map();
   ReadOnlySharedMemoryRegion ConvertToReadOnly() &&;
   SharedMemoryHandle TakeHandle() &&;
   static WritableSharedMemoryRegion Create(std::size_t size);
 
- private:
+private:
   int fd_ = -1;
   std::size_t size_ = 0;
 };
 
 class UnsafeSharedMemoryRegion::Impl final {
- public:
+public:
   explicit Impl(SharedMemoryHandle handle);
   ~Impl();
-  bool is_valid() const { return fd_ >= 0; }
-  std::size_t size() const { return size_; }
+
+  bool is_valid() const {
+    return fd_ >= 0;
+  }
+
+  std::size_t size() const {
+    return size_;
+  }
+
   WritableSharedMemoryMapping Map();
   ReadOnlySharedMemoryMapping MapReadOnly();
   WritableSharedMemoryRegion ConvertToWritable() &&;
@@ -96,12 +157,12 @@ class UnsafeSharedMemoryRegion::Impl final {
   SharedMemoryHandle TakeHandle() &&;
   static UnsafeSharedMemoryRegion Create(std::size_t size);
 
- private:
+private:
   int fd_ = -1;
   std::size_t size_ = 0;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // !defined(_WIN32)
-#endif  // NEIXX_MEMORY_SHARED_MEMORY_POSIX_H_
+#endif // !defined(_WIN32)
+#endif // NEIXX_MEMORY_SHARED_MEMORY_POSIX_H_

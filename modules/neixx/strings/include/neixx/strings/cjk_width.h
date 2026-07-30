@@ -15,8 +15,7 @@ enum class EastAsianWidthAmbiguousPolicy {
 };
 
 struct DisplayWidthOptions {
-  EastAsianWidthAmbiguousPolicy ambiguous_policy =
-      EastAsianWidthAmbiguousPolicy::kTreatAsNarrow;
+  EastAsianWidthAmbiguousPolicy ambiguous_policy = EastAsianWidthAmbiguousPolicy::kTreatAsNarrow;
   std::size_t tab_width = 4;
 };
 

@@ -8,14 +8,20 @@ namespace nei {
 
 // Simple test delegate for testing the MessagePump interface contract.
 class SimpleTestDelegate : public MessagePump::Delegate {
- public:
-  bool DoWork() override { return false; }
-  bool DoDelayedWork(NextWorkInfo* out) override {
+public:
+  bool DoWork() override {
+    return false;
+  }
+
+  bool DoDelayedWork(NextWorkInfo *out) override {
     out->next_run_time = NextWorkInfo::kNoScheduledRunTime;
     out->recent_now = TimeTicks::Now();
     return false;
   }
-  bool DoIdleWork() override { return false; }
+
+  bool DoIdleWork() override {
+    return false;
+  }
 };
 
 // Test basic MessagePump interface construction and destruction.
@@ -28,7 +34,7 @@ TEST(MessagePumpTest, CreateAndDestroy) {
 // Test NextWorkInfo struct initialization and sentinel value.
 TEST(MessagePumpTest, NextWorkInfoSentinel) {
   MessagePump::Delegate::NextWorkInfo info;
-  info.next_run_time = TimeTicks();  // Sentinel value (null)
+  info.next_run_time = TimeTicks(); // Sentinel value (null)
   info.recent_now = TimeTicks::Now();
 
   EXPECT_TRUE(info.next_run_time.is_null());
@@ -50,8 +56,7 @@ TEST(MessagePumpTest, NextWorkInfoWithScheduledTime) {
 
 // Test that kNoScheduledRunTime constant represents a null TimeTicks.
 TEST(MessagePumpTest, NoScheduledRunTimeConstant) {
-  EXPECT_TRUE(MessagePump::Delegate::NextWorkInfo::kNoScheduledRunTime
-                  .is_null());
+  EXPECT_TRUE(MessagePump::Delegate::NextWorkInfo::kNoScheduledRunTime.is_null());
 }
 
 // Test Delegate with simple implementation.
@@ -73,15 +78,21 @@ TEST(MessagePumpTest, SimpleDelegateCallbacks) {
 // Test Delegate DoDelayedWork with scheduling.
 TEST(MessagePumpTest, DelegateSchedulesDelayedWork) {
   class SchedulingDelegate : public MessagePump::Delegate {
-   public:
-    bool DoWork() override { return false; }
-    bool DoDelayedWork(NextWorkInfo* out) override {
+  public:
+    bool DoWork() override {
+      return false;
+    }
+
+    bool DoDelayedWork(NextWorkInfo *out) override {
       // Schedule work 100ms from now.
       out->next_run_time = TimeTicks::Now() + TimeDelta::FromMilliseconds(100);
       out->recent_now = TimeTicks::Now();
       return false;
     }
-    bool DoIdleWork() override { return false; }
+
+    bool DoIdleWork() override {
+      return false;
+    }
   } delegate;
 
   MessagePump::Delegate::NextWorkInfo out_info;
@@ -89,4 +100,4 @@ TEST(MessagePumpTest, DelegateSchedulesDelayedWork) {
   EXPECT_FALSE(out_info.next_run_time.is_null());
 }
 
-}  // namespace nei
+} // namespace nei

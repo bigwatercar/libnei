@@ -89,20 +89,19 @@ TEST(PlatformThreadTest, SleepShortDurationPrecision) {
     const auto t0 = std::chrono::high_resolution_clock::now();
     nei::PlatformThread::Sleep(nei::TimeDelta::FromMilliseconds(1));
     const auto t1 = std::chrono::high_resolution_clock::now();
-    total_us +=
-        std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+    total_us += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
   }
 
   const int64_t avg_us = total_us / kIterations;
-  EXPECT_LT(avg_us, kMaxAvgUs)
-      << "Average Sleep(1ms) took " << avg_us
-      << " us  --  high-resolution timer may not be active.";
+  EXPECT_LT(avg_us, kMaxAvgUs) << "Average Sleep(1ms) took " << avg_us
+                               << " us  --  high-resolution timer may not be active.";
 }
 
 TEST(PlatformThreadTest, SetCurrentThreadNameBestEffort) {
   nei::PlatformThread::SetCurrentThreadName("nei-thread-main");
 
   nei::PlatformThread::Handle handle;
+
   class NamingDelegate final : public nei::PlatformThread::Delegate {
   public:
     void ThreadMain() override {
@@ -133,10 +132,7 @@ TEST(PlatformThreadTest, CreateWithTypeBackgroundPath) {
     std::atomic<bool> *ran_;
   } delegate(&ran);
 
-  ASSERT_TRUE(nei::PlatformThread::CreateWithType(0,
-                                                   &delegate,
-                                                   &handle,
-                                                   nei::ThreadType::BACKGROUND));
+  ASSERT_TRUE(nei::PlatformThread::CreateWithType(0, &delegate, &handle, nei::ThreadType::BACKGROUND));
   ASSERT_TRUE(nei::PlatformThread::Join(&handle));
   EXPECT_TRUE(ran.load(std::memory_order_acquire));
 }
@@ -146,7 +142,8 @@ TEST(PlatformThreadTest, JoinTwiceFails) {
 
   class NoopDelegate final : public nei::PlatformThread::Delegate {
   public:
-    void ThreadMain() override {}
+    void ThreadMain() override {
+    }
   } delegate;
 
   ASSERT_TRUE(nei::PlatformThread::Create(0, &delegate, &handle));
@@ -160,21 +157,21 @@ TEST(PlatformThreadTest, JoinAfterDetachFails) {
   std::future<void> finished_future = finished_promise.get_future();
 
   class NoopDelegate final : public nei::PlatformThread::Delegate {
-   public:
-    explicit NoopDelegate(std::promise<void>* finished)
-        : finished_(finished) {}
+  public:
+    explicit NoopDelegate(std::promise<void> *finished)
+        : finished_(finished) {
+    }
 
     void ThreadMain() override {
       finished_->set_value();
     }
 
-   private:
-    std::promise<void>* finished_;
+  private:
+    std::promise<void> *finished_;
   } delegate(&finished_promise);
 
   ASSERT_TRUE(nei::PlatformThread::Create(0, &delegate, &handle));
   ASSERT_TRUE(nei::PlatformThread::Detach(&handle));
   EXPECT_FALSE(nei::PlatformThread::Join(&handle));
-  EXPECT_EQ(finished_future.wait_for(std::chrono::seconds(1)),
-            std::future_status::ready);
+  EXPECT_EQ(finished_future.wait_for(std::chrono::seconds(1)), std::future_status::ready);
 }

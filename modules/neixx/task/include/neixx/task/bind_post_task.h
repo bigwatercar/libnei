@@ -69,11 +69,13 @@ namespace internal {
 // 类型特征: 区分 OnceCallback<Args...> 与 RepeatingCallback<Args...>
 template <typename T>
 struct is_once_callback : std::false_type {};
+
 template <typename R, typename... Args>
 struct is_once_callback<OnceCallback<R(Args...)>> : std::true_type {};
 
 template <typename T>
 struct is_repeating_callback : std::false_type {};
+
 template <typename R, typename... Args>
 struct is_repeating_callback<RepeatingCallback<R(Args...)>> : std::true_type {};
 
@@ -95,13 +97,11 @@ struct is_repeating_callback<RepeatingCallback<R(Args...)>> : std::true_type {};
 //   当 callback 为 void() 闭包时, Args... 为空包, 零额外开销。
 // ---------------------------------------------------------------------------
 template <typename CallbackType>
-class BindPostTaskTrampoline
-    : public RefCountedThreadSafe<BindPostTaskTrampoline<CallbackType>> {
- public:
-  BindPostTaskTrampoline(scoped_refptr<TaskRunner> task_runner,
-                         CallbackType callback)
-      : task_runner_(std::move(task_runner)),
-        callback_(std::move(callback)) {
+class BindPostTaskTrampoline : public RefCountedThreadSafe<BindPostTaskTrampoline<CallbackType>> {
+public:
+  BindPostTaskTrampoline(scoped_refptr<TaskRunner> task_runner, CallbackType callback)
+      : task_runner_(std::move(task_runner))
+      , callback_(std::move(callback)) {
     DCHECK(task_runner_);
   }
 
@@ -116,7 +116,7 @@ class BindPostTaskTrampoline
   // 线程安全: 可在任意线程调用。
   // -----------------------------------------------------------------------
   template <typename... Args>
-  void Run(Args&&... args) {
+  void Run(Args &&...args) {
     if (!task_runner_) {
       return;
     }
@@ -126,41 +126,29 @@ class BindPostTaskTrampoline
       if (callback_) {
         task_runner_->PostTask(
             FROM_HERE,
-            BindOnce(
-                [cb = std::move(callback_),
-                 tup = std::make_tuple(
-                     std::forward<Args>(args)...)]() mutable {
-                  // Extract the callback and forward stored args to Run().
-                  auto local_cb = std::move(cb);
-                  std::apply(
-                      [&local_cb](auto&&... a) {
-                        std::move(local_cb).Run(
-                            std::forward<decltype(a)>(a)...);
-                      },
-                      std::move(tup));
-                }));
+            BindOnce([cb = std::move(callback_), tup = std::make_tuple(std::forward<Args>(args)...)]() mutable {
+              // Extract the callback and forward stored args to Run().
+              auto local_cb = std::move(cb);
+              std::apply([&local_cb](auto &&...a) { std::move(local_cb).Run(std::forward<decltype(a)>(a)...); },
+                         std::move(tup));
+            }));
         callback_consumed_ = true;
       }
     } else {
       // RepeatingCallback<void()>: copy the callback, forward args via tuple.
-      task_runner_->PostTask(
-          FROM_HERE,
-          BindOnce(
-              [cb = callback_,
-               tup = std::make_tuple(
-                   std::forward<Args>(args)...)]() mutable {
-                std::apply(
-                    [&cb](auto&... a) {
-                      cb.Run();  // RepeatingCallback<void()> is void() only
-                      (void)std::initializer_list<int>{
-                          ((void)a, 0)...};  // suppress unused warnings
-                    },
-                    std::move(tup));
-              }));
+      task_runner_->PostTask(FROM_HERE,
+                             BindOnce([cb = callback_, tup = std::make_tuple(std::forward<Args>(args)...)]() mutable {
+                               std::apply(
+                                   [&cb](auto &...a) {
+                                     cb.Run(); // RepeatingCallback<void()> is void() only
+                                     (void)std::initializer_list<int>{((void)a, 0)...}; // suppress unused warnings
+                                   },
+                                   std::move(tup));
+                             }));
     }
   }
 
- private:
+private:
   friend class RefCountedThreadSafe<BindPostTaskTrampoline>;
 
   // -----------------------------------------------------------------------
@@ -196,18 +184,15 @@ class BindPostTaskTrampoline
     }
 
     // 判断当前线程是否为目标线程
-    const scoped_refptr<TaskRunner> current =
-        ThreadTaskRunnerHandle::Get();
+    const scoped_refptr<TaskRunner> current = ThreadTaskRunnerHandle::Get();
 
     if (current.get() != task_runner_.get()) {
       // * 不在目标线程 -> 弹射回目标线程析构
       // 将 callback 的所有权转移到目标线程上的一个空 lambda,
       // lambda 在目标线程执行完毕后, callback 随 lambda 析构。
-      task_runner_->PostTask(
-          FROM_HERE,
-          [cb = std::move(callback_)]() {
-            // cb 在此 lambda 结束时析构 -> 在目标线程上释放所有资源
-          });
+      task_runner_->PostTask(FROM_HERE, [cb = std::move(callback_)]() {
+        // cb 在此 lambda 结束时析构 -> 在目标线程上释放所有资源
+      });
       // 标记为已消耗, 防止基类析构时再次处理
       callback_consumed_ = true;
     }
@@ -223,7 +208,7 @@ class BindPostTaskTrampoline
   bool callback_consumed_ = false;
 };
 
-}  // namespace internal
+} // namespace internal
 
 // =============================================================================
 // 公开 API: BindPostTask
@@ -244,37 +229,28 @@ class BindPostTaskTrampoline
 //   std::move(safe).Run(addresses);  // cb(addresses) runs on runner
 // ---------------------------------------------------------------------------
 template <typename... Args>
-OnceCallback<void(Args...)> BindPostTask(scoped_refptr<TaskRunner> task_runner,
-                                    OnceCallback<void(Args...)> callback) {
+OnceCallback<void(Args...)> BindPostTask(scoped_refptr<TaskRunner> task_runner, OnceCallback<void(Args...)> callback) {
   DCHECK(task_runner);
-  auto trampoline =
-      MakeRefCounted<internal::BindPostTaskTrampoline<OnceCallback<void(Args...)>>>(
-          std::move(task_runner), std::move(callback));
+  auto trampoline = MakeRefCounted<internal::BindPostTaskTrampoline<OnceCallback<void(Args...)>>>(
+      std::move(task_runner), std::move(callback));
 
   return OnceCallback<void(Args...)>(
-      [trampoline = std::move(trampoline)](Args... args) mutable {
-        trampoline->Run(std::forward<Args>(args)...);
-      });
+      [trampoline = std::move(trampoline)](Args... args) mutable { trampoline->Run(std::forward<Args>(args)...); });
 }
 
 // ---------------------------------------------------------------------------
 // RepeatingCallback<void()>  --  void() only.  Parameterized RepeatingCallback will
 // be added when needed.
 // ---------------------------------------------------------------------------
-inline RepeatingCallback<void()> BindPostTask(
-    scoped_refptr<TaskRunner> task_runner,
-    RepeatingCallback<void()> callback) {
+inline RepeatingCallback<void()> BindPostTask(scoped_refptr<TaskRunner> task_runner,
+                                              RepeatingCallback<void()> callback) {
   DCHECK(task_runner);
-  auto trampoline =
-      MakeRefCounted<internal::BindPostTaskTrampoline<RepeatingCallback<void()>>>(
-          std::move(task_runner), std::move(callback));
+  auto trampoline = MakeRefCounted<internal::BindPostTaskTrampoline<RepeatingCallback<void()>>>(std::move(task_runner),
+                                                                                                std::move(callback));
 
-  return BindRepeating(
-      [trampoline](auto&&... args) {
-        trampoline->Run(std::forward<decltype(args)>(args)...);
-      });
+  return BindRepeating([trampoline](auto &&...args) { trampoline->Run(std::forward<decltype(args)>(args)...); });
 }
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_TASK_BIND_POST_TASK_H_
+#endif // NEIXX_TASK_BIND_POST_TASK_H_

@@ -42,17 +42,17 @@ TEST(SharedMemoryTest, BasicMapAndUnmap) {
   // Phase 2: re-map and verify.
   auto mapping2 = writable.Map();
   ASSERT_TRUE(mapping2.is_valid());
-  EXPECT_STREQ(static_cast<const char*>(mapping2.memory()), kMagicString);
+  EXPECT_STREQ(static_cast<const char *>(mapping2.memory()), kMagicString);
 
   // Phase 3: overwrite and verify in-place.
   const char kOther[] = "OVERWRITE";
   std::memcpy(mapping2.memory(), kOther, sizeof(kOther));
-  EXPECT_STREQ(static_cast<const char*>(mapping2.memory()), kOther);
+  EXPECT_STREQ(static_cast<const char *>(mapping2.memory()), kOther);
 
   // Phase 4: verify a third independent mapping sees the overwrite.
   auto mapping3 = writable.Map();
   ASSERT_TRUE(mapping3.is_valid());
-  EXPECT_STREQ(static_cast<const char*>(mapping3.memory()), kOther);
+  EXPECT_STREQ(static_cast<const char *>(mapping3.memory()), kOther);
 }
 
 // =============================================================================
@@ -74,8 +74,7 @@ TEST(SharedMemoryTest, DowngradeSecurity) {
   }
 
   // Downgrade — writable is consumed.
-  ReadOnlySharedMemoryRegion readonly =
-      std::move(writable).ConvertToReadOnly();
+  ReadOnlySharedMemoryRegion readonly = std::move(writable).ConvertToReadOnly();
 
   // Assert A: original writable is dead.
   EXPECT_FALSE(writable.is_valid());
@@ -87,11 +86,11 @@ TEST(SharedMemoryTest, DowngradeSecurity) {
   auto ro_mapping = readonly.Map();
   ASSERT_TRUE(ro_mapping.is_valid());
   EXPECT_NE(ro_mapping.memory(), nullptr);
-  EXPECT_STREQ(static_cast<const char*>(ro_mapping.memory()), kMagicString);
+  EXPECT_STREQ(static_cast<const char *>(ro_mapping.memory()), kMagicString);
 
   // Assert C: type-system attack — ReadOnly mapping returns const void*.
   // No mutable API exists.  We verify the pointer is truly const-qualified.
-  const void* ro_ptr = ro_mapping.memory();
+  const void *ro_ptr = ro_mapping.memory();
   EXPECT_NE(ro_ptr, nullptr);
 
   // Further proof: no implicit conversion from ReadOnly region to
@@ -151,7 +150,7 @@ TEST(SharedMemoryTest, CrossProcessHandleTransfer) {
 
     auto ro_mapping = unsafe.MapReadOnly();
     ASSERT_TRUE(ro_mapping.is_valid());
-    EXPECT_STREQ(static_cast<const char*>(ro_mapping.memory()), kPayloadA);
+    EXPECT_STREQ(static_cast<const char *>(ro_mapping.memory()), kPayloadA);
 
     // Attempting writable mapping on a read-only-sealed handle must fail.
     // The region itself may appear valid (it wraps a handle), but Map()
@@ -161,8 +160,7 @@ TEST(SharedMemoryTest, CrossProcessHandleTransfer) {
     // assertion is that Map() fails when the handle is read-only.
     if (degraded.is_valid()) {
       auto wr_fail = degraded.Map();
-      EXPECT_FALSE(wr_fail.is_valid())
-          << "Writable mapping of a read-only-sealed handle MUST fail";
+      EXPECT_FALSE(wr_fail.is_valid()) << "Writable mapping of a read-only-sealed handle MUST fail";
     }
   }
 
@@ -197,7 +195,7 @@ TEST(SharedMemoryTest, CrossProcessHandleTransfer) {
     ASSERT_TRUE(writable2.is_valid());
     auto wr_mapping = writable2.Map();
     ASSERT_TRUE(wr_mapping.is_valid());
-    EXPECT_STREQ(static_cast<const char*>(wr_mapping.memory()), kPayloadB);
+    EXPECT_STREQ(static_cast<const char *>(wr_mapping.memory()), kPayloadB);
   }
 }
 
@@ -271,28 +269,28 @@ TEST(SharedMemoryTest, UnsafeRegionConcurrentAccess) {
   EXPECT_NE(mapping_b.memory(), nullptr);
 
   // Verify initial state: zeroed memory.
-  EXPECT_EQ(*static_cast<const char*>(mapping_a.memory()), '\0');
-  EXPECT_EQ(*static_cast<const char*>(mapping_b.memory()), '\0');
+  EXPECT_EQ(*static_cast<const char *>(mapping_a.memory()), '\0');
+  EXPECT_EQ(*static_cast<const char *>(mapping_b.memory()), '\0');
 
   // Write through mapping A.
   const char kShared[] = "SHARED_VIA_UNSAFE_REGION";
   std::memcpy(mapping_a.memory(), kShared, sizeof(kShared));
 
   // Mapping B sees the change instantly (shared physical pages).
-  EXPECT_STREQ(static_cast<const char*>(mapping_b.memory()), kShared);
+  EXPECT_STREQ(static_cast<const char *>(mapping_b.memory()), kShared);
 
   // Write through mapping B, verify A sees it.
   const char kFromB[] = "WRITTEN_BY_B";
   std::memcpy(mapping_b.memory(), kFromB, sizeof(kFromB));
-  EXPECT_STREQ(static_cast<const char*>(mapping_a.memory()), kFromB);
+  EXPECT_STREQ(static_cast<const char *>(mapping_a.memory()), kFromB);
 
   // Destroy one mapping — the other remains valid.
-  mapping_a = {};  // move-assign from empty → triggers munmap/UnmapViewOfFile
+  mapping_a = {}; // move-assign from empty → triggers munmap/UnmapViewOfFile
   EXPECT_FALSE(mapping_a.is_valid());
 
   // mapping_b still alive and sees its own last write.
   ASSERT_TRUE(mapping_b.is_valid());
-  EXPECT_STREQ(static_cast<const char*>(mapping_b.memory()), kFromB);
+  EXPECT_STREQ(static_cast<const char *>(mapping_b.memory()), kFromB);
 }
 
 // =============================================================================
@@ -320,5 +318,5 @@ TEST(SharedMemoryTest, RepeatedMapUnmapNoLeak) {
   SUCCEED();
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

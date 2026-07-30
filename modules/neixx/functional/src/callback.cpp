@@ -15,4 +15,4 @@ namespace nei {
 template class OnceCallback<void()>;
 template class RepeatingCallback<void()>;
 
-}  // namespace nei
+} // namespace nei

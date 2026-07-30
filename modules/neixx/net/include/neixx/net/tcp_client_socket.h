@@ -75,30 +75,25 @@ struct KeepAliveConfig {
 //                   },
 //                   io_runner);
 //
-class NEI_API TCPClientSocket : public AsyncInputStream,
-                                 public AsyncOutputStream {
- public:
+class NEI_API TCPClientSocket : public AsyncInputStream, public AsyncOutputStream {
+public:
   using ConnectCallback = std::function<void(bool success)>;
 
   TCPClientSocket();
   ~TCPClientSocket() override;
 
-  TCPClientSocket(const TCPClientSocket&) = delete;
-  TCPClientSocket& operator=(const TCPClientSocket&) = delete;
+  TCPClientSocket(const TCPClientSocket &) = delete;
+  TCPClientSocket &operator=(const TCPClientSocket &) = delete;
 
   // Initiates an asynchronous connection to |addr|.
   // |callback| is invoked on |io_runner| with the connect result.
   // Returns false if the socket could not be created or the connect
   // request could not be submitted.
-  bool Connect(const IPEndPoint& addr,
-               ConnectCallback callback,
-               scoped_refptr<TaskRunner> io_runner);
+  bool Connect(const IPEndPoint &addr, ConnectCallback callback, scoped_refptr<TaskRunner> io_runner);
 
   // ---- AsyncInputStream ------------------------------------------------
 
-  void ReadAsync(scoped_refptr<IOBuffer> buf,
-                 std::size_t buf_len,
-                 IOReadCallback callback) override;
+  void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback) override;
 
   void Close() override;
 
@@ -120,7 +115,7 @@ class NEI_API TCPClientSocket : public AsyncInputStream,
   //
   // Returns false if the socket is not connected or the platform
   // setsockopt / WSAIoctl call fails.
-  bool SetKeepAlive(const KeepAliveConfig& config);
+  bool SetKeepAlive(const KeepAliveConfig &config);
 
   // Starts a periodic health-check timer on the IO thread.  Every
   // |check_interval|, the socket's error state is polled via
@@ -135,8 +130,7 @@ class NEI_API TCPClientSocket : public AsyncInputStream,
   // The monitor is complementary to SetKeepAlive(): SetKeepAlive arms
   // the kernel probes, and the monitor periodically checks whether the
   // probes have marked the socket as dead.
-  void StartKeepAliveMonitor(TimeDelta check_interval,
-                             OnceCallback<void()> on_dead);
+  void StartKeepAliveMonitor(TimeDelta check_interval, OnceCallback<void()> on_dead);
 
   // Stops the keep-alive health monitor.  Safe to call multiple times
   // and from any thread (posts a task to the IO thread if needed).
@@ -144,28 +138,26 @@ class NEI_API TCPClientSocket : public AsyncInputStream,
 
   // ---- AsyncOutputStream -----------------------------------------------
 
-  void WriteAsync(scoped_refptr<IOBuffer> buf,
-                  std::size_t buf_len,
-                  IOWriteCallback callback) override;
+  void WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOWriteCallback callback) override;
 
- public:
+public:
   // Forward declaration for PIMPL.  Defined in src/.
   class Impl;
 
   // Constructed from an already-accepted socket by TCPServerSocket.
   // Takes ownership of |impl| (the shell adds a reference).
-  explicit TCPClientSocket(Impl* impl);
+  explicit TCPClientSocket(Impl *impl);
 
- private:
+private:
   friend class TLSServerSocket;
 
   // Returns the IO TaskRunner this socket is bound to.
   scoped_refptr<TaskRunner> io_task_runner() const;
 
-  Impl* impl_ = nullptr;  // Raw pointer  --  lifetime managed by RefCountedThreadSafe
+  Impl *impl_ = nullptr; // Raw pointer  --  lifetime managed by RefCountedThreadSafe
 };
 
-}  // namespace net
-}  // namespace nei
+} // namespace net
+} // namespace nei
 
-#endif  // NEIXX_NET_TCP_CLIENT_SOCKET_H_
+#endif // NEIXX_NET_TCP_CLIENT_SOCKET_H_

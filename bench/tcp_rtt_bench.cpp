@@ -50,17 +50,24 @@ namespace {
 using Clock = std::chrono::high_resolution_clock;
 
 class IoThread {
- public:
-  explicit IoThread(const std::string& name) {
+public:
+  explicit IoThread(const std::string &name) {
     nei::Thread::Options opts;
     opts.message_pump_type = nei::MessagePumpType::IO;
     thread_ = std::make_unique<nei::Thread>(name);
     thread_->StartWithOptions(opts);
     runner_ = thread_->GetTaskRunner();
   }
-  ~IoThread() { thread_->Stop(); }
-  nei::scoped_refptr<nei::TaskRunner> runner() const { return runner_; }
- private:
+
+  ~IoThread() {
+    thread_->Stop();
+  }
+
+  nei::scoped_refptr<nei::TaskRunner> runner() const {
+    return runner_;
+  }
+
+private:
   std::unique_ptr<nei::Thread> thread_;
   nei::scoped_refptr<nei::TaskRunner> runner_;
 };
@@ -68,26 +75,28 @@ class IoThread {
 static uint16_t FindFreePort() {
 #if defined(_WIN32)
   SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (s == INVALID_SOCKET) return 0;
+  if (s == INVALID_SOCKET)
+    return 0;
   struct sockaddr_in addr = {};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = 0;
-  ::bind(s, (struct sockaddr*)&addr, sizeof(addr));
+  ::bind(s, (struct sockaddr *)&addr, sizeof(addr));
   int len = sizeof(addr);
-  ::getsockname(s, (struct sockaddr*)&addr, &len);
+  ::getsockname(s, (struct sockaddr *)&addr, &len);
   ::closesocket(s);
   return ntohs(addr.sin_port);
 #else
   int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) return 0;
+  if (fd < 0)
+    return 0;
   struct sockaddr_in addr = {};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = 0;
-  ::bind(fd, (struct sockaddr*)&addr, sizeof(addr));
+  ::bind(fd, (struct sockaddr *)&addr, sizeof(addr));
   socklen_t len = sizeof(addr);
-  ::getsockname(fd, (struct sockaddr*)&addr, &len);
+  ::getsockname(fd, (struct sockaddr *)&addr, &len);
   ::close(fd);
   return ntohs(addr.sin_port);
 #endif
@@ -99,7 +108,10 @@ const char kPong[4] = {'P', 'O', 'N', 'G'};
 
 void RunRttBench(int total_connections) {
   const uint16_t port = FindFreePort();
-  if (port == 0) { std::cerr << "ERROR: no free port" << std::endl; return; }
+  if (port == 0) {
+    std::cerr << "ERROR: no free port" << std::endl;
+    return;
+  }
 
   // ---- Multi-Reactor workers ----
   const int kWorkers = 4;
@@ -110,8 +122,7 @@ void RunRttBench(int total_connections) {
 
   IoThread acceptor_thread("rtt-acceptor");
 
-  nei::WaitableEvent server_ready(
-      nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+  nei::WaitableEvent server_ready(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<int> server_echoes{0};
 
   auto server = std::make_shared<nei::net::TCPServerSocket>();
@@ -123,40 +134,38 @@ void RunRttBench(int total_connections) {
   };
 
   // ---- Server: accept -> read ping -> write pong -> close ----
-  acceptor_thread.runner()->PostTask(FROM_HERE,
-      [&, acc_runner = acceptor_thread.runner(), ws = std::move(worker_selector)]() mutable {
-    bool ok = server->Listen(
-        nei::net::IPEndPoint(
-            nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
-        total_connections + 100,
-        [&](bool success,
-            std::unique_ptr<nei::net::TCPClientSocket> accepted) {
-          if (!success) return;
-          auto conn = std::make_shared<std::unique_ptr<nei::net::TCPClientSocket>>(
-              std::move(accepted));
-          auto ping_buf = nei::MakeRefCounted<nei::IOBufferWithSize>(4);
+  acceptor_thread.runner()->PostTask(
+      FROM_HERE, [&, acc_runner = acceptor_thread.runner(), ws = std::move(worker_selector)]() mutable {
+        bool ok = server->Listen(
+            nei::net::IPEndPoint(nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
+            total_connections + 100,
+            [&](bool success, std::unique_ptr<nei::net::TCPClientSocket> accepted) {
+              if (!success)
+                return;
+              auto conn = std::make_shared<std::unique_ptr<nei::net::TCPClientSocket>>(std::move(accepted));
+              auto ping_buf = nei::MakeRefCounted<nei::IOBufferWithSize>(4);
 
-          // Read 4-byte ping.
-          (*conn)->ReadAsync(ping_buf, 4,
-              [conn, ping_buf, &server_echoes](bool ok, size_t n) {
-                if (!ok || n != 4) return;
+              // Read 4-byte ping.
+              (*conn)->ReadAsync(ping_buf, 4, [conn, ping_buf, &server_echoes](bool ok, size_t n) {
+                if (!ok || n != 4)
+                  return;
                 // Echo back 4-byte pong.
                 auto pong_buf = nei::MakeRefCounted<nei::IOBufferWithSize>(4);
                 std::memcpy(pong_buf->data(), kPong, 4);
-                (*conn)->WriteAsync(pong_buf, 4,
-                    [conn, pong_buf, &server_echoes](bool ok2, size_t) {
-                      if (ok2) server_echoes.fetch_add(1);
-                      (*conn)->Close();
-                    });
+                (*conn)->WriteAsync(pong_buf, 4, [conn, pong_buf, &server_echoes](bool ok2, size_t) {
+                  if (ok2)
+                    server_echoes.fetch_add(1);
+                  (*conn)->Close();
+                });
               });
-        },
-        acc_runner,
-        std::move(ws));
-    server_ready.Signal();
-    if (!ok) {
-      std::cerr << "server Listen failed" << std::endl;
-    }
-  });
+            },
+            acc_runner,
+            std::move(ws));
+        server_ready.Signal();
+        if (!ok) {
+          std::cerr << "server Listen failed" << std::endl;
+        }
+      });
 
   server_ready.Wait();
 
@@ -164,8 +173,7 @@ void RunRttBench(int total_connections) {
   const int batch_size = 500;
   std::atomic<int> client_done{0};
   std::atomic<int> client_fail{0};
-  nei::WaitableEvent all_done(
-      nei::WaitableEvent::ResetPolicy::kManual, false);
+  nei::WaitableEvent all_done(nei::WaitableEvent::ResetPolicy::kManual, false);
 
   // Store RTT measurements (in microseconds).
   std::vector<double> rtts_us;
@@ -180,8 +188,7 @@ void RunRttBench(int total_connections) {
   while (launched < total_connections) {
     int batch_count = std::min(batch_size, total_connections - launched);
     auto batch_remaining = std::make_shared<std::atomic<int>>(batch_count);
-    auto batch_event = std::make_shared<nei::WaitableEvent>(
-        nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+    auto batch_event = std::make_shared<nei::WaitableEvent>(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
 
     std::vector<std::shared_ptr<nei::net::TCPClientSocket>> batch_clients;
 
@@ -192,15 +199,23 @@ void RunRttBench(int total_connections) {
       auto t_start = std::make_shared<Clock::time_point>();
 
       client->Connect(
-          nei::net::IPEndPoint(
-              nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
-          [client, &client_done, &client_fail, &all_done, total_connections,
-           batch_remaining, batch_event, &rtts_us, &rtts_mutex,
+          nei::net::IPEndPoint(nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
+          [client,
+           &client_done,
+           &client_fail,
+           &all_done,
+           total_connections,
+           batch_remaining,
+           batch_event,
+           &rtts_us,
+           &rtts_mutex,
            t_start](bool ok) mutable {
             if (!ok) {
               client_fail.fetch_add(1);
-              if (client_done.fetch_add(1) + 1 == total_connections) all_done.Signal();
-              if (batch_remaining->fetch_sub(1) == 1) batch_event->Signal();
+              if (client_done.fetch_add(1) + 1 == total_connections)
+                all_done.Signal();
+              if (batch_remaining->fetch_sub(1) == 1)
+                batch_event->Signal();
               return;
             }
 
@@ -209,43 +224,62 @@ void RunRttBench(int total_connections) {
             auto ping_buf = nei::MakeRefCounted<nei::IOBufferWithSize>(4);
             std::memcpy(ping_buf->data(), kPing, 4);
 
-            client->WriteAsync(ping_buf, 4,
-                [client, &client_done, &client_fail, &all_done, total_connections,
-                 batch_remaining, batch_event, &rtts_us, &rtts_mutex,
-                 t_start, ping_buf](bool ok_w, size_t) {
+            client->WriteAsync(
+                ping_buf,
+                4,
+                [client,
+                 &client_done,
+                 &client_fail,
+                 &all_done,
+                 total_connections,
+                 batch_remaining,
+                 batch_event,
+                 &rtts_us,
+                 &rtts_mutex,
+                 t_start,
+                 ping_buf](bool ok_w, size_t) {
                   if (!ok_w) {
                     client_fail.fetch_add(1);
-                    if (client_done.fetch_add(1) + 1 == total_connections) all_done.Signal();
-                    if (batch_remaining->fetch_sub(1) == 1) batch_event->Signal();
+                    if (client_done.fetch_add(1) + 1 == total_connections)
+                      all_done.Signal();
+                    if (batch_remaining->fetch_sub(1) == 1)
+                      batch_event->Signal();
                     return;
                   }
 
                   auto pong_buf = nei::MakeRefCounted<nei::IOBufferWithSize>(4);
 
-                  client->ReadAsync(pong_buf, 4,
-                      [client, &client_done, &client_fail, &all_done, total_connections,
-                       batch_remaining, batch_event, &rtts_us, &rtts_mutex,
-                       t_start, pong_buf](bool ok_r, size_t n) {
-                        if (ok_r && n == 4 &&
-                            std::memcmp(pong_buf->data(), kPong, 4) == 0) {
-                          auto t_end = Clock::now();
-                          double us = std::chrono::duration<double, std::micro>(
-                              t_end - *t_start).count();
-                          {
-                            std::lock_guard<std::mutex> lk(rtts_mutex);
-                            rtts_us.push_back(us);
-                          }
-                        } else {
-                          client_fail.fetch_add(1);
-                        }
+                  client->ReadAsync(pong_buf,
+                                    4,
+                                    [client,
+                                     &client_done,
+                                     &client_fail,
+                                     &all_done,
+                                     total_connections,
+                                     batch_remaining,
+                                     batch_event,
+                                     &rtts_us,
+                                     &rtts_mutex,
+                                     t_start,
+                                     pong_buf](bool ok_r, size_t n) {
+                                      if (ok_r && n == 4 && std::memcmp(pong_buf->data(), kPong, 4) == 0) {
+                                        auto t_end = Clock::now();
+                                        double us = std::chrono::duration<double, std::micro>(t_end - *t_start).count();
+                                        {
+                                          std::lock_guard<std::mutex> lk(rtts_mutex);
+                                          rtts_us.push_back(us);
+                                        }
+                                      } else {
+                                        client_fail.fetch_add(1);
+                                      }
 
-                        client->Close();
+                                      client->Close();
 
-                        if (client_done.fetch_add(1) + 1 == total_connections)
-                          all_done.Signal();
-                        if (batch_remaining->fetch_sub(1) == 1)
-                          batch_event->Signal();
-                      });
+                                      if (client_done.fetch_add(1) + 1 == total_connections)
+                                        all_done.Signal();
+                                      if (batch_remaining->fetch_sub(1) == 1)
+                                        batch_event->Signal();
+                                    });
                 });
           },
           cli_runner);
@@ -275,11 +309,8 @@ void RunRttBench(int total_connections) {
   std::cout << "  Connections     : " << total_connections << std::endl;
   std::cout << "  Workers         : " << kWorkers << std::endl;
   std::cout << "  Server echoes   : " << echoes << std::endl;
-  std::cout << "  Client OK       : " << (done - fail)
-            << "  (failures: " << fail << ")" << std::endl;
-  std::cout << "  Total elapsed   : "
-            << std::fixed << std::setprecision(3) << elapsed << " s"
-            << std::endl;
+  std::cout << "  Client OK       : " << (done - fail) << "  (failures: " << fail << ")" << std::endl;
+  std::cout << "  Total elapsed   : " << std::fixed << std::setprecision(3) << elapsed << " s" << std::endl;
 
   // ---- RTT statistics ----
   if (!rtts_us.empty()) {
@@ -287,39 +318,38 @@ void RunRttBench(int total_connections) {
     double min_us = rtts_us.front();
     double max_us = rtts_us.back();
     double sum_us = 0;
-    for (auto v : rtts_us) sum_us += v;
+    for (auto v : rtts_us)
+      sum_us += v;
     double avg_us = sum_us / rtts_us.size();
 
     auto pct = [&](double p) -> double {
       size_t idx = static_cast<size_t>(rtts_us.size() * p / 100.0);
-      if (idx >= rtts_us.size()) idx = rtts_us.size() - 1;
+      if (idx >= rtts_us.size())
+        idx = rtts_us.size() - 1;
       return rtts_us[idx];
     };
 
-    std::cout << "  RTT min / avg / max : "
-              << std::fixed << std::setprecision(0)
-              << min_us << " / " << avg_us << " / " << max_us << " us"
-              << std::endl;
-    std::cout << "  RTT p50 / p90 / p99 : "
-              << std::fixed << std::setprecision(0)
-              << pct(50) << " / " << pct(90) << " / " << pct(99) << " us"
-              << std::endl;
+    std::cout << "  RTT min / avg / max : " << std::fixed << std::setprecision(0) << min_us << " / " << avg_us << " / "
+              << max_us << " us" << std::endl;
+    std::cout << "  RTT p50 / p90 / p99 : " << std::fixed << std::setprecision(0) << pct(50) << " / " << pct(90)
+              << " / " << pct(99) << " us" << std::endl;
   }
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
 #if defined(_WIN32)
   nei::net::EnsureWsa();
 #endif
   nei::AtExitManager at_exit;
-  nei::ThreadPoolInstance::CreateAndStart(
-      nei::ThreadPoolInstance::InitParams{});
+  nei::ThreadPoolInstance::CreateAndStart(nei::ThreadPoolInstance::InitParams{});
 
   int total = 1000;
-  if (argc > 1) total = std::atoi(argv[1]);
-  if (total <= 0) total = 1000;
+  if (argc > 1)
+    total = std::atoi(argv[1]);
+  if (total <= 0)
+    total = 1000;
 
   std::cout << "=== TCP RTT Under Concurrency ===" << std::endl;
   RunRttBench(total);

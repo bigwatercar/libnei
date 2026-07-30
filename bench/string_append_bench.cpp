@@ -35,8 +35,7 @@ BenchResult BenchStringAppendF(std::uint64_t iterations) {
 
   const auto begin = Clock::now();
   for (std::uint64_t i = 0; i < iterations; ++i) {
-    nei::StringAppendF(
-        &out, "{\"id\":%llu,\"ok\":%d,\"name\":\"user-%llu\"}", i, (i & 1ull) ? 1 : 0, i);
+    nei::StringAppendF(&out, "{\"id\":%llu,\"ok\":%d,\"name\":\"user-%llu\"}", i, (i & 1ull) ? 1 : 0, i);
   }
   const auto end = Clock::now();
 
@@ -133,14 +132,12 @@ int main(int argc, char **argv) {
     return 2;
   }
 
-  const double speedup_vs_printf = appendf.elapsed_us == 0
-                                       ? 0.0
-                                       : static_cast<double>(printf_append.elapsed_us)
-                                             / static_cast<double>(appendf.elapsed_us);
-  const double speedup_vs_sstream = appendf.elapsed_us == 0
-                                        ? 0.0
-                                        : static_cast<double>(stringstream_append.elapsed_us)
-                                              / static_cast<double>(appendf.elapsed_us);
+  const double speedup_vs_printf =
+      appendf.elapsed_us == 0 ? 0.0
+                              : static_cast<double>(printf_append.elapsed_us) / static_cast<double>(appendf.elapsed_us);
+  const double speedup_vs_sstream = appendf.elapsed_us == 0 ? 0.0
+                                                            : static_cast<double>(stringstream_append.elapsed_us)
+                                                                  / static_cast<double>(appendf.elapsed_us);
 
   std::cout << "speedup (StringAppendF vs StringPrintf+operator+=): " << std::fixed << std::setprecision(2)
             << speedup_vs_printf << "x\n";

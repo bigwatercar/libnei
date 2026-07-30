@@ -31,53 +31,51 @@ constexpr uint32_t kMagicWord = 0x4E454958;
 
 // Absolute upper bound on a single message payload.  Anything larger is
 // treated as a corrupt / malicious stream and tears down the channel.
-constexpr std::size_t kMaxMessageSize = 128 * 1024 * 1024;  // 128 MiB
+constexpr std::size_t kMaxMessageSize = 128 * 1024 * 1024; // 128 MiB
 
 // Size of each ReadAsync() chunk issued to the underlying stream.
 // 64 KiB matches the IOBufferPool hot bucket so AcquireBuffer() typically
 // returns a recycled buffer with zero heap allocation on the hot path.
-constexpr std::size_t kReadChunkSize = 65536;  // 64 KiB
+constexpr std::size_t kReadChunkSize = 65536; // 64 KiB
 
 // When the number of already-consumed bytes at the front of receive_buffer_
 // exceeds this threshold the consumed prefix is erased to prevent unbounded
 // memory growth.
-constexpr std::size_t kReceiveBufferCompactThreshold = 65536;  // 64 KiB
+constexpr std::size_t kReceiveBufferCompactThreshold = 65536; // 64 KiB
 
 // ---- Little-endian helpers ------------------------------------------------
 
-void WriteUint32LE(uint8_t* dst, uint32_t value) {
+void WriteUint32LE(uint8_t *dst, uint32_t value) {
   dst[0] = static_cast<uint8_t>(value);
   dst[1] = static_cast<uint8_t>(value >> 8);
   dst[2] = static_cast<uint8_t>(value >> 16);
   dst[3] = static_cast<uint8_t>(value >> 24);
 }
 
-uint32_t ReadUint32LE(const uint8_t* src) {
-  return (static_cast<uint32_t>(src[0])) |
-         (static_cast<uint32_t>(src[1]) << 8) |
-         (static_cast<uint32_t>(src[2]) << 16) |
-         (static_cast<uint32_t>(src[3]) << 24);
+uint32_t ReadUint32LE(const uint8_t *src) {
+  return (static_cast<uint32_t>(src[0])) | (static_cast<uint32_t>(src[1]) << 8) | (static_cast<uint32_t>(src[2]) << 16)
+         | (static_cast<uint32_t>(src[3]) << 24);
 }
 
-}  // namespace
+} // namespace
 
 // ===========================================================================
 // MessageChannel::Impl
 // ===========================================================================
 
 class MessageChannel::Impl final {
- public:
+public:
   // Explicit dependency injection: both TaskRunners are supplied by the
   // caller.  No implicit thread-environment capture.
   Impl(scoped_refptr<TaskRunner> io_task_runner,
        scoped_refptr<TaskRunner> client_task_runner,
-       AsyncInputStream* read_stream,
-       AsyncOutputStream* write_stream)
-      : io_task_runner_(std::move(io_task_runner)),
-        client_task_runner_(std::move(client_task_runner)),
-        read_stream_(read_stream),
-        write_stream_(write_stream),
-        weak_factory_(this, FROM_HERE) {
+       AsyncInputStream *read_stream,
+       AsyncOutputStream *write_stream)
+      : io_task_runner_(std::move(io_task_runner))
+      , client_task_runner_(std::move(client_task_runner))
+      , read_stream_(read_stream)
+      , write_stream_(write_stream)
+      , weak_factory_(this, FROM_HERE) {
     DCHECK(io_task_runner_ != nullptr);
     DCHECK(client_task_runner_ != nullptr);
     DCHECK(read_stream_ != nullptr);
@@ -94,11 +92,11 @@ class MessageChannel::Impl final {
   // Public API (called from MessageChannel  --  ANY thread)
   // =========================================================================
 
-  void StartReading(MessageChannel::MessageReceivedCallback on_message,
-                    MessageChannel::ErrorCallback on_error) {
+  void StartReading(MessageChannel::MessageReceivedCallback on_message, MessageChannel::ErrorCallback on_error) {
     {
       std::lock_guard<std::mutex> guard(lock_);
-      if (started_ || error_signaled_) return;
+      if (started_ || error_signaled_)
+        return;
       started_ = true;
       on_message_ = std::move(on_message);
       on_error_ = std::move(on_error);
@@ -106,9 +104,9 @@ class MessageChannel::Impl final {
 
     // Kick off the first read on the I/O thread via BindPostTask.
     auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-    BindPostTask(io_task_runner_,
-                 BindOnce([weak_this]() {
-                   if (!weak_this) return;
+    BindPostTask(io_task_runner_, BindOnce([weak_this]() {
+                   if (!weak_this)
+                     return;
                    weak_this->BeginRead();
                  }))
         .Run();
@@ -119,20 +117,17 @@ class MessageChannel::Impl final {
     const std::size_t payload_len = message ? message->size() : 0;
     const std::size_t framed_len = kHeaderSize + payload_len;
     auto framed_buf = IOBufferPool::GetInstance().AcquireBuffer(framed_len);
-    WriteUint32LE(reinterpret_cast<uint8_t*>(framed_buf->data()),
-                  static_cast<uint32_t>(payload_len));
-    WriteUint32LE(reinterpret_cast<uint8_t*>(framed_buf->data()) + 4,
-                  kMagicWord);
+    WriteUint32LE(reinterpret_cast<uint8_t *>(framed_buf->data()), static_cast<uint32_t>(payload_len));
+    WriteUint32LE(reinterpret_cast<uint8_t *>(framed_buf->data()) + 4, kMagicWord);
     if (payload_len > 0) {
-      std::memcpy(framed_buf->data() + kHeaderSize,
-                  message->data(),
-                  payload_len);
+      std::memcpy(framed_buf->data() + kHeaderSize, message->data(), payload_len);
     }
 
     bool need_issue = false;
     {
       std::lock_guard<std::mutex> guard(lock_);
-      if (error_signaled_ || closing_) return;
+      if (error_signaled_ || closing_)
+        return;
       pending_writes_.push_back(std::move(framed_buf));
       if (!write_in_flight_) {
         write_in_flight_ = true;
@@ -143,9 +138,9 @@ class MessageChannel::Impl final {
     if (need_issue) {
       // Delegate the actual write to io_task_runner_ via BindPostTask.
       auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-      BindPostTask(io_task_runner_,
-                   BindOnce([weak_this]() {
-                     if (!weak_this) return;
+      BindPostTask(io_task_runner_, BindOnce([weak_this]() {
+                     if (!weak_this)
+                       return;
                      weak_this->IssueNextWrite();
                    }))
           .Run();
@@ -157,7 +152,8 @@ class MessageChannel::Impl final {
 
     {
       std::lock_guard<std::mutex> guard(lock_);
-      if (error_signaled_) return;
+      if (error_signaled_)
+        return;
       closing_ = true;
 
       // If nothing is in flight and the write queue is empty we can
@@ -175,7 +171,7 @@ class MessageChannel::Impl final {
     }
   }
 
- private:
+private:
   // =========================================================================
   // Read path  --  state machine (ALL on io_task_runner_)
   // =========================================================================
@@ -185,15 +181,16 @@ class MessageChannel::Impl final {
   void BeginRead() {
     {
       std::lock_guard<std::mutex> guard(lock_);
-      if (error_signaled_ || closing_) return;
+      if (error_signaled_ || closing_)
+        return;
     }
     // read_in_flight_ is only accessed on io_task_runner_  --  lock-free.
-    if (read_in_flight_) return;
+    if (read_in_flight_)
+      return;
     read_in_flight_ = true;
 
     // Acquire a recycled 64 KiB buffer from the pool.
-    scoped_refptr<IOBufferWithSize> sized_buf =
-        IOBufferPool::GetInstance().AcquireBuffer(kReadChunkSize);
+    scoped_refptr<IOBufferWithSize> sized_buf = IOBufferPool::GetInstance().AcquireBuffer(kReadChunkSize);
     scoped_refptr<IOBuffer> base_buf(sized_buf.get());
 
     auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
@@ -201,27 +198,22 @@ class MessageChannel::Impl final {
 
     // Raw I/O callback may fire on any thread  --  trampoline to
     // io_task_runner_ via BindPostTask where the state machine lives.
-    read_stream_->ReadAsync(
-        std::move(base_buf),
-        kReadChunkSize,
-        [weak_this, io_runner, sized_buf](bool success,
-                                           std::size_t bytes_read) mutable {
-          if (!weak_this) return;
-          BindPostTask(io_runner,
-                       BindOnce([weak_this, success, bytes_read,
-                                 sized_buf]() mutable {
-                         if (!weak_this) return;
-                         weak_this->OnDataReceived(success, bytes_read,
-                                                    std::move(sized_buf));
-                       }))
-              .Run();
-        });
+    read_stream_->ReadAsync(std::move(base_buf),
+                            kReadChunkSize,
+                            [weak_this, io_runner, sized_buf](bool success, std::size_t bytes_read) mutable {
+                              if (!weak_this)
+                                return;
+                              BindPostTask(io_runner, BindOnce([weak_this, success, bytes_read, sized_buf]() mutable {
+                                             if (!weak_this)
+                                               return;
+                                             weak_this->OnDataReceived(success, bytes_read, std::move(sized_buf));
+                                           }))
+                                  .Run();
+                            });
   }
 
   // Called on io_task_runner_ after each ReadAsync completes.
-  void OnDataReceived(bool success,
-                      std::size_t bytes_read,
-                      scoped_refptr<IOBufferWithSize> read_buf) {
+  void OnDataReceived(bool success, std::size_t bytes_read, scoped_refptr<IOBufferWithSize> read_buf) {
     // read_buf keeps the I/O buffer alive until this scope ends; its
     // destructor returns storage to IOBufferPool automatically.
 
@@ -236,7 +228,8 @@ class MessageChannel::Impl final {
 
       // If we are already in an error state the callback chain has been
       // torn down  --  drop this chunk silently.
-      if (error_signaled_) return;
+      if (error_signaled_)
+        return;
 
       if (!success || bytes_read == 0) {
         // EOF or underlying stream error.
@@ -244,11 +237,8 @@ class MessageChannel::Impl final {
       } else {
         // Append the freshly-read bytes to the persistent receive buffer.
         // receive_buffer_ is io_task_runner_ private  --  lock-free access.
-        const uint8_t* data =
-            reinterpret_cast<const uint8_t*>(read_buf->data());
-        receive_buffer_.insert(receive_buffer_.end(),
-                               data,
-                               data + bytes_read);
+        const uint8_t *data = reinterpret_cast<const uint8_t *>(read_buf->data());
+        receive_buffer_.insert(receive_buffer_.end(), data, data + bytes_read);
 
         // Parse as many complete frames as possible.
         completed_messages = TryParseFrames(&should_signal_error);
@@ -270,21 +260,20 @@ class MessageChannel::Impl final {
       MessageChannel::MessageReceivedCallback cb;
       {
         std::lock_guard<std::mutex> guard(lock_);
-        if (error_signaled_) return;
+        if (error_signaled_)
+          return;
         cb = on_message_;
       }
       if (cb) {
         auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-        BindPostTask(
-            client_task_runner_,
-            BindOnce(
-                [weak_this, cb = std::move(cb),
-                 messages = std::move(completed_messages)]() mutable {
-                  if (!weak_this) return;
-                  for (MessageChannel::Message& msg : messages) {
-                    cb(std::move(msg));
-                  }
-                }))
+        BindPostTask(client_task_runner_,
+                     BindOnce([weak_this, cb = std::move(cb), messages = std::move(completed_messages)]() mutable {
+                       if (!weak_this)
+                         return;
+                       for (MessageChannel::Message &msg : messages) {
+                         cb(std::move(msg));
+                       }
+                     }))
             .Run();
       }
     }
@@ -299,7 +288,7 @@ class MessageChannel::Impl final {
       if (error_cb) {
         PostErrorToClient(std::move(error_cb));
       }
-      return;  // No more reads after error.
+      return; // No more reads after error.
     }
 
     // ---- Phase 3: issue the next read (on io_task_runner_) -------------
@@ -339,19 +328,18 @@ class MessageChannel::Impl final {
   // Called exclusively on io_task_runner_.
   // receive_buffer_ / consume_offset_ / read_state_ / current_message_size_
   // are io_task_runner_-private  --  no lock needed.
-  std::vector<MessageChannel::Message> TryParseFrames(
-      bool* should_signal_error) {
+  std::vector<MessageChannel::Message> TryParseFrames(bool *should_signal_error) {
     std::vector<MessageChannel::Message> messages;
 
     while (true) {
-      const std::size_t available =
-          receive_buffer_.size() - consume_offset_;
+      const std::size_t available = receive_buffer_.size() - consume_offset_;
 
       if (read_state_ == ReadState::kReadingHeader) {
         // Need the full 8-byte header (4B length + 4B magic).
-        if (available < kHeaderSize) break;
+        if (available < kHeaderSize)
+          break;
 
-        const uint8_t* hdr = receive_buffer_.data() + consume_offset_;
+        const uint8_t *hdr = receive_buffer_.data() + consume_offset_;
         const uint32_t payload_len = ReadUint32LE(hdr);
         const uint32_t magic = ReadUint32LE(hdr + 4);
 
@@ -368,8 +356,7 @@ class MessageChannel::Impl final {
       }
 
       if (read_state_ == ReadState::kReadingPayload) {
-        const std::size_t available_now =
-            receive_buffer_.size() - consume_offset_;
+        const std::size_t available_now = receive_buffer_.size() - consume_offset_;
 
         if (available_now < current_message_size_) {
           // Not enough bytes yet  --  need another read chunk.
@@ -378,13 +365,9 @@ class MessageChannel::Impl final {
 
         // Extract the complete payload into a pool-allocated buffer.
         // No std::vector or new  --  zero-copy-pool allocation.
-        scoped_refptr<IOBufferWithSize> msg_buf =
-            IOBufferPool::GetInstance().AcquireBuffer(
-                current_message_size_);
+        scoped_refptr<IOBufferWithSize> msg_buf = IOBufferPool::GetInstance().AcquireBuffer(current_message_size_);
         if (current_message_size_ > 0) {
-          std::memcpy(msg_buf->data(),
-                      receive_buffer_.data() + consume_offset_,
-                      current_message_size_);
+          std::memcpy(msg_buf->data(), receive_buffer_.data() + consume_offset_, current_message_size_);
         }
         messages.push_back(std::move(msg_buf));
 
@@ -403,7 +386,8 @@ class MessageChannel::Impl final {
   // compaction threshold.
   // Called exclusively on io_task_runner_  --  lock-free.
   void CompactReceiveBuffer() {
-    if (consume_offset_ == 0) return;
+    if (consume_offset_ == 0)
+      return;
 
     if (consume_offset_ >= receive_buffer_.size()) {
       // All bytes consumed  --  reset entirely.
@@ -413,8 +397,7 @@ class MessageChannel::Impl final {
     }
 
     if (consume_offset_ >= kReceiveBufferCompactThreshold) {
-      receive_buffer_.erase(receive_buffer_.begin(),
-                            receive_buffer_.begin() + consume_offset_);
+      receive_buffer_.erase(receive_buffer_.begin(), receive_buffer_.begin() + consume_offset_);
       consume_offset_ = 0;
     }
   }
@@ -435,7 +418,8 @@ class MessageChannel::Impl final {
 
     {
       std::lock_guard<std::mutex> guard(lock_);
-      if (error_signaled_) return;
+      if (error_signaled_)
+        return;
 
       if (current_write_buf_) {
         // Continuing a partial write  --  the buffer is still at the front
@@ -473,11 +457,11 @@ class MessageChannel::Impl final {
     }
 
     // No work to do  --  go idle.
-    if (!write_buf) return;
+    if (!write_buf)
+      return;
 
     // Create a windowed view into the remaining bytes.
-    scoped_refptr<WrappedIOBuffer> write_slice(
-        new WrappedIOBuffer(write_buf->data() + current_write_offset_));
+    scoped_refptr<WrappedIOBuffer> write_slice(new WrappedIOBuffer(write_buf->data() + current_write_offset_));
 
     auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
     scoped_refptr<TaskRunner> io_runner = io_task_runner_;
@@ -485,12 +469,12 @@ class MessageChannel::Impl final {
     write_stream_->WriteAsync(
         scoped_refptr<IOBuffer>(write_slice.get()),
         remaining,
-        [weak_this, io_runner, write_buf, write_slice](
-            bool success, std::size_t bytes_written) mutable {
-          if (!weak_this) return;
-          BindPostTask(io_runner,
-                       BindOnce([weak_this, success, bytes_written]() mutable {
-                         if (!weak_this) return;
+        [weak_this, io_runner, write_buf, write_slice](bool success, std::size_t bytes_written) mutable {
+          if (!weak_this)
+            return;
+          BindPostTask(io_runner, BindOnce([weak_this, success, bytes_written]() mutable {
+                         if (!weak_this)
+                           return;
                          weak_this->OnWriteComplete(success, bytes_written);
                        }))
               .Run();
@@ -504,7 +488,8 @@ class MessageChannel::Impl final {
 
     {
       std::lock_guard<std::mutex> guard(lock_);
-      if (error_signaled_) return;
+      if (error_signaled_)
+        return;
 
       if (!success || bytes_written == 0) {
         // Write failure  --  tear down the channel and discard the buffer.
@@ -571,7 +556,8 @@ class MessageChannel::Impl final {
   // responsible for moving it out under the lock and posting it to
   // client_task_runner_ OUTSIDE the lock.
   void SignalErrorLocked() {
-    if (error_signaled_) return;
+    if (error_signaled_)
+      return;
     error_signaled_ = true;
     on_message_ = MessageChannel::MessageReceivedCallback();
   }
@@ -579,11 +565,12 @@ class MessageChannel::Impl final {
   // Posts an error callback to client_task_runner_ via BindPostTask with
   // WeakPtr protection.  Must be called OUTSIDE the lock.
   void PostErrorToClient(MessageChannel::ErrorCallback error_cb) {
-    if (!error_cb) return;
+    if (!error_cb)
+      return;
     auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-    BindPostTask(client_task_runner_,
-                 BindOnce([weak_this, cb = std::move(error_cb)]() mutable {
-                   if (!weak_this) return;
+    BindPostTask(client_task_runner_, BindOnce([weak_this, cb = std::move(error_cb)]() mutable {
+                   if (!weak_this)
+                     return;
                    cb();
                  }))
         .Run();
@@ -594,8 +581,8 @@ class MessageChannel::Impl final {
   // =========================================================================
 
   enum class ReadState {
-    kReadingHeader,   // Waiting for / decoding the 8-byte header.
-    kReadingPayload,  // Accumulating payload bytes.
+    kReadingHeader,  // Waiting for / decoding the 8-byte header.
+    kReadingPayload, // Accumulating payload bytes.
   };
 
   // =========================================================================
@@ -609,8 +596,8 @@ class MessageChannel::Impl final {
   const scoped_refptr<TaskRunner> client_task_runner_;
 
   // Underlying streams (not owned).
-  AsyncInputStream* const read_stream_;
-  AsyncOutputStream* const write_stream_;
+  AsyncInputStream *const read_stream_;
+  AsyncOutputStream *const write_stream_;
 
   // ---- Shared coordination state (protected by lock_) ---------------------
   // Accessed from any thread (StartReading / Send / Close) and from
@@ -662,20 +649,17 @@ class MessageChannel::Impl final {
 // MessageChannel  --  public forwarding
 // ===========================================================================
 
-MessageChannel::MessageChannel(
-    scoped_refptr<TaskRunner> io_task_runner,
-    scoped_refptr<TaskRunner> client_task_runner,
-    AsyncInputStream* read_stream,
-    AsyncOutputStream* write_stream)
-    : impl_(std::make_unique<Impl>(std::move(io_task_runner),
-                                   std::move(client_task_runner),
-                                   read_stream,
-                                   write_stream)) {}
+MessageChannel::MessageChannel(scoped_refptr<TaskRunner> io_task_runner,
+                               scoped_refptr<TaskRunner> client_task_runner,
+                               AsyncInputStream *read_stream,
+                               AsyncOutputStream *write_stream)
+    : impl_(
+          std::make_unique<Impl>(std::move(io_task_runner), std::move(client_task_runner), read_stream, write_stream)) {
+}
 
 MessageChannel::~MessageChannel() = default;
 
-void MessageChannel::StartReading(MessageReceivedCallback on_message,
-                                  ErrorCallback on_error) {
+void MessageChannel::StartReading(MessageReceivedCallback on_message, ErrorCallback on_error) {
   impl_->StartReading(std::move(on_message), std::move(on_error));
 }
 
@@ -687,4 +671,4 @@ void MessageChannel::Close() {
   impl_->Close();
 }
 
-}  // namespace nei
+} // namespace nei

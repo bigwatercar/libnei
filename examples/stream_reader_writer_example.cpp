@@ -23,7 +23,7 @@
 namespace {
 
 class DemoPipeState {
- public:
+public:
   std::mutex lock;
   std::string payload;
   bool input_closed = false;
@@ -31,14 +31,13 @@ class DemoPipeState {
 };
 
 class DemoAsyncInputStream final : public nei::AsyncInputStream {
- public:
-  DemoAsyncInputStream(nei::scoped_refptr<nei::TaskRunner> io_runner,
-                       std::shared_ptr<DemoPipeState> state)
-      : io_runner_(std::move(io_runner)), state_(std::move(state)) {}
+public:
+  DemoAsyncInputStream(nei::scoped_refptr<nei::TaskRunner> io_runner, std::shared_ptr<DemoPipeState> state)
+      : io_runner_(std::move(io_runner))
+      , state_(std::move(state)) {
+  }
 
-  void ReadAsync(nei::scoped_refptr<nei::IOBuffer> buf,
-                 std::size_t buf_len,
-                 IOReadCallback callback) override {
+  void ReadAsync(nei::scoped_refptr<nei::IOBuffer> buf, std::size_t buf_len, IOReadCallback callback) override {
     if (!io_runner_ || !callback || !buf) {
       if (callback) {
         callback(false, 0u);
@@ -46,22 +45,21 @@ class DemoAsyncInputStream final : public nei::AsyncInputStream {
       return;
     }
 
-    io_runner_->PostTask(
-        FROM_HERE,
-        [state = state_, buf = std::move(buf), buf_len, callback = std::move(callback)]() mutable {
-          std::size_t copied = 0;
-          bool ok = false;
-          {
-            std::lock_guard<std::mutex> guard(state->lock);
-            if (!state->input_closed && !state->payload.empty() && buf_len > 0) {
-              copied = (std::min)(buf_len, state->payload.size());
-              std::memcpy(buf->data(), state->payload.data(), copied);
-              state->payload.erase(0, copied);
-              ok = true;
-            }
-          }
-          callback(ok, copied);
-        });
+    io_runner_->PostTask(FROM_HERE,
+                         [state = state_, buf = std::move(buf), buf_len, callback = std::move(callback)]() mutable {
+                           std::size_t copied = 0;
+                           bool ok = false;
+                           {
+                             std::lock_guard<std::mutex> guard(state->lock);
+                             if (!state->input_closed && !state->payload.empty() && buf_len > 0) {
+                               copied = (std::min)(buf_len, state->payload.size());
+                               std::memcpy(buf->data(), state->payload.data(), copied);
+                               state->payload.erase(0, copied);
+                               ok = true;
+                             }
+                           }
+                           callback(ok, copied);
+                         });
   }
 
   void Close() override {
@@ -69,20 +67,19 @@ class DemoAsyncInputStream final : public nei::AsyncInputStream {
     state_->input_closed = true;
   }
 
- private:
+private:
   nei::scoped_refptr<nei::TaskRunner> io_runner_;
   std::shared_ptr<DemoPipeState> state_;
 };
 
 class DemoAsyncOutputStream final : public nei::AsyncOutputStream {
- public:
-  DemoAsyncOutputStream(nei::scoped_refptr<nei::TaskRunner> io_runner,
-                        std::shared_ptr<DemoPipeState> state)
-      : io_runner_(std::move(io_runner)), state_(std::move(state)) {}
+public:
+  DemoAsyncOutputStream(nei::scoped_refptr<nei::TaskRunner> io_runner, std::shared_ptr<DemoPipeState> state)
+      : io_runner_(std::move(io_runner))
+      , state_(std::move(state)) {
+  }
 
-  void WriteAsync(nei::scoped_refptr<nei::IOBuffer> buf,
-                  std::size_t buf_len,
-                  IOWriteCallback callback) override {
+  void WriteAsync(nei::scoped_refptr<nei::IOBuffer> buf, std::size_t buf_len, IOWriteCallback callback) override {
     if (!io_runner_ || !callback || !buf) {
       if (callback) {
         callback(false, 0u);
@@ -90,19 +87,18 @@ class DemoAsyncOutputStream final : public nei::AsyncOutputStream {
       return;
     }
 
-    io_runner_->PostTask(
-        FROM_HERE,
-        [state = state_, buf = std::move(buf), buf_len, callback = std::move(callback)]() mutable {
-          bool ok = false;
-          {
-            std::lock_guard<std::mutex> guard(state->lock);
-            if (!state->output_closed) {
-              state->payload.append(reinterpret_cast<const char*>(buf->data()), buf_len);
-              ok = true;
-            }
-          }
-          callback(ok, ok ? buf_len : 0u);
-        });
+    io_runner_->PostTask(FROM_HERE,
+                         [state = state_, buf = std::move(buf), buf_len, callback = std::move(callback)]() mutable {
+                           bool ok = false;
+                           {
+                             std::lock_guard<std::mutex> guard(state->lock);
+                             if (!state->output_closed) {
+                               state->payload.append(reinterpret_cast<const char *>(buf->data()), buf_len);
+                               ok = true;
+                             }
+                           }
+                           callback(ok, ok ? buf_len : 0u);
+                         });
   }
 
   void Close() override {
@@ -110,16 +106,18 @@ class DemoAsyncOutputStream final : public nei::AsyncOutputStream {
     state_->output_closed = true;
   }
 
- private:
+private:
   nei::scoped_refptr<nei::TaskRunner> io_runner_;
   std::shared_ptr<DemoPipeState> state_;
 };
 
 struct ScenarioState {
   explicit ScenarioState(nei::scoped_refptr<nei::TaskRunner> runner,
-                         nei::WaitableEvent* done_event,
-                         std::atomic<bool>* result)
-      : io_runner(std::move(runner)), done(done_event), ok(result) {
+                         nei::WaitableEvent *done_event,
+                         std::atomic<bool> *result)
+      : io_runner(std::move(runner))
+      , done(done_event)
+      , ok(result) {
     pipe = std::make_shared<DemoPipeState>();
     input = std::make_unique<DemoAsyncInputStream>(io_runner, pipe);
     output = std::make_unique<DemoAsyncOutputStream>(io_runner, pipe);
@@ -138,27 +136,26 @@ struct ScenarioState {
   std::unique_ptr<DemoAsyncOutputStream> output;
   std::unique_ptr<nei::StreamReader> reader;
   std::unique_ptr<nei::StreamWriter> writer;
-  nei::WaitableEvent* done = nullptr;
-  std::atomic<bool>* ok = nullptr;
+  nei::WaitableEvent *done = nullptr;
+  std::atomic<bool> *ok = nullptr;
 };
 
 void RunOneScenarioAsync(nei::scoped_refptr<nei::TaskRunner> io_runner,
-                         nei::WaitableEvent* done,
-                         std::atomic<bool>* ok) {
+                         nei::WaitableEvent *done,
+                         std::atomic<bool> *ok) {
   auto state = std::make_shared<ScenarioState>(std::move(io_runner), done, ok);
 
   // The whole demo is a non-blocking callback chain on the logic sequence.
   // This keeps the logic runner pump alive so StreamReader/StreamWriter can
   // trampoline physical IO completions back to this sequence and pass WeakPtr
   // guards correctly.
-  state->writer->WriteString("hello stream wrapper",
-                             [state](bool write_ok, std::size_t written) {
+  state->writer->WriteString("hello stream wrapper", [state](bool write_ok, std::size_t written) {
     if (!write_ok || written == 0) {
       state->Finish(false);
       return;
     }
 
-    state->reader->ReadString(written, [state](bool read_ok, std::string&& text) {
+    state->reader->ReadString(written, [state](bool read_ok, std::string &&text) {
       if (!read_ok || text != "hello stream wrapper") {
         state->Finish(false);
         return;
@@ -172,9 +169,7 @@ void RunOneScenarioAsync(nei::scoped_refptr<nei::TaskRunner> io_runner,
           return;
         }
 
-        state->reader->ReadBytes(w2,
-                                 [state](bool b_ok,
-                                         std::vector<std::uint8_t>&& data) {
+        state->reader->ReadBytes(w2, [state](bool b_ok, std::vector<std::uint8_t> &&data) {
           if (!b_ok) {
             state->Finish(false);
             return;
@@ -189,7 +184,7 @@ void RunOneScenarioAsync(nei::scoped_refptr<nei::TaskRunner> io_runner,
   });
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   nei::Thread io_thread("demo-io-thread");
@@ -220,9 +215,7 @@ int main() {
   nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> ok{false};
 
-  logic_runner->PostTask(FROM_HERE, [&]() {
-    RunOneScenarioAsync(io_runner, &done, &ok);
-  });
+  logic_runner->PostTask(FROM_HERE, [&]() { RunOneScenarioAsync(io_runner, &done, &ok); });
 
   if (!done.TimedWait(std::chrono::seconds(10))) {
     std::cerr << "Demo timed out" << std::endl;

@@ -3,7 +3,7 @@
 namespace {
 // Thread-local blocking callback set by the worker thread before each task.
 thread_local nei::internal::BlockingCallback g_blocking_cb;
-}  // namespace
+} // namespace
 
 namespace nei {
 namespace internal {
@@ -12,7 +12,7 @@ void SetCurrentBlockingCallback(BlockingCallback cb) {
   g_blocking_cb = std::move(cb);
 }
 
-}  // namespace internal
+} // namespace internal
 
 ScopedBlockingCall::ScopedBlockingCall() {
   if (g_blocking_cb) {
@@ -27,4 +27,4 @@ ScopedBlockingCall::~ScopedBlockingCall() {
   }
 }
 
-}  // namespace nei
+} // namespace nei

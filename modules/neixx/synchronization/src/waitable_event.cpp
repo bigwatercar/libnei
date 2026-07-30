@@ -16,10 +16,8 @@ public:
   Impl(ResetPolicy reset_policy, bool initially_signaled)
       : reset_policy_(reset_policy)
 #if defined(_WIN32)
-      , event_handle_(CreateEventA(nullptr,
-                   reset_policy == ResetPolicy::kManual ? TRUE : FALSE,
-                                   initially_signaled ? TRUE : FALSE,
-                                   nullptr))
+      , event_handle_(CreateEventA(
+            nullptr, reset_policy == ResetPolicy::kManual ? TRUE : FALSE, initially_signaled ? TRUE : FALSE, nullptr))
 #else
       , signaled_(initially_signaled)
 #endif

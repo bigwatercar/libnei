@@ -34,18 +34,20 @@
 // ScopedPrint -- RAII helper for visualizing stack unwinding order
 // ---------------------------------------------------------------------------
 class ScopedPrint {
- public:
-  explicit ScopedPrint(std::string msg) : msg_(std::move(msg)) {
+public:
+  explicit ScopedPrint(std::string msg)
+      : msg_(std::move(msg)) {
     std::printf("[Ctor] %s\n", msg_.c_str());
   }
+
   ~ScopedPrint() {
     std::printf("[Dtor]  %s\n", msg_.c_str());
   }
 
-  ScopedPrint(const ScopedPrint&) = delete;
-  ScopedPrint& operator=(const ScopedPrint&) = delete;
+  ScopedPrint(const ScopedPrint &) = delete;
+  ScopedPrint &operator=(const ScopedPrint &) = delete;
 
- private:
+private:
   std::string msg_;
 };
 
@@ -71,10 +73,10 @@ void BackgroundWorker() {
 
   // Critical moment -- if this were a traditional `delete`-based singleton,
   // we would crash here with a null-pointer dereference or use-after-free.
-  auto& pool = nei::IOBufferPool::GetInstance();
+  auto &pool = nei::IOBufferPool::GetInstance();
   std::printf("[Worker] Safely accessed leaky singleton during exit window. "
               "Pool address: %p\n",
-              static_cast<void*>(&pool));
+              static_cast<void *>(&pool));
 }
 
 int main() {
@@ -96,38 +98,28 @@ int main() {
     // -------------------------------------------------------------------
     std::printf("--- Registering exit callbacks ---\n");
 
-    nei::AtExitManager::RegisterCallback([] {
-      std::printf("[AtExit] Callback 1 (registered first, runs last)\n");
-    });
+    nei::AtExitManager::RegisterCallback([] { std::printf("[AtExit] Callback 1 (registered first, runs last)\n"); });
 
-    nei::AtExitManager::RegisterCallback([] {
-      std::printf("[AtExit] Callback 2\n");
-    });
+    nei::AtExitManager::RegisterCallback([] { std::printf("[AtExit] Callback 2\n"); });
 
-    nei::AtExitManager::RegisterCallback([] {
-      std::printf("[AtExit] IOBufferPool cleanup -- draining cached 4K/64K blocks\n");
-    });
+    nei::AtExitManager::RegisterCallback(
+        [] { std::printf("[AtExit] IOBufferPool cleanup -- draining cached 4K/64K blocks\n"); });
 
-    nei::AtExitManager::RegisterCallback([] {
-      std::printf("[AtExit] Callback 3 (registered last, runs first)\n");
-    });
+    nei::AtExitManager::RegisterCallback([] { std::printf("[AtExit] Callback 3 (registered last, runs first)\n"); });
 
     // -------------------------------------------------------------------
     // Step 3: Access IOBufferPool -- triggers Singleton<>::GetInstance().
     // -------------------------------------------------------------------
     std::printf("\n--- Accessing IOBufferPool (Leaky Singleton) ---\n");
 
-    nei::IOBufferPool& pool = nei::IOBufferPool::GetInstance();
-    std::printf("IOBufferPool instance acquired: %p\n",
-                static_cast<void*>(&pool));
+    nei::IOBufferPool &pool = nei::IOBufferPool::GetInstance();
+    std::printf("IOBufferPool instance acquired: %p\n", static_cast<void *>(&pool));
 
     {
       auto buf_4k = pool.AcquireBuffer(4096);
       auto buf_64k = pool.AcquireBuffer(65536);
-      std::printf("Acquired 4K buffer:  %p, size=%zu\n",
-                  static_cast<void*>(buf_4k->data()), buf_4k->size());
-      std::printf("Acquired 64K buffer: %p, size=%zu\n",
-                  static_cast<void*>(buf_64k->data()), buf_64k->size());
+      std::printf("Acquired 4K buffer:  %p, size=%zu\n", static_cast<void *>(buf_4k->data()), buf_4k->size());
+      std::printf("Acquired 64K buffer: %p, size=%zu\n", static_cast<void *>(buf_64k->data()), buf_64k->size());
     }
 
     // -------------------------------------------------------------------
@@ -147,7 +139,7 @@ int main() {
 
     std::printf("\n=== main() returning -- ~AtExitManager will now fire ===\n\n");
 
-  }  // ~AtExitManager fires here -- LIFO drain of all callbacks
+  } // ~AtExitManager fires here -- LIFO drain of all callbacks
 
   // -----------------------------------------------------------------------
   // Post-shutdown: give the detached background thread time to wake up,

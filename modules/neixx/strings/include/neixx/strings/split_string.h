@@ -24,19 +24,13 @@ enum SplitResult {
 };
 
 // Splits |input| on a single delimiter character.
-NEI_API std::vector<std::string> SplitString(std::string_view input,
-                                             char delimiter,
-                                             WhitespaceHandling whitespace,
-                                             SplitResult result_type);
+NEI_API std::vector<std::string>
+SplitString(std::string_view input, char delimiter, WhitespaceHandling whitespace, SplitResult result_type);
 // Splits |input| on a string delimiter. An empty delimiter returns the whole input as one token.
-NEI_API std::vector<std::string> SplitString(std::string_view input,
-                                             std::string_view delimiter,
-                                             WhitespaceHandling whitespace,
-                                             SplitResult result_type);
-NEI_API std::vector<std::u16string> SplitString(std::u16string_view input,
-                                                char16_t delimiter,
-                                                WhitespaceHandling whitespace,
-                                                SplitResult result_type);
+NEI_API std::vector<std::string>
+SplitString(std::string_view input, std::string_view delimiter, WhitespaceHandling whitespace, SplitResult result_type);
+NEI_API std::vector<std::u16string>
+SplitString(std::u16string_view input, char16_t delimiter, WhitespaceHandling whitespace, SplitResult result_type);
 NEI_API std::vector<std::u16string> SplitString(std::u16string_view input,
                                                 std::u16string_view delimiter,
                                                 WhitespaceHandling whitespace,

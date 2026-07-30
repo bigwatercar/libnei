@@ -18,27 +18,27 @@ namespace nei {
 // StreamWriter wraps AsyncOutputStream and owns temporary write buffers inside
 // each request closure so business code only passes plain text.
 class NEI_API StreamWriter final {
- public:
+public:
   using WriteCallback = std::function<void(bool success, std::size_t bytes_written)>;
 
-  explicit StreamWriter(AsyncOutputStream* stream);
+  explicit StreamWriter(AsyncOutputStream *stream);
   ~StreamWriter();
 
-  StreamWriter(const StreamWriter&) = delete;
-  StreamWriter& operator=(const StreamWriter&) = delete;
+  StreamWriter(const StreamWriter &) = delete;
+  StreamWriter &operator=(const StreamWriter &) = delete;
 
   // Writes |text| as one async request. The internal IOBuffer lifetime is tied
   // to the request closure and released automatically after completion.
   void WriteString(std::string_view text, WriteCallback user_callback);
 
- private:
-  AsyncOutputStream* stream_ = nullptr;  // Non-owning.
+private:
+  AsyncOutputStream *stream_ = nullptr; // Non-owning.
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   scoped_refptr<TaskRunner> target_task_runner_;
   WeakPtrFactory<StreamWriter> weak_factory_{this, FROM_HERE_MEMBER};
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_IO_STREAM_WRITER_H_
+#endif // NEIXX_IO_STREAM_WRITER_H_

@@ -18,19 +18,21 @@ namespace {
 /// Factory: creates the correct MessagePump for the requested type.
 std::unique_ptr<MessagePump> CreateMessagePumpForType(MessagePumpType type) {
   switch (type) {
-    case MessagePumpType::IO:
-      return std::make_unique<MessagePumpForIO>();
-    case MessagePumpType::DEFAULT:
-      return std::make_unique<MessagePumpDefault>();
-    case MessagePumpType::UI:
-      return std::make_unique<MessagePumpDefault>();
+  case MessagePumpType::IO:
+    return std::make_unique<MessagePumpForIO>();
+  case MessagePumpType::DEFAULT:
+    return std::make_unique<MessagePumpDefault>();
+  case MessagePumpType::UI:
+    return std::make_unique<MessagePumpDefault>();
   }
   return std::make_unique<MessagePumpDefault>();
 }
 
-}  // namespace
+} // namespace
 
-Thread::Thread(const std::string& name) : name_(name) {}
+Thread::Thread(const std::string &name)
+    : name_(name) {
+}
 
 Thread::~Thread() {
   Stop();
@@ -40,7 +42,7 @@ bool Thread::Start() {
   return StartWithOptions(Options{});
 }
 
-bool Thread::StartWithOptions(const Options& options) {
+bool Thread::StartWithOptions(const Options &options) {
   WaitableEvent start_event(WaitableEvent::ResetPolicy::kManual, false);
   {
     AutoLock lock(lock_);
@@ -55,8 +57,7 @@ bool Thread::StartWithOptions(const Options& options) {
     thread_id_ = 0;
   }
 
-  if (!PlatformThread::CreateWithType(options.stack_size, this, &handle_,
-                                      options.thread_type)) {
+  if (!PlatformThread::CreateWithType(options.stack_size, this, &handle_, options.thread_type)) {
     AutoLock lock(lock_);
     start_event_ = nullptr;
     started_ = false;
@@ -95,12 +96,11 @@ void Thread::Stop() {
 
   // Self-join is guaranteed to deadlock: the calling thread would wait on
   // itself. Catch this programmer error early in debug builds.
-  DCHECK_NE_MSG(GetThreadId(), PlatformThread::CurrentId(),
-                "self-stop would cause deadlock");
+  DCHECK_NE_MSG(GetThreadId(), PlatformThread::CurrentId(), "self-stop would cause deadlock");
 
   if (runner) {
     runner->PostTask(FROM_HERE, []() {
-      SequenceManager* current = SequenceManager::Current();
+      SequenceManager *current = SequenceManager::Current();
       if (current != nullptr) {
         current->Quit();
       }
@@ -142,13 +142,12 @@ void Thread::ThreadMain() {
   PlatformThread::SetCurrentThreadType(options_.thread_type);
 
   // Build the pump for this thread's event loop.
-  std::unique_ptr<MessagePump> pump =
-      CreateMessagePumpForType(options_.message_pump_type);
+  std::unique_ptr<MessagePump> pump = CreateMessagePumpForType(options_.message_pump_type);
 
   SequenceManager sequence_manager(std::move(pump));
   scoped_refptr<TaskRunner> default_task_runner = sequence_manager.GetDefaultTaskRunner();
 
-  WaitableEvent* start_event = nullptr;
+  WaitableEvent *start_event = nullptr;
   {
     AutoLock lock(lock_);
     thread_id_ = PlatformThread::CurrentId();
@@ -179,4 +178,4 @@ void Thread::ThreadMain() {
   thread_id_ = 0;
 }
 
-}  // namespace nei
+} // namespace nei

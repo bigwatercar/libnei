@@ -31,8 +31,9 @@ struct TlsBioCtx {
     scoped_refptr<IOBuffer> buf;
     size_t len = 0;
   };
+
   std::deque<RecvRecord> recv_queue;
-  size_t recv_head_offset = 0;  // consumed bytes from front buffer
+  size_t recv_head_offset = 0; // consumed bytes from front buffer
 
   // Write path: BioSend wraps ciphertext into IOBufferWithSize and
   // pushes here.  FlushBio drains the queue with write serialization.
@@ -40,11 +41,12 @@ struct TlsBioCtx {
     scoped_refptr<IOBuffer> buf;
     size_t len = 0;
   };
+
   std::deque<SendRecord> send_queue;
 };
 
-static int BioSend(void* ctx, const unsigned char* data, size_t len) {
-  auto* bio = static_cast<TlsBioCtx*>(ctx);
+static int BioSend(void *ctx, const unsigned char *data, size_t len) {
+  auto *bio = static_cast<TlsBioCtx *>(ctx);
   // The ONLY copy on the write path: ciphertext → IOBufferWithSize.
   auto wbuf = MakeRefCounted<IOBufferWithSize>(len);
   std::memcpy(wbuf->data(), data, len);
@@ -52,10 +54,10 @@ static int BioSend(void* ctx, const unsigned char* data, size_t len) {
   return static_cast<int>(len);
 }
 
-static int BioRecv(void* ctx, unsigned char* buf, size_t len) {
-  auto* bio = static_cast<TlsBioCtx*>(ctx);
+static int BioRecv(void *ctx, unsigned char *buf, size_t len) {
+  auto *bio = static_cast<TlsBioCtx *>(ctx);
   while (!bio->recv_queue.empty()) {
-    auto& front = bio->recv_queue.front();
+    auto &front = bio->recv_queue.front();
     size_t remain = front.len - bio->recv_head_offset;
     if (remain == 0) {
       bio->recv_queue.pop_front();
@@ -76,8 +78,8 @@ static int BioRecv(void* ctx, unsigned char* buf, size_t len) {
 // =============================================================================
 
 class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
- public:
-  Impl(std::unique_ptr<TCPClientSocket> transport, SSLContext* ctx)
+public:
+  Impl(std::unique_ptr<TCPClientSocket> transport, SSLContext *ctx)
       : transport_(std::move(transport)) {
     mbedtls_ssl_init(&ssl_);
     mbedtls_ssl_setup(&ssl_, ctx->config());
@@ -90,20 +92,17 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     DETACH_FROM_SEQUENCE(sequence_checker_);
   }
 
-  ~Impl() { mbedtls_ssl_free(&ssl_); }
-
-  void Connect(const IPEndPoint& addr,
-               TLSClientSocket::ConnectCallback cb,
-               scoped_refptr<TaskRunner> runner) {
-    runner_ = std::move(runner);
-    connect_cb_ = std::move(cb);
-    transport_->Connect(addr,
-        [self = scoped_refptr<Impl>(this)](bool ok) { self->OnTcpConnect(ok); },
-        runner_);
+  ~Impl() {
+    mbedtls_ssl_free(&ssl_);
   }
 
-  void StartHandshake(TLSClientSocket::ConnectCallback cb,
-                      scoped_refptr<TaskRunner> runner) {
+  void Connect(const IPEndPoint &addr, TLSClientSocket::ConnectCallback cb, scoped_refptr<TaskRunner> runner) {
+    runner_ = std::move(runner);
+    connect_cb_ = std::move(cb);
+    transport_->Connect(addr, [self = scoped_refptr<Impl>(this)](bool ok) { self->OnTcpConnect(ok); }, runner_);
+  }
+
+  void StartHandshake(TLSClientSocket::ConnectCallback cb, scoped_refptr<TaskRunner> runner) {
     DCHECK_MSG(state_ == State::Idle, "StartHandshake: must be idle");
     runner_ = std::move(runner);
     connect_cb_ = std::move(cb);
@@ -111,31 +110,34 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     RunHandshakeLoop();
   }
 
-  void ReadAsync(scoped_refptr<IOBuffer> buf, size_t len,
-                 AsyncInputStream::IOReadCallback cb) {
+  void ReadAsync(scoped_refptr<IOBuffer> buf, size_t len, AsyncInputStream::IOReadCallback cb) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     if (state_ != State::Connected) {
       PostFail(std::move(cb));
       return;
     }
-    read_buf_ = std::move(buf); read_len_ = len; read_cb_ = std::move(cb);
+    read_buf_ = std::move(buf);
+    read_len_ = len;
+    read_cb_ = std::move(cb);
     TryReadDecrypt();
   }
 
-  void WriteAsync(scoped_refptr<IOBuffer> buf, size_t len,
-                  AsyncOutputStream::IOWriteCallback cb) {
+  void WriteAsync(scoped_refptr<IOBuffer> buf, size_t len, AsyncOutputStream::IOWriteCallback cb) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     if (state_ != State::Connected) {
       PostFail(std::move(cb));
       return;
     }
-    write_buf_ = std::move(buf); write_len_ = len; write_cb_ = std::move(cb);
+    write_buf_ = std::move(buf);
+    write_len_ = len;
+    write_cb_ = std::move(cb);
     TryWriteEncrypt();
   }
 
   void Close() {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    if (state_ == State::Closed || state_ == State::Closing) return;
+    if (state_ == State::Closed || state_ == State::Closing)
+      return;
     state_ = State::Closing;
     if (handshake_done_)
       mbedtls_ssl_close_notify(&ssl_);
@@ -158,7 +160,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     if (!bio_.send_queue.empty() || write_in_flight_) {
       if (!write_in_flight_ && !bio_.send_queue.empty())
         FlushBio();
-      return;  // FlushBio completion will call CloseAfterFlush again
+      return; // FlushBio completion will call CloseAfterFlush again
     }
     FinalClose();
   }
@@ -170,17 +172,16 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
   }
 
   std::string GetNegotiatedProtocol() const {
-    const char* proto = mbedtls_ssl_get_alpn_protocol(&ssl_);
+    const char *proto = mbedtls_ssl_get_alpn_protocol(&ssl_);
     return proto ? std::string(proto) : std::string();
   }
 
   // ---- Keep-Alive (delegates to underlying TCP transport) -----------
-  bool SetKeepAlive(const KeepAliveConfig& config) {
+  bool SetKeepAlive(const KeepAliveConfig &config) {
     return transport_->SetKeepAlive(config);
   }
 
-  void StartKeepAliveMonitor(TimeDelta check_interval,
-                             OnceCallback<void()> on_dead) {
+  void StartKeepAliveMonitor(TimeDelta check_interval, OnceCallback<void()> on_dead) {
     transport_->StartKeepAliveMonitor(check_interval, std::move(on_dead));
   }
 
@@ -188,12 +189,15 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
     transport_->StopKeepAliveMonitor();
   }
 
- private:
+private:
   enum class State { Idle, Handshaking, Connected, Closing, Closed };
 
   // ----- Handshake -----
   void OnTcpConnect(bool ok) {
-    if (!ok) { NotifyConnect(false); return; }
+    if (!ok) {
+      NotifyConnect(false);
+      return;
+    }
     state_ = State::Handshaking;
     RunHandshakeLoop();
   }
@@ -233,16 +237,19 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
 
   void ReadTransportForHandshake() {
     auto buf = MakeRefCounted<IOBufferWithSize>(kTlsChunkSize);
-    transport_->ReadAsync(buf, kTlsChunkSize,
-        [self = scoped_refptr<Impl>(this), buf](bool ok, size_t n) {
-          if (self->state_ == State::Closed || self->state_ == State::Closing) return;
-          // n == 0 is TCP EOF — the peer sent FIN.  Must NOT retry,
-          // or we enter an infinite spin (ReadAsync → EOF →
-          // RunHandshakeLoop → WANT_READ → ReadAsync → EOF → ...).
-          if (!ok || n == 0) { self->NotifyConnect(false); return; }
-          self->bio_.recv_queue.push_back({buf, n});
-          self->RunHandshakeLoop();
-        });
+    transport_->ReadAsync(buf, kTlsChunkSize, [self = scoped_refptr<Impl>(this), buf](bool ok, size_t n) {
+      if (self->state_ == State::Closed || self->state_ == State::Closing)
+        return;
+      // n == 0 is TCP EOF — the peer sent FIN.  Must NOT retry,
+      // or we enter an infinite spin (ReadAsync → EOF →
+      // RunHandshakeLoop → WANT_READ → ReadAsync → EOF → ...).
+      if (!ok || n == 0) {
+        self->NotifyConnect(false);
+        return;
+      }
+      self->bio_.recv_queue.push_back({buf, n});
+      self->RunHandshakeLoop();
+    });
   }
 
   void FlushBioAsync() {
@@ -270,24 +277,26 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
   // ----- Post-handshake -----
   void TryReadDecrypt() {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    int ret = mbedtls_ssl_read(&ssl_,
-        reinterpret_cast<unsigned char*>(read_buf_->data()), read_len_);
+    int ret = mbedtls_ssl_read(&ssl_, reinterpret_cast<unsigned char *>(read_buf_->data()), read_len_);
     if (ret > 0) {
-      auto cb = std::move(read_cb_); read_buf_.reset();
-      runner_->PostTask(FROM_HERE,
-          BindOnce(std::move(cb), true, static_cast<size_t>(ret)));
+      auto cb = std::move(read_cb_);
+      read_buf_.reset();
+      runner_->PostTask(FROM_HERE, BindOnce(std::move(cb), true, static_cast<size_t>(ret)));
       return;
     }
     if (ret == MBEDTLS_ERR_SSL_WANT_READ) {
       auto chunk = MakeRefCounted<IOBufferWithSize>(kTlsChunkSize);
-      transport_->ReadAsync(chunk, kTlsChunkSize,
-          [self = scoped_refptr<Impl>(this), chunk](bool ok, size_t n) {
-            if (self->state_ == State::Closed || self->state_ == State::Closing) return;
-            // n == 0 is TCP EOF — the peer sent FIN mid-stream.
-            if (!ok || n == 0) { self->NotifyReadError(); return; }
-            self->bio_.recv_queue.push_back({chunk, n});
-            self->TryReadDecrypt();
-          });
+      transport_->ReadAsync(chunk, kTlsChunkSize, [self = scoped_refptr<Impl>(this), chunk](bool ok, size_t n) {
+        if (self->state_ == State::Closed || self->state_ == State::Closing)
+          return;
+        // n == 0 is TCP EOF — the peer sent FIN mid-stream.
+        if (!ok || n == 0) {
+          self->NotifyReadError();
+          return;
+        }
+        self->bio_.recv_queue.push_back({chunk, n});
+        self->TryReadDecrypt();
+      });
       return;
     }
     NotifyReadError();
@@ -295,20 +304,18 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
 
   void TryWriteEncrypt() {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    int ret = mbedtls_ssl_write(&ssl_,
-        reinterpret_cast<const unsigned char*>(write_buf_->data()), write_len_);
+    int ret = mbedtls_ssl_write(&ssl_, reinterpret_cast<const unsigned char *>(write_buf_->data()), write_len_);
     if (ret > 0) {
       FlushBio();
-      auto cb = std::move(write_cb_); write_buf_.reset();
-      runner_->PostTask(FROM_HERE,
-          BindOnce(std::move(cb), true, static_cast<size_t>(ret)));
+      auto cb = std::move(write_cb_);
+      write_buf_.reset();
+      runner_->PostTask(FROM_HERE, BindOnce(std::move(cb), true, static_cast<size_t>(ret)));
       return;
     }
     if (ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
       FlushBio();
       runner_->PostTask(FROM_HERE,
-          BindOnce([](scoped_refptr<Impl> self) { self->TryWriteEncrypt(); },
-                   scoped_refptr<Impl>(this)));
+                        BindOnce([](scoped_refptr<Impl> self) { self->TryWriteEncrypt(); }, scoped_refptr<Impl>(this)));
       return;
     }
     NotifyWriteError();
@@ -316,17 +323,18 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
 
   void FlushBio(std::function<void()> on_flushed = {}) {
     if (write_in_flight_)
-      return;  // Completion callback drains send_queue when current write finishes.
+      return; // Completion callback drains send_queue when current write finishes.
     if (bio_.send_queue.empty()) {
-      if (on_flushed) on_flushed();
+      if (on_flushed)
+        on_flushed();
       return;
     }
     write_in_flight_ = true;
-    auto& front = bio_.send_queue.front();
-    transport_->WriteAsync(front.buf, front.len,
-        [self = scoped_refptr<Impl>(this),
-         on_flushed = std::move(on_flushed)](bool, size_t) {
-          if (self->state_ == State::Closed) return;
+    auto &front = bio_.send_queue.front();
+    transport_->WriteAsync(
+        front.buf, front.len, [self = scoped_refptr<Impl>(this), on_flushed = std::move(on_flushed)](bool, size_t) {
+          if (self->state_ == State::Closed)
+            return;
           self->bio_.send_queue.pop_front();
           self->write_in_flight_ = false;
           // Drain next — pass on_flushed so it fires only when queue is empty.
@@ -339,8 +347,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
   // ----- Helpers -----
   void NotifyConnect(bool ok) {
     if (connect_cb_) {
-      runner_->PostTask(FROM_HERE,
-          BindOnce(std::move(connect_cb_), ok));
+      runner_->PostTask(FROM_HERE, BindOnce(std::move(connect_cb_), ok));
     }
   }
 
@@ -363,9 +370,12 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
   }
 
   void ClearPending() {
-    if (read_cb_) NotifyReadError();
-    if (write_cb_) NotifyWriteError();
-    if (connect_cb_) NotifyConnect(false);
+    if (read_cb_)
+      NotifyReadError();
+    if (write_cb_)
+      NotifyWriteError();
+    if (connect_cb_)
+      NotifyConnect(false);
   }
 
   bool write_in_flight_ = false;
@@ -379,9 +389,11 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
   scoped_refptr<TaskRunner> runner_;
 
   TLSClientSocket::ConnectCallback connect_cb_;
-  scoped_refptr<IOBuffer> read_buf_;   size_t read_len_ = 0;
+  scoped_refptr<IOBuffer> read_buf_;
+  size_t read_len_ = 0;
   AsyncInputStream::IOReadCallback read_cb_;
-  scoped_refptr<IOBuffer> write_buf_;  size_t write_len_ = 0;
+  scoped_refptr<IOBuffer> write_buf_;
+  size_t write_len_ = 0;
   AsyncOutputStream::IOWriteCallback write_cb_;
 
   DECLARE_SEQUENCE_CHECKER(sequence_checker_);
@@ -391,57 +403,64 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
 // Public shell
 // =============================================================================
 
-TLSClientSocket::TLSClientSocket(std::unique_ptr<TCPClientSocket> transport,
-                                 SSLContext* ctx)
-    : impl_(new Impl(std::move(transport), ctx)) { impl_->AddRef(); }
-
-TLSClientSocket::~TLSClientSocket() {
-  if (impl_) { impl_->Orphan(); impl_->Release(); }
+TLSClientSocket::TLSClientSocket(std::unique_ptr<TCPClientSocket> transport, SSLContext *ctx)
+    : impl_(new Impl(std::move(transport), ctx)) {
+  impl_->AddRef();
 }
 
-TLSClientSocket::TLSClientSocket(TLSClientSocket&& other) noexcept
-    : impl_(other.impl_) { other.impl_ = nullptr; }
+TLSClientSocket::~TLSClientSocket() {
+  if (impl_) {
+    impl_->Orphan();
+    impl_->Release();
+  }
+}
 
-TLSClientSocket& TLSClientSocket::operator=(TLSClientSocket&& other) noexcept {
+TLSClientSocket::TLSClientSocket(TLSClientSocket &&other) noexcept
+    : impl_(other.impl_) {
+  other.impl_ = nullptr;
+}
+
+TLSClientSocket &TLSClientSocket::operator=(TLSClientSocket &&other) noexcept {
   if (this != &other) {
-    if (impl_) { impl_->Orphan(); impl_->Release(); }
-    impl_ = other.impl_; other.impl_ = nullptr;
+    if (impl_) {
+      impl_->Orphan();
+      impl_->Release();
+    }
+    impl_ = other.impl_;
+    other.impl_ = nullptr;
   }
   return *this;
 }
 
-void TLSClientSocket::Connect(const IPEndPoint& addr, ConnectCallback cb,
-                              scoped_refptr<TaskRunner> runner) {
+void TLSClientSocket::Connect(const IPEndPoint &addr, ConnectCallback cb, scoped_refptr<TaskRunner> runner) {
   impl_->Connect(addr, std::move(cb), std::move(runner));
 }
 
-void TLSClientSocket::StartHandshake(ConnectCallback cb,
-                                     scoped_refptr<TaskRunner> runner) {
+void TLSClientSocket::StartHandshake(ConnectCallback cb, scoped_refptr<TaskRunner> runner) {
   impl_->StartHandshake(std::move(cb), std::move(runner));
 }
 
-void TLSClientSocket::ReadAsync(scoped_refptr<IOBuffer> buf, size_t len,
-                                IOReadCallback cb) {
+void TLSClientSocket::ReadAsync(scoped_refptr<IOBuffer> buf, size_t len, IOReadCallback cb) {
   impl_->ReadAsync(std::move(buf), len, std::move(cb));
 }
 
-void TLSClientSocket::WriteAsync(scoped_refptr<IOBuffer> buf, size_t len,
-                                 IOWriteCallback cb) {
+void TLSClientSocket::WriteAsync(scoped_refptr<IOBuffer> buf, size_t len, IOWriteCallback cb) {
   impl_->WriteAsync(std::move(buf), len, std::move(cb));
 }
 
-void TLSClientSocket::Close() { impl_->Close(); }
+void TLSClientSocket::Close() {
+  impl_->Close();
+}
 
 std::string TLSClientSocket::GetNegotiatedProtocol() const {
   return impl_->GetNegotiatedProtocol();
 }
 
-bool TLSClientSocket::SetKeepAlive(const KeepAliveConfig& config) {
+bool TLSClientSocket::SetKeepAlive(const KeepAliveConfig &config) {
   return impl_->SetKeepAlive(config);
 }
 
-void TLSClientSocket::StartKeepAliveMonitor(TimeDelta check_interval,
-                                            OnceCallback<void()> on_dead) {
+void TLSClientSocket::StartKeepAliveMonitor(TimeDelta check_interval, OnceCallback<void()> on_dead) {
   impl_->StartKeepAliveMonitor(check_interval, std::move(on_dead));
 }
 
@@ -449,4 +468,4 @@ void TLSClientSocket::StopKeepAliveMonitor() {
   impl_->StopKeepAliveMonitor();
 }
 
-}  // namespace nei::net
+} // namespace nei::net

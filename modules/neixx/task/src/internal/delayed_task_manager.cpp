@@ -8,7 +8,8 @@
 namespace nei {
 namespace internal {
 
-DelayedTaskManager::DelayedTaskManager(PooledTaskSource* task_source) : task_source_(task_source) {
+DelayedTaskManager::DelayedTaskManager(PooledTaskSource *task_source)
+    : task_source_(task_source) {
   thread_started_ = PlatformThread::Create(0, this, &thread_handle_);
 }
 
@@ -16,7 +17,7 @@ DelayedTaskManager::~DelayedTaskManager() {
   Shutdown();
 }
 
-void DelayedTaskManager::AddQueue(TaskQueue* queue) {
+void DelayedTaskManager::AddQueue(TaskQueue *queue) {
   if (queue == nullptr) {
     return;
   }
@@ -31,7 +32,7 @@ void DelayedTaskManager::AddQueue(TaskQueue* queue) {
   wake_event_.Signal();
 }
 
-void DelayedTaskManager::RemoveQueue(TaskQueue* queue) {
+void DelayedTaskManager::RemoveQueue(TaskQueue *queue) {
   if (queue == nullptr) {
     return;
   }
@@ -41,7 +42,7 @@ void DelayedTaskManager::RemoveQueue(TaskQueue* queue) {
   wake_event_.Signal();
 }
 
-void DelayedTaskManager::OnQueueUpdated(TaskQueue* queue) {
+void DelayedTaskManager::OnQueueUpdated(TaskQueue *queue) {
   if (queue == nullptr) {
     return;
   }
@@ -62,9 +63,9 @@ void DelayedTaskManager::OnQueueUpdated(TaskQueue* queue) {
 
   // Preempt timer wait when a newly posted delayed task has an earlier
   // deadline, or when we need to clear stale waiting assumptions.
-  if (previous_next_run_time.is_null() ||
-      (!updated_next_run_time.is_null() && updated_next_run_time < previous_next_run_time) ||
-      updated_next_run_time.is_null()) {
+  if (previous_next_run_time.is_null()
+      || (!updated_next_run_time.is_null() && updated_next_run_time < previous_next_run_time)
+      || updated_next_run_time.is_null()) {
     wake_event_.Signal();
   }
 }
@@ -142,7 +143,7 @@ void DelayedTaskManager::ThreadMain() {
       continue;
     }
 
-    TaskQueue* queue = next_entry.queue;
+    TaskQueue *queue = next_entry.queue;
     if (queue == nullptr || queue->is_shutdown()) {
       continue;
     }
@@ -155,7 +156,7 @@ void DelayedTaskManager::ThreadMain() {
   }
 }
 
-void DelayedTaskManager::RefreshQueueStateLocked(TaskQueue* queue) {
+void DelayedTaskManager::RefreshQueueStateLocked(TaskQueue *queue) {
   auto it = queues_.find(queue);
   if (it == queues_.end()) {
     return;
@@ -176,7 +177,7 @@ void DelayedTaskManager::RefreshQueueStateLocked(TaskQueue* queue) {
   }
 }
 
-bool DelayedTaskManager::PopNextValidEntryLocked(HeapEntry* out_entry) {
+bool DelayedTaskManager::PopNextValidEntryLocked(HeapEntry *out_entry) {
   if (out_entry == nullptr) {
     return false;
   }
@@ -204,5 +205,5 @@ bool DelayedTaskManager::PopNextValidEntryLocked(HeapEntry* out_entry) {
   return false;
 }
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei

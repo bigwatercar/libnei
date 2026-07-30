@@ -19,7 +19,7 @@ constexpr std::size_t kChunkSize = 4096;
 // threshold to prevent unbounded memory growth.
 constexpr std::size_t kTextBufferCompactionThreshold = 2048;
 
-}  // namespace
+} // namespace
 
 // ---------------------------------------------------------------------------
 // State
@@ -27,7 +27,7 @@ constexpr std::size_t kTextBufferCompactionThreshold = 2048;
 // All fields are accessed only from the thread that owns the underlying
 // stream (the IO thread / message-pump thread), so no mutex is required.
 struct AsyncLineReader::State {
-  AsyncInputStream* stream = nullptr;
+  AsyncInputStream *stream = nullptr;
   LineCallback line_callback;
   std::string text_buffer;
   std::size_t consume_offset = 0;
@@ -38,8 +38,9 @@ struct AsyncLineReader::State {
 // AsyncLineReader
 // ---------------------------------------------------------------------------
 
-AsyncLineReader::AsyncLineReader(AsyncInputStream* input_stream)
-    : stream_(input_stream), state_(std::make_shared<State>()) {
+AsyncLineReader::AsyncLineReader(AsyncInputStream *input_stream)
+    : stream_(input_stream)
+    , state_(std::make_shared<State>()) {
   state_->stream = input_stream;
 }
 
@@ -49,19 +50,21 @@ AsyncLineReader::~AsyncLineReader() {
 }
 
 void AsyncLineReader::StartReadingLines(LineCallback callback) {
-  if (state_->started || stream_ == nullptr) return;
+  if (state_->started || stream_ == nullptr)
+    return;
   state_->started = true;
   state_->line_callback = std::move(callback);
   IssueNextRead(state_);
 }
 
 void AsyncLineReader::FlushPendingLine() {
-  if (!state_->started || !state_->line_callback) return;
-  if (state_->consume_offset >= state_->text_buffer.size()) return;
+  if (!state_->started || !state_->line_callback)
+    return;
+  if (state_->consume_offset >= state_->text_buffer.size())
+    return;
 
-  std::string pending_line(
-      state_->text_buffer.data() + state_->consume_offset,
-      state_->text_buffer.size() - state_->consume_offset);
+  std::string pending_line(state_->text_buffer.data() + state_->consume_offset,
+                           state_->text_buffer.size() - state_->consume_offset);
   state_->text_buffer.clear();
   state_->consume_offset = 0;
 
@@ -71,7 +74,7 @@ void AsyncLineReader::FlushPendingLine() {
 }
 
 // static
-void AsyncLineReader::IssueNextRead(const std::shared_ptr<State>& state) {
+void AsyncLineReader::IssueNextRead(const std::shared_ptr<State> &state) {
   if (!state->started || !state->line_callback || state->stream == nullptr) {
     return;
   }
@@ -79,42 +82,37 @@ void AsyncLineReader::IssueNextRead(const std::shared_ptr<State>& state) {
   // Acquire a 4 KiB IOBuffer from the pool.  scoped_refptr does not support
   // implicit upcasting, so hold the concrete IOBufferWithSize reference and
   // construct an IOBuffer scoped_refptr from its raw pointer explicitly.
-  scoped_refptr<IOBufferWithSize> sized_buf =
-      IOBufferPool::GetInstance().AcquireBuffer(kChunkSize);
+  scoped_refptr<IOBufferWithSize> sized_buf = IOBufferPool::GetInstance().AcquireBuffer(kChunkSize);
   scoped_refptr<IOBuffer> buf(sized_buf.get());
 
   // The lambda captures buf by value (scoped_refptr) so the buffer region
   // stays alive until the callback fires, even if the caller discards its
   // reference.
-  state->stream->ReadAsync(
-      buf, kChunkSize,
-      [state, buf](bool ok, std::size_t bytes_read) mutable {
-        // Append the raw bytes into the line-parsing text buffer BEFORE
-        // calling the parse helper so that OnChunkReceived can work with
-        // state->text_buffer directly.
-        if (ok && bytes_read > 0) {
-          state->text_buffer.append(reinterpret_cast<const char*>(buf->data()), bytes_read);
-        }
-        // Release our ref on buf now; the pool recycle hook (if set) will
-        // return it automatically via IOBufferWithSize::~IOBufferWithSize().
-        buf.reset();
+  state->stream->ReadAsync(buf, kChunkSize, [state, buf](bool ok, std::size_t bytes_read) mutable {
+    // Append the raw bytes into the line-parsing text buffer BEFORE
+    // calling the parse helper so that OnChunkReceived can work with
+    // state->text_buffer directly.
+    if (ok && bytes_read > 0) {
+      state->text_buffer.append(reinterpret_cast<const char *>(buf->data()), bytes_read);
+    }
+    // Release our ref on buf now; the pool recycle hook (if set) will
+    // return it automatically via IOBufferWithSize::~IOBufferWithSize().
+    buf.reset();
 
-        OnChunkReceived(state, ok, bytes_read);
-      });
+    OnChunkReceived(state, ok, bytes_read);
+  });
 }
 
 // static
-void AsyncLineReader::OnChunkReceived(const std::shared_ptr<State>& state,
-                                       bool ok,
-                                       std::size_t bytes_read) {
-  if (!state->started || !state->line_callback) return;
+void AsyncLineReader::OnChunkReceived(const std::shared_ptr<State> &state, bool ok, std::size_t bytes_read) {
+  if (!state->started || !state->line_callback)
+    return;
 
   if (!ok || bytes_read == 0) {
     // EOF or error.  Flush any remaining partial line.
     if (state->consume_offset < state->text_buffer.size()) {
-      std::string trailing(
-          state->text_buffer.data() + state->consume_offset,
-          state->text_buffer.size() - state->consume_offset);
+      std::string trailing(state->text_buffer.data() + state->consume_offset,
+                           state->text_buffer.size() - state->consume_offset);
       state->text_buffer.clear();
       state->consume_offset = 0;
       if (!trailing.empty() && state->line_callback) {
@@ -131,7 +129,8 @@ void AsyncLineReader::OnChunkReceived(const std::shared_ptr<State>& state,
   std::size_t search_pos = state->consume_offset;
   while (true) {
     const std::size_t nl = state->text_buffer.find('\n', search_pos);
-    if (nl == std::string::npos) break;
+    if (nl == std::string::npos)
+      break;
 
     const std::size_t line_start = state->consume_offset;
     std::size_t line_end = nl;
@@ -139,8 +138,7 @@ void AsyncLineReader::OnChunkReceived(const std::shared_ptr<State>& state,
     if (line_end > line_start && state->text_buffer[line_end - 1] == '\r') {
       --line_end;
     }
-    completed_lines.emplace_back(state->text_buffer.data() + line_start,
-                                 line_end - line_start);
+    completed_lines.emplace_back(state->text_buffer.data() + line_start, line_end - line_start);
     state->consume_offset = nl + 1;
     search_pos = state->consume_offset;
   }
@@ -156,7 +154,7 @@ void AsyncLineReader::OnChunkReceived(const std::shared_ptr<State>& state,
   }
 
   // Deliver completed lines to the caller.
-  for (std::string& line : completed_lines) {
+  for (std::string &line : completed_lines) {
     if (state->line_callback) {
       state->line_callback(std::move(line));
     }
@@ -168,4 +166,4 @@ void AsyncLineReader::OnChunkReceived(const std::shared_ptr<State>& state,
   }
 }
 
-}  // namespace nei
+} // namespace nei

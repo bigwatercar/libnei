@@ -48,7 +48,7 @@ TEST(BufferInputStreamTest, MultipleReadsAdvanceCursor) {
       call_count++;
       EXPECT_TRUE(ok);
       EXPECT_EQ(n, static_cast<std::size_t>(expected));
-      received.append(reinterpret_cast<const char*>(buf->data()), n);
+      received.append(reinterpret_cast<const char *>(buf->data()), n);
     });
   }
 
@@ -68,9 +68,7 @@ TEST(BufferInputStreamTest, ReadPastEOFReturnsZero) {
     EXPECT_EQ(n, 3u);
   });
 
-  stream.ReadAsync(buf, 16, [&](bool ok, std::size_t n) {
-    second_eof = !ok && n == 0;
-  });
+  stream.ReadAsync(buf, 16, [&](bool ok, std::size_t n) { second_eof = !ok && n == 0; });
 
   EXPECT_TRUE(first_ok);
   EXPECT_TRUE(second_eof);
@@ -84,14 +82,12 @@ TEST(BufferInputStreamTest, ClosePreventsFurtherReads) {
 
   auto buf = scoped_refptr<IOBuffer>(new IOBufferWithSize(16));
   bool saw_eof = false;
-  stream.ReadAsync(buf, 16, [&](bool ok, std::size_t n) {
-    saw_eof = !ok && n == 0;
-  });
+  stream.ReadAsync(buf, 16, [&](bool ok, std::size_t n) { saw_eof = !ok && n == 0; });
   EXPECT_TRUE(saw_eof);
 }
 
 TEST(BufferInputStreamTest, SizeAndRemaining) {
-  std::string data = "1234567890";  // 10 bytes
+  std::string data = "1234567890"; // 10 bytes
   BufferInputStream stream(std::move(data));
 
   EXPECT_EQ(stream.size(), 10u);
@@ -104,11 +100,11 @@ TEST(BufferInputStreamTest, SizeAndRemaining) {
   });
 
   EXPECT_EQ(stream.remaining(), 7u);
-  EXPECT_EQ(stream.size(), 10u);  // size never changes
+  EXPECT_EQ(stream.size(), 10u); // size never changes
 }
 
 TEST(BufferInputStreamTest, BorrowFromRawPointer) {
-  const char* text = "borrowed data";
+  const char *text = "borrowed data";
   BufferInputStream stream(text, std::strlen(text));
 
   auto buf = scoped_refptr<IOBuffer>(new IOBufferWithSize(64));
@@ -124,8 +120,7 @@ TEST(BufferInputStreamTest, BorrowFromIOBuffer) {
   std::memcpy(source->data(), "12345", 5);
   // Pass as IOBuffer (scoped_refptr<IOBufferWithSize> -> scoped_refptr<IOBuffer>
   // not implicit  --  use raw pointer).
-  BufferInputStream stream(
-      scoped_refptr<IOBuffer>(source.get()), 5);
+  BufferInputStream stream(scoped_refptr<IOBuffer>(source.get()), 5);
 
   auto buf = scoped_refptr<IOBuffer>(new IOBufferWithSize(16));
   stream.ReadAsync(buf, 16, [&](bool ok, std::size_t n) {
@@ -144,9 +139,7 @@ TEST(BufferInputStreamTest, ParseLinesWithAsyncLineReader) {
   AsyncLineReader reader(&stream);
 
   std::vector<std::string> lines;
-  reader.StartReadingLines([&lines](std::string&& line) {
-    lines.push_back(std::move(line));
-  });
+  reader.StartReadingLines([&lines](std::string &&line) { lines.push_back(std::move(line)); });
 
   ASSERT_EQ(lines.size(), 3u);
   EXPECT_EQ(lines[0], "line1");
@@ -159,9 +152,7 @@ TEST(BufferInputStreamTest, ParseLinesEmptyBuffer) {
   AsyncLineReader reader(&stream);
 
   std::vector<std::string> lines;
-  reader.StartReadingLines([&lines](std::string&& line) {
-    lines.push_back(std::move(line));
-  });
+  reader.StartReadingLines([&lines](std::string &&line) { lines.push_back(std::move(line)); });
 
   EXPECT_TRUE(lines.empty());
 }
@@ -174,9 +165,7 @@ TEST(BufferInputStreamTest, ParseLinesWithoutTrailingNewline) {
   AsyncLineReader reader(&stream);
 
   std::vector<std::string> lines;
-  reader.StartReadingLines([&lines](std::string&& line) {
-    lines.push_back(std::move(line));
-  });
+  reader.StartReadingLines([&lines](std::string &&line) { lines.push_back(std::move(line)); });
 
   // Both "hello" (terminated by \n) and "world" (terminated by EOF)
   // are delivered automatically.
@@ -198,9 +187,7 @@ TEST(BufferInputStreamTest, ParseLinesOnlyPartialLine) {
   AsyncLineReader reader(&stream);
 
   std::vector<std::string> lines;
-  reader.StartReadingLines([&lines](std::string&& line) {
-    lines.push_back(std::move(line));
-  });
+  reader.StartReadingLines([&lines](std::string &&line) { lines.push_back(std::move(line)); });
 
   // Delivered as a complete line by EOF semantics.
   ASSERT_EQ(lines.size(), 1u);
@@ -218,9 +205,7 @@ TEST(BufferInputStreamTest, ParseLinesEmptyFlushIsNoop) {
   AsyncLineReader reader(&stream);
 
   std::vector<std::string> lines;
-  reader.StartReadingLines([&lines](std::string&& line) {
-    lines.push_back(std::move(line));
-  });
+  reader.StartReadingLines([&lines](std::string &&line) { lines.push_back(std::move(line)); });
 
   ASSERT_EQ(lines.size(), 1u);
   EXPECT_EQ(lines[0], "done");
@@ -237,9 +222,7 @@ TEST(BufferInputStreamTest, ParseLinesCRLFHandling) {
   AsyncLineReader reader(&stream);
 
   std::vector<std::string> lines;
-  reader.StartReadingLines([&lines](std::string&& line) {
-    lines.push_back(std::move(line));
-  });
+  reader.StartReadingLines([&lines](std::string &&line) { lines.push_back(std::move(line)); });
 
   ASSERT_EQ(lines.size(), 3u);
   EXPECT_EQ(lines[0], "line1");
@@ -253,9 +236,7 @@ TEST(BufferInputStreamTest, ParseLinesEmptyLines) {
   AsyncLineReader reader(&stream);
 
   std::vector<std::string> lines;
-  reader.StartReadingLines([&lines](std::string&& line) {
-    lines.push_back(std::move(line));
-  });
+  reader.StartReadingLines([&lines](std::string &&line) { lines.push_back(std::move(line)); });
 
   ASSERT_EQ(lines.size(), 3u);
   EXPECT_TRUE(lines[0].empty());
@@ -269,9 +250,7 @@ TEST(BufferInputStreamTest, ParseLinesMixedEmptyLines) {
   AsyncLineReader reader(&stream);
 
   std::vector<std::string> lines;
-  reader.StartReadingLines([&lines](std::string&& line) {
-    lines.push_back(std::move(line));
-  });
+  reader.StartReadingLines([&lines](std::string &&line) { lines.push_back(std::move(line)); });
 
   ASSERT_EQ(lines.size(), 4u);
   EXPECT_EQ(lines[0], "a");
@@ -280,5 +259,5 @@ TEST(BufferInputStreamTest, ParseLinesMixedEmptyLines) {
   EXPECT_TRUE(lines[3].empty());
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

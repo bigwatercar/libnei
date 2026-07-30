@@ -15,26 +15,29 @@ class TLSClientSocket;
 struct KeepAliveConfig;
 
 class NEI_API TLSServerSocket {
- public:
+public:
   using AcceptCallback = std::function<void(bool, std::unique_ptr<TLSClientSocket>)>;
   using RunnerSelector = TCPServerSocket::RunnerSelector;
-  explicit TLSServerSocket(SSLContext* ctx);
+  explicit TLSServerSocket(SSLContext *ctx);
   ~TLSServerSocket();
-  TLSServerSocket(const TLSServerSocket&) = delete;
-  TLSServerSocket& operator=(const TLSServerSocket&) = delete;
-  bool Listen(const IPEndPoint& addr, int backlog, AcceptCallback callback,
-              scoped_refptr<TaskRunner> runner, RunnerSelector selector = {});
+  TLSServerSocket(const TLSServerSocket &) = delete;
+  TLSServerSocket &operator=(const TLSServerSocket &) = delete;
+  bool Listen(const IPEndPoint &addr,
+              int backlog,
+              AcceptCallback callback,
+              scoped_refptr<TaskRunner> runner,
+              RunnerSelector selector = {});
   void Close();
 
   // Configures OS-level TCP keep-alive on all future accepted connections.
   // The configuration is applied to the underlying TCP socket before the
   // TLS handshake starts.  Already-accepted connections are not affected.
-  void SetKeepAlive(const KeepAliveConfig& config);
+  void SetKeepAlive(const KeepAliveConfig &config);
 
- private:
+private:
   class Impl;
-  Impl* impl_ = nullptr;
+  Impl *impl_ = nullptr;
 };
 
-}  // namespace nei::net
+} // namespace nei::net
 #endif

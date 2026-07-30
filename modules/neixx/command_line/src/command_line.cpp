@@ -69,9 +69,7 @@ std::u16string NormalizeSwitchName(std::u16string_view name) {
   return ToLowerASCII(RemoveSwitchPrefix(name));
 }
 
-bool ParseSwitchToken(std::u16string_view token,
-                      std::u16string *name,
-                      std::u16string *value) {
+bool ParseSwitchToken(std::u16string_view token, std::u16string *name, std::u16string *value) {
   if (!IsSwitchToken(token) || token == u"--") {
     return false;
   }
@@ -186,7 +184,7 @@ std::vector<std::u16string> ParseWindowsCommandLine() {
   ::LocalFree(wide_argv);
   return argv;
 }
-#endif  // _WIN32
+#endif // _WIN32
 
 std::mutex &CurrentProcessMutex() {
   static std::mutex mutex;
@@ -274,7 +272,8 @@ std::string ResolveProgramPathWithPathEnv(std::string_view program, std::string_
   std::size_t start = 0;
   while (start <= path_env.size()) {
     const std::size_t end = path_env.find(':', start);
-    std::string_view dir = (end == std::string_view::npos) ? path_env.substr(start) : path_env.substr(start, end - start);
+    std::string_view dir =
+        (end == std::string_view::npos) ? path_env.substr(start) : path_env.substr(start, end - start);
     if (dir.empty()) {
       dir = ".";
     }
@@ -322,8 +321,8 @@ void AppendSwitchToken(std::vector<std::u16string> *argv,
     return;
   }
 
-  if (policy == CommandLine::DuplicateSwitchPolicy::kPreserveExisting &&
-      switches->find(normalized_name) != switches->end()) {
+  if (policy == CommandLine::DuplicateSwitchPolicy::kPreserveExisting
+      && switches->find(normalized_name) != switches->end()) {
     return;
   }
 
@@ -351,8 +350,7 @@ std::set<std::u16string> BuildWhitelist(const std::vector<std::string> &whitelis
   return normalized;
 }
 
-void PrependWrapperTokens(std::vector<std::u16string> *wrapper_argv,
-                          std::vector<std::u16string> tokens) {
+void PrependWrapperTokens(std::vector<std::u16string> *wrapper_argv, std::vector<std::u16string> tokens) {
   if (tokens.empty()) {
     return;
   }
@@ -424,8 +422,7 @@ std::string CommandLine::ResolveProgramPathForEnv(std::string_view path_env) con
   }
 
   const std::string path_key(path_env);
-  if (impl_->resolved_program_cache_valid
-      && impl_->resolved_program_cache_path_env == path_key) {
+  if (impl_->resolved_program_cache_valid && impl_->resolved_program_cache_path_env == path_key) {
     return impl_->resolved_program_cache_value;
   }
 
@@ -478,15 +475,11 @@ void CommandLine::AppendSwitch(std::string_view name, DuplicateSwitchPolicy poli
   AppendSwitchASCII(name, std::string_view(), policy);
 }
 
-void CommandLine::AppendSwitchASCII(std::string_view name,
-                                    std::string_view value,
-                                    DuplicateSwitchPolicy policy) {
+void CommandLine::AppendSwitchASCII(std::string_view name, std::string_view value, DuplicateSwitchPolicy policy) {
   AppendSwitchUTF16(UTF8ToUTF16(name), UTF8ToUTF16(value), policy);
 }
 
-void CommandLine::AppendSwitchUTF16(std::u16string_view name,
-                                    std::u16string_view value,
-                                    DuplicateSwitchPolicy policy) {
+void CommandLine::AppendSwitchUTF16(std::u16string_view name, std::u16string_view value, DuplicateSwitchPolicy policy) {
   AppendSwitchToken(&impl_->argv, &impl_->switches, name, value, policy);
   MarkFullArgvDirty(impl_.get());
 }
@@ -613,7 +606,8 @@ void CommandLine::AppendArguments(const CommandLine &source, bool include_progra
     start_index = 1;
   }
 
-  combined_argv.insert(combined_argv.end(), source_argv.begin() + static_cast<std::ptrdiff_t>(start_index), source_argv.end());
+  combined_argv.insert(
+      combined_argv.end(), source_argv.begin() + static_cast<std::ptrdiff_t>(start_index), source_argv.end());
   ParseFromUTF16Argv(combined_argv);
 }
 

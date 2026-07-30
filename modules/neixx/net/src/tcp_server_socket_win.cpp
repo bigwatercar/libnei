@@ -43,8 +43,7 @@ struct AcceptContext {
 namespace {
 
 // AcceptEx needs 16 bytes of padding on each side of the sockaddr.
-constexpr DWORD kAddrBufferSize =
-    sizeof(struct sockaddr_storage) + 16;
+constexpr DWORD kAddrBufferSize = sizeof(struct sockaddr_storage) + 16;
 
 // Number of concurrently-pending AcceptEx calls to keep in the kernel.
 // For C10K connection storms, 64-128 entries prevent NIC-layer drops that
@@ -60,20 +59,18 @@ constexpr auto kPostAcceptRetryDelay = TimeDelta::FromMilliseconds(10);
 LPFN_ACCEPTEX GetAcceptEx() {
   static LPFN_ACCEPTEX fn = nullptr;
   if (!fn) {
-    SOCKET s = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP,
-                          nullptr, 0, WSA_FLAG_OVERLAPPED);
+    SOCKET s = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED);
     if (s != INVALID_SOCKET) {
       GUID guid = WSAID_ACCEPTEX;
       DWORD bytes = 0;
-      WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, sizeof(guid),
-               &fn, sizeof(fn), &bytes, nullptr, nullptr);
+      WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, sizeof(guid), &fn, sizeof(fn), &bytes, nullptr, nullptr);
       closesocket(s);
     }
   }
   return fn;
 }
 
-}  // namespace
+} // namespace
 
 // =============================================================================
 // TCPServerSocket::Impl
@@ -82,35 +79,35 @@ LPFN_ACCEPTEX GetAcceptEx() {
 TCPServerSocket::Impl::Impl()
     : weak_factory_(this, FROM_HERE_MEMBER) {
   EnsureWsa();
-  DETACH_FROM_THREAD(thread_checker_);  // Lazy-bind on first IO-thread use.
+  DETACH_FROM_THREAD(thread_checker_); // Lazy-bind on first IO-thread use.
 }
 
 TCPServerSocket::Impl::~Impl() {
   Close();
 }
 
-bool TCPServerSocket::Impl::Listen(
-    const IPEndPoint& addr, int backlog,
-    TCPServerSocket::AcceptCallback callback,
-    scoped_refptr<TaskRunner> acceptor_runner,
-    TCPServerSocket::RunnerSelector worker_selector) {
+bool TCPServerSocket::Impl::Listen(const IPEndPoint &addr,
+                                   int backlog,
+                                   TCPServerSocket::AcceptCallback callback,
+                                   scoped_refptr<TaskRunner> acceptor_runner,
+                                   TCPServerSocket::RunnerSelector worker_selector) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(acceptor_runner);
   DCHECK_MSG(!closed_, "Listen: server already closed");
   DCHECK_MSG(listen_socket_ == INVALID_SOCKET, "Listen: already listening");
   listen_socket_ = CreateListenSocket(addr, backlog);
-  if (listen_socket_ == INVALID_SOCKET) return false;
+  if (listen_socket_ == INVALID_SOCKET)
+    return false;
 
   accept_callback_ = std::move(callback);
   io_runner_ = std::move(acceptor_runner);
   worker_selector_ = std::move(worker_selector);
 
   // Register listen socket with the pump's IOCP.
-  auto* pump = MessagePumpForIO::Current();
+  auto *pump = MessagePumpForIO::Current();
   DCHECK_MSG(pump, "Listen: pump null  --  not on IO thread");
   controller_.StartWatching(
-      pump, reinterpret_cast<NativeIOHandle>(listen_socket_),
-      MessagePumpForIO::FdWatchController::Mode::READ, this);
+      pump, reinterpret_cast<NativeIOHandle>(listen_socket_), MessagePumpForIO::FdWatchController::Mode::READ, this);
 
   // Seed the kernel AcceptEx pool with 64 pending entries so that C10K
   // connection storms do not overflow the listen backlog and cause
@@ -122,7 +119,8 @@ bool TCPServerSocket::Impl::Listen(
 
 void TCPServerSocket::Impl::Close() {
   std::unique_lock<std::mutex> lock(mutex_);
-  if (closed_.exchange(true)) return;
+  if (closed_.exchange(true))
+    return;
 
   // Fire pending accept callback with failure.
   if (accept_callback_) {
@@ -131,11 +129,8 @@ void TCPServerSocket::Impl::Close() {
       auto cb = std::move(accept_callback_);
       auto runner = io_runner_;
       lock.unlock();
-      runner->PostTask(
-          FROM_HERE,
-          BindOnce([](TCPServerSocket::AcceptCallback c) {
-            c(false, nullptr);
-          }, std::move(cb)));
+      runner->PostTask(FROM_HERE,
+                       BindOnce([](TCPServerSocket::AcceptCallback c) { c(false, nullptr); }, std::move(cb)));
       lock.lock();
     }
   }
@@ -157,7 +152,8 @@ void TCPServerSocket::Impl::Close() {
 
 void TCPServerSocket::Impl::Shutdown() {
   std::unique_lock<std::mutex> lock(mutex_);
-  if (closed_.exchange(true)) return;
+  if (closed_.exchange(true))
+    return;
 
   // Silent shutdown  --  clear the callback without firing it.
   accept_callback_ = {};
@@ -174,7 +170,8 @@ void TCPServerSocket::Impl::Shutdown() {
 }
 
 void TCPServerSocket::Impl::Orphan() {
-  if (orphaned_.exchange(true)) return;
+  if (orphaned_.exchange(true))
+    return;
 
   {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -185,7 +182,7 @@ void TCPServerSocket::Impl::Orphan() {
   }
 
   if (!closed_) {
-    Shutdown();  // Silent  --  stops watching, closes fd. Does NOT release self-hold.
+    Shutdown(); // Silent  --  stops watching, closes fd. Does NOT release self-hold.
   }
 
   // If no pending accepts remain, release self-hold immediately.
@@ -205,10 +202,12 @@ void TCPServerSocket::Impl::PostAcceptBatch(int count) {
 
 void TCPServerSocket::Impl::PostAccept() {
   std::unique_lock<std::mutex> lock(mutex_);
-  if (closed_) return;
+  if (closed_)
+    return;
 
   LPFN_ACCEPTEX fn_accept_ex = GetAcceptEx();
-  if (!fn_accept_ex) return;  // Fatal  --  WSAIoctl failed at startup.
+  if (!fn_accept_ex)
+    return; // Fatal  --  WSAIoctl failed at startup.
 
   SOCKET client = CreateClientSocket();
   if (client == INVALID_SOCKET) {
@@ -217,11 +216,9 @@ void TCPServerSocket::Impl::PostAccept() {
     DCHECK_MSG(io_runner_, "PostAccept: io_runner_ is null for retry");
     if (io_runner_) {
       lock.unlock();
-      io_runner_->PostDelayedTask(
-          FROM_HERE,
-          BindOnce([](scoped_refptr<Impl> self) { self->PostAccept(); },
-                   WrapRefCounted(this)),
-          kPostAcceptRetryDelay);
+      io_runner_->PostDelayedTask(FROM_HERE,
+                                  BindOnce([](scoped_refptr<Impl> self) { self->PostAccept(); }, WrapRefCounted(this)),
+                                  kPostAcceptRetryDelay);
     }
     return;
   }
@@ -232,16 +229,14 @@ void TCPServerSocket::Impl::PostAccept() {
     DCHECK_MSG(io_runner_, "PostAccept: io_runner_ is null for retry");
     if (io_runner_) {
       lock.unlock();
-      io_runner_->PostDelayedTask(
-          FROM_HERE,
-          BindOnce([](scoped_refptr<Impl> self) { self->PostAccept(); },
-                   WrapRefCounted(this)),
-          kPostAcceptRetryDelay);
+      io_runner_->PostDelayedTask(FROM_HERE,
+                                  BindOnce([](scoped_refptr<Impl> self) { self->PostAccept(); }, WrapRefCounted(this)),
+                                  kPostAcceptRetryDelay);
     }
     return;
   }
 
-  auto* ctx = new AcceptContext();
+  auto *ctx = new AcceptContext();
   ctx->client_socket = client;
   ctx->addr_buffer = addr_buf;
   ctx->callback = accept_callback_;
@@ -252,14 +247,14 @@ void TCPServerSocket::Impl::PostAccept() {
 
   DWORD bytes = 0;
   BOOL ok = fn_accept_ex(
-      listen_socket_, client, addr_buf->data(), 0,
-      kAddrBufferSize, kAddrBufferSize, &bytes, &ctx->overlapped);
+      listen_socket_, client, addr_buf->data(), 0, kAddrBufferSize, kAddrBufferSize, &bytes, &ctx->overlapped);
 
   if (!ok && WSAGetLastError() != ERROR_IO_PENDING) {
     // AcceptEx failed synchronously  --  clean up and retry.
     lock.lock();
     auto it = std::find(pending_accepts_.begin(), pending_accepts_.end(), ctx);
-    if (it != pending_accepts_.end()) pending_accepts_.erase(it);
+    if (it != pending_accepts_.end())
+      pending_accepts_.erase(it);
     lock.unlock();
     closesocket(client);
     delete ctx;
@@ -269,11 +264,9 @@ void TCPServerSocket::Impl::PostAccept() {
     // ticks; permanent failures waste at most 100 retries/second/worker.
     DCHECK_MSG(io_runner_, "PostAccept: io_runner_ is null for retry");
     if (io_runner_) {
-      io_runner_->PostDelayedTask(
-          FROM_HERE,
-          BindOnce([](scoped_refptr<Impl> self) { self->PostAccept(); },
-                   WrapRefCounted(this)),
-          kPostAcceptRetryDelay);
+      io_runner_->PostDelayedTask(FROM_HERE,
+                                  BindOnce([](scoped_refptr<Impl> self) { self->PostAccept(); }, WrapRefCounted(this)),
+                                  kPostAcceptRetryDelay);
     }
   }
 }
@@ -282,12 +275,12 @@ void TCPServerSocket::Impl::PostAccept() {
 // IOCP completion  --  routed by the pump via CompletionWatcher
 // =============================================================================
 
-void TCPServerSocket::Impl::OnIOCompleted(
-    NativeIOHandle /*handle*/, void* overlapped_context,
-    std::uint32_t /*bytes_transferred*/, std::uint32_t error_code) {
+void TCPServerSocket::Impl::OnIOCompleted(NativeIOHandle /*handle*/,
+                                          void *overlapped_context,
+                                          std::uint32_t /*bytes_transferred*/,
+                                          std::uint32_t error_code) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  auto* ctx = CONTAINING_RECORD(overlapped_context, AcceptContext,
-                                  overlapped);
+  auto *ctx = CONTAINING_RECORD(overlapped_context, AcceptContext, overlapped);
   // Transfer self_ref to a local — keeps Impl alive for the duration of
   // this call, even if Close()/Orphan() tries to tear it down.
   scoped_refptr<Impl> self_ref = std::move(ctx->self_ref);
@@ -317,11 +310,12 @@ void TCPServerSocket::Impl::OnIOCompleted(
         ReleaseSelfHoldUnderLock(lock2);
       }
     }
-    return;  // self_ref released here → may delete Impl
+    return; // self_ref released here → may delete Impl
   }
 
   // Normal path  --  ctx was pending; post another accept unless closed.
-  if (!closed_) PostAccept();
+  if (!closed_)
+    PostAccept();
 
   if (error_code != 0) {
     closesocket(client);
@@ -339,22 +333,19 @@ void TCPServerSocket::Impl::OnIOCompleted(
       DCHECK_MSG(io_runner_, "OnIOCompleted: io_runner_ is null");
       if (io_runner_) {
         // Lock-free dispatch: callback copied under lock, fired outside.
-        io_runner_->PostTask(FROM_HERE,
-                         BindOnce([](AcceptCallback c) { c(false, nullptr); },
-                                  std::move(cb)));
+        io_runner_->PostTask(FROM_HERE, BindOnce([](AcceptCallback c) { c(false, nullptr); }, std::move(cb)));
       }
     }
     return;
   }
 
-  setsockopt(client, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT,
-             reinterpret_cast<char*>(&listen_socket_), sizeof(listen_socket_));
+  setsockopt(
+      client, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, reinterpret_cast<char *>(&listen_socket_), sizeof(listen_socket_));
 
-  scoped_refptr<TaskRunner> worker_runner =
-      worker_selector_ ? worker_selector_() : nullptr;
+  scoped_refptr<TaskRunner> worker_runner = worker_selector_ ? worker_selector_() : nullptr;
   if (!worker_runner)
     worker_runner = io_runner_;
-  auto* client_impl = new TCPClientSocket::Impl(client, worker_runner);
+  auto *client_impl = new TCPClientSocket::Impl(client, worker_runner);
   auto client_sock = std::make_unique<TCPClientSocket>(client_impl);
 
   // ---- Zero-allocation recycle: keep the AcceptContext and addr_buffer
@@ -375,22 +366,32 @@ void TCPServerSocket::Impl::OnIOCompleted(
     }
     LPFN_ACCEPTEX fn = GetAcceptEx();
     DWORD bytes = 0;
-    BOOL ok = fn(listen_socket_, reuse_client, ctx->addr_buffer->data(), 0,
-                 kAddrBufferSize, kAddrBufferSize, &bytes, &ctx->overlapped);
+    BOOL ok = fn(listen_socket_,
+                 reuse_client,
+                 ctx->addr_buffer->data(),
+                 0,
+                 kAddrBufferSize,
+                 kAddrBufferSize,
+                 &bytes,
+                 &ctx->overlapped);
     if (!ok && WSAGetLastError() != ERROR_IO_PENDING) {
       // Re-submit failed  --  fall back to fresh allocation.
       std::unique_lock<std::mutex> lock2(mutex_);
       auto it = std::find(pending_accepts_.begin(), pending_accepts_.end(), ctx);
-      if (it != pending_accepts_.end()) pending_accepts_.erase(it);
+      if (it != pending_accepts_.end())
+        pending_accepts_.erase(it);
       lock2.unlock();
       closesocket(reuse_client);
       delete ctx;
-      if (!closed_) PostAccept();
+      if (!closed_)
+        PostAccept();
     }
   } else {
-    if (reuse_client != INVALID_SOCKET) closesocket(reuse_client);
+    if (reuse_client != INVALID_SOCKET)
+      closesocket(reuse_client);
     delete ctx;
-    if (!closed_) PostAccept();
+    if (!closed_)
+      PostAccept();
   }
   {
     // Snapshot accept_callback_ under the mutex  --  same TOCTOU fix as
@@ -406,9 +407,9 @@ void TCPServerSocket::Impl::OnIOCompleted(
         // Lock-free dispatch: callback copied under lock, fired outside.
         io_runner_->PostTask(
             FROM_HERE,
-            BindOnce([](AcceptCallback c,
-                        std::unique_ptr<TCPClientSocket> s) { c(true, std::move(s)); },
-                     std::move(cb), std::move(client_sock)));
+            BindOnce([](AcceptCallback c, std::unique_ptr<TCPClientSocket> s) { c(true, std::move(s)); },
+                     std::move(cb),
+                     std::move(client_sock)));
       }
     }
   }
@@ -440,43 +441,39 @@ namespace {
 void EnableLoopbackFastPath(SOCKET s) {
   int opt = 1;
   DWORD bytes = 0;
-  WSAIoctl(s, SIO_LOOPBACK_FAST_PATH, &opt, sizeof(opt),
-           nullptr, 0, &bytes, nullptr, nullptr);
+  WSAIoctl(s, SIO_LOOPBACK_FAST_PATH, &opt, sizeof(opt), nullptr, 0, &bytes, nullptr, nullptr);
 }
-}  // namespace
+} // namespace
 
 // =============================================================================
 // TCPServerSocket::Impl  --  continued
 // =============================================================================
 
-SOCKET TCPServerSocket::Impl::CreateListenSocket(const IPEndPoint& addr,
-                                                  int backlog) {
+SOCKET TCPServerSocket::Impl::CreateListenSocket(const IPEndPoint &addr, int backlog) {
   struct sockaddr_storage sa = {};
   int sa_len = 0;
   if (!EndPointToSockAddr(addr, &sa, &sa_len))
     return INVALID_SOCKET;
 
-  SOCKET s = WSASocketW(sa.ss_family, SOCK_STREAM, IPPROTO_TCP,
-                        nullptr, 0,
-                        WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
-  if (s == INVALID_SOCKET) return INVALID_SOCKET;
+  SOCKET s =
+      WSASocketW(sa.ss_family, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+  if (s == INVALID_SOCKET)
+    return INVALID_SOCKET;
 
   // Explicit IPV6_V6ONLY for cross-platform consistency.
   if (sa.ss_family == AF_INET6) {
     int v6only = 1;
-    setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY,
-               reinterpret_cast<const char*>(&v6only), sizeof(v6only));
+    setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char *>(&v6only), sizeof(v6only));
   }
 
   // Set SO_REUSEADDR for quick restart.
   BOOL reuse = TRUE;
-  setsockopt(s, SOL_SOCKET, SO_REUSEADDR,
-             reinterpret_cast<char*>(&reuse), sizeof(reuse));
+  setsockopt(s, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<char *>(&reuse), sizeof(reuse));
 
   // Enable kernel-level TCP bypass for localhost connections.
   EnableLoopbackFastPath(s);
 
-  if (bind(s, reinterpret_cast<struct sockaddr*>(&sa), sa_len) == SOCKET_ERROR) {
+  if (bind(s, reinterpret_cast<struct sockaddr *>(&sa), sa_len) == SOCKET_ERROR) {
     closesocket(s);
     return INVALID_SOCKET;
   }
@@ -495,14 +492,11 @@ SOCKET TCPServerSocket::Impl::CreateClientSocket() {
   if (listen_socket_ != INVALID_SOCKET) {
     struct sockaddr_storage sa = {};
     int sa_len = sizeof(sa);
-    if (getsockname(listen_socket_, reinterpret_cast<struct sockaddr*>(&sa),
-                    &sa_len) == 0) {
+    if (getsockname(listen_socket_, reinterpret_cast<struct sockaddr *>(&sa), &sa_len) == 0) {
       family = sa.ss_family;
     }
   }
-  SOCKET s = WSASocketW(family, SOCK_STREAM, IPPROTO_TCP,
-                         nullptr, 0,
-                         WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+  SOCKET s = WSASocketW(family, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
   if (s != INVALID_SOCKET)
     EnableLoopbackFastPath(s);
   return s;
@@ -514,18 +508,17 @@ scoped_refptr<IOBuffer> TCPServerSocket::Impl::CreateAddrBuffer() {
   return scoped_refptr<IOBuffer>(buf.get());
 }
 
-bool TCPServerSocket::Impl::EndPointToSockAddr(
-    const IPEndPoint& ep, struct sockaddr_storage* out, int* out_len) {
+bool TCPServerSocket::Impl::EndPointToSockAddr(const IPEndPoint &ep, struct sockaddr_storage *out, int *out_len) {
   std::memset(out, 0, sizeof(*out));
 
   if (ep.address().IsIPv4()) {
-    auto* sa = reinterpret_cast<struct sockaddr_in*>(out);
+    auto *sa = reinterpret_cast<struct sockaddr_in *>(out);
     sa->sin_family = AF_INET;
     sa->sin_port = htons(ep.port());
     std::memcpy(&sa->sin_addr, ep.address().data().data(), 4);
     *out_len = sizeof(struct sockaddr_in);
   } else if (ep.address().IsIPv6()) {
-    auto* sa = reinterpret_cast<struct sockaddr_in6*>(out);
+    auto *sa = reinterpret_cast<struct sockaddr_in6 *>(out);
     sa->sin6_family = AF_INET6;
     sa->sin6_port = htons(ep.port());
     std::memcpy(&sa->sin6_addr, ep.address().data().data(), 16);
@@ -549,8 +542,7 @@ void TCPServerSocket::Impl::ReleaseSelfHoldIfNeeded() {
     this->Release();
 }
 
-void TCPServerSocket::Impl::ReleaseSelfHoldUnderLock(
-    std::unique_lock<std::mutex>& lock) {
+void TCPServerSocket::Impl::ReleaseSelfHoldUnderLock(std::unique_lock<std::mutex> &lock) {
   DCHECK(lock.owns_lock());
   if (has_self_ref_) {
     has_self_ref_ = false;
@@ -559,6 +551,6 @@ void TCPServerSocket::Impl::ReleaseSelfHoldUnderLock(
   }
 }
 
-}  // namespace nei::net
+} // namespace nei::net
 
-#endif  // _WIN32
+#endif // _WIN32

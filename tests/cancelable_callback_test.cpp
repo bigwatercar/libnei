@@ -18,8 +18,8 @@ namespace {
 // =============================================================================
 struct LifecycleTracker {
   std::shared_ptr<bool> alive = std::make_shared<bool>(true);
-  std::shared_ptr<std::thread::id> destructed_on =
-      std::make_shared<std::thread::id>();
+  std::shared_ptr<std::thread::id> destructed_on = std::make_shared<std::thread::id>();
+
   ~LifecycleTracker() {
     *alive = false;
     *destructed_on = std::this_thread::get_id();
@@ -30,9 +30,9 @@ struct LifecycleTracker {
 // CancelableOnceClosureTest  --  测试夹具
 // =============================================================================
 class CancelableOnceClosureTest : public testing::Test {
- protected:
+protected:
   template <typename F>
-  CancelableOnceClosure MakeTask(F&& fn) {
+  CancelableOnceClosure MakeTask(F &&fn) {
     return CancelableOnceClosure(BindOnce(std::forward<F>(fn)));
   }
 };
@@ -85,7 +85,7 @@ TEST_F(CancelableOnceClosureTest, CancelReleasesResourcesImmediately) {
   auto alive_guard = tracker->alive;
 
   {
-    auto t = std::move(*tracker);  // move tracker into closure capture
+    auto t = std::move(*tracker); // move tracker into closure capture
     CancelableOnceClosure task(BindOnce(
         [](LifecycleTracker /*captured*/) {
           // If we get here, Cancel() didn't work
@@ -107,16 +107,13 @@ TEST_F(CancelableOnceClosureTest, CancelReleasesResourcesOnCallingThread) {
   std::thread::id calling_thread = std::this_thread::get_id();
 
   auto t = std::move(*tracker);
-  CancelableOnceClosure task(BindOnce(
-      [](LifecycleTracker /*captured*/) { FAIL(); },
-      std::move(t)));
+  CancelableOnceClosure task(BindOnce([](LifecycleTracker /*captured*/) { FAIL(); }, std::move(t)));
 
   task.Cancel();
 
   EXPECT_FALSE(*alive_guard);
-  EXPECT_EQ(*destructed_on, calling_thread)
-      << "Cancel() must release captured resources synchronously on "
-         "the calling thread (not deferred to a background task)";
+  EXPECT_EQ(*destructed_on, calling_thread) << "Cancel() must release captured resources synchronously on "
+                                               "the calling thread (not deferred to a background task)";
 }
 
 // ---------------------------------------------------------------------------
@@ -133,7 +130,7 @@ TEST_F(CancelableOnceClosureTest, IsCancelledReflectsState) {
 TEST_F(CancelableOnceClosureTest, IsCancelledFalseAfterRun) {
   auto task = MakeTask([] {});
   task.Run();
-  EXPECT_FALSE(task.IsCancelled());  // Run() ≠ Cancel()
+  EXPECT_FALSE(task.IsCancelled()); // Run() ≠ Cancel()
 }
 
 TEST_F(CancelableOnceClosureTest, OperatorBoolReflectsValidity) {
@@ -172,8 +169,8 @@ TEST_F(CancelableOnceClosureTest, CallbackAndRunConsumeSameTask) {
   std::atomic<int> count{0};
   auto task = MakeTask([&count] { count.fetch_add(1); });
   OnceCallback cb = task.callback();
-  task.Run();             // Run() 先消费
-  std::move(cb).Run();    // callback() 的包装看到 task_ 已空
+  task.Run();          // Run() 先消费
+  std::move(cb).Run(); // callback() 的包装看到 task_ 已空
   EXPECT_EQ(count.load(), 1);
 }
 
@@ -253,7 +250,7 @@ TEST_F(CancelableOnceClosureTest, ConcurrentCancelAndRun) {
     t1.join();
     t2.join();
 
-    EXPECT_LE(count.load(), 1);  // 0=cancelled, 1=executed, never >1
+    EXPECT_LE(count.load(), 1); // 0=cancelled, 1=executed, never >1
   }
 }
 
@@ -262,7 +259,8 @@ TEST_F(CancelableOnceClosureTest, ConcurrentDualCancel) {
     auto task = MakeTask([] {});
     std::thread t1([&task] { task.Cancel(); });
     std::thread t2([&task] { task.Cancel(); });
-    t1.join(); t2.join();
+    t1.join();
+    t2.join();
     EXPECT_TRUE(task.IsCancelled());
   }
 }
@@ -273,10 +271,11 @@ TEST_F(CancelableOnceClosureTest, ConcurrentDualRun) {
     auto task = MakeTask([&count] { count.fetch_add(1); });
     std::thread t1([&task] { task.Run(); });
     std::thread t2([&task] { task.Run(); });
-    t1.join(); t2.join();
+    t1.join();
+    t2.join();
     EXPECT_EQ(count.load(), 1);
   }
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

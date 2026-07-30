@@ -43,34 +43,27 @@ class AsyncFile;
 //   - This adapter owns the position state; it is safe to destroy at any time.
 // ---------------------------------------------------------------------------
 class NEI_API FileInputStreamAdapter final : public AsyncInputStream {
- public:
+public:
   // Constructs a sequential input adapter wrapping |file|.
   // |start_offset| is the initial read position in the file.
-  explicit FileInputStreamAdapter(AsyncFile* file,
-                                  std::uint64_t start_offset = 0);
-  FileInputStreamAdapter(AsyncFile* file,
-                         scoped_refptr<TaskRunner> target_task_runner,
-                         std::uint64_t start_offset = 0);
+  explicit FileInputStreamAdapter(AsyncFile *file, std::uint64_t start_offset = 0);
+  FileInputStreamAdapter(AsyncFile *file, scoped_refptr<TaskRunner> target_task_runner, std::uint64_t start_offset = 0);
   ~FileInputStreamAdapter() override;
 
-  FileInputStreamAdapter(const FileInputStreamAdapter&) = delete;
-  FileInputStreamAdapter& operator=(const FileInputStreamAdapter&) = delete;
+  FileInputStreamAdapter(const FileInputStreamAdapter &) = delete;
+  FileInputStreamAdapter &operator=(const FileInputStreamAdapter &) = delete;
 
   // AsyncInputStream override: issues one async read from |position_|.
-  void ReadAsync(scoped_refptr<IOBuffer> buf,
-                 std::size_t buf_len,
-                 IOReadCallback callback) override;
+  void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback) override;
 
   void Close() override;
 
- private:
-  void ReadAsyncOnTarget(scoped_refptr<IOBuffer> buf,
-                         std::size_t buf_len,
-                         IOReadCallback callback);
+private:
+  void ReadAsyncOnTarget(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback);
   void CloseOnTarget();
 
-  AsyncFile* file_ = nullptr;  // Non-owning.
-  std::uint64_t position_ = 0;  // Current read offset in the file.
+  AsyncFile *file_ = nullptr;  // Non-owning.
+  std::uint64_t position_ = 0; // Current read offset in the file.
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   scoped_refptr<TaskRunner> target_task_runner_;
   NEI_SUPPRESS_MSC_WARNING_END
@@ -120,18 +113,17 @@ class NEI_API FileInputStreamAdapter final : public AsyncInputStream {
 //   - This adapter owns the position state; it is safe to destroy at any time.
 // ---------------------------------------------------------------------------
 class NEI_API FileOutputStreamAdapter final : public AsyncOutputStream {
- public:
+public:
   // Constructs a sequential output adapter wrapping |file|.
   // |start_offset| is the initial write position in the file.
-  explicit FileOutputStreamAdapter(AsyncFile* file,
-                                   std::uint64_t start_offset = 0);
-  FileOutputStreamAdapter(AsyncFile* file,
+  explicit FileOutputStreamAdapter(AsyncFile *file, std::uint64_t start_offset = 0);
+  FileOutputStreamAdapter(AsyncFile *file,
                           scoped_refptr<TaskRunner> target_task_runner,
                           std::uint64_t start_offset = 0);
   ~FileOutputStreamAdapter() override;
 
-  FileOutputStreamAdapter(const FileOutputStreamAdapter&) = delete;
-  FileOutputStreamAdapter& operator=(const FileOutputStreamAdapter&) = delete;
+  FileOutputStreamAdapter(const FileOutputStreamAdapter &) = delete;
+  FileOutputStreamAdapter &operator=(const FileOutputStreamAdapter &) = delete;
 
   // AsyncOutputStream override: issues one async write from pre-computed offset.
   //
@@ -142,19 +134,15 @@ class NEI_API FileOutputStreamAdapter final : public AsyncOutputStream {
   //   - This ensures sequential offset assignment even if multiple WriteAsync()
   //     calls are in flight.
   //   - Then dispatch to file_->WriteAsync(my_offset, ...).
-  void WriteAsync(scoped_refptr<IOBuffer> buf,
-                  std::size_t bytes_to_write,
-                  IOWriteCallback callback) override;
+  void WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t bytes_to_write, IOWriteCallback callback) override;
 
   void Close() override;
 
- private:
-  void WriteAsyncOnTarget(scoped_refptr<IOBuffer> buf,
-                          std::size_t bytes_to_write,
-                          IOWriteCallback callback);
+private:
+  void WriteAsyncOnTarget(scoped_refptr<IOBuffer> buf, std::size_t bytes_to_write, IOWriteCallback callback);
   void CloseOnTarget();
 
-  AsyncFile* file_ = nullptr;  // Non-owning.
+  AsyncFile *file_ = nullptr; // Non-owning.
   std::uint64_t position_ = 0;
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   scoped_refptr<TaskRunner> target_task_runner_;
@@ -167,6 +155,6 @@ class NEI_API FileOutputStreamAdapter final : public AsyncOutputStream {
   NEI_SUPPRESS_MSC_WARNING_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_IO_FILE_STREAM_ADAPTERS_H_
+#endif // NEIXX_IO_FILE_STREAM_ADAPTERS_H_

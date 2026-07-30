@@ -32,7 +32,7 @@ namespace nei {
 // arbitrary application sequence.
 // ---------------------------------------------------------------------------
 class NEI_API AsyncInputStream {
- public:
+public:
   // Completion signature:  callback(success, bytes_read)
   using IOReadCallback = std::function<void(bool success, std::size_t bytes_read)>;
 
@@ -41,9 +41,7 @@ class NEI_API AsyncInputStream {
   // Issue one asynchronous read into [buf->data(), buf->data() + buf_len).
   // `buf_len` must not exceed the physical size of `buf`.
   // Exactly one call to `callback` will be made, possibly synchronously.
-  virtual void ReadAsync(scoped_refptr<IOBuffer> buf,
-                         std::size_t buf_len,
-                         IOReadCallback callback) = 0;
+  virtual void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback) = 0;
 
   virtual void Close() = 0;
 };
@@ -63,7 +61,7 @@ class NEI_API AsyncInputStream {
 // the implementation must not release it until the callback has fired.
 // ---------------------------------------------------------------------------
 class NEI_API AsyncOutputStream {
- public:
+public:
   // Completion signature:  callback(success, bytes_written)
   using IOWriteCallback = std::function<void(bool success, std::size_t bytes_written)>;
 
@@ -72,13 +70,11 @@ class NEI_API AsyncOutputStream {
   // Issue one asynchronous write of `buf_len` bytes from buf->data().
   // `buf_len` must not exceed the physical size of `buf`.
   // Exactly one call to `callback` will be made, possibly synchronously.
-  virtual void WriteAsync(scoped_refptr<IOBuffer> buf,
-                          std::size_t buf_len,
-                          IOWriteCallback callback) = 0;
+  virtual void WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOWriteCallback callback) = 0;
 
   virtual void Close() = 0;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_IO_ASYNC_STREAM_H_
+#endif // NEIXX_IO_ASYNC_STREAM_H_

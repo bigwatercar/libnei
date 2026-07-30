@@ -49,6 +49,7 @@ TEST(UtilsMd5Test, MatchesKnownVectors) {
     const char *input;
     const char *hex;
   };
+
   const Case cases[] = {
       {"", "d41d8cd98f00b204e9800998ecf8427e"},
       {"abc", "900150983cd24fb0d6963f7d28e17f72"},
@@ -87,6 +88,7 @@ TEST(UtilsSha1Test, MatchesKnownVectors) {
     const char *input;
     const char *hex;
   };
+
   const Case cases[] = {
       {"", "da39a3ee5e6b4b0d3255bfef95601890afd80709"},
       {"abc", "a9993e364706816aba3e25717850c26c9cd0d89d"},

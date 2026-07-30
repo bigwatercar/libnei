@@ -18,26 +18,26 @@ namespace nei {
 // Nested Run() calls are supported: Quit() exits only the innermost active
 // Run() frame, matching Chromium-style nested loop behavior.
 class NEI_API MessagePumpDefault final : public MessagePump {
- public:
+public:
   MessagePumpDefault();
   ~MessagePumpDefault() override;
 
-  MessagePumpDefault(const MessagePumpDefault&) = delete;
-  MessagePumpDefault& operator=(const MessagePumpDefault&) = delete;
+  MessagePumpDefault(const MessagePumpDefault &) = delete;
+  MessagePumpDefault &operator=(const MessagePumpDefault &) = delete;
 
   // MessagePump implementation.
-  void Run(Delegate* delegate) override;
+  void Run(Delegate *delegate) override;
   void Quit() override;
   void ScheduleWork() override;
-  void ScheduleDelayedWork(const TimeTicks& delayed_run_time) override;
+  void ScheduleDelayedWork(const TimeTicks &delayed_run_time) override;
 
- private:
+private:
   class Impl;
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   std::unique_ptr<Impl> impl_;
   NEI_SUPPRESS_MSC_WARNING_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_TASK_MESSAGE_LOOP_MESSAGE_PUMP_DEFAULT_H_
+#endif // NEIXX_TASK_MESSAGE_LOOP_MESSAGE_PUMP_DEFAULT_H_

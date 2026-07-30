@@ -125,8 +125,7 @@ bool PlatformThread::Join(Handle *handle) {
 
   // Self-join is a guaranteed deadlock (the thread would wait on itself).
   // Crash immediately with a clear message rather than hanging forever.
-  CHECK_MSG(!pthread_equal(handle->impl_->native_handle, pthread_self()),
-            "self-join would cause deadlock");
+  CHECK_MSG(!pthread_equal(handle->impl_->native_handle, pthread_self()), "self-join would cause deadlock");
 
   const int join_result = pthread_join(handle->impl_->native_handle, nullptr);
   DCHECK_EQ_MSG(join_result, 0, "pthread_join failed");
@@ -156,15 +155,15 @@ void PlatformThread::SetCurrentThreadName(const std::string &name) {
 bool PlatformThread::SetCurrentThreadType(ThreadType thread_type) {
   int nice_value = 0;
   switch (thread_type) {
-    case ThreadType::BACKGROUND:
-      nice_value = 10;
-      break;
-    case ThreadType::DEFAULT:
-      nice_value = 0;
-      break;
-    case ThreadType::REALTIME_AUDIO:
-      nice_value = -2;
-      break;
+  case ThreadType::BACKGROUND:
+    nice_value = 10;
+    break;
+  case ThreadType::DEFAULT:
+    nice_value = 0;
+    break;
+  case ThreadType::REALTIME_AUDIO:
+    nice_value = -2;
+    break;
   }
 #if defined(__linux__)
   // On Linux, setpriority(PRIO_PROCESS, id, ...) can target a specific LWP

@@ -24,9 +24,9 @@ namespace nei {
 /// Used by PlatformThread::SetCurrentThreadType() and by Thread::Options /
 /// ThreadPool::InitParams to declare the initial OS weight of a thread.
 enum class ThreadType {
-  BACKGROUND,        ///< Low-priority background work; yields to UI/foreground.
-  DEFAULT,           ///< Normal OS scheduling; no special priority.
-  REALTIME_AUDIO,    ///< Elevated real-time priority for latency-sensitive work.
+  BACKGROUND,     ///< Low-priority background work; yields to UI/foreground.
+  DEFAULT,        ///< Normal OS scheduling; no special priority.
+  REALTIME_AUDIO, ///< Elevated real-time priority for latency-sensitive work.
 };
 
 class NEI_API PlatformThread final {
@@ -65,10 +65,7 @@ public:
   static void Sleep(TimeDelta duration);
 
   static bool Create(std::size_t stack_size, Delegate *delegate, Handle *handle);
-  static bool CreateWithType(std::size_t stack_size,
-                             Delegate *delegate,
-                             Handle *handle,
-                             ThreadType thread_type);
+  static bool CreateWithType(std::size_t stack_size, Delegate *delegate, Handle *handle, ThreadType thread_type);
   static bool Join(Handle *handle);
   static bool Detach(Handle *handle);
 

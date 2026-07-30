@@ -13,6 +13,7 @@ TEST(Base64Test, EncodeKnownVectors) {
     const char *plain;
     const char *encoded;
   };
+
   const Case cases[] = {
       {"", ""},
       {"f", "Zg=="},
@@ -26,8 +27,7 @@ TEST(Base64Test, EncodeKnownVectors) {
     const size_t in_len = std::strlen(c.plain);
     std::vector<char> out(nei_base64_encoded_length(in_len));
     size_t out_len = 0U;
-    ASSERT_EQ(nei_base64_encode(
-                  reinterpret_cast<const uint8_t *>(c.plain), in_len, out.data(), out.size(), &out_len),
+    ASSERT_EQ(nei_base64_encode(reinterpret_cast<const uint8_t *>(c.plain), in_len, out.data(), out.size(), &out_len),
               NEI_BASE64_OK);
     ASSERT_EQ(out_len, std::strlen(c.encoded));
     EXPECT_EQ(std::string(out.data(), out_len), std::string(c.encoded));
@@ -39,6 +39,7 @@ TEST(Base64Test, DecodeKnownVectors) {
     const char *encoded;
     const char *plain;
   };
+
   const Case cases[] = {
       {"", ""},
       {"Zg==", "f"},

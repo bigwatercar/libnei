@@ -12,7 +12,10 @@ namespace nei {
 class NEI_API SequenceToken {
 public:
   constexpr SequenceToken() noexcept = default;
-  explicit constexpr SequenceToken(std::uint64_t value) noexcept : value_(value) {}
+
+  explicit constexpr SequenceToken(std::uint64_t value) noexcept
+      : value_(value) {
+  }
 
   static SequenceToken Create();
 

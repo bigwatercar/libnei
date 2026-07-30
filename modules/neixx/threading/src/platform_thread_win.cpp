@@ -56,7 +56,9 @@ bool SetCurrentThreadNameLegacy(const std::string &name) {
   } info{0x1000, name.c_str(), static_cast<DWORD>(-1), 0};
 
   __try {
-    ::RaiseException(0x406D1388, 0, static_cast<DWORD>(sizeof(info) / sizeof(ULONG_PTR)),
+    ::RaiseException(0x406D1388,
+                     0,
+                     static_cast<DWORD>(sizeof(info) / sizeof(ULONG_PTR)),
                      reinterpret_cast<const ULONG_PTR *>(&info));
   } __except (EXCEPTION_EXECUTE_HANDLER) {
   }
@@ -112,8 +114,7 @@ void PlatformThread::Sleep(TimeDelta duration) {
     ::QueryPerformanceFrequency(&freq);
     ::QueryPerformanceCounter(&start);
 
-    const int64_t target_ticks =
-        start.QuadPart + (duration.InMicroseconds() * freq.QuadPart) / 1'000'000LL;
+    const int64_t target_ticks = start.QuadPart + (duration.InMicroseconds() * freq.QuadPart) / 1'000'000LL;
 
     ::Sleep(1);
 
@@ -143,13 +144,8 @@ bool PlatformThread::CreateWithType(std::size_t stack_size,
   start_state->delegate = delegate;
   start_state->thread_type = thread_type;
   unsigned thread_id = 0;
-  const uintptr_t native_handle = _beginthreadex(
-      nullptr,
-      static_cast<unsigned>(stack_size),
-      &ThreadEntry,
-      start_state.get(),
-      0,
-      &thread_id);
+  const uintptr_t native_handle =
+      _beginthreadex(nullptr, static_cast<unsigned>(stack_size), &ThreadEntry, start_state.get(), 0, &thread_id);
   if (native_handle == 0) {
     return false;
   }
@@ -172,8 +168,7 @@ bool PlatformThread::Join(Handle *handle) {
 
   // Self-join is a guaranteed deadlock (the thread would wait on itself).
   // Crash immediately with a clear message rather than hanging forever.
-  CHECK_NE_MSG(::GetThreadId(handle->impl_->native_handle), ::GetCurrentThreadId(),
-               "self-join would cause deadlock");
+  CHECK_NE_MSG(::GetThreadId(handle->impl_->native_handle), ::GetCurrentThreadId(), "self-join would cause deadlock");
 
   (void)::WaitForSingleObject(handle->impl_->native_handle, INFINITE);
   (void)::CloseHandle(handle->impl_->native_handle);
@@ -196,7 +191,7 @@ void PlatformThread::SetCurrentThreadName(const std::string &name) {
   if (fn != nullptr) {
     std::u16string utf16_name = UTF8ToUTF16(name);
     if (!utf16_name.empty()) {
-      (void)fn(::GetCurrentThread(), reinterpret_cast<const wchar_t*>(utf16_name.c_str()));
+      (void)fn(::GetCurrentThread(), reinterpret_cast<const wchar_t *>(utf16_name.c_str()));
       return;
     }
   }
@@ -206,15 +201,15 @@ void PlatformThread::SetCurrentThreadName(const std::string &name) {
 bool PlatformThread::SetCurrentThreadType(ThreadType thread_type) {
   int priority = THREAD_PRIORITY_NORMAL;
   switch (thread_type) {
-    case ThreadType::BACKGROUND:
-      priority = THREAD_PRIORITY_BELOW_NORMAL;
-      break;
-    case ThreadType::DEFAULT:
-      priority = THREAD_PRIORITY_NORMAL;
-      break;
-    case ThreadType::REALTIME_AUDIO:
-      priority = THREAD_PRIORITY_HIGHEST;
-      break;
+  case ThreadType::BACKGROUND:
+    priority = THREAD_PRIORITY_BELOW_NORMAL;
+    break;
+  case ThreadType::DEFAULT:
+    priority = THREAD_PRIORITY_NORMAL;
+    break;
+  case ThreadType::REALTIME_AUDIO:
+    priority = THREAD_PRIORITY_HIGHEST;
+    break;
   }
   return ::SetThreadPriority(::GetCurrentThread(), priority) != 0;
 }

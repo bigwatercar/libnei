@@ -13,17 +13,18 @@ namespace nei {
 namespace {
 
 class CurrentProbeDelegate final : public MessagePump::Delegate {
- public:
-  explicit CurrentProbeDelegate(MessagePumpForIO* pump) : pump_(pump) {}
+public:
+  explicit CurrentProbeDelegate(MessagePumpForIO *pump)
+      : pump_(pump) {
+  }
 
   bool DoWork() override {
-    observed_non_null_.store(MessagePumpForIO::Current() != nullptr,
-                             std::memory_order_release);
+    observed_non_null_.store(MessagePumpForIO::Current() != nullptr, std::memory_order_release);
     pump_->Quit();
     return true;
   }
 
-  bool DoDelayedWork(NextWorkInfo* next_work_info) override {
+  bool DoDelayedWork(NextWorkInfo *next_work_info) override {
     if (next_work_info != nullptr) {
       next_work_info->next_run_time = NextWorkInfo::kNoScheduledRunTime;
     }
@@ -38,8 +39,8 @@ class CurrentProbeDelegate final : public MessagePump::Delegate {
     return observed_non_null_.load(std::memory_order_acquire);
   }
 
- private:
-  MessagePumpForIO* pump_ = nullptr;
+private:
+  MessagePumpForIO *pump_ = nullptr;
   std::atomic<bool> observed_non_null_{false};
 };
 
@@ -92,12 +93,11 @@ TEST(MessagePumpForIOStressTest, ManyCrossThreadPostTasksAllExecute) {
     // Pump may be slow under emulation (WSL/Valgrind); keep waiting.
   }
 
-  EXPECT_TRUE(signaled) << "Only " << executed.load() << " / "
-                        << kTaskCount << " tasks executed before timeout";
+  EXPECT_TRUE(signaled) << "Only " << executed.load() << " / " << kTaskCount << " tasks executed before timeout";
   EXPECT_EQ(executed.load(), kTaskCount);
 
   io_thread.Stop();
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

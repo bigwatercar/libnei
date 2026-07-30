@@ -74,7 +74,7 @@ namespace nei {
 //
 template <typename T>
 class NoDestructor {
- public:
+public:
   // -----------------------------------------------------------------------
   // Construction  --  完美转发任意构造参数
   // -----------------------------------------------------------------------
@@ -87,7 +87,7 @@ class NoDestructor {
   //   - 移动语义:    NoDestructor<T> obj(std::move(existing));
   //
   template <typename... Args>
-  explicit NoDestructor(Args&&... args) {
+  explicit NoDestructor(Args &&...args) {
     // Placement-new onto the aligned raw storage.
     // Uses parenthesized syntax () rather than braced {} to match Chromium
     // behaviour and the majority of construction scenarios.
@@ -109,28 +109,43 @@ class NoDestructor {
   // NoDestructor 持有原地构造的对象，拷贝/移动在语义上无意义。如果确实需要
   // 转移所有权，说明不应该使用 NoDestructor --  -- 考虑 std::unique_ptr 或
   // Singleton 容器。
-  NoDestructor(const NoDestructor&) = delete;
-  NoDestructor& operator=(const NoDestructor&) = delete;
-  NoDestructor(NoDestructor&&) = delete;
-  NoDestructor& operator=(NoDestructor&&) = delete;
+  NoDestructor(const NoDestructor &) = delete;
+  NoDestructor &operator=(const NoDestructor &) = delete;
+  NoDestructor(NoDestructor &&) = delete;
+  NoDestructor &operator=(NoDestructor &&) = delete;
 
   // -----------------------------------------------------------------------
   // 访问器
   // -----------------------------------------------------------------------
 
   // 指针语法访问，类似智能指针。
-  T* operator->() { return ptr(); }
-  const T* operator->() const { return ptr(); }
+  T *operator->() {
+    return ptr();
+  }
+
+  const T *operator->() const {
+    return ptr();
+  }
 
   // 引用语法访问。
-  T& operator*() { return *ptr(); }
-  const T& operator*() const { return *ptr(); }
+  T &operator*() {
+    return *ptr();
+  }
+
+  const T &operator*() const {
+    return *ptr();
+  }
 
   // 显式 getter（偏好显式 API 时使用）。
-  T* get() { return ptr(); }
-  const T* get() const { return ptr(); }
+  T *get() {
+    return ptr();
+  }
 
- private:
+  const T *get() const {
+    return ptr();
+  }
+
+private:
   // 返回指向已构造 T 的指针。
   //
   // 使用 std::launder 满足 C++17 严格别名规则：
@@ -138,11 +153,12 @@ class NoDestructor {
   //   不 launder 的情况下编译器可能基于"unsigned char 不能别名 T"
   //   做出错误优化（实践中极少触发但标准要求）。Chromium 实现同样
   //   使用 std::launder。
-  T* ptr() {
-    return std::launder(reinterpret_cast<T*>(storage_));
+  T *ptr() {
+    return std::launder(reinterpret_cast<T *>(storage_));
   }
-  const T* ptr() const {
-    return std::launder(reinterpret_cast<const T*>(storage_));
+
+  const T *ptr() const {
+    return std::launder(reinterpret_cast<const T *>(storage_));
   }
 
   // 对齐到 T 的原始字节存储。
@@ -150,6 +166,6 @@ class NoDestructor {
   alignas(T) unsigned char storage_[sizeof(T)];
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_COMMON_NO_DESTRUCTOR_H_
+#endif // NEIXX_COMMON_NO_DESTRUCTOR_H_

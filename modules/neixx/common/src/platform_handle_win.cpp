@@ -23,27 +23,33 @@ namespace nei {
 // ===========================================================================
 
 class PlatformHandle::Impl final {
- public:
+public:
   using ValidFn = bool (*)(HANDLE);
   using CloseFn = void (*)(HANDLE);
 
   Impl()
-      : handle_(DefaultHandleTraits::NullValue()),
-        valid_fn_(&DefaultHandleTraits::IsValid),
-        close_fn_(&DefaultHandleTraits::Close) {}
+      : handle_(DefaultHandleTraits::NullValue())
+      , valid_fn_(&DefaultHandleTraits::IsValid)
+      , close_fn_(&DefaultHandleTraits::Close) {
+  }
 
   Impl(HANDLE handle, ValidFn valid_fn, CloseFn close_fn, HANDLE null_value)
-      : handle_(handle),
-        valid_fn_(valid_fn),
-        close_fn_(close_fn),
-        null_value_(null_value) {}
+      : handle_(handle)
+      , valid_fn_(valid_fn)
+      , close_fn_(close_fn)
+      , null_value_(null_value) {
+  }
 
-  ~Impl() { Close(); }
+  ~Impl() {
+    Close();
+  }
 
-  Impl(const Impl&) = delete;
-  Impl& operator=(const Impl&) = delete;
+  Impl(const Impl &) = delete;
+  Impl &operator=(const Impl &) = delete;
 
-  bool is_valid() const { return valid_fn_(handle_); }
+  bool is_valid() const {
+    return valid_fn_(handle_);
+  }
 
   HANDLE Release() {
     HANDLE h = handle_;
@@ -51,7 +57,9 @@ class PlatformHandle::Impl final {
     return h;
   }
 
-  HANDLE Get() const { return handle_; }
+  HANDLE Get() const {
+    return handle_;
+  }
 
   void Close() {
     if (is_valid()) {
@@ -60,7 +68,7 @@ class PlatformHandle::Impl final {
     }
   }
 
- private:
+private:
   HANDLE handle_ = DefaultHandleTraits::NullValue();
   ValidFn valid_fn_ = &DefaultHandleTraits::IsValid;
   CloseFn close_fn_ = &DefaultHandleTraits::Close;
@@ -69,16 +77,18 @@ class PlatformHandle::Impl final {
 
 // ---- Public forwarding ---------------------------------------------------
 
-PlatformHandle::PlatformHandle() : impl_(std::make_unique<Impl>()) {}
+PlatformHandle::PlatformHandle()
+    : impl_(std::make_unique<Impl>()) {
+}
 
 PlatformHandle::~PlatformHandle() = default;
 
-PlatformHandle::PlatformHandle(PlatformHandle&& other) noexcept
+PlatformHandle::PlatformHandle(PlatformHandle &&other) noexcept
     : impl_(std::move(other.impl_)) {
   other.impl_ = std::make_unique<Impl>();
 }
 
-PlatformHandle& PlatformHandle::operator=(PlatformHandle&& other) noexcept {
+PlatformHandle &PlatformHandle::operator=(PlatformHandle &&other) noexcept {
   if (this != &other) {
     impl_ = std::move(other.impl_);
     other.impl_ = std::make_unique<Impl>();
@@ -86,7 +96,9 @@ PlatformHandle& PlatformHandle::operator=(PlatformHandle&& other) noexcept {
   return *this;
 }
 
-bool PlatformHandle::is_valid() const { return impl_->is_valid(); }
+bool PlatformHandle::is_valid() const {
+  return impl_->is_valid();
+}
 
 int PlatformHandle::ReleaseAsFd() {
   // ReleaseAsFd() is POSIX-only.
@@ -94,8 +106,8 @@ int PlatformHandle::ReleaseAsFd() {
   return -1;
 }
 
-void* PlatformHandle::ReleaseAsHandle() {
-  return static_cast<void*>(impl_->Release());
+void *PlatformHandle::ReleaseAsHandle() {
+  return static_cast<void *>(impl_->Release());
 }
 
 int PlatformHandle::GetFd() const {
@@ -104,8 +116,8 @@ int PlatformHandle::GetFd() const {
   return -1;
 }
 
-void* PlatformHandle::GetHandle() const {
-  return static_cast<void*>(impl_->Get());
+void *PlatformHandle::GetHandle() const {
+  return static_cast<void *>(impl_->Get());
 }
 
 // ===========================================================================
@@ -121,27 +133,25 @@ void* PlatformHandle::GetHandle() const {
 // a new trait requires adding an explicit instantiation here.
 
 template <typename WinHandleTraits>
-PlatformHandle PlatformHandle::FromNativeHandle(void* handle) {
+PlatformHandle PlatformHandle::FromNativeHandle(void *handle) {
   PlatformHandle ph;
-  ph.impl_.reset(new Impl(static_cast<HANDLE>(handle),
-                          &WinHandleTraits::IsValid,
-                          &WinHandleTraits::Close,
-                          WinHandleTraits::NullValue()));
+  ph.impl_.reset(new Impl(
+      static_cast<HANDLE>(handle), &WinHandleTraits::IsValid, &WinHandleTraits::Close, WinHandleTraits::NullValue()));
   return ph;
 }
 
 #if defined(NEI_EXPORTS)
 // MSVC requires __declspec(dllexport) on explicit instantiations of
 // member function templates so they are visible outside the DLL.
-template __declspec(dllexport) PlatformHandle PlatformHandle::FromNativeHandle<DefaultHandleTraits>(void* handle);
-template __declspec(dllexport) PlatformHandle PlatformHandle::FromNativeHandle<NullHandleTraits>(void* handle);
-template __declspec(dllexport) PlatformHandle PlatformHandle::FromNativeHandle<PseudoHandleTraits>(void* handle);
+template __declspec(dllexport) PlatformHandle PlatformHandle::FromNativeHandle<DefaultHandleTraits>(void *handle);
+template __declspec(dllexport) PlatformHandle PlatformHandle::FromNativeHandle<NullHandleTraits>(void *handle);
+template __declspec(dllexport) PlatformHandle PlatformHandle::FromNativeHandle<PseudoHandleTraits>(void *handle);
 #else
-template PlatformHandle PlatformHandle::FromNativeHandle<DefaultHandleTraits>(void* handle);
-template PlatformHandle PlatformHandle::FromNativeHandle<NullHandleTraits>(void* handle);
-template PlatformHandle PlatformHandle::FromNativeHandle<PseudoHandleTraits>(void* handle);
+template PlatformHandle PlatformHandle::FromNativeHandle<DefaultHandleTraits>(void *handle);
+template PlatformHandle PlatformHandle::FromNativeHandle<NullHandleTraits>(void *handle);
+template PlatformHandle PlatformHandle::FromNativeHandle<PseudoHandleTraits>(void *handle);
 #endif
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // defined(_WIN32)
+#endif // defined(_WIN32)

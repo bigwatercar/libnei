@@ -30,8 +30,13 @@ namespace nei {
 // 后台残存线程访问的普通单例。
 template <typename T>
 struct DefaultSingletonTraits {
-  static T* New() { return new T(); }
-  static void Delete(T* x) { delete x; }
+  static T *New() {
+    return new T();
+  }
+
+  static void Delete(T *x) {
+    delete x;
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -46,10 +51,12 @@ struct DefaultSingletonTraits {
 // 可以提供模板特化版本，在 Delete() 中调用 PurgeMemory() 等清理方法。
 template <typename T>
 struct LeakySingletonTraits {
-  static T* New() { return new T(); }
+  static T *New() {
+    return new T();
+  }
 
   // 故意留空：不 delete 实例本身。外部特化可覆盖此行为。
-  static void Delete(T* /*x*/) {
+  static void Delete(T * /*x*/) {
     // Leaky trait intentionally leaks the instance memory to prevent
     // Crash-on-Shutdown when residue background threads access it late.
     // The OS reclaims the shell's virtual memory at process exit.
@@ -82,17 +89,17 @@ struct LeakySingletonTraits {
 //
 template <typename T, typename Traits = DefaultSingletonTraits<T>>
 class Singleton {
- public:
-  Singleton(const Singleton&) = delete;
-  Singleton& operator=(const Singleton&) = delete;
+public:
+  Singleton(const Singleton &) = delete;
+  Singleton &operator=(const Singleton &) = delete;
 
   // 返回全局唯一实例。
   //
   // 首次调用触发懒初始化（线程安全）；后续调用直接返回已发布指针。
-  static T* GetInstance() {
+  static T *GetInstance() {
     // Fast path: acquire barrier ensures we see all stores from the
     // constructing thread (including the fully-constructed T object).
-    T* instance = instance_.load(std::memory_order_acquire);
+    T *instance = instance_.load(std::memory_order_acquire);
 
     if (instance == nullptr) {
       std::lock_guard<std::mutex> lock(lock_);
@@ -107,7 +114,7 @@ class Singleton {
         // The callback captures nothing -- it accesses instance_ directly,
         // which is a static member and doesn't need capture.
         bool registered = AtExitManager::RegisterCallback([] {
-          T* to_delete = instance_.load(std::memory_order_relaxed);
+          T *to_delete = instance_.load(std::memory_order_relaxed);
           if (to_delete) {
             Traits::Delete(to_delete);
           }
@@ -130,20 +137,20 @@ class Singleton {
     return instance;
   }
 
- private:
+private:
   // Per-instantiation singleton state.
   // Each <T, Traits> pair gets its own instance_ and lock_.
-  static std::atomic<T*> instance_;
+  static std::atomic<T *> instance_;
   static std::mutex lock_;
 };
 
 // Out-of-line static member definitions.
 template <typename T, typename Traits>
-std::atomic<T*> Singleton<T, Traits>::instance_{nullptr};
+std::atomic<T *> Singleton<T, Traits>::instance_{nullptr};
 
 template <typename T, typename Traits>
 std::mutex Singleton<T, Traits>::lock_;
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_COMMON_SINGLETON_H_
+#endif // NEIXX_COMMON_SINGLETON_H_

@@ -25,15 +25,15 @@ namespace nei {
 namespace {
 
 class FakeAsyncInputStream final : public AsyncInputStream {
- public:
+public:
   struct State {
     scoped_refptr<TaskRunner> io_runner;
     scoped_refptr<TaskRunner> logic_runner;
     std::string payload;
     bool succeed = true;
     std::chrono::milliseconds delay{0};
-    WaitableEvent* invoked_event = nullptr;
-    WaitableEvent* logic_barrier_event = nullptr;
+    WaitableEvent *invoked_event = nullptr;
+    WaitableEvent *logic_barrier_event = nullptr;
   };
 
   FakeAsyncInputStream(scoped_refptr<TaskRunner> io_runner,
@@ -41,8 +41,8 @@ class FakeAsyncInputStream final : public AsyncInputStream {
                        std::string payload,
                        bool succeed,
                        std::chrono::milliseconds delay,
-                       WaitableEvent* invoked_event,
-                       WaitableEvent* logic_barrier_event) {
+                       WaitableEvent *invoked_event,
+                       WaitableEvent *logic_barrier_event) {
     state_ = std::make_shared<State>();
     state_->io_runner = std::move(io_runner);
     state_->logic_runner = std::move(logic_runner);
@@ -53,9 +53,7 @@ class FakeAsyncInputStream final : public AsyncInputStream {
     state_->logic_barrier_event = logic_barrier_event;
   }
 
-  void ReadAsync(scoped_refptr<IOBuffer> buf,
-                 std::size_t buf_len,
-                 IOReadCallback callback) override {
+  void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback) override {
     auto state = state_;
     state->io_runner->PostDelayedTask(
         FROM_HERE,
@@ -72,30 +70,28 @@ class FakeAsyncInputStream final : public AsyncInputStream {
             state->invoked_event->Signal();
           }
           if (state->logic_runner && state->logic_barrier_event != nullptr) {
-            state->logic_runner->PostTask(FROM_HERE,
-                                    [barrier = state->logic_barrier_event]() {
-                                      barrier->Signal();
-                                    });
+            state->logic_runner->PostTask(FROM_HERE, [barrier = state->logic_barrier_event]() { barrier->Signal(); });
           }
         },
         TimeDelta::FromMilliseconds(state->delay.count()));
   }
 
-  void Close() override {}
+  void Close() override {
+  }
 
- private:
+private:
   std::shared_ptr<State> state_;
 };
 
 class FakeAsyncOutputStream final : public AsyncOutputStream {
- public:
+public:
   struct State {
     scoped_refptr<TaskRunner> io_runner;
     scoped_refptr<TaskRunner> logic_runner;
     bool succeed = true;
     std::chrono::milliseconds delay{0};
-    WaitableEvent* invoked_event = nullptr;
-    WaitableEvent* logic_barrier_event = nullptr;
+    WaitableEvent *invoked_event = nullptr;
+    WaitableEvent *logic_barrier_event = nullptr;
     mutable std::mutex lock;
     std::string written_payload;
   };
@@ -104,8 +100,8 @@ class FakeAsyncOutputStream final : public AsyncOutputStream {
                         scoped_refptr<TaskRunner> logic_runner,
                         bool succeed,
                         std::chrono::milliseconds delay,
-                        WaitableEvent* invoked_event,
-                        WaitableEvent* logic_barrier_event) {
+                        WaitableEvent *invoked_event,
+                        WaitableEvent *logic_barrier_event) {
     state_ = std::make_shared<State>();
     state_->io_runner = std::move(io_runner);
     state_->logic_runner = std::move(logic_runner);
@@ -115,16 +111,14 @@ class FakeAsyncOutputStream final : public AsyncOutputStream {
     state_->logic_barrier_event = logic_barrier_event;
   }
 
-  void WriteAsync(scoped_refptr<IOBuffer> buf,
-                  std::size_t buf_len,
-                  IOWriteCallback callback) override {
+  void WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOWriteCallback callback) override {
     auto state = state_;
     state->io_runner->PostDelayedTask(
         FROM_HERE,
         [state, buf = std::move(buf), buf_len, callback = std::move(callback)]() mutable {
           if (state->succeed) {
             std::lock_guard<std::mutex> guard(state->lock);
-            state->written_payload.append(reinterpret_cast<const char*>(buf->data()), buf_len);
+            state->written_payload.append(reinterpret_cast<const char *>(buf->data()), buf_len);
             callback(true, buf_len);
           } else {
             callback(false, 0u);
@@ -133,23 +127,21 @@ class FakeAsyncOutputStream final : public AsyncOutputStream {
             state->invoked_event->Signal();
           }
           if (state->logic_runner && state->logic_barrier_event != nullptr) {
-            state->logic_runner->PostTask(FROM_HERE,
-                                    [barrier = state->logic_barrier_event]() {
-                                      barrier->Signal();
-                                    });
+            state->logic_runner->PostTask(FROM_HERE, [barrier = state->logic_barrier_event]() { barrier->Signal(); });
           }
         },
         TimeDelta::FromMilliseconds(state->delay.count()));
   }
 
-  void Close() override {}
+  void Close() override {
+  }
 
   std::string written_payload() const {
     std::lock_guard<std::mutex> guard(state_->lock);
     return state_->written_payload;
   }
 
- private:
+private:
   std::shared_ptr<State> state_;
 };
 
@@ -174,20 +166,23 @@ TEST(StreamReaderWriterTest, ReadStringReturnsPayloadOnLogicSequence) {
     struct ReadStringState {
       FakeAsyncInputStream input;
       StreamReader reader;
-      explicit ReadStringState(scoped_refptr<TaskRunner> io_runner,
-                               scoped_refptr<TaskRunner> logic_runner)
-          : input(std::move(io_runner), std::move(logic_runner), "hello-reader",
-                  true, std::chrono::milliseconds(1), nullptr, nullptr),
-            reader(&input) {}
+      explicit ReadStringState(scoped_refptr<TaskRunner> io_runner, scoped_refptr<TaskRunner> logic_runner)
+          : input(std::move(io_runner),
+                  std::move(logic_runner),
+                  "hello-reader",
+                  true,
+                  std::chrono::milliseconds(1),
+                  nullptr,
+                  nullptr)
+          , reader(&input) {
+      }
     };
 
     auto state = std::make_shared<ReadStringState>(io_runner, logic_runner);
     const auto logic_tid = PlatformThread::CurrentId();
 
-    state->reader.ReadString(64, [state, &ok, &done, logic_tid](bool success,
-                                                                std::string&& data) {
-      ok.store(success && data == "hello-reader" &&
-                   PlatformThread::CurrentId() == logic_tid,
+    state->reader.ReadString(64, [state, &ok, &done, logic_tid](bool success, std::string &&data) {
+      ok.store(success && data == "hello-reader" && PlatformThread::CurrentId() == logic_tid,
                std::memory_order_release);
       done.Signal();
     });
@@ -222,17 +217,21 @@ TEST(StreamReaderWriterTest, ReadBytesReturnsVectorPayload) {
     struct ReadBytesState {
       FakeAsyncInputStream input;
       StreamReader reader;
-      explicit ReadBytesState(scoped_refptr<TaskRunner> io_runner,
-                              scoped_refptr<TaskRunner> logic_runner)
-          : input(std::move(io_runner), std::move(logic_runner), "ABCDEF", true,
-                  std::chrono::milliseconds(1), nullptr, nullptr),
-            reader(&input) {}
+      explicit ReadBytesState(scoped_refptr<TaskRunner> io_runner, scoped_refptr<TaskRunner> logic_runner)
+          : input(std::move(io_runner),
+                  std::move(logic_runner),
+                  "ABCDEF",
+                  true,
+                  std::chrono::milliseconds(1),
+                  nullptr,
+                  nullptr)
+          , reader(&input) {
+      }
     };
 
     auto state = std::make_shared<ReadBytesState>(io_runner, logic_runner);
 
-    state->reader.ReadBytes(6, [state, &ok, &done](bool success,
-                                                   std::vector<std::uint8_t>&& data) {
+    state->reader.ReadBytes(6, [state, &ok, &done](bool success, std::vector<std::uint8_t> &&data) {
       const std::string text(data.begin(), data.end());
       ok.store(success && text == "ABCDEF", std::memory_order_release);
       done.Signal();
@@ -268,20 +267,16 @@ TEST(StreamReaderWriterTest, WriteStringCopiesPayloadAndReportsBytes) {
     struct WriteState {
       FakeAsyncOutputStream output;
       StreamWriter writer;
-      explicit WriteState(scoped_refptr<TaskRunner> io_runner,
-                          scoped_refptr<TaskRunner> logic_runner)
-          : output(std::move(io_runner), std::move(logic_runner), true,
-                   std::chrono::milliseconds(1), nullptr, nullptr),
-            writer(&output) {}
+      explicit WriteState(scoped_refptr<TaskRunner> io_runner, scoped_refptr<TaskRunner> logic_runner)
+          : output(std::move(io_runner), std::move(logic_runner), true, std::chrono::milliseconds(1), nullptr, nullptr)
+          , writer(&output) {
+      }
     };
 
     auto state = std::make_shared<WriteState>(io_runner, logic_runner);
 
-    state->writer.WriteString("writer-payload",
-                              [state, &ok, &done](bool success,
-                                                  std::size_t bytes_written) {
-      ok.store(success && bytes_written == 14 &&
-                   state->output.written_payload() == "writer-payload",
+    state->writer.WriteString("writer-payload", [state, &ok, &done](bool success, std::size_t bytes_written) {
+      ok.store(success && bytes_written == 14 && state->output.written_payload() == "writer-payload",
                std::memory_order_release);
       done.Signal();
     });
@@ -314,13 +309,10 @@ TEST(StreamReaderWriterTest, StreamReaderDestructionDropsLateCallback) {
   std::atomic<int> callback_count{0};
 
   const bool posted = logic_runner->PostTask(FROM_HERE, [&]() {
-    FakeAsyncInputStream input(io_runner, logic_runner, "drop-me", true,
-                               std::chrono::milliseconds(10), &io_invoked,
-                               &logic_barrier);
+    FakeAsyncInputStream input(
+        io_runner, logic_runner, "drop-me", true, std::chrono::milliseconds(10), &io_invoked, &logic_barrier);
     auto reader = std::make_unique<StreamReader>(&input);
-    reader->ReadString(32, [&](bool, std::string&&) {
-      callback_count.fetch_add(1, std::memory_order_acq_rel);
-    });
+    reader->ReadString(32, [&](bool, std::string &&) { callback_count.fetch_add(1, std::memory_order_acq_rel); });
     reader.reset();
   });
   ASSERT_TRUE(posted);
@@ -352,13 +344,11 @@ TEST(StreamReaderWriterTest, StreamWriterDestructionDropsLateCallback) {
   std::atomic<int> callback_count{0};
 
   const bool posted = logic_runner->PostTask(FROM_HERE, [&]() {
-    FakeAsyncOutputStream output(io_runner, logic_runner, true,
-                                 std::chrono::milliseconds(10), &io_invoked,
-                                 &logic_barrier);
+    FakeAsyncOutputStream output(
+        io_runner, logic_runner, true, std::chrono::milliseconds(10), &io_invoked, &logic_barrier);
     auto writer = std::make_unique<StreamWriter>(&output);
-    writer->WriteString("drop-callback", [&](bool, std::size_t) {
-      callback_count.fetch_add(1, std::memory_order_acq_rel);
-    });
+    writer->WriteString("drop-callback",
+                        [&](bool, std::size_t) { callback_count.fetch_add(1, std::memory_order_acq_rel); });
     writer.reset();
   });
   ASSERT_TRUE(posted);
@@ -392,17 +382,21 @@ TEST(StreamReaderWriterTest, ReadStringReturnsFailureWhenStreamFails) {
     struct ReadStringFailState {
       FakeAsyncInputStream input;
       StreamReader reader;
-      explicit ReadStringFailState(scoped_refptr<TaskRunner> io_runner,
-                                   scoped_refptr<TaskRunner> logic_runner)
-          : input(std::move(io_runner), std::move(logic_runner), "ignored",
-                  false, std::chrono::milliseconds(1), nullptr, nullptr),
-            reader(&input) {}
+      explicit ReadStringFailState(scoped_refptr<TaskRunner> io_runner, scoped_refptr<TaskRunner> logic_runner)
+          : input(std::move(io_runner),
+                  std::move(logic_runner),
+                  "ignored",
+                  false,
+                  std::chrono::milliseconds(1),
+                  nullptr,
+                  nullptr)
+          , reader(&input) {
+      }
     };
 
     auto state = std::make_shared<ReadStringFailState>(io_runner, logic_runner);
 
-    state->reader.ReadString(64, [state, &ok, &done](bool success,
-                                                     std::string&& data) {
+    state->reader.ReadString(64, [state, &ok, &done](bool success, std::string &&data) {
       ok.store(!success && data.empty(), std::memory_order_release);
       done.Signal();
     });
@@ -437,17 +431,21 @@ TEST(StreamReaderWriterTest, ReadBytesReturnsFailureWhenStreamFails) {
     struct ReadBytesFailState {
       FakeAsyncInputStream input;
       StreamReader reader;
-      explicit ReadBytesFailState(scoped_refptr<TaskRunner> io_runner,
-                                  scoped_refptr<TaskRunner> logic_runner)
-          : input(std::move(io_runner), std::move(logic_runner), "ignored",
-                  false, std::chrono::milliseconds(1), nullptr, nullptr),
-            reader(&input) {}
+      explicit ReadBytesFailState(scoped_refptr<TaskRunner> io_runner, scoped_refptr<TaskRunner> logic_runner)
+          : input(std::move(io_runner),
+                  std::move(logic_runner),
+                  "ignored",
+                  false,
+                  std::chrono::milliseconds(1),
+                  nullptr,
+                  nullptr)
+          , reader(&input) {
+      }
     };
 
     auto state = std::make_shared<ReadBytesFailState>(io_runner, logic_runner);
 
-    state->reader.ReadBytes(32, [state, &ok, &done](bool success,
-                                                    std::vector<std::uint8_t>&& data) {
+    state->reader.ReadBytes(32, [state, &ok, &done](bool success, std::vector<std::uint8_t> &&data) {
       ok.store(!success && data.empty(), std::memory_order_release);
       done.Signal();
     });
@@ -482,18 +480,15 @@ TEST(StreamReaderWriterTest, WriteStringReturnsFailureWhenStreamFails) {
     struct WriteFailState {
       FakeAsyncOutputStream output;
       StreamWriter writer;
-      explicit WriteFailState(scoped_refptr<TaskRunner> io_runner,
-                              scoped_refptr<TaskRunner> logic_runner)
-          : output(std::move(io_runner), std::move(logic_runner), false,
-                   std::chrono::milliseconds(1), nullptr, nullptr),
-            writer(&output) {}
+      explicit WriteFailState(scoped_refptr<TaskRunner> io_runner, scoped_refptr<TaskRunner> logic_runner)
+          : output(std::move(io_runner), std::move(logic_runner), false, std::chrono::milliseconds(1), nullptr, nullptr)
+          , writer(&output) {
+      }
     };
 
     auto state = std::make_shared<WriteFailState>(io_runner, logic_runner);
 
-    state->writer.WriteString("attempt",
-                              [state, &ok, &done](bool success,
-                                                  std::size_t bytes_written) {
+    state->writer.WriteString("attempt", [state, &ok, &done](bool success, std::size_t bytes_written) {
       ok.store(!success && bytes_written == 0, std::memory_order_release);
       done.Signal();
     });
@@ -507,5 +502,5 @@ TEST(StreamReaderWriterTest, WriteStringReturnsFailureWhenStreamFails) {
   io_thread.Stop();
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

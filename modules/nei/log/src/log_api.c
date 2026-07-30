@@ -46,7 +46,7 @@ static volatile sig_atomic_t s_in_crash_handler = 0;
 #if defined(_WIN32)
 
 /* Forward declarations for the Windows crash-handler helpers. */
-static int  _nei_log_win_printf(char *out, size_t out_cap, const char *fmt, ...);
+static int _nei_log_win_printf(char *out, size_t out_cap, const char *fmt, ...);
 static void _nei_log_format_windows_stack_line(char *out, size_t out_cap, unsigned frame_index, void *frame);
 static LONG WINAPI _nei_log_unhandled_exception_filter(PEXCEPTION_POINTERS ex_info);
 

@@ -38,17 +38,24 @@
 namespace {
 
 class IoThread {
- public:
-  explicit IoThread(const std::string& name) {
+public:
+  explicit IoThread(const std::string &name) {
     nei::Thread::Options opts;
     opts.message_pump_type = nei::MessagePumpType::IO;
     thread_ = std::make_unique<nei::Thread>(name);
     thread_->StartWithOptions(opts);
     runner_ = thread_->GetTaskRunner();
   }
-  ~IoThread() { thread_->Stop(); }
-  nei::scoped_refptr<nei::TaskRunner> runner() const { return runner_; }
- private:
+
+  ~IoThread() {
+    thread_->Stop();
+  }
+
+  nei::scoped_refptr<nei::TaskRunner> runner() const {
+    return runner_;
+  }
+
+private:
   std::unique_ptr<nei::Thread> thread_;
   nei::scoped_refptr<nei::TaskRunner> runner_;
 };
@@ -59,7 +66,7 @@ struct State {
   std::atomic<bool> response_received{false};
 };
 
-void RunDemo(const std::string& host, uint16_t port) {
+void RunDemo(const std::string &host, uint16_t port) {
   std::cout << "=== Resolve & Connect Demo ===" << std::endl;
   std::cout << "Host: " << host << "  Port: " << port << std::endl;
   std::cout << std::endl;
@@ -73,18 +80,17 @@ void RunDemo(const std::string& host, uint16_t port) {
 
   resolver.Resolve(
       host,
-      [host, port, io_runner, state](const nei::net::AddressList& addresses) {
+      [host, port, io_runner, state](const nei::net::AddressList &addresses) {
         if (addresses.empty()) {
           std::cerr << "ERROR: no addresses resolved" << std::endl;
           state->done.Signal();
           return;
         }
-        const nei::net::IPEndPoint& ep = addresses.front();
+        const nei::net::IPEndPoint &ep = addresses.front();
         std::cout << "[1] Resolved: " << ep.ToString() << std::endl;
 
         nei::net::IPEndPoint target(ep.address(), port);
-        std::cout << "[2] Connecting to " << target.ToString() << " ..."
-                  << std::endl;
+        std::cout << "[2] Connecting to " << target.ToString() << " ..." << std::endl;
 
         auto client = std::make_shared<nei::net::TCPClientSocket>();
         client->Connect(
@@ -99,61 +105,51 @@ void RunDemo(const std::string& host, uint16_t port) {
               std::cout << "[2] Connected!" << std::endl;
 
               // ---- Step 3: Send HTTP GET request ----
-              std::string request =
-                  "GET /generate_204 HTTP/1.1\r\n"
-                  "Host: " + host + "\r\n"
-                  "Connection: close\r\n"
-                  "\r\n";
+              std::string request = "GET /generate_204 HTTP/1.1\r\n"
+                                    "Host: "
+                                    + host
+                                    + "\r\n"
+                                      "Connection: close\r\n"
+                                      "\r\n";
 
-              auto write_buf =
-                  nei::MakeRefCounted<nei::IOBufferWithSize>(request.size());
+              auto write_buf = nei::MakeRefCounted<nei::IOBufferWithSize>(request.size());
               std::memcpy(write_buf->data(), request.data(), request.size());
 
-              std::cout << "[3] Sending HTTP GET /generate_204 ..."
-                        << std::endl;
+              std::cout << "[3] Sending HTTP GET /generate_204 ..." << std::endl;
 
-              client->WriteAsync(
-                  write_buf, request.size(),
-                  [client, state](bool ws, std::size_t /*n*/) {
-                    if (!ws) {
-                      std::cerr << "ERROR: write failed" << std::endl;
-                      state->done.Signal();
-                      return;
-                    }
-                    std::cout << "[3] Request sent." << std::endl;
+              client->WriteAsync(write_buf, request.size(), [client, state](bool ws, std::size_t /*n*/) {
+                if (!ws) {
+                  std::cerr << "ERROR: write failed" << std::endl;
+                  state->done.Signal();
+                  return;
+                }
+                std::cout << "[3] Request sent." << std::endl;
 
-                    // ---- Step 4: Read HTTP response ----
-                    auto read_buf =
-                        nei::MakeRefCounted<nei::IOBufferWithSize>(4096);
-                    std::cout << "[4] Reading response ..." << std::endl;
+                // ---- Step 4: Read HTTP response ----
+                auto read_buf = nei::MakeRefCounted<nei::IOBufferWithSize>(4096);
+                std::cout << "[4] Reading response ..." << std::endl;
 
-                    client->ReadAsync(
-                        read_buf, 4096,
-                        [client, read_buf, state](bool rs, std::size_t n) {
-                          if (!rs && n == 0) {
-                            std::cout << "[4] Server closed connection."
-                                      << std::endl;
-                            state->done.Signal();
-                            return;
-                          }
-                          if (!rs) {
-                            std::cerr << "ERROR: read failed" << std::endl;
-                            state->done.Signal();
-                            return;
-                          }
+                client->ReadAsync(read_buf, 4096, [client, read_buf, state](bool rs, std::size_t n) {
+                  if (!rs && n == 0) {
+                    std::cout << "[4] Server closed connection." << std::endl;
+                    state->done.Signal();
+                    return;
+                  }
+                  if (!rs) {
+                    std::cerr << "ERROR: read failed" << std::endl;
+                    state->done.Signal();
+                    return;
+                  }
 
-                          state->response_received.store(true);
-                          std::cout << "[4] Received " << n << " bytes:"
-                                    << std::endl;
-                          std::cout.write(
-                              reinterpret_cast<const char*>(read_buf->data()),
-                              static_cast<std::streamsize>(n));
-                          std::cout << std::endl;
+                  state->response_received.store(true);
+                  std::cout << "[4] Received " << n << " bytes:" << std::endl;
+                  std::cout.write(reinterpret_cast<const char *>(read_buf->data()), static_cast<std::streamsize>(n));
+                  std::cout << std::endl;
 
-                          client->Close();
-                          state->done.Signal();
-                        });
-                  });
+                  client->Close();
+                  state->done.Signal();
+                });
+              });
             },
             io_runner);
       },
@@ -167,29 +163,28 @@ void RunDemo(const std::string& host, uint16_t port) {
 
   std::cout << std::endl;
   std::cout << "=== Result ===" << std::endl;
-  std::cout << "  Connected:  " << (state->connected.load() ? "YES" : "NO")
-            << std::endl;
-  std::cout << "  Response:   "
-            << (state->response_received.load() ? "YES" : "NO") << std::endl;
+  std::cout << "  Connected:  " << (state->connected.load() ? "YES" : "NO") << std::endl;
+  std::cout << "  Response:   " << (state->response_received.load() ? "YES" : "NO") << std::endl;
   if (state->connected.load())
     std::cout << std::endl << "Demo completed successfully." << std::endl;
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   // AtExitManager must be the first stack object in main()  --  it ensures
   // cleanup callbacks run in reverse order of registration.
   nei::AtExitManager at_exit;
 
   std::string host = "www.gstatic.com";
   uint16_t port = 80;
-  if (argc > 1) host = argv[1];
-  if (argc > 2) port = static_cast<uint16_t>(std::atoi(argv[2]));
+  if (argc > 1)
+    host = argv[1];
+  if (argc > 2)
+    port = static_cast<uint16_t>(std::atoi(argv[2]));
 
   // HostResolver needs a background thread pool for blocking DNS lookups.
-  nei::ThreadPoolInstance::CreateAndStart(
-      nei::ThreadPoolInstance::InitParams{});
+  nei::ThreadPoolInstance::CreateAndStart(nei::ThreadPoolInstance::InitParams{});
 
   RunDemo(host, port);
 

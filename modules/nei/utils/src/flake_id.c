@@ -86,7 +86,7 @@ uint64_t nei_flake_next_id(void) {
     s_tls.last_ms = 0ULL;
     s_tls.sequence = 0U;
     s_tls.initialized = 1U;
-    nei_time_qpc_ensure_anchor();  /* once per process, idempotent */
+    nei_time_qpc_ensure_anchor(); /* once per process, idempotent */
   }
 
   now_ms = nei_flake_now_ms();

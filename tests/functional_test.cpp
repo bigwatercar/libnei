@@ -48,10 +48,7 @@ TEST(CancelableCallbackTest, ManualCancelSkipsExecution) {
   std::atomic<bool> ran{false};
 
   nei::CancelableOnceClosure cancelable(nei::BindOnce(
-      [](std::atomic<bool> &ran_inner) {
-        ran_inner.store(true, std::memory_order_release);
-      },
-      std::ref(ran)));
+      [](std::atomic<bool> &ran_inner) { ran_inner.store(true, std::memory_order_release); }, std::ref(ran)));
 
   nei::OnceCallback<void()> wrapped = cancelable.callback();
   cancelable.Cancel();
@@ -124,7 +121,8 @@ TEST(TaskCallbackTest, RepeatingCallbackIsCopyable) {
 
 TEST(TaskCallbackTest, RepeatingCallbackSupportsReferenceBinding) {
   int value = 5;
-  nei::RepeatingCallback<void()> cb = nei::BindRepeating([](int &target, int delta) { target += delta; }, std::ref(value), 4);
+  nei::RepeatingCallback<void()> cb =
+      nei::BindRepeating([](int &target, int delta) { target += delta; }, std::ref(value), 4);
 
   cb.Run();
   cb.Run();

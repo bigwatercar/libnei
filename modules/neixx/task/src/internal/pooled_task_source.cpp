@@ -6,11 +6,12 @@
 namespace nei {
 namespace internal {
 
-PooledTaskSource::PooledTaskSource() {}
+PooledTaskSource::PooledTaskSource() {
+}
 
 PooledTaskSource::~PooledTaskSource() = default;
 
-std::size_t PooledTaskSource::GetShardIndex(TaskQueue* queue) const {
+std::size_t PooledTaskSource::GetShardIndex(TaskQueue *queue) const {
   if (queue == nullptr) {
     return 0;
   }
@@ -18,13 +19,13 @@ std::size_t PooledTaskSource::GetShardIndex(TaskQueue* queue) const {
   return (reinterpret_cast<std::uintptr_t>(queue) >> 4) % kShardCount;
 }
 
-void PooledTaskSource::RegisterTaskQueue(TaskQueue* queue) {
+void PooledTaskSource::RegisterTaskQueue(TaskQueue *queue) {
   if (queue == nullptr) {
     return;
   }
 
   std::size_t shard_index = GetShardIndex(queue);
-  Shard& shard = shards_[shard_index];
+  Shard &shard = shards_[shard_index];
 
   AutoLock lock(shard.lock);
   if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
@@ -35,13 +36,12 @@ void PooledTaskSource::RegisterTaskQueue(TaskQueue* queue) {
   (void)shard.states.emplace(queue, QueueState());
 }
 
-TaskQueue* PooledTaskSource::GetNextTaskQueue() {
+TaskQueue *PooledTaskSource::GetNextTaskQueue() {
   bool timed_out = false;
   return GetNextTaskQueueTimed(TimeDelta{}, timed_out);
 }
 
-TaskQueue* PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout,
-                                                   bool& timed_out) {
+TaskQueue *PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout, bool &timed_out) {
   timed_out = false;
   const bool has_timeout = timeout.is_positive();
   // Compute the absolute deadline once, outside the retry loop, so that
@@ -49,13 +49,12 @@ TaskQueue* PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout,
   const TimeTicks deadline = has_timeout ? TimeTicks::Now() + timeout : TimeTicks();
 
   for (;;) {
-    const std::uint64_t observed_generation =
-        wake_generation_.load(std::memory_order_acquire);
+    const std::uint64_t observed_generation = wake_generation_.load(std::memory_order_acquire);
 
     // Scan all shards without holding wait_lock_ to avoid lock-order inversion
     // between the shard locks and the wait condvar lock.
     for (std::size_t i = 0; i < kShardCount; ++i) {
-      Shard& shard = shards_[i];
+      Shard &shard = shards_[i];
       AutoLock lock(shard.lock);
 
       if (is_shutdown_.load(std::memory_order_acquire)) {
@@ -74,7 +73,7 @@ TaskQueue* PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout,
           continue;
         }
 
-        QueueState& state = it->second;
+        QueueState &state = it->second;
         if (!state.queued) {
           continue;
         }
@@ -107,32 +106,31 @@ TaskQueue* PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout,
           const TaskQueue::RunStatus status = entry.queue->WillRunTask();
 
           switch (status) {
-            case TaskQueue::RunStatus::kDisallowed:
-              // Shutdown or max-concurrency reached.  Discard this
-              // heap entry and scan for the next ready queue.
-              continue;
+          case TaskQueue::RunStatus::kDisallowed:
+            // Shutdown or max-concurrency reached.  Discard this
+            // heap entry and scan for the next ready queue.
+            continue;
 
-            case TaskQueue::RunStatus::kAllowedNotSaturated: {
-              // Slot reserved but more remain.  Re-push so other
-              // workers can also reserve slots — but only if the
-              // queue still contains work to avoid heap-churning
-              // an already-drained queue.
-              if (entry.queue->HasImmediateWork()) {
-                QueueEntry re_entry = entry;
-                re_entry.order =
-                    enqueue_order_.fetch_add(1, std::memory_order_relaxed);
-                shard.heap.push(re_entry);
-                state.queued = true;
-                NotifyWorkAvailable();
-              }
-              return entry.queue;
+          case TaskQueue::RunStatus::kAllowedNotSaturated: {
+            // Slot reserved but more remain.  Re-push so other
+            // workers can also reserve slots — but only if the
+            // queue still contains work to avoid heap-churning
+            // an already-drained queue.
+            if (entry.queue->HasImmediateWork()) {
+              QueueEntry re_entry = entry;
+              re_entry.order = enqueue_order_.fetch_add(1, std::memory_order_relaxed);
+              shard.heap.push(re_entry);
+              state.queued = true;
+              NotifyWorkAvailable();
             }
+            return entry.queue;
+          }
 
-            case TaskQueue::RunStatus::kAllowedSaturated:
-              // Last slot reserved.  Do NOT re-push; the queue is now
-              // saturated.  DidProcessTask() will re-enqueue it when
-              // a slot frees up.
-              return entry.queue;
+          case TaskQueue::RunStatus::kAllowedSaturated:
+            // Last slot reserved.  Do NOT re-push; the queue is now
+            // saturated.  DidProcessTask() will re-enqueue it when
+            // a slot frees up.
+            return entry.queue;
           }
         }
 
@@ -148,8 +146,8 @@ TaskQueue* PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout,
       return nullptr;
     }
 
-    while (!is_shutdown_.load(std::memory_order_acquire) &&
-           wake_generation_.load(std::memory_order_acquire) == observed_generation) {
+    while (!is_shutdown_.load(std::memory_order_acquire)
+           && wake_generation_.load(std::memory_order_acquire) == observed_generation) {
       if (has_timeout) {
         const TimeDelta remaining = deadline - TimeTicks::Now();
         if (!remaining.is_positive()) {
@@ -157,8 +155,7 @@ TaskQueue* PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout,
           return nullptr;
         }
         // Clamp to at least 1 ms to avoid busy-spinning on sub-ms remainders.
-        const auto wait_ms =
-            std::max<std::int64_t>(1, remaining.InMilliseconds());
+        const auto wait_ms = std::max<std::int64_t>(1, remaining.InMilliseconds());
         wait_cv_.TimedWait(std::chrono::milliseconds(wait_ms));
       } else {
         wait_cv_.Wait();
@@ -167,7 +164,7 @@ TaskQueue* PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout,
   }
 }
 
-bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue* queue) {
+bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue *queue) {
   if (queue == nullptr) {
     return false;
   }
@@ -177,7 +174,7 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue* queue) {
   }
 
   std::size_t shard_index = GetShardIndex(queue);
-  Shard& shard = shards_[shard_index];
+  Shard &shard = shards_[shard_index];
 
   bool enqueued = false;
   {
@@ -191,7 +188,7 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue* queue) {
       return false;
     }
 
-    QueueState& state = it->second;
+    QueueState &state = it->second;
 
     // Parallel queues: ensure the queue is in the heap if it has work,
     // then notify workers so they pick it up.
@@ -228,7 +225,7 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue* queue) {
   return enqueued;
 }
 
-bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(TaskQueue* queue, const TimeTicks& now) {
+bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(TaskQueue *queue, const TimeTicks &now) {
   if (queue == nullptr) {
     return false;
   }
@@ -238,7 +235,7 @@ bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(TaskQueue* queue, const Time
   }
 
   std::size_t shard_index = GetShardIndex(queue);
-  Shard& shard = shards_[shard_index];
+  Shard &shard = shards_[shard_index];
 
   bool enqueued = false;
   {
@@ -252,7 +249,7 @@ bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(TaskQueue* queue, const Time
       return false;
     }
 
-    QueueState& state = it->second;
+    QueueState &state = it->second;
     if (state.in_flight) {
       state.reenqueue_requested = true;
       return false;
@@ -274,13 +271,13 @@ bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(TaskQueue* queue, const Time
   return enqueued;
 }
 
-void PooledTaskSource::OnTaskQueueProcessed(TaskQueue* queue) {
+void PooledTaskSource::OnTaskQueueProcessed(TaskQueue *queue) {
   if (queue == nullptr) {
     return;
   }
 
   std::size_t shard_index = GetShardIndex(queue);
-  Shard& shard = shards_[shard_index];
+  Shard &shard = shards_[shard_index];
 
   bool needs_signal = false;
   {
@@ -290,7 +287,7 @@ void PooledTaskSource::OnTaskQueueProcessed(TaskQueue* queue) {
       return;
     }
 
-    QueueState& state = it->second;
+    QueueState &state = it->second;
 
     if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
       state.queued = false;
@@ -348,15 +345,15 @@ void PooledTaskSource::Shutdown() {
   wait_cv_.Broadcast();
 }
 
-bool PooledTaskSource::EnqueueLocked(TaskQueue* queue, std::size_t shard_index) {
-  Shard& shard = shards_[shard_index];
+bool PooledTaskSource::EnqueueLocked(TaskQueue *queue, std::size_t shard_index) {
+  Shard &shard = shards_[shard_index];
 
   auto it = shard.states.find(queue);
   if (it == shard.states.end()) {
     return false;
   }
 
-  QueueState& state = it->second;
+  QueueState &state = it->second;
   if (state.queued || state.in_flight || is_shutdown_.load(std::memory_order_acquire)) {
     return false;
   }
@@ -379,17 +376,17 @@ void PooledTaskSource::NotifyWorkAvailable() {
   wait_cv_.Signal();
 }
 
-  void PooledTaskSource::NotifyTaskPosted() {
-    total_task_count_.fetch_add(1, std::memory_order_relaxed);
-  }
+void PooledTaskSource::NotifyTaskPosted() {
+  total_task_count_.fetch_add(1, std::memory_order_relaxed);
+}
 
-  void PooledTaskSource::NotifyTaskConsumed() {
-    total_task_count_.fetch_sub(1, std::memory_order_relaxed);
-  }
+void PooledTaskSource::NotifyTaskConsumed() {
+  total_task_count_.fetch_sub(1, std::memory_order_relaxed);
+}
 
-  std::int64_t PooledTaskSource::GetTotalTaskCount() const {
-    return total_task_count_.load(std::memory_order_relaxed);
-  }
+std::int64_t PooledTaskSource::GetTotalTaskCount() const {
+  return total_task_count_.load(std::memory_order_relaxed);
+}
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei

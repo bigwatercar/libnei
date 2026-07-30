@@ -101,8 +101,7 @@ public:
   const SwitchMap &GetSwitches() const;
 
   // Appends a boolean switch (no explicit value).
-  void AppendSwitch(std::string_view name,
-                    DuplicateSwitchPolicy policy = DuplicateSwitchPolicy::kReplaceExisting);
+  void AppendSwitch(std::string_view name, DuplicateSwitchPolicy policy = DuplicateSwitchPolicy::kReplaceExisting);
   // Appends a UTF-8 switch/value pair.
   void AppendSwitchASCII(std::string_view name,
                          std::string_view value,

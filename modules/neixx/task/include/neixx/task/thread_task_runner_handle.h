@@ -23,16 +23,16 @@ class TaskRunner;
 // Note: ThreadTaskRunnerHandle requires an active SequenceManager on the
 // current thread. If no SequenceManager is bound, Get() will return nullptr.
 class NEI_API ThreadTaskRunnerHandle final {
- public:
+public:
   ThreadTaskRunnerHandle() = delete;
 
   // Returns the default TaskRunner for the current thread's SequenceManager.
   // Returns nullptr if no SequenceManager is bound to the current thread.
   static scoped_refptr<TaskRunner> Get();
 
- private:
+private:
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_TASK_THREAD_TASK_RUNNER_HANDLE_H_
+#endif // NEIXX_TASK_THREAD_TASK_RUNNER_HANDLE_H_

@@ -78,7 +78,10 @@ public:
     if (!flag_) {
       flag_ = MakeRefCounted<InternalFlag>();
     }
-    return WeakPtr<T>(ptr_, flag_, bound_thread_, from_here,
+    return WeakPtr<T>(ptr_,
+                      flag_,
+                      bound_thread_,
+                      from_here,
 #if !defined(NDEBUG)
                       factory_created_from_here_
 #else
@@ -177,8 +180,11 @@ private:
   // Constructor with full Location tracking.
   // |created_from_here| records where GetWeakPtr() was called.
   // |factory_from_here| records where the WeakPtrFactory was constructed.
-  WeakPtr(T *ptr, scoped_refptr<InternalFlag> flag, std::thread::id bound_thread,
-          const Location &created_from_here, const Location &factory_from_here)
+  WeakPtr(T *ptr,
+          scoped_refptr<InternalFlag> flag,
+          std::thread::id bound_thread,
+          const Location &created_from_here,
+          const Location &factory_from_here)
       : ptr_(ptr)
       , flag_(std::move(flag))
       , bound_thread_(std::move(bound_thread))
@@ -207,12 +213,8 @@ private:
               "  Factory created at  : %s\n"
               "  Bound thread id     : %lu\n"
               "  Current thread id   : %lu\n",
-              weak_ptr_created_from_here_.is_null()
-                  ? "(unknown)"
-                  : weak_ptr_created_from_here_.ToString().c_str(),
-              factory_created_from_here_.is_null()
-                  ? "(unknown)"
-                  : factory_created_from_here_.ToString().c_str(),
+              weak_ptr_created_from_here_.is_null() ? "(unknown)" : weak_ptr_created_from_here_.ToString().c_str(),
+              factory_created_from_here_.is_null() ? "(unknown)" : factory_created_from_here_.ToString().c_str(),
               static_cast<unsigned long>(std::hash<std::thread::id>{}(bound_thread_)),
               static_cast<unsigned long>(std::hash<std::thread::id>{}(std::this_thread::get_id())));
       fflush(stderr);
@@ -226,16 +228,12 @@ private:
             "invalidated).\n"
             "  WeakPtr obtained at: %s\n"
             "  Factory created at  : %s\n",
-            weak_ptr_created_from_here_.is_null()
-                ? "(unknown)"
-                : weak_ptr_created_from_here_.ToString().c_str(),
-            factory_created_from_here_.is_null()
-                ? "(unknown)"
-                : factory_created_from_here_.ToString().c_str());
+            weak_ptr_created_from_here_.is_null() ? "(unknown)" : weak_ptr_created_from_here_.ToString().c_str(),
+            factory_created_from_here_.is_null() ? "(unknown)" : factory_created_from_here_.ToString().c_str());
     fflush(stderr);
     abort();
   }
-#endif  // !defined(NDEBUG)
+#endif // !defined(NDEBUG)
 
   T *ptr_ = nullptr;
   scoped_refptr<InternalFlag> flag_;

@@ -20,7 +20,7 @@ namespace nei::net {
 
 // Converts a c-ares ares_addrinfo linked list to an AddressList.
 // Returns empty list on nullptr or conversion failure.
-AddressList ConvertAresAddrInfo(const struct ares_addrinfo* result);
+AddressList ConvertAresAddrInfo(const struct ares_addrinfo *result);
 
 // =============================================================================
 // HostResolver::Impl  --  private implementation detail
@@ -41,19 +41,17 @@ AddressList ConvertAresAddrInfo(const struct ares_addrinfo* result);
 // destroyed while a DNS lookup is in flight, the callback becomes
 // a no-op (WeakPtr expired -> query context is silently dropped).
 class HostResolver::Impl {
- public:
+public:
   Impl();
-  explicit Impl(const HostResolverOptions& options);
+  explicit Impl(const HostResolverOptions &options);
   ~Impl();
 
-  Impl(const Impl&) = delete;
-  Impl& operator=(const Impl&) = delete;
+  Impl(const Impl &) = delete;
+  Impl &operator=(const Impl &) = delete;
 
-  bool Resolve(const std::string& host,
-               ResolveCallback callback,
-               scoped_refptr<TaskRunner> target_runner);
+  bool Resolve(const std::string &host, ResolveCallback callback, scoped_refptr<TaskRunner> target_runner);
 
- private:
+private:
   HostResolverOptions options_;
 
   // Must be the last member  --  ensures all WeakPtrs are invalidated before
@@ -61,6 +59,6 @@ class HostResolver::Impl {
   WeakPtrFactory<Impl> weak_factory_;
 };
 
-}  // namespace nei::net
+} // namespace nei::net
 
-#endif  // NEIXX_NET_SRC_HOST_RESOLVER_IMPL_H_
+#endif // NEIXX_NET_SRC_HOST_RESOLVER_IMPL_H_

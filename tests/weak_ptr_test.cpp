@@ -56,7 +56,7 @@ TEST(WeakPtrLocationTest, BackwardCompatibleInvalidate) {
   WeakPtr<int> wp = factory.GetWeakPtr(FROM_HERE);
   EXPECT_TRUE(wp);
 
-  factory.InvalidateWeakPtrs();  // Old API, no FROM_HERE.
+  factory.InvalidateWeakPtrs(); // Old API, no FROM_HERE.
 
   EXPECT_FALSE(wp);
   EXPECT_EQ(wp.get(), nullptr);
@@ -151,7 +151,7 @@ TEST(WeakPtrDeathTest, OperatorStarOnInvalidWeakPtr) {
   // diagnostic (abort).
   EXPECT_DEATH(
       {
-        TestObj& ref = *wp;
+        TestObj &ref = *wp;
         (void)ref;
       },
       "INVALID WeakPtr");
@@ -171,7 +171,7 @@ TEST(WeakPtrDeathTest, OperatorArrowOnValidWeakPtr) {
   EXPECT_EQ((*wp).value, 99);
 }
 
-#endif  // !defined(NDEBUG)
+#endif // !defined(NDEBUG)
 
 // =============================================================================
 // Cross-thread dereference diagnostics
@@ -212,13 +212,13 @@ TEST(WeakPtrTest, CrossThreadOperatorBoolIsSafe) {
   WeakPtr<TestObj> wp = factory.GetWeakPtr(FROM_HERE);
 
   std::thread t([wp]() {
-    EXPECT_TRUE(wp);  // operator bool() is thread-safe.
+    EXPECT_TRUE(wp); // operator bool() is thread-safe.
   });
   t.join();
 
   EXPECT_TRUE(wp);
 }
-#endif  // !defined(NDEBUG)
+#endif // !defined(NDEBUG)
 
 // =============================================================================
 // Zero-overhead in Release
@@ -251,9 +251,10 @@ TEST(WeakPtrSizeTest, ReleaseZeroOverhead) {
 // =============================================================================
 
 struct ThreadSafeObj {};
+
 struct NonThreadSafeObj {};
 
-}  // namespace
+} // namespace
 
 // Mark ThreadSafeObj as allowed for cross-thread dereference.
 template <>
@@ -269,8 +270,8 @@ TEST(WeakPtrThreadSafeTest, OptInAllowsCrossThreadDereference) {
   // Cross-thread dereference should NOT trigger assertion because
   // WeakPtrThreadSafe<ThreadSafeObj> is true_type.
   std::thread t([wp]() {
-    EXPECT_TRUE(wp);      // operator bool()  --  always safe.
-    EXPECT_NE(wp.get(), nullptr);  // get()  --  safe due to opt-in.
+    EXPECT_TRUE(wp);              // operator bool()  --  always safe.
+    EXPECT_NE(wp.get(), nullptr); // get()  --  safe due to opt-in.
   });
   t.join();
 }
@@ -282,13 +283,7 @@ TEST(WeakPtrThreadSafeTest, NonOptInBlocksCrossThreadDereference) {
   WeakPtr<NonThreadSafeObj> wp = factory.GetWeakPtr(FROM_HERE);
 
   // Cross-thread dereference without opt-in must fail.
-  std::thread t([wp]() {
-    EXPECT_DEATH(
-        {
-          wp.get();
-        },
-        "Cross-thread dereference");
-  });
+  std::thread t([wp]() { EXPECT_DEATH({ wp.get(); }, "Cross-thread dereference"); });
   t.join();
 #else
   // Release: no assertion, just verify compilation.
@@ -299,5 +294,5 @@ TEST(WeakPtrThreadSafeTest, NonOptInBlocksCrossThreadDereference) {
 #endif
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

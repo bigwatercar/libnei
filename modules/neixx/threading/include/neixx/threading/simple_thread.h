@@ -39,15 +39,15 @@ class WaitableEvent;
 /// safe to call from any thread.  Run() is called exactly once from the
 /// managed thread.
 class NEI_API SimpleThread : public PlatformThread::Delegate {
- public:
+public:
   /// Options forwarded to PlatformThread::CreateWithType().
   struct Options {
-    std::size_t stack_size = 0;            ///< 0 = OS default
+    std::size_t stack_size = 0; ///< 0 = OS default
     ThreadType thread_type = ThreadType::DEFAULT;
   };
 
   /// Constructs a SimpleThread with a human-readable name (for debuggers).
-  explicit SimpleThread(const std::string& name = std::string());
+  explicit SimpleThread(const std::string &name = std::string());
 
   /// Destroys the SimpleThread.
   ///
@@ -56,10 +56,10 @@ class NEI_API SimpleThread : public PlatformThread::Delegate {
   ~SimpleThread() override;
 
   // Non-copyable, non-movable.
-  SimpleThread(const SimpleThread&) = delete;
-  SimpleThread& operator=(const SimpleThread&) = delete;
-  SimpleThread(SimpleThread&&) = delete;
-  SimpleThread& operator=(SimpleThread&&) = delete;
+  SimpleThread(const SimpleThread &) = delete;
+  SimpleThread &operator=(const SimpleThread &) = delete;
+  SimpleThread(SimpleThread &&) = delete;
+  SimpleThread &operator=(SimpleThread &&) = delete;
 
   // -----------------------------------------------------------------------
   //  Lifecycle
@@ -75,7 +75,7 @@ class NEI_API SimpleThread : public PlatformThread::Delegate {
   /// Starts the thread with explicit options.
   ///
   /// @copydetails Start()
-  void StartWithOptions(const Options& options);
+  void StartWithOptions(const Options &options);
 
   /// Blocks the calling thread until Run() returns.
   ///
@@ -97,17 +97,21 @@ class NEI_API SimpleThread : public PlatformThread::Delegate {
   PlatformThread::PlatformThreadId GetThreadId() const;
 
   /// Returns the thread name supplied at construction.
-  const std::string& name() const { return name_; }
+  const std::string &name() const {
+    return name_;
+  }
 
   /// @copydoc name()
-  const std::string& thread_name() const { return name_; }
+  const std::string &thread_name() const {
+    return name_;
+  }
 
- protected:
+protected:
   /// The entry point executed on the new thread.  Subclasses must override
   /// this.  Run() should eventually return so that Join() can complete.
   virtual void Run() = 0;
 
- private:
+private:
   // PlatformThread::Delegate implementation.
   void ThreadMain() override;
 
@@ -119,11 +123,11 @@ class NEI_API SimpleThread : public PlatformThread::Delegate {
   mutable Lock lock_;
   PlatformThread::Handle handle_;
   PlatformThread::PlatformThreadId thread_id_ = 0;
-  WaitableEvent* start_event_ = nullptr;  // non-owning; valid only during Start
+  WaitableEvent *start_event_ = nullptr; // non-owning; valid only during Start
   bool started_ = false;
   bool joined_ = false;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_THREADING_SIMPLE_THREAD_H_
+#endif // NEIXX_THREADING_SIMPLE_THREAD_H_

@@ -43,22 +43,22 @@ namespace nei {
 // of callers.
 
 class NEI_API BufferInputStream final : public AsyncInputStream {
- public:
+public:
   // Owns a copy of |data|.
   explicit BufferInputStream(std::vector<std::uint8_t> data);
   explicit BufferInputStream(std::string data);
 
   // Borrows |data| without copying.  |data| must outlive this instance.
-  BufferInputStream(const std::uint8_t* data, std::size_t len);
-  BufferInputStream(const char* data, std::size_t len);
+  BufferInputStream(const std::uint8_t *data, std::size_t len);
+  BufferInputStream(const char *data, std::size_t len);
 
   // Borrows an IOBuffer range.  |buf| must outlive this instance.
   BufferInputStream(scoped_refptr<IOBuffer> buf, std::size_t len);
 
   ~BufferInputStream() override;
 
-  BufferInputStream(const BufferInputStream&) = delete;
-  BufferInputStream& operator=(const BufferInputStream&) = delete;
+  BufferInputStream(const BufferInputStream &) = delete;
+  BufferInputStream &operator=(const BufferInputStream &) = delete;
 
   // AsyncInputStream implementation.
   //
@@ -67,9 +67,7 @@ class NEI_API BufferInputStream final : public AsyncInputStream {
   // in memory).
   //
   // success=false, bytes_read=0 signals EOF (cursor at end or closed).
-  void ReadAsync(scoped_refptr<IOBuffer> buf,
-                 std::size_t buf_len,
-                 IOReadCallback callback) override;
+  void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback) override;
 
   void Close() override;
 
@@ -79,13 +77,13 @@ class NEI_API BufferInputStream final : public AsyncInputStream {
   // Returns the number of bytes remaining from the current cursor.
   std::size_t remaining() const;
 
- private:
+private:
   struct Impl;
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   std::unique_ptr<Impl> impl_;
   NEI_SUPPRESS_MSC_WARNING_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_IO_BUFFER_STREAM_H_
+#endif // NEIXX_IO_BUFFER_STREAM_H_

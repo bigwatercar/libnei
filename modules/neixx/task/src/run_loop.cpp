@@ -6,7 +6,8 @@
 
 namespace nei {
 
-RunLoop::RunLoop() : sequence_manager_(SequenceManager::Current()) {
+RunLoop::RunLoop()
+    : sequence_manager_(SequenceManager::Current()) {
   DCHECK(sequence_manager_ != nullptr);
 }
 
@@ -39,4 +40,4 @@ OnceClosure RunLoop::QuitClosure() {
   return BindOnce(&RunLoop::Quit, this);
 }
 
-}  // namespace nei
+} // namespace nei

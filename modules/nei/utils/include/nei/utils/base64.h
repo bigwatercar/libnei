@@ -43,8 +43,7 @@ NEI_API size_t nei_base64_decoded_max_length(size_t input_len);
  * @param out_len Optional output length (without trailing '\0').
  * @return @ref NEI_BASE64_OK on success, otherwise an error code.
  */
-NEI_API int nei_base64_encode(
-    const uint8_t *input, size_t input_len, char *out, size_t out_cap, size_t *out_len);
+NEI_API int nei_base64_encode(const uint8_t *input, size_t input_len, char *out, size_t out_cap, size_t *out_len);
 
 /**
  * @brief Decode RFC 4648 base64 text into raw bytes.
@@ -55,8 +54,7 @@ NEI_API int nei_base64_encode(
  * @param out_len Optional decoded byte length.
  * @return @ref NEI_BASE64_OK on success, otherwise an error code.
  */
-NEI_API int nei_base64_decode(
-    const char *input, size_t input_len, uint8_t *out, size_t out_cap, size_t *out_len);
+NEI_API int nei_base64_decode(const char *input, size_t input_len, uint8_t *out, size_t out_cap, size_t *out_len);
 
 #ifdef __cplusplus
 }

@@ -14,11 +14,9 @@ namespace nei {
 
 class TaskRunner;
 
-class NEI_API ProcessService final
-    : public RefCountedThreadSafe<ProcessService> {
- public:
-  static scoped_refptr<ProcessService> Create(
-      const std::string& thread_name = "process-service-io");
+class NEI_API ProcessService final : public RefCountedThreadSafe<ProcessService> {
+public:
+  static scoped_refptr<ProcessService> Create(const std::string &thread_name = "process-service-io");
   static scoped_refptr<ProcessService> GetDefault();
 
   bool Start();
@@ -26,14 +24,14 @@ class NEI_API ProcessService final
   bool IsOnServiceThread() const;
   scoped_refptr<TaskRunner> GetTaskRunner() const;
 
- private:
-    template <typename T, typename... Args>
-    friend scoped_refptr<T> MakeRefCounted(Args&&... args);
+private:
+  template <typename T, typename... Args>
+  friend scoped_refptr<T> MakeRefCounted(Args &&...args);
   friend class RefCountedThreadSafe<ProcessService>;
 
   class Impl;
 
-  explicit ProcessService(const std::string& thread_name);
+  explicit ProcessService(const std::string &thread_name);
   ~ProcessService();
 
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
@@ -41,6 +39,6 @@ class NEI_API ProcessService final
   NEI_SUPPRESS_MSC_WARNING_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_PROCESS_PROCESS_SERVICE_H_
+#endif // NEIXX_PROCESS_PROCESS_SERVICE_H_

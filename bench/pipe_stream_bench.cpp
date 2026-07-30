@@ -61,37 +61,32 @@ std::string FormatSize(std::size_t bytes) {
 }
 
 #if defined(_WIN32)
-bool CreateAsyncPipePair(nei::PlatformHandle& read_handle,
-                         nei::PlatformHandle& write_handle) {
+bool CreateAsyncPipePair(nei::PlatformHandle &read_handle, nei::PlatformHandle &write_handle) {
   static std::atomic<unsigned long long> pipe_counter{0};
   const DWORD pid = GetCurrentProcessId();
-  const unsigned long long counter =
-      pipe_counter.fetch_add(1, std::memory_order_relaxed);
-  const std::string pipe_name =
-      "\\\\.\\pipe\\nei_pipe_stream_bench_" + std::to_string(pid) + "_" +
-      std::to_string(GetTickCount64()) + "_" + std::to_string(counter);
+  const unsigned long long counter = pipe_counter.fetch_add(1, std::memory_order_relaxed);
+  const std::string pipe_name = "\\\\.\\pipe\\nei_pipe_stream_bench_" + std::to_string(pid) + "_"
+                                + std::to_string(GetTickCount64()) + "_" + std::to_string(counter);
 
-  HANDLE server = CreateNamedPipeA(
-      pipe_name.c_str(),
-      PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
-      PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-      1,
-      0,
-      0,
-      0,
-      nullptr);
+  HANDLE server = CreateNamedPipeA(pipe_name.c_str(),
+                                   PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
+                                   PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                                   1,
+                                   0,
+                                   0,
+                                   0,
+                                   nullptr);
   if (server == INVALID_HANDLE_VALUE) {
     return false;
   }
 
-  HANDLE client = CreateFileA(
-      pipe_name.c_str(),
-      GENERIC_WRITE,
-      0,
-      nullptr,
-      OPEN_EXISTING,
-      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
-      nullptr);
+  HANDLE client = CreateFileA(pipe_name.c_str(),
+                              GENERIC_WRITE,
+                              0,
+                              nullptr,
+                              OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
+                              nullptr);
   if (client == INVALID_HANDLE_VALUE) {
     CloseHandle(server);
     return false;
@@ -105,15 +100,12 @@ bool CreateAsyncPipePair(nei::PlatformHandle& read_handle,
     return false;
   }
 
-  read_handle =
-      nei::PlatformHandle::FromNativeHandle<nei::DefaultHandleTraits>(server);
-  write_handle =
-      nei::PlatformHandle::FromNativeHandle<nei::DefaultHandleTraits>(client);
+  read_handle = nei::PlatformHandle::FromNativeHandle<nei::DefaultHandleTraits>(server);
+  write_handle = nei::PlatformHandle::FromNativeHandle<nei::DefaultHandleTraits>(client);
   return true;
 }
 #else
-bool CreateAsyncPipePair(nei::PlatformHandle& read_handle,
-                         nei::PlatformHandle& write_handle) {
+bool CreateAsyncPipePair(nei::PlatformHandle &read_handle, nei::PlatformHandle &write_handle) {
   int fds[2] = {-1, -1};
   if (pipe(fds) != 0) {
     return false;
@@ -144,19 +136,19 @@ struct PipeBenchState {
   explicit PipeBenchState(nei::scoped_refptr<nei::TaskRunner> runner,
                           std::size_t chunk,
                           std::size_t total,
-                          nei::WaitableEvent* done_event)
-      : io_runner(std::move(runner)),
-        chunk_size(chunk),
-        total_bytes(total),
-        done(done_event) {}
+                          nei::WaitableEvent *done_event)
+      : io_runner(std::move(runner))
+      , chunk_size(chunk)
+      , total_bytes(total)
+      , done(done_event) {
+  }
 
-  void Start(const std::shared_ptr<PipeBenchState>& self,
+  void Start(const std::shared_ptr<PipeBenchState> &self,
              nei::PlatformHandle read_handle,
              nei::PlatformHandle write_handle) {
     input = std::make_shared<nei::PipeInputStream>(io_runner);
     output = std::make_shared<nei::PipeOutputStream>(io_runner);
-    if (!input->BindPlatformHandle(std::move(read_handle)) ||
-        !output->BindPlatformHandle(std::move(write_handle))) {
+    if (!input->BindPlatformHandle(std::move(read_handle)) || !output->BindPlatformHandle(std::move(write_handle))) {
       success.store(false, std::memory_order_release);
       done->Signal();
       return;
@@ -182,7 +174,7 @@ struct PipeBenchState {
     done->Signal();
   }
 
-  static void IssueRead(const std::shared_ptr<PipeBenchState>& self) {
+  static void IssueRead(const std::shared_ptr<PipeBenchState> &self) {
     const std::size_t remaining = self->total_bytes - self->bytes_read;
     if (remaining == 0) {
       self->finished = Clock::now();
@@ -193,37 +185,33 @@ struct PipeBenchState {
 
     const std::size_t read_size = (std::min)(remaining, kReadBufferSize);
     auto read_holder = AcquireBuffer(read_size);
-    self->input->ReadAsync(
-        read_holder.buf, read_size,
-        [self, read_holder](bool ok, std::size_t n) {
-          if (!ok || n == 0) {
-            self->success.store(false, std::memory_order_release);
-            self->CloseAndSignal();
-            return;
-          }
-          self->bytes_read += n;
-          IssueRead(self);
-        });
+    self->input->ReadAsync(read_holder.buf, read_size, [self, read_holder](bool ok, std::size_t n) {
+      if (!ok || n == 0) {
+        self->success.store(false, std::memory_order_release);
+        self->CloseAndSignal();
+        return;
+      }
+      self->bytes_read += n;
+      IssueRead(self);
+    });
   }
 
-  static void IssueWrite(const std::shared_ptr<PipeBenchState>& self) {
+  static void IssueWrite(const std::shared_ptr<PipeBenchState> &self) {
     const std::size_t remaining = self->total_bytes - self->bytes_written;
     if (remaining == 0) {
       return;
     }
 
     const std::size_t write_size = (std::min)(remaining, self->chunk_size);
-    self->output->WriteAsync(
-            self->payload.buf, write_size,
-        [self, write_size](bool ok, std::size_t n) {
-              if (!ok || n == 0) {
-            self->success.store(false, std::memory_order_release);
-            self->CloseAndSignal();
-            return;
-          }
-          self->bytes_written += n;
-          IssueWrite(self);
-        });
+    self->output->WriteAsync(self->payload.buf, write_size, [self, write_size](bool ok, std::size_t n) {
+      if (!ok || n == 0) {
+        self->success.store(false, std::memory_order_release);
+        self->CloseAndSignal();
+        return;
+      }
+      self->bytes_written += n;
+      IssueWrite(self);
+    });
   }
 
   nei::scoped_refptr<nei::TaskRunner> io_runner;
@@ -237,12 +225,11 @@ struct PipeBenchState {
   Clock::time_point started;
   Clock::time_point finished;
   std::atomic<bool> success{false};
-  nei::WaitableEvent* done = nullptr;
+  nei::WaitableEvent *done = nullptr;
 };
 
-BenchResult RunBench(const nei::scoped_refptr<nei::TaskRunner>& io_runner,
-                     std::size_t chunk_size,
-                     std::size_t total_bytes) {
+BenchResult
+RunBench(const nei::scoped_refptr<nei::TaskRunner> &io_runner, std::size_t chunk_size, std::size_t total_bytes) {
   nei::PlatformHandle read_handle;
   nei::PlatformHandle write_handle;
   if (!CreateAsyncPipePair(read_handle, write_handle)) {
@@ -250,17 +237,13 @@ BenchResult RunBench(const nei::scoped_refptr<nei::TaskRunner>& io_runner,
   }
 
   nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
-  auto state = std::make_shared<PipeBenchState>(io_runner, chunk_size, total_bytes,
-                                                &done);
+  auto state = std::make_shared<PipeBenchState>(io_runner, chunk_size, total_bytes, &done);
   io_runner->PostTask(FROM_HERE,
-                      [state, read_handle = std::move(read_handle),
-                       write_handle = std::move(write_handle)]() mutable {
-                        state->Start(state, std::move(read_handle),
-                                     std::move(write_handle));
+                      [state, read_handle = std::move(read_handle), write_handle = std::move(write_handle)]() mutable {
+                        state->Start(state, std::move(read_handle), std::move(write_handle));
                       });
 
-  if (!done.TimedWait(std::chrono::seconds(30)) ||
-      !state->success.load(std::memory_order_acquire)) {
+  if (!done.TimedWait(std::chrono::seconds(30)) || !state->success.load(std::memory_order_acquire)) {
     return {};
   }
 
@@ -268,40 +251,29 @@ BenchResult RunBench(const nei::scoped_refptr<nei::TaskRunner>& io_runner,
   result.chunk_size = chunk_size;
   result.total_bytes = total_bytes;
   result.elapsed_us = static_cast<std::uint64_t>(
-      std::chrono::duration_cast<std::chrono::microseconds>(
-          state->finished - state->started)
-          .count());
+      std::chrono::duration_cast<std::chrono::microseconds>(state->finished - state->started).count());
   const double seconds = static_cast<double>(result.elapsed_us) / 1'000'000.0;
-  result.throughput_mb_s =
-      static_cast<double>(total_bytes) / (1024.0 * 1024.0) / seconds;
-  result.chunks_per_second =
-      static_cast<double>((total_bytes + chunk_size - 1) / chunk_size) / seconds;
+  result.throughput_mb_s = static_cast<double>(total_bytes) / (1024.0 * 1024.0) / seconds;
+  result.chunks_per_second = static_cast<double>((total_bytes + chunk_size - 1) / chunk_size) / seconds;
   return result;
 }
 
 void PrintHeader() {
-  std::cout << std::left << std::setw(12) << "Chunk"
-            << std::setw(14) << "Total"
-            << std::setw(12) << "Time(ms)"
-            << std::setw(14) << "Throughput"
-            << std::setw(16) << "Chunks/s" << std::endl;
+  std::cout << std::left << std::setw(12) << "Chunk" << std::setw(14) << "Total" << std::setw(12) << "Time(ms)"
+            << std::setw(14) << "Throughput" << std::setw(16) << "Chunks/s" << std::endl;
   std::cout << std::string(68, '-') << std::endl;
 }
 
-void PrintRow(const BenchResult& result) {
-    const std::string throughput =
-      (std::to_string(result.throughput_mb_s)).substr(0, 6) + " MB/s";
-    const std::string chunks_per_second =
-      std::to_string(static_cast<std::uint64_t>(result.chunks_per_second));
-  std::cout << std::left << std::setw(12) << FormatSize(result.chunk_size)
-            << std::setw(14) << FormatSize(result.total_bytes)
-            << std::setw(12) << std::fixed << std::setprecision(2)
-            << (static_cast<double>(result.elapsed_us) / 1000.0)
-        << std::setw(14) << throughput
-        << std::setw(16) << chunks_per_second << std::endl;
+void PrintRow(const BenchResult &result) {
+  const std::string throughput = (std::to_string(result.throughput_mb_s)).substr(0, 6) + " MB/s";
+  const std::string chunks_per_second = std::to_string(static_cast<std::uint64_t>(result.chunks_per_second));
+  std::cout << std::left << std::setw(12) << FormatSize(result.chunk_size) << std::setw(14)
+            << FormatSize(result.total_bytes) << std::setw(12) << std::fixed << std::setprecision(2)
+            << (static_cast<double>(result.elapsed_us) / 1000.0) << std::setw(14) << throughput << std::setw(16)
+            << chunks_per_second << std::endl;
 }
 
-std::size_t ParseTotalBytes(int argc, char* argv[]) {
+std::size_t ParseTotalBytes(int argc, char *argv[]) {
   if (argc < 2) {
     return kDefaultTotalBytes;
   }
@@ -312,9 +284,9 @@ std::size_t ParseTotalBytes(int argc, char* argv[]) {
   return static_cast<std::size_t>(total_mb) * 1024 * 1024;
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   nei::AtExitManager at_exit;
 
   const std::size_t total_bytes = ParseTotalBytes(argc, argv);
@@ -334,8 +306,7 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  const nei::scoped_refptr<nei::TaskRunner> io_runner =
-      io_thread.GetTaskRunner();
+  const nei::scoped_refptr<nei::TaskRunner> io_runner = io_thread.GetTaskRunner();
   if (!io_runner) {
     std::cerr << "Failed to acquire IO task runner." << std::endl;
     io_thread.Stop();

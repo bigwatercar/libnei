@@ -40,13 +40,13 @@
 // ── Format backend selection ─────────────────────────────────────────────
 
 #if __has_include(<fmt/format.h>)
-  #include <fmt/format.h>
-  #define NEIXX_LOG_FMT(fmt_str, ...) fmt::format(fmt_str, ##__VA_ARGS__)
+#include <fmt/format.h>
+#define NEIXX_LOG_FMT(fmt_str, ...) fmt::format(fmt_str, ##__VA_ARGS__)
 #elif __cplusplus >= 202002L && __has_include(<format>)
-  #include <format>
-  #define NEIXX_LOG_FMT(fmt_str, ...) std::format(fmt_str, ##__VA_ARGS__)
+#include <format>
+#define NEIXX_LOG_FMT(fmt_str, ...) std::format(fmt_str, ##__VA_ARGS__)
 #else
-  #error "neixx/log/log.h requires either {fmt} (<fmt/format.h>) or C++20 <format>"
+#error "neixx/log/log.h requires either {fmt} (<fmt/format.h>) or C++20 <format>"
 #endif
 
 // ── Macros ────────────────────────────────────────────────────────────────
@@ -62,8 +62,13 @@
 #define NEIXX_LOG(level, fmt_str, ...)                                                                                 \
   do {                                                                                                                 \
     auto _neixx_msg_ = NEIXX_LOG_FMT(fmt_str, ##__VA_ARGS__);                                                          \
-    nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, level, __FILE__, __LINE__, NEI_FUNC,                               \
-                     (_neixx_msg_).data(), (_neixx_msg_).size());                                                       \
+    nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,                                                                    \
+                     level,                                                                                            \
+                     __FILE__,                                                                                         \
+                     __LINE__,                                                                                         \
+                     NEI_FUNC,                                                                                         \
+                     (_neixx_msg_).data(),                                                                             \
+                     (_neixx_msg_).size());                                                                            \
   } while (0)
 
 /**
@@ -90,8 +95,7 @@
 #define NEIXX_LOG_C(config_handle, level, fmt_str, ...)                                                                \
   do {                                                                                                                 \
     auto _neixx_msg_ = NEIXX_LOG_FMT(fmt_str, ##__VA_ARGS__);                                                          \
-    nei_llog_literal(config_handle, level, __FILE__, __LINE__, NEI_FUNC,                                               \
-                     (_neixx_msg_).data(), (_neixx_msg_).size());                                                       \
+    nei_llog_literal(config_handle, level, __FILE__, __LINE__, NEI_FUNC, (_neixx_msg_).data(), (_neixx_msg_).size());  \
   } while (0)
 
 /**
@@ -118,8 +122,13 @@
 #define NEIXX_LOG_V(verbose, fmt_str, ...)                                                                             \
   do {                                                                                                                 \
     auto _neixx_msg_ = NEIXX_LOG_FMT(fmt_str, ##__VA_ARGS__);                                                          \
-    nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, verbose, __FILE__, __LINE__, NEI_FUNC,                             \
-                     (_neixx_msg_).data(), (_neixx_msg_).size());                                                       \
+    nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE,                                                                    \
+                     verbose,                                                                                          \
+                     __FILE__,                                                                                         \
+                     __LINE__,                                                                                         \
+                     NEI_FUNC,                                                                                         \
+                     (_neixx_msg_).data(),                                                                             \
+                     (_neixx_msg_).size());                                                                            \
   } while (0)
 
 /**
@@ -146,8 +155,8 @@
 #define NEIXX_LOG_V_C(config_handle, verbose, fmt_str, ...)                                                            \
   do {                                                                                                                 \
     auto _neixx_msg_ = NEIXX_LOG_FMT(fmt_str, ##__VA_ARGS__);                                                          \
-    nei_vlog_literal(config_handle, verbose, __FILE__, __LINE__, NEI_FUNC,                                             \
-                     (_neixx_msg_).data(), (_neixx_msg_).size());                                                       \
+    nei_vlog_literal(                                                                                                  \
+        config_handle, verbose, __FILE__, __LINE__, NEI_FUNC, (_neixx_msg_).data(), (_neixx_msg_).size());             \
   } while (0)
 
 /**
@@ -167,12 +176,12 @@
 
 #else // NEI_LOG_DISABLE_MACROS
 
-#define NEIXX_LOG(level, fmt_str, ...)            ((void)(level))
+#define NEIXX_LOG(level, fmt_str, ...) ((void)(level))
 #define NEIXX_LOG_IF(condition, level, fmt_str, ...) ((void)(condition))
 #define NEIXX_LOG_C(config_handle, level, fmt_str, ...) ((void)(config_handle), (void)(level))
 #define NEIXX_LOG_C_IF(condition, config_handle, level, fmt_str, ...)                                                  \
   ((void)(condition), (void)(config_handle), (void)(level))
-#define NEIXX_LOG_V(verbose, fmt_str, ...)         ((void)(verbose))
+#define NEIXX_LOG_V(verbose, fmt_str, ...) ((void)(verbose))
 #define NEIXX_LOG_V_IF(condition, verbose, fmt_str, ...) ((void)(condition))
 #define NEIXX_LOG_V_C(config_handle, verbose, fmt_str, ...) ((void)(config_handle), (void)(verbose))
 #define NEIXX_LOG_V_C_IF(condition, config_handle, verbose, fmt_str, ...)                                              \

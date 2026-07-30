@@ -31,7 +31,7 @@ namespace {
 // =============================================================================
 
 class HostResolverTest : public testing::Test {
- protected:
+protected:
   void SetUp() override {
     Thread::Options opts;
     ASSERT_TRUE(test_thread_.StartWithOptions(opts));
@@ -45,8 +45,7 @@ class HostResolverTest : public testing::Test {
 
   // Helper: resolve and block until callback fires, return the result.
   // Uses a WaitableEvent to synchronize.
-  AddressList ResolveAndWait(const std::string& host,
-                              HostResolver* resolver = nullptr) {
+  AddressList ResolveAndWait(const std::string &host, HostResolver *resolver = nullptr) {
     std::unique_ptr<HostResolver> local_resolver;
     if (!resolver) {
       local_resolver = std::make_unique<HostResolver>();
@@ -56,15 +55,15 @@ class HostResolverTest : public testing::Test {
     AddressList result;
     WaitableEvent done(WaitableEvent::ResetPolicy::kManual, false);
 
-    resolver->Resolve(host,
-        [&result, &done](const AddressList& addrs) {
+    resolver->Resolve(
+        host,
+        [&result, &done](const AddressList &addrs) {
           result = addrs;
           done.Signal();
         },
         test_runner_);
 
-    EXPECT_TRUE(done.TimedWait(std::chrono::seconds(10)))
-        << "DNS resolution timed out for host: " << host;
+    EXPECT_TRUE(done.TimedWait(std::chrono::seconds(10))) << "DNS resolution timed out for host: " << host;
     return result;
   }
 
@@ -72,11 +71,13 @@ class HostResolverTest : public testing::Test {
   static bool HasIPv6Connectivity() {
 #if defined(_WIN32)
     SOCKET s = socket(AF_INET6, SOCK_DGRAM, 0);
-    if (s == INVALID_SOCKET) return false;
+    if (s == INVALID_SOCKET)
+      return false;
     closesocket(s);
 #else
     int s = socket(AF_INET6, SOCK_DGRAM, 0);
-    if (s < 0) return false;
+    if (s < 0)
+      return false;
     close(s);
 #endif
     return true;
@@ -104,8 +105,7 @@ TEST_F(HostResolverTest, ResolveEmptyHost) {
 
 TEST_F(HostResolverTest, ResolveInvalidHost) {
   // Non-existent domain should return empty result.
-  AddressList result = ResolveAndWait(
-      "this-domain-does-not-exist-12345.invalid.");
+  AddressList result = ResolveAndWait("this-domain-does-not-exist-12345.invalid.");
   EXPECT_TRUE(result.empty());
 }
 
@@ -133,10 +133,12 @@ TEST_F(HostResolverTest, ResolveDualStack) {
   bool has_ipv4 = false;
   bool has_ipv6 = false;
   for (std::size_t i = 0; i < result.size(); ++i) {
-    if (result[i].address().family() == IPAddress::Family::kIPv4) has_ipv4 = true;
-    if (result[i].address().family() == IPAddress::Family::kIPv6) has_ipv6 = true;
+    if (result[i].address().family() == IPAddress::Family::kIPv4)
+      has_ipv4 = true;
+    if (result[i].address().family() == IPAddress::Family::kIPv6)
+      has_ipv6 = true;
   }
-  (void)has_ipv6;  // IPv6 depends on network setup — may be absent
+  (void)has_ipv6; // IPv6 depends on network setup — may be absent
 
   // At minimum we should get IPv4; IPv6 depends on network setup.
   EXPECT_TRUE(has_ipv4);
@@ -262,16 +264,15 @@ TEST_F(HostResolverTest, CustomDnsServerMixedV4V6) {
 
 TEST_F(HostResolverTest, CustomTimeout) {
   HostResolverOptions opts;
-  opts.timeout_ms = 100;  // Very short timeout
-  opts.tries = 0;         // No retries
+  opts.timeout_ms = 100; // Very short timeout
+  opts.tries = 0;        // No retries
 
   HostResolver resolver(opts);
   // NOTE: With a non-existent domain we cannot distinguish "timed out"
   // from "fast NXDOMAIN response" — both produce an empty result.
   // The primary goal is verifying that the short timeout doesn't crash
   // or hang, which this achieves.
-  AddressList result = ResolveAndWait(
-      "this-domain-does-not-exist-12345.invalid.", &resolver);
+  AddressList result = ResolveAndWait("this-domain-does-not-exist-12345.invalid.", &resolver);
   EXPECT_TRUE(result.empty());
 }
 
@@ -286,11 +287,7 @@ TEST_F(HostResolverTest, DestroyBeforeCallback) {
   auto called = std::make_shared<std::atomic<bool>>(false);
   {
     HostResolver resolver;
-    resolver.Resolve("www.example.com",
-        [called](const AddressList&) {
-          called->store(true);
-        },
-        test_runner_);
+    resolver.Resolve("www.example.com", [called](const AddressList &) { called->store(true); }, test_runner_);
   }
   // The callback should be silently dropped via WeakPtr.
   // If we get here without crashing, the test passes.
@@ -303,8 +300,9 @@ TEST_F(HostResolverTest, CallbackOnCorrectRunner) {
   WaitableEvent done(WaitableEvent::ResetPolicy::kManual, false);
   bool callback_called = false;
 
-  resolver.Resolve("localhost",
-      [&done, &callback_called](const AddressList&) {
+  resolver.Resolve(
+      "localhost",
+      [&done, &callback_called](const AddressList &) {
         callback_called = true;
         done.Signal();
       },
@@ -321,16 +319,16 @@ TEST_F(HostResolverTest, CallbackOnCorrectRunner) {
 TEST_F(HostResolverTest, ResolveMultipleConcurrent) {
   constexpr int kConcurrent = 10;
   std::vector<std::string> hosts = {
-    "localhost",
-    "127.0.0.1",
-    "::1",
-    "one.one.one.one",
-    "dns.google",
-    "www.baidu.com",
-    "8.8.8.8",
-    "1.1.1.1",
-    "223.5.5.5",
-    "119.29.29.29",
+      "localhost",
+      "127.0.0.1",
+      "::1",
+      "one.one.one.one",
+      "dns.google",
+      "www.baidu.com",
+      "8.8.8.8",
+      "1.1.1.1",
+      "223.5.5.5",
+      "119.29.29.29",
   };
 
   std::atomic<int> completed{0};
@@ -338,8 +336,9 @@ TEST_F(HostResolverTest, ResolveMultipleConcurrent) {
   HostResolver resolver;
 
   for (int i = 0; i < kConcurrent; ++i) {
-    resolver.Resolve(hosts[i % hosts.size()],
-        [&completed, &all_done, kConcurrent](const AddressList&) {
+    resolver.Resolve(
+        hosts[i % hosts.size()],
+        [&completed, &all_done, kConcurrent](const AddressList &) {
           if (++completed == kConcurrent) {
             all_done.Signal();
           }
@@ -385,15 +384,26 @@ TEST_F(HostResolverTest, StressConcurrent) {
     // Mix of valid and invalid hosts.
     std::string host;
     switch (i % 5) {
-      case 0: host = "localhost"; break;
-      case 1: host = "one.one.one.one"; break;
-      case 2: host = "127.0.0.1"; break;
-      case 3: host = "8.8.8.8"; break;
-      case 4: host = "this-domain-does-not-exist-12345.invalid."; break;
+    case 0:
+      host = "localhost";
+      break;
+    case 1:
+      host = "one.one.one.one";
+      break;
+    case 2:
+      host = "127.0.0.1";
+      break;
+    case 3:
+      host = "8.8.8.8";
+      break;
+    case 4:
+      host = "this-domain-does-not-exist-12345.invalid.";
+      break;
     }
 
-    resolver.Resolve(host,
-        [&completed, &errors, &all_done, kTotal](const AddressList& result) {
+    resolver.Resolve(
+        host,
+        [&completed, &errors, &all_done, kTotal](const AddressList &result) {
           if (result.empty()) {
             // Invalid domain or timeout  --  expected for some hosts.
           }
@@ -408,5 +418,5 @@ TEST_F(HostResolverTest, StressConcurrent) {
   EXPECT_EQ(completed.load(), kTotal);
 }
 
-}  // namespace
-}  // namespace nei::net
+} // namespace
+} // namespace nei::net

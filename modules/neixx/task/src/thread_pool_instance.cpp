@@ -8,29 +8,29 @@
 namespace nei {
 namespace {
 
-ThreadPoolInstance* g_instance = nullptr;
+ThreadPoolInstance *g_instance = nullptr;
 bool g_shutdown_registered = false;
 
-}  // namespace
+} // namespace
 
 // ---------------------------------------------------------------------------
 // ThreadPoolInstance
 // ---------------------------------------------------------------------------
 
-ThreadPoolInstance::ThreadPoolInstance(const InitParams& params)
-    : pool_(params) {}
+ThreadPoolInstance::ThreadPoolInstance(const InitParams &params)
+    : pool_(params) {
+}
 
 ThreadPoolInstance::~ThreadPoolInstance() = default;
 
 // static
-ThreadPoolInstance* ThreadPoolInstance::Get() {
+ThreadPoolInstance *ThreadPoolInstance::Get() {
   return g_instance;
 }
 
 // static
-void ThreadPoolInstance::CreateAndStart(const InitParams& params) {
-  CHECK_MSG(g_instance == nullptr,
-            "ThreadPoolInstance::CreateAndStart() called twice.");
+void ThreadPoolInstance::CreateAndStart(const InitParams &params) {
+  CHECK_MSG(g_instance == nullptr, "ThreadPoolInstance::CreateAndStart() called twice.");
 
   g_instance = new ThreadPoolInstance(params);
 
@@ -84,14 +84,12 @@ void ThreadPoolInstance::ResetForTesting() {
   g_shutdown_registered = false;
 }
 
-scoped_refptr<TaskRunner> ThreadPoolInstance::CreateSequencedTaskRunner(
-    const TaskTraits& traits) {
+scoped_refptr<TaskRunner> ThreadPoolInstance::CreateSequencedTaskRunner(const TaskTraits &traits) {
   return pool_.CreateSequencedTaskRunner(traits);
 }
 
-scoped_refptr<TaskRunner> ThreadPoolInstance::CreateParallelTaskRunner(
-    const TaskTraits& traits) {
+scoped_refptr<TaskRunner> ThreadPoolInstance::CreateParallelTaskRunner(const TaskTraits &traits) {
   return pool_.CreateParallelTaskRunner(traits);
 }
 
-}  // namespace nei
+} // namespace nei

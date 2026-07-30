@@ -25,8 +25,13 @@ std::string UTF16ToUTF8Impl(std::u16string_view utf16) {
 
 // Public API: always use std::string_view / std::string for UTF-8 to maintain
 // compatibility across C++17 and C++20.
-std::u16string UTF8ToUTF16(std::string_view utf8) { return UTF8ToUTF16Impl(utf8); }
-std::string UTF16ToUTF8(std::u16string_view utf16) { return UTF16ToUTF8Impl(utf16); }
+std::u16string UTF8ToUTF16(std::string_view utf8) {
+  return UTF8ToUTF16Impl(utf8);
+}
+
+std::string UTF16ToUTF8(std::u16string_view utf16) {
+  return UTF16ToUTF8Impl(utf16);
+}
 
 // =============================================================================
 // System codepage (ACP) conversions

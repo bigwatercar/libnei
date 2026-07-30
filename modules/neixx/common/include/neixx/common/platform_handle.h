@@ -37,21 +37,21 @@ struct DefaultHandleTraits;
 struct NullHandleTraits;
 struct PseudoHandleTraits;
 
-#endif  // defined(_WIN32)
+#endif // defined(_WIN32)
 
 // ---------------------------------------------------------------------------
 // PlatformHandle  --  cross-platform, move-only system handle capsule
 // ---------------------------------------------------------------------------
 class NEI_API PlatformHandle final {
- public:
+public:
   PlatformHandle();
   ~PlatformHandle();
 
-  PlatformHandle(const PlatformHandle&) = delete;
-  PlatformHandle& operator=(const PlatformHandle&) = delete;
+  PlatformHandle(const PlatformHandle &) = delete;
+  PlatformHandle &operator=(const PlatformHandle &) = delete;
 
-  PlatformHandle(PlatformHandle&& other) noexcept;
-  PlatformHandle& operator=(PlatformHandle&& other) noexcept;
+  PlatformHandle(PlatformHandle &&other) noexcept;
+  PlatformHandle &operator=(PlatformHandle &&other) noexcept;
 
   bool is_valid() const;
 
@@ -62,7 +62,7 @@ class NEI_API PlatformHandle final {
   // parameter selects validity-check and close behaviour.
   // Defined (with explicit instantiations) in platform_handle_win.cpp.
   template <typename WinHandleTraits>
-  static PlatformHandle FromNativeHandle(void* handle);
+  static PlatformHandle FromNativeHandle(void *handle);
 #else
   static PlatformHandle FromNativeHandle(int fd);
 #endif
@@ -70,20 +70,20 @@ class NEI_API PlatformHandle final {
   // ---- Extraction (transfers ownership to caller) -----------------------
 
   int ReleaseAsFd();       // DCHECK-fails on Windows
-  void* ReleaseAsHandle(); // DCHECK-fails on POSIX
+  void *ReleaseAsHandle(); // DCHECK-fails on POSIX
 
   // ---- Raw access (does NOT transfer ownership) -------------------------
 
   int GetFd() const;       // DCHECK-fails on Windows
-  void* GetHandle() const; // DCHECK-fails on POSIX
+  void *GetHandle() const; // DCHECK-fails on POSIX
 
- private:
+private:
   class Impl;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_COMMON_PLATFORM_HANDLE_H_
+#endif // NEIXX_COMMON_PLATFORM_HANDLE_H_

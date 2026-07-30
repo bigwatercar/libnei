@@ -52,12 +52,13 @@ std::uint64_t GetCurrentThreadId();
 // 仅由 TRACE_EVENT0 宏内部使用。
 // =============================================================================
 class TraceEventScope final {
- public:
-  TraceEventScope(const char* category, const char* name)
-      : category_(category),
-        name_(name),
-        thread_id_(0),  // 惰性获取: 仅在 Trace 开启时调用
-        start_us_(0) {
+public:
+  TraceEventScope(const char *category, const char *name)
+      : category_(category)
+      , name_(name)
+      , thread_id_(0)
+      , // 惰性获取: 仅在 Trace 开启时调用
+      start_us_(0) {
     // 仅在 Trace 开启时获取时间戳和线程 ID
     // (宏的 g_trace_enabled 检查已保证此处只在开启时进入)
     start_us_ = TimeTicks::Now().ToInternalValue();
@@ -69,18 +70,17 @@ class TraceEventScope final {
     const std::int64_t end_us = TimeTicks::Now().ToInternalValue();
     const std::int64_t duration_us = end_us - start_us_;
 
-    TraceLog::GetInstance().AddEvent(
-        TraceEvent{category_, name_, 'X', thread_id_, start_us_, duration_us});
+    TraceLog::GetInstance().AddEvent(TraceEvent{category_, name_, 'X', thread_id_, start_us_, duration_us});
   }
 
-  TraceEventScope(const TraceEventScope&) = delete;
-  TraceEventScope& operator=(const TraceEventScope&) = delete;
+  TraceEventScope(const TraceEventScope &) = delete;
+  TraceEventScope &operator=(const TraceEventScope &) = delete;
 
- private:
-  const char* category_;
-  const char* name_;
+private:
+  const char *category_;
+  const char *name_;
   std::uint64_t thread_id_;
-  std::int64_t  start_us_;
+  std::int64_t start_us_;
 };
 
 // =============================================================================
@@ -92,22 +92,20 @@ class TraceEventScope final {
 // TRACE_EVENT_INSTANT (ph:'I') 宏。
 // =============================================================================
 class TraceEventInstantScope final {
- public:
-  TraceEventInstantScope(const char* category, const char* name, char phase) {
+public:
+  TraceEventInstantScope(const char *category, const char *name, char phase) {
     TraceLog::GetInstance().AddEvent(
-        TraceEvent{category, name, phase,
-                   GetCurrentThreadId(),
-                   TimeTicks::Now().ToInternalValue(), 0});
+        TraceEvent{category, name, phase, GetCurrentThreadId(), TimeTicks::Now().ToInternalValue(), 0});
   }
 
   ~TraceEventInstantScope() = default;
 
-  TraceEventInstantScope(const TraceEventInstantScope&) = delete;
-  TraceEventInstantScope& operator=(const TraceEventInstantScope&) = delete;
+  TraceEventInstantScope(const TraceEventInstantScope &) = delete;
+  TraceEventInstantScope &operator=(const TraceEventInstantScope &) = delete;
 };
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei
 
 // =============================================================================
 // 公开宏定义
@@ -124,53 +122,49 @@ class TraceEventInstantScope final {
 //
 // 线程安全:
 //   写入当前线程的私有 TraceBuffer, 无全局锁竞争。
-#define TRACE_EVENT0(category, name)                                          \
-  if (!::nei::g_trace_enabled.load(std::memory_order_relaxed)) {             \
-  } else                                                                      \
-    ::nei::internal::TraceEventScope __trace_event_scope_##__LINE__(category, \
-                                                                     name)
+#define TRACE_EVENT0(category, name)                                                                                   \
+  if (!::nei::g_trace_enabled.load(std::memory_order_relaxed)) {                                                       \
+  } else                                                                                                               \
+    ::nei::internal::TraceEventScope __trace_event_scope_##__LINE__(category, name)
 
 // TRACE_EVENT_BEGIN(category, name)
 //
 // 记录一个 Begin 事件 (ph: 'B'), 标记异步区间的开始。
 // 与同名的 TRACE_EVENT_END 配对使用。
 // 典型用法: Worker 线程开始、IO 操作开始时调用。
-#define TRACE_EVENT_BEGIN(category, name)                                     \
-  if (!::nei::g_trace_enabled.load(std::memory_order_relaxed)) {             \
-  } else                                                                      \
-    ::nei::internal::TraceEventInstantScope __trace_begin_##__LINE__(        \
-        category, name, 'B')
+#define TRACE_EVENT_BEGIN(category, name)                                                                              \
+  if (!::nei::g_trace_enabled.load(std::memory_order_relaxed)) {                                                       \
+  } else                                                                                                               \
+    ::nei::internal::TraceEventInstantScope __trace_begin_##__LINE__(category, name, 'B')
 
 // TRACE_EVENT_END(category, name)
 //
 // 记录一个 End 事件 (ph: 'E'), 标记异步区间的结束。
 // 与同名的 TRACE_EVENT_BEGIN 配对使用。
-#define TRACE_EVENT_END(category, name)                                       \
-  if (!::nei::g_trace_enabled.load(std::memory_order_relaxed)) {             \
-  } else                                                                      \
-    ::nei::internal::TraceEventInstantScope __trace_end_##__LINE__(          \
-        category, name, 'E')
+#define TRACE_EVENT_END(category, name)                                                                                \
+  if (!::nei::g_trace_enabled.load(std::memory_order_relaxed)) {                                                       \
+  } else                                                                                                               \
+    ::nei::internal::TraceEventInstantScope __trace_end_##__LINE__(category, name, 'E')
 
 // TRACE_EVENT_INSTANT(category, name)
 //
 // 记录一个 Instant 事件 (ph: 'I'), 标记某一时刻的瞬时状态。
 // 典型用法: 标记 Spurious Wakeup、调试断点等。
-#define TRACE_EVENT_INSTANT(category, name)                                   \
-  if (!::nei::g_trace_enabled.load(std::memory_order_relaxed)) {             \
-  } else                                                                      \
-    ::nei::internal::TraceEventInstantScope __trace_instant_##__LINE__(      \
-        category, name, 'I')
+#define TRACE_EVENT_INSTANT(category, name)                                                                            \
+  if (!::nei::g_trace_enabled.load(std::memory_order_relaxed)) {                                                       \
+  } else                                                                                                               \
+    ::nei::internal::TraceEventInstantScope __trace_instant_##__LINE__(category, name, 'I')
 
-#else  // !NEI_ENABLE_TRACE_EVENTS
+#else // !NEI_ENABLE_TRACE_EVENTS
 
 // Trace events compiled out: macros become no-ops.
 // This completely strips all instrumentation from Release builds
 // when the CMake option NEI_ENABLE_TRACE_EVENTS is set to OFF.
-#define TRACE_EVENT0(category, name)          ((void)0)
-#define TRACE_EVENT_BEGIN(category, name)     ((void)0)
-#define TRACE_EVENT_END(category, name)       ((void)0)
-#define TRACE_EVENT_INSTANT(category, name)   ((void)0)
+#define TRACE_EVENT0(category, name) ((void)0)
+#define TRACE_EVENT_BEGIN(category, name) ((void)0)
+#define TRACE_EVENT_END(category, name) ((void)0)
+#define TRACE_EVENT_INSTANT(category, name) ((void)0)
 
-#endif  // NEI_ENABLE_TRACE_EVENTS
+#endif // NEI_ENABLE_TRACE_EVENTS
 
-#endif  // NEIXX_TRACE_EVENT_TRACE_EVENT_H_
+#endif // NEIXX_TRACE_EVENT_TRACE_EVENT_H_

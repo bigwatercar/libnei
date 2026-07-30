@@ -27,10 +27,11 @@ namespace nei {
 //   - callback() 是 const 操作（不加锁），返回的闭包内部自行加锁
 // =============================================================================
 
-class CancelableOnceClosure::Impl
-    : public RefCountedThreadSafe<CancelableOnceClosure::Impl> {
- public:
-  explicit Impl(OnceCallback<void()> task) : task_(std::move(task)) {}
+class CancelableOnceClosure::Impl : public RefCountedThreadSafe<CancelableOnceClosure::Impl> {
+public:
+  explicit Impl(OnceCallback<void()> task)
+      : task_(std::move(task)) {
+  }
 
   // ---------------------------------------------------------------------------
   // Run()  --  执行闭包（若未取消且未执行过）
@@ -95,14 +96,10 @@ class CancelableOnceClosure::Impl
   // ---------------------------------------------------------------------------
   OnceCallback<void()> AsCallback() {
     scoped_refptr<Impl> self(this);
-    return BindOnce(
-        [](scoped_refptr<Impl> impl) {
-          impl->Run();
-        },
-        std::move(self));
+    return BindOnce([](scoped_refptr<Impl> impl) { impl->Run(); }, std::move(self));
   }
 
- private:
+private:
   friend class RefCountedThreadSafe<Impl>;
 
   mutable Lock lock_;
@@ -131,14 +128,12 @@ CancelableOnceClosure::~CancelableOnceClosure() {
   }
 }
 
-CancelableOnceClosure::CancelableOnceClosure(
-    CancelableOnceClosure&& other) noexcept
+CancelableOnceClosure::CancelableOnceClosure(CancelableOnceClosure &&other) noexcept
     : impl_(other.impl_) {
   other.impl_ = nullptr;
 }
 
-CancelableOnceClosure& CancelableOnceClosure::operator=(
-    CancelableOnceClosure&& other) noexcept {
+CancelableOnceClosure &CancelableOnceClosure::operator=(CancelableOnceClosure &&other) noexcept {
   if (this != &other) {
     if (impl_) {
       // Auto-cancel BEFORE releasing: marks cancelled_ so any outstanding
@@ -177,4 +172,4 @@ OnceCallback<void()> CancelableOnceClosure::callback() {
   return impl_->AsCallback();
 }
 
-}  // namespace nei
+} // namespace nei

@@ -23,15 +23,14 @@ namespace nei::net {
 
 UDPSocket::Impl::Impl()
     : weak_factory_(this, FROM_HERE_MEMBER) {
-  DETACH_FROM_THREAD(thread_checker_);  // Lazy-bind on first IO-thread use.
+  DETACH_FROM_THREAD(thread_checker_); // Lazy-bind on first IO-thread use.
 }
 
 UDPSocket::Impl::~Impl() {
   // The Orphan / Close path should have already cleaned up the socket.
   // If Close() still has work to do here, it indicates a lifecycle bug —
   // the shell may have been destroyed without prior Orphan/Close.
-  DCHECK_MSG(closed_.load() || fd_ < 0,
-             "UDPSocket::Impl destroyed without prior Close/Orphan cleanup");
+  DCHECK_MSG(closed_.load() || fd_ < 0, "UDPSocket::Impl destroyed without prior Close/Orphan cleanup");
   Close();
 }
 
@@ -39,8 +38,7 @@ UDPSocket::Impl::~Impl() {
 // Bind
 // =============================================================================
 
-bool UDPSocket::Impl::Bind(const IPEndPoint& local_addr,
-                           scoped_refptr<TaskRunner> io_runner) {
+bool UDPSocket::Impl::Bind(const IPEndPoint &local_addr, scoped_refptr<TaskRunner> io_runner) {
   DCHECK(io_runner);
 
   // Atomic test-and-set prevents double-Bind from concurrent threads.
@@ -54,12 +52,11 @@ bool UDPSocket::Impl::Bind(const IPEndPoint& local_addr,
   return DoBind(local_addr);
 }
 
-bool UDPSocket::Impl::DoBind(const IPEndPoint& local_addr) {
+bool UDPSocket::Impl::DoBind(const IPEndPoint &local_addr) {
   // Refuse to create a socket after Close / Orphan — prevents a handle
   // leak where the fd is created but never registered with epoll (because
   // the IO thread is shutting down).
-  if (closed_.load(std::memory_order_relaxed) ||
-      orphaned_.load(std::memory_order_relaxed)) {
+  if (closed_.load(std::memory_order_relaxed) || orphaned_.load(std::memory_order_relaxed)) {
     return false;
   }
 
@@ -89,7 +86,7 @@ bool UDPSocket::Impl::DoBind(const IPEndPoint& local_addr) {
   int opt = 1;
   setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-  if (bind(fd_, reinterpret_cast<struct ::sockaddr*>(&sa), sa_len) < 0) {
+  if (bind(fd_, reinterpret_cast<struct ::sockaddr *>(&sa), sa_len) < 0) {
     close(fd_);
     fd_ = -1;
     return false;
@@ -104,7 +101,8 @@ bool UDPSocket::Impl::DoBind(const IPEndPoint& local_addr) {
 // =============================================================================
 
 void UDPSocket::Impl::Close() {
-  if (closed_.exchange(true)) return;
+  if (closed_.exchange(true))
+    return;
 
   // Swap pending queues out under lock, then dispatch failure callbacks
   // outside the lock (lock-free dispatch — prevents re-entrant deadlock).
@@ -116,11 +114,11 @@ void UDPSocket::Impl::Close() {
     recvs_to_fail.swap(pending_recvs_);
   }
 
-  for (auto& s : sends_to_fail) {
+  for (auto &s : sends_to_fail) {
     if (s.callback)
       PostSendToResult(std::move(s.callback), false, 0);
   }
-  for (auto& r : recvs_to_fail) {
+  for (auto &r : recvs_to_fail) {
     if (r.callback)
       PostRecvFromResult(std::move(r.callback), false, 0, IPEndPoint());
   }
@@ -129,11 +127,8 @@ void UDPSocket::Impl::Close() {
   // DoCloseCleanup() always executes on the IO thread and is idempotent
   // (it sets closed_ so subsequent calls are no-ops).
   if (io_runner_ && !io_runner_->BelongsToCurrentThread()) {
-    io_runner_->PostTask(
-        FROM_HERE,
-        BindOnce([](scoped_refptr<Impl> self) {
-          self->DoCloseCleanup();
-        }, WrapRefCounted(this)));
+    io_runner_->PostTask(FROM_HERE,
+                         BindOnce([](scoped_refptr<Impl> self) { self->DoCloseCleanup(); }, WrapRefCounted(this)));
   } else {
     DoCloseCleanup();
   }
@@ -168,18 +163,19 @@ void UDPSocket::Impl::DoCloseCleanup() {
     sends_orphaned.swap(pending_sends_);
     recvs_orphaned.swap(pending_recvs_);
   }
-  for (auto& s : sends_orphaned) {
+  for (auto &s : sends_orphaned) {
     if (s.callback)
       PostSendToResult(std::move(s.callback), false, 0);
   }
-  for (auto& r : recvs_orphaned) {
+  for (auto &r : recvs_orphaned) {
     if (r.callback)
       PostRecvFromResult(std::move(r.callback), false, 0, IPEndPoint());
   }
 }
 
 void UDPSocket::Impl::Orphan() {
-  if (orphaned_.exchange(true)) return;
+  if (orphaned_.exchange(true))
+    return;
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -197,11 +193,8 @@ void UDPSocket::Impl::Orphan() {
 
   // StopWatching + close must run on IO thread to avoid racing epoll_wait.
   if (io_runner_ && !io_runner_->BelongsToCurrentThread()) {
-    io_runner_->PostTask(
-        FROM_HERE,
-        BindOnce([](scoped_refptr<Impl> self) {
-          self->DoOrphanCleanup();
-        }, WrapRefCounted(this)));
+    io_runner_->PostTask(FROM_HERE,
+                         BindOnce([](scoped_refptr<Impl> self) { self->DoOrphanCleanup(); }, WrapRefCounted(this)));
   } else {
     DoOrphanCleanup();
   }
@@ -251,21 +244,23 @@ void UDPSocket::Impl::ReleaseSelfHoldIfNeeded() {
 
 void UDPSocket::Impl::SendTo(scoped_refptr<IOBuffer> buf,
                              std::size_t buf_len,
-                             const IPEndPoint& dest,
+                             const IPEndPoint &dest,
                              UDPSocket::SendToCallback callback) {
   DCHECK_MSG(io_runner_, "SendTo: Bind() must be called first");
 
   if (!io_runner_->BelongsToCurrentThread()) {
     io_runner_->PostTask(
         FROM_HERE,
-        BindOnce(
-            [](scoped_refptr<Impl> self, scoped_refptr<IOBuffer> b,
-               std::size_t len, IPEndPoint d,
-               UDPSocket::SendToCallback cb) {
-              self->DoSendTo(std::move(b), len, d, std::move(cb));
-            },
-            WrapRefCounted(this), std::move(buf), buf_len, dest,
-            std::move(callback)));
+        BindOnce([](scoped_refptr<Impl> self,
+                    scoped_refptr<IOBuffer> b,
+                    std::size_t len,
+                    IPEndPoint d,
+                    UDPSocket::SendToCallback cb) { self->DoSendTo(std::move(b), len, d, std::move(cb)); },
+                 WrapRefCounted(this),
+                 std::move(buf),
+                 buf_len,
+                 dest,
+                 std::move(callback)));
     return;
   }
 
@@ -274,7 +269,7 @@ void UDPSocket::Impl::SendTo(scoped_refptr<IOBuffer> buf,
 
 void UDPSocket::Impl::DoSendTo(scoped_refptr<IOBuffer> buf,
                                std::size_t buf_len,
-                               const IPEndPoint& dest,
+                               const IPEndPoint &dest,
                                UDPSocket::SendToCallback callback) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
@@ -307,13 +302,12 @@ void UDPSocket::Impl::DoSendTo(scoped_refptr<IOBuffer> buf,
       pending.dest_addr_len = sa_len;
       pending.callback = std::move(callback);
       pending_sends_.push_back(std::move(pending));
-      return;  // Write watcher already armed from the earlier EAGAIN.
+      return; // Write watcher already armed from the earlier EAGAIN.
     }
   }
 
   // Queue is empty — attempt immediate send.
-  ssize_t n = sendto(fd_, buf->data(), buf_len, MSG_NOSIGNAL,
-                     reinterpret_cast<struct ::sockaddr*>(&sa), sa_len);
+  ssize_t n = sendto(fd_, buf->data(), buf_len, MSG_NOSIGNAL, reinterpret_cast<struct ::sockaddr *>(&sa), sa_len);
   if (n > 0) {
     if (callback) {
       PostSendToResult(std::move(callback), true, static_cast<int>(n));
@@ -345,11 +339,9 @@ void UDPSocket::Impl::DoSendTo(scoped_refptr<IOBuffer> buf,
       pending_sends_.push_back(std::move(pending));
     }
 
-    auto* pump = MessagePumpForIO::Current();
+    auto *pump = MessagePumpForIO::Current();
     DCHECK_MSG(pump, "DoSendTo: pump null — not on IO thread");
-    write_controller_.StartWatching(
-        pump, fd_,
-        MessagePumpForIO::FdWatchController::Mode::WRITE, this);
+    write_controller_.StartWatching(pump, fd_, MessagePumpForIO::FdWatchController::Mode::WRITE, this);
     return;
   }
 
@@ -370,20 +362,19 @@ void UDPSocket::Impl::DoSendTo(scoped_refptr<IOBuffer> buf,
 // RecvFrom
 // =============================================================================
 
-void UDPSocket::Impl::RecvFrom(scoped_refptr<IOBuffer> buf,
-                               std::size_t buf_len,
-                               UDPSocket::RecvFromCallback callback) {
+void UDPSocket::Impl::RecvFrom(scoped_refptr<IOBuffer> buf, std::size_t buf_len, UDPSocket::RecvFromCallback callback) {
   DCHECK_MSG(io_runner_, "RecvFrom: Bind() must be called first");
 
   if (!io_runner_->BelongsToCurrentThread()) {
     io_runner_->PostTask(
         FROM_HERE,
         BindOnce(
-            [](scoped_refptr<Impl> self, scoped_refptr<IOBuffer> b,
-               std::size_t len, UDPSocket::RecvFromCallback cb) {
+            [](scoped_refptr<Impl> self, scoped_refptr<IOBuffer> b, std::size_t len, UDPSocket::RecvFromCallback cb) {
               self->DoRecvFrom(std::move(b), len, std::move(cb));
             },
-            WrapRefCounted(this), std::move(buf), buf_len,
+            WrapRefCounted(this),
+            std::move(buf),
+            buf_len,
             std::move(callback)));
     return;
   }
@@ -420,11 +411,9 @@ void UDPSocket::Impl::DoRecvFrom(scoped_refptr<IOBuffer> buf,
   }
 
   if (should_start_watching) {
-    auto* pump = MessagePumpForIO::Current();
+    auto *pump = MessagePumpForIO::Current();
     DCHECK_MSG(pump, "DoRecvFrom: pump null — not on IO thread");
-    read_controller_.StartWatching(
-        pump, fd_,
-        MessagePumpForIO::FdWatchController::Mode::READ, this);
+    read_controller_.StartWatching(pump, fd_, MessagePumpForIO::FdWatchController::Mode::READ, this);
   }
 }
 
@@ -432,14 +421,12 @@ void UDPSocket::Impl::DoRecvFrom(scoped_refptr<IOBuffer> buf,
 // epoll callbacks — drain loops
 // =============================================================================
 
-void UDPSocket::Impl::OnFileCanReadWithoutBlocking(
-    NativeIOHandle /*handle*/) {
+void UDPSocket::Impl::OnFileCanReadWithoutBlocking(NativeIOHandle /*handle*/) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DrainRecvQueue();
 }
 
-void UDPSocket::Impl::OnFileCanWriteWithoutBlocking(
-    NativeIOHandle /*handle*/) {
+void UDPSocket::Impl::OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DrainSendQueue();
 }
@@ -452,7 +439,7 @@ void UDPSocket::Impl::OnFileCanWriteWithoutBlocking(
 // Stops at EAGAIN to prevent busy-looping.
 //
 void UDPSocket::Impl::DrainRecvQueue() {
-  bool did_receive = false;  // batch DrainSendQueue at end, not per-packet
+  bool did_receive = false; // batch DrainSendQueue at end, not per-packet
   while (true) {
     PendingRecvFrom pending;
     {
@@ -466,18 +453,13 @@ void UDPSocket::Impl::DrainRecvQueue() {
     struct ::sockaddr_storage peer = {};
     ::socklen_t peer_len = sizeof(peer);
 
-    ssize_t n = recvfrom(fd_,
-                         pending.buf->data(),
-                         pending.buf_len,
-                         0,
-                         reinterpret_cast<struct ::sockaddr*>(&peer),
-                         &peer_len);
+    ssize_t n =
+        recvfrom(fd_, pending.buf->data(), pending.buf_len, 0, reinterpret_cast<struct ::sockaddr *>(&peer), &peer_len);
 
     if (n > 0) {
       IPEndPoint peer_ep = SockAddrToIPEndPoint(peer, peer_len);
       if (pending.callback) {
-        PostRecvFromResult(std::move(pending.callback), true,
-                           static_cast<int>(n), peer_ep);
+        PostRecvFromResult(std::move(pending.callback), true, static_cast<int>(n), peer_ep);
       }
       did_receive = true;
       continue;
@@ -501,7 +483,7 @@ void UDPSocket::Impl::DrainRecvQueue() {
         std::lock_guard<std::mutex> lock(mutex_);
         pending_recvs_.push_front(std::move(pending));
       }
-      break;  // Stop draining; epoll will re-trigger when more data arrives.
+      break; // Stop draining; epoll will re-trigger when more data arrives.
     }
 
     // ECONNREFUSED / ENETUNREACH / EHOSTUNREACH: async ICMP errors
@@ -509,8 +491,7 @@ void UDPSocket::Impl::DrainRecvQueue() {
     // these do not indicate a local fault — silently discard and
     // continue draining.  Treating them as hard errors would tear down
     // the entire receive loop because one peer sent an ICMP rejection.
-    if (errno == ECONNREFUSED || errno == ENETUNREACH ||
-        errno == EHOSTUNREACH) {
+    if (errno == ECONNREFUSED || errno == ENETUNREACH || errno == EHOSTUNREACH) {
       continue;
     }
 
@@ -557,14 +538,12 @@ void UDPSocket::Impl::DrainSendQueue() {
                        pending.buf->data(),
                        pending.buf_len,
                        MSG_NOSIGNAL,
-                       reinterpret_cast<struct ::sockaddr*>(
-                           &pending.dest_addr),
+                       reinterpret_cast<struct ::sockaddr *>(&pending.dest_addr),
                        pending.dest_addr_len);
 
     if (n > 0) {
       if (pending.callback) {
-        PostSendToResult(std::move(pending.callback), true,
-                         static_cast<int>(n));
+        PostSendToResult(std::move(pending.callback), true, static_cast<int>(n));
       }
       continue;
     }
@@ -614,7 +593,7 @@ bool UDPSocket::Impl::SetBroadcast(bool active) {
   return setsockopt(fd_, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt)) == 0;
 }
 
-bool UDPSocket::Impl::JoinGroup(const IPAddress& group_address) {
+bool UDPSocket::Impl::JoinGroup(const IPAddress &group_address) {
   DCHECK_MSG(io_runner_, "JoinGroup: Bind() must be called first");
   if (fd_ < 0)
     return false;
@@ -623,22 +602,20 @@ bool UDPSocket::Impl::JoinGroup(const IPAddress& group_address) {
     struct ip_mreq mreq = {};
     std::memcpy(&mreq.imr_multiaddr, group_address.data().data(), 4);
     mreq.imr_interface.s_addr = INADDR_ANY;
-    return setsockopt(fd_, IPPROTO_IP, IP_ADD_MEMBERSHIP,
-                      &mreq, sizeof(mreq)) == 0;
+    return setsockopt(fd_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) == 0;
   }
 
   if (group_address.IsIPv6()) {
     struct ipv6_mreq mreq6 = {};
     std::memcpy(&mreq6.ipv6mr_multiaddr, group_address.data().data(), 16);
     mreq6.ipv6mr_interface = 0;
-    return setsockopt(fd_, IPPROTO_IPV6, IPV6_JOIN_GROUP,
-                      &mreq6, sizeof(mreq6)) == 0;
+    return setsockopt(fd_, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq6, sizeof(mreq6)) == 0;
   }
 
   return false;
 }
 
-bool UDPSocket::Impl::LeaveGroup(const IPAddress& group_address) {
+bool UDPSocket::Impl::LeaveGroup(const IPAddress &group_address) {
   DCHECK_MSG(io_runner_, "LeaveGroup: Bind() must be called first");
   if (fd_ < 0)
     return false;
@@ -647,30 +624,27 @@ bool UDPSocket::Impl::LeaveGroup(const IPAddress& group_address) {
     struct ip_mreq mreq = {};
     std::memcpy(&mreq.imr_multiaddr, group_address.data().data(), 4);
     mreq.imr_interface.s_addr = INADDR_ANY;
-    return setsockopt(fd_, IPPROTO_IP, IP_DROP_MEMBERSHIP,
-                      &mreq, sizeof(mreq)) == 0;
+    return setsockopt(fd_, IPPROTO_IP, IP_DROP_MEMBERSHIP, &mreq, sizeof(mreq)) == 0;
   }
 
   if (group_address.IsIPv6()) {
     struct ipv6_mreq mreq6 = {};
     std::memcpy(&mreq6.ipv6mr_multiaddr, group_address.data().data(), 16);
     mreq6.ipv6mr_interface = 0;
-    return setsockopt(fd_, IPPROTO_IPV6, IPV6_LEAVE_GROUP,
-                      &mreq6, sizeof(mreq6)) == 0;
+    return setsockopt(fd_, IPPROTO_IPV6, IPV6_LEAVE_GROUP, &mreq6, sizeof(mreq6)) == 0;
   }
 
   return false;
 }
 
-bool UDPSocket::Impl::GetLocalAddress(IPEndPoint* out) const {
+bool UDPSocket::Impl::GetLocalAddress(IPEndPoint *out) const {
   DCHECK_MSG(io_runner_, "GetLocalAddress: Bind() must be called first");
   if (closed_.load(std::memory_order_relaxed) || fd_ < 0 || !out)
     return false;
 
   struct ::sockaddr_storage sa = {};
   ::socklen_t sa_len = sizeof(sa);
-  if (getsockname(fd_, reinterpret_cast<struct ::sockaddr*>(&sa),
-                  &sa_len) != 0) {
+  if (getsockname(fd_, reinterpret_cast<struct ::sockaddr *>(&sa), &sa_len) != 0) {
     return false;
   }
 
@@ -694,41 +668,45 @@ bool UDPSocket::Impl::SetReceiveBufferSize(int32_t size) {
 // Callback posting (lock-free dispatch)
 // =============================================================================
 
-void UDPSocket::Impl::PostSendToResult(UDPSocket::SendToCallback cb,
-                                       bool success, int bytes) {
+void UDPSocket::Impl::PostSendToResult(UDPSocket::SendToCallback cb, bool success, int bytes) {
   if (cb) {
     DCHECK_MSG(io_runner_, "PostSendToResult: io_runner_ is null");
     if (io_runner_) {
-      io_runner_->PostTask(
-          FROM_HERE,
-          BindOnce(
-              [](scoped_refptr<Impl> self, UDPSocket::SendToCallback c,
-                 bool s, int n) {
-                if (self->orphaned_)
-                  return;
-                c(s, n);
-              },
-              WrapRefCounted(this), std::move(cb), success, bytes));
+      io_runner_->PostTask(FROM_HERE,
+                           BindOnce(
+                               [](scoped_refptr<Impl> self, UDPSocket::SendToCallback c, bool s, int n) {
+                                 if (self->orphaned_)
+                                   return;
+                                 c(s, n);
+                               },
+                               WrapRefCounted(this),
+                               std::move(cb),
+                               success,
+                               bytes));
     }
   }
 }
 
 void UDPSocket::Impl::PostRecvFromResult(UDPSocket::RecvFromCallback cb,
-                                         bool success, int bytes,
-                                         const IPEndPoint& peer) {
+                                         bool success,
+                                         int bytes,
+                                         const IPEndPoint &peer) {
   if (cb) {
     DCHECK_MSG(io_runner_, "PostRecvFromResult: io_runner_ is null");
     if (io_runner_) {
       io_runner_->PostTask(
           FROM_HERE,
           BindOnce(
-              [](scoped_refptr<Impl> self, UDPSocket::RecvFromCallback c,
-                 bool s, int n, IPEndPoint p) {
+              [](scoped_refptr<Impl> self, UDPSocket::RecvFromCallback c, bool s, int n, IPEndPoint p) {
                 if (self->orphaned_)
                   return;
                 c(s, n, p);
               },
-              WrapRefCounted(this), std::move(cb), success, bytes, peer));
+              WrapRefCounted(this),
+              std::move(cb),
+              success,
+              bytes,
+              peer));
     }
   }
 }
@@ -737,17 +715,16 @@ void UDPSocket::Impl::PostRecvFromResult(UDPSocket::RecvFromCallback cb,
 // Helpers
 // =============================================================================
 
-bool UDPSocket::Impl::EndPointToSockAddr(
-    const IPEndPoint& ep, ::sockaddr_storage* out, ::socklen_t* out_len) {
+bool UDPSocket::Impl::EndPointToSockAddr(const IPEndPoint &ep, ::sockaddr_storage *out, ::socklen_t *out_len) {
   std::memset(out, 0, sizeof(*out));
   if (ep.address().IsIPv4()) {
-    auto* sa = reinterpret_cast<struct sockaddr_in*>(out);
+    auto *sa = reinterpret_cast<struct sockaddr_in *>(out);
     sa->sin_family = AF_INET;
     sa->sin_port = htons(ep.port());
     std::memcpy(&sa->sin_addr, ep.address().data().data(), 4);
     *out_len = sizeof(struct sockaddr_in);
   } else if (ep.address().IsIPv6()) {
-    auto* sa = reinterpret_cast<struct sockaddr_in6*>(out);
+    auto *sa = reinterpret_cast<struct sockaddr_in6 *>(out);
     sa->sin6_family = AF_INET6;
     sa->sin6_port = htons(ep.port());
     std::memcpy(&sa->sin6_addr, ep.address().data().data(), 16);
@@ -758,27 +735,22 @@ bool UDPSocket::Impl::EndPointToSockAddr(
   return true;
 }
 
-IPEndPoint UDPSocket::Impl::SockAddrToIPEndPoint(
-    const struct ::sockaddr_storage& sa, ::socklen_t sa_len) const {
-  if (sa.ss_family == AF_INET &&
-      sa_len >= static_cast<::socklen_t>(sizeof(struct sockaddr_in))) {
-    const auto* sin = reinterpret_cast<const struct sockaddr_in*>(&sa);
-    IPAddress addr(IPAddress::Family::kIPv4,
-                   reinterpret_cast<const uint8_t*>(&sin->sin_addr));
+IPEndPoint UDPSocket::Impl::SockAddrToIPEndPoint(const struct ::sockaddr_storage &sa, ::socklen_t sa_len) const {
+  if (sa.ss_family == AF_INET && sa_len >= static_cast<::socklen_t>(sizeof(struct sockaddr_in))) {
+    const auto *sin = reinterpret_cast<const struct sockaddr_in *>(&sa);
+    IPAddress addr(IPAddress::Family::kIPv4, reinterpret_cast<const uint8_t *>(&sin->sin_addr));
     return IPEndPoint(addr, ntohs(sin->sin_port));
   }
 
-  if (sa.ss_family == AF_INET6 &&
-      sa_len >= static_cast<::socklen_t>(sizeof(struct sockaddr_in6))) {
-    const auto* sin6 = reinterpret_cast<const struct sockaddr_in6*>(&sa);
-    IPAddress addr(IPAddress::Family::kIPv6,
-                   reinterpret_cast<const uint8_t*>(&sin6->sin6_addr));
+  if (sa.ss_family == AF_INET6 && sa_len >= static_cast<::socklen_t>(sizeof(struct sockaddr_in6))) {
+    const auto *sin6 = reinterpret_cast<const struct sockaddr_in6 *>(&sa);
+    IPAddress addr(IPAddress::Family::kIPv6, reinterpret_cast<const uint8_t *>(&sin6->sin6_addr));
     return IPEndPoint(addr, ntohs(sin6->sin6_port));
   }
 
-  return IPEndPoint();  // Unknown family.
+  return IPEndPoint(); // Unknown family.
 }
 
-}  // namespace nei::net
+} // namespace nei::net
 
-#endif  // !_WIN32
+#endif // !_WIN32

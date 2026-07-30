@@ -8,16 +8,16 @@
 namespace nei {
 
 ChildProcess::ChildProcess()
-    : impl_(CreatePlatformImpl(ProcessService::GetDefault())) {}
+    : impl_(CreatePlatformImpl(ProcessService::GetDefault())) {
+}
 
 ChildProcess::ChildProcess(scoped_refptr<ProcessService> process_service)
-    : impl_(CreatePlatformImpl(process_service ? std::move(process_service)
-                                               : ProcessService::GetDefault())) {}
+    : impl_(CreatePlatformImpl(process_service ? std::move(process_service) : ProcessService::GetDefault())) {
+}
 
 ChildProcess::~ChildProcess() = default;
 
-bool ChildProcess::Launch(const CommandLine& command_line,
-                          const ProcessLaunchOptions& options) {
+bool ChildProcess::Launch(const CommandLine &command_line, const ProcessLaunchOptions &options) {
   return impl_->Launch(command_line, options);
 }
 
@@ -25,20 +25,20 @@ bool ChildProcess::Terminate(int exit_code, bool force) {
   return impl_->Terminate(exit_code, force);
 }
 
-void ChildProcess::SetListener(ChildProcessListener* listener) {
+void ChildProcess::SetListener(ChildProcessListener *listener) {
   impl_->SetExternalListener(listener);
 }
 
-AsyncInputStream* ChildProcess::GetStdoutStream() const {
+AsyncInputStream *ChildProcess::GetStdoutStream() const {
   return impl_->GetStdoutStream();
 }
 
-AsyncInputStream* ChildProcess::GetStderrStream() const {
+AsyncInputStream *ChildProcess::GetStderrStream() const {
   return impl_->GetStderrStream();
 }
 
-AsyncOutputStream* ChildProcess::GetStdinStream() const {
+AsyncOutputStream *ChildProcess::GetStdinStream() const {
   return impl_->GetStdinStream();
 }
 
-}  // namespace nei
+} // namespace nei

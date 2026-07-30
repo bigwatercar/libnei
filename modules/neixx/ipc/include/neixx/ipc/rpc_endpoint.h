@@ -46,7 +46,7 @@ class TaskRunner;
 // IOBufferWithSize to signal timeout.
 // ---------------------------------------------------------------------------
 class NEI_API RpcEndpoint final {
- public:
+public:
   // A payload buffer allocated from IOBufferPool.
   using MessageBuffer = scoped_refptr<IOBufferWithSize>;
 
@@ -60,8 +60,7 @@ class NEI_API RpcEndpoint final {
   // Handler for incoming kRequest messages.
   // |request_payload|  --  the business payload after the RPC header.
   // |reply_cb|         --  call this to send a response back.
-  using RequestHandler =
-      std::function<void(MessageBuffer request_payload, ReplyCallback reply_cb)>;
+  using RequestHandler = std::function<void(MessageBuffer request_payload, ReplyCallback reply_cb)>;
 
   // Called on unrecoverable channel error.
   using ErrorHandler = std::function<void()>;
@@ -75,12 +74,12 @@ class NEI_API RpcEndpoint final {
   // |write_stream|        --  underlying async output stream (not owned).
   RpcEndpoint(scoped_refptr<TaskRunner> io_task_runner,
               scoped_refptr<TaskRunner> client_task_runner,
-              AsyncInputStream* read_stream,
-              AsyncOutputStream* write_stream);
+              AsyncInputStream *read_stream,
+              AsyncOutputStream *write_stream);
   ~RpcEndpoint();
 
-  RpcEndpoint(const RpcEndpoint&) = delete;
-  RpcEndpoint& operator=(const RpcEndpoint&) = delete;
+  RpcEndpoint(const RpcEndpoint &) = delete;
+  RpcEndpoint &operator=(const RpcEndpoint &) = delete;
 
   // Starts listening for incoming messages.  Must be called after
   // SetRequestHandler().  |on_error| fires once on channel failure.
@@ -91,19 +90,17 @@ class NEI_API RpcEndpoint final {
 
   // Sends a request and waits for a response.  |on_response| is called
   // with the response payload, or with a null buffer on timeout.
-  void SendRequest(MessageBuffer payload,
-                   TimeDelta timeout,
-                   ResponseCallback on_response);
+  void SendRequest(MessageBuffer payload, TimeDelta timeout, ResponseCallback on_response);
 
   // Registers the handler for incoming kRequest messages.
   // Must be called before Start().
   void SetRequestHandler(RequestHandler handler);
 
- private:
+private:
   class Impl;
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_IPC_RPC_ENDPOINT_H_
+#endif // NEIXX_IPC_RPC_ENDPOINT_H_

@@ -76,8 +76,7 @@ TestCert GenerateSelfSignedCert() {
     ADD_FAILURE() << "pk_setup: " << ret;
     return {};
   }
-  ret = mbedtls_rsa_gen_key(mbedtls_pk_rsa(key), mbedtls_ctr_drbg_random,
-                            &drbg, 2048, 65537);
+  ret = mbedtls_rsa_gen_key(mbedtls_pk_rsa(key), mbedtls_ctr_drbg_random, &drbg, 2048, 65537);
   if (ret != 0) {
     ADD_FAILURE() << "rsa_gen_key: " << ret;
     return {};
@@ -88,7 +87,7 @@ TestCert GenerateSelfSignedCert() {
   mbedtls_x509write_crt_set_md_alg(&crt, MBEDTLS_MD_SHA256);
   mbedtls_mpi_lset(&serial, 1);
 
-  const char* subject = "CN=libnei-test,O=NEI,C=CN";
+  const char *subject = "CN=libnei-test,O=NEI,C=CN";
   mbedtls_x509write_crt_set_subject_name(&crt, subject);
   mbedtls_x509write_crt_set_issuer_name(&crt, subject);
   mbedtls_x509write_crt_set_validity(&crt, "20250101000000", "20350101000000");
@@ -97,8 +96,7 @@ TestCert GenerateSelfSignedCert() {
   mbedtls_x509write_crt_set_basic_constraints(&crt, 0, -1);
 
   unsigned char der_buf[4096];
-  ret = mbedtls_x509write_crt_der(&crt, der_buf, sizeof(der_buf),
-                                  mbedtls_ctr_drbg_random, &drbg);
+  ret = mbedtls_x509write_crt_der(&crt, der_buf, sizeof(der_buf), mbedtls_ctr_drbg_random, &drbg);
   if (ret <= 0) {
     ADD_FAILURE() << "x509write_crt_der: " << ret;
     return {};
@@ -106,24 +104,32 @@ TestCert GenerateSelfSignedCert() {
 
   std::string cert_pem, key_pem;
   if (ret > 0) {
-    unsigned char pem[8192]; size_t olen = 0;
+    unsigned char pem[8192];
+    size_t olen = 0;
     mbedtls_pem_write_buffer("-----BEGIN CERTIFICATE-----\n",
                              "-----END CERTIFICATE-----\n",
-                             der_buf + sizeof(der_buf) - ret, static_cast<size_t>(ret),
-                             pem, sizeof(pem), &olen);
-    cert_pem.assign(reinterpret_cast<char*>(pem), olen);
+                             der_buf + sizeof(der_buf) - ret,
+                             static_cast<size_t>(ret),
+                             pem,
+                             sizeof(pem),
+                             &olen);
+    cert_pem.assign(reinterpret_cast<char *>(pem), olen);
   }
 
   unsigned char key_der[4096];
   int key_len = mbedtls_pk_write_key_der(&key, key_der, sizeof(key_der));
   EXPECT_GT(key_len, 0) << "pk_write_key_der failed";
   if (key_len > 0) {
-    unsigned char pem[8192]; size_t olen = 0;
+    unsigned char pem[8192];
+    size_t olen = 0;
     mbedtls_pem_write_buffer("-----BEGIN RSA PRIVATE KEY-----\n",
                              "-----END RSA PRIVATE KEY-----\n",
-                             key_der + sizeof(key_der) - key_len, static_cast<size_t>(key_len),
-                             pem, sizeof(pem), &olen);
-    key_pem.assign(reinterpret_cast<char*>(pem), olen);
+                             key_der + sizeof(key_der) - key_len,
+                             static_cast<size_t>(key_len),
+                             pem,
+                             sizeof(pem),
+                             &olen);
+    key_pem.assign(reinterpret_cast<char *>(pem), olen);
   }
 
   mbedtls_pk_free(&key);
@@ -140,7 +146,7 @@ TestCert GenerateSelfSignedCert() {
 // =============================================================================
 
 class TlsSocketTest : public testing::Test {
- protected:
+protected:
   void SetUp() override {
     // Generate cert once per test suite.
     static TestCert cert = GenerateSelfSignedCert();
@@ -168,32 +174,38 @@ class TlsSocketTest : public testing::Test {
     ASSERT_TRUE(srv_runner_);
   }
 
-  void TearDown() override { srv_thread_.Stop(); io_thread_.Stop(); }
+  void TearDown() override {
+    srv_thread_.Stop();
+    io_thread_.Stop();
+  }
 
   static uint16_t FindFreePort() {
 #if defined(_WIN32)
-    WSADATA d; WSAStartup(MAKEWORD(2, 2), &d);
+    WSADATA d;
+    WSAStartup(MAKEWORD(2, 2), &d);
     SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (s == INVALID_SOCKET) return 0;
+    if (s == INVALID_SOCKET)
+      return 0;
     struct sockaddr_in addr = {};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = 0;
-    ::bind(s, (struct sockaddr*)&addr, sizeof(addr));
+    ::bind(s, (struct sockaddr *)&addr, sizeof(addr));
     int len = sizeof(addr);
-    ::getsockname(s, (struct sockaddr*)&addr, &len);
+    ::getsockname(s, (struct sockaddr *)&addr, &len);
     ::closesocket(s);
     return ntohs(addr.sin_port);
 #else
     int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return 0;
+    if (fd < 0)
+      return 0;
     struct sockaddr_in addr = {};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = 0;
-    ::bind(fd, (struct sockaddr*)&addr, sizeof(addr));
+    ::bind(fd, (struct sockaddr *)&addr, sizeof(addr));
     socklen_t len = sizeof(addr);
-    ::getsockname(fd, (struct sockaddr*)&addr, &len);
+    ::getsockname(fd, (struct sockaddr *)&addr, &len);
     ::close(fd);
     return ntohs(addr.sin_port);
 #endif
@@ -251,7 +263,7 @@ TEST_F(TlsSocketTest, HandshakeEofDeathSpiral) {
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = htons(port);
-    ASSERT_EQ(::bind(listen_fd, (struct sockaddr*)&addr, sizeof(addr)), 0);
+    ASSERT_EQ(::bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)), 0);
     ASSERT_EQ(::listen(listen_fd, 1), 0);
     server_ready.Signal();
 
@@ -260,7 +272,7 @@ TEST_F(TlsSocketTest, HandshakeEofDeathSpiral) {
       // Immediately close — sends RST, not graceful FIN.  On Windows,
       // closesocket with SO_LINGER set to 0 ensures immediate RST.
       struct linger lg = {1, 0};
-      setsockopt(client_fd, SOL_SOCKET, SO_LINGER, (char*)&lg, sizeof(lg));
+      setsockopt(client_fd, SOL_SOCKET, SO_LINGER, (char *)&lg, sizeof(lg));
       ::closesocket(client_fd);
     }
     ::closesocket(listen_fd);
@@ -271,13 +283,13 @@ TEST_F(TlsSocketTest, HandshakeEofDeathSpiral) {
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = htons(port);
-    ASSERT_EQ(::bind(listen_fd, (struct sockaddr*)&addr, sizeof(addr)), 0);
+    ASSERT_EQ(::bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)), 0);
     ASSERT_EQ(::listen(listen_fd, 1), 0);
     server_ready.Signal();
 
     int client_fd = ::accept(listen_fd, nullptr, nullptr);
     if (client_fd >= 0) {
-      ::close(client_fd);  // Sends FIN → peer sees EOF
+      ::close(client_fd); // Sends FIN → peer sees EOF
     }
     ::close(listen_fd);
 #endif
@@ -290,20 +302,20 @@ TEST_F(TlsSocketTest, HandshakeEofDeathSpiral) {
   WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> connect_ok{true};
 
-  auto client = std::make_shared<TLSClientSocket>(
-      std::make_unique<TCPClientSocket>(), client_ctx_.get());
+  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), client_ctx_.get());
   io_runner_->PostTask(FROM_HERE, [&]() {
     client->Connect(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
-        [&](bool ok) { connect_ok.store(ok); done.Signal(); },
+        [&](bool ok) {
+          connect_ok.store(ok);
+          done.Signal();
+        },
         io_runner_);
   });
 
   // Must complete within 5 seconds — if EOF death spiral exists, this hangs.
-  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)))
-      << "Test hung — EOF death spiral likely!";
-  EXPECT_FALSE(connect_ok.load())
-      << "Handshake should fail when raw server sends RST/FIN mid-handshake";
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5))) << "Test hung — EOF death spiral likely!";
+  EXPECT_FALSE(connect_ok.load()) << "Handshake should fail when raw server sends RST/FIN mid-handshake";
 
   raw_server.join();
 }
@@ -326,7 +338,8 @@ TEST_F(TlsSocketTest, DestructionDuringHandshake) {
   WaitableEvent server_ready(WaitableEvent::ResetPolicy::kAutomatic, false);
   srv_runner_->PostTask(FROM_HERE, [&]() {
     ASSERT_TRUE(server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+        1,
         [](bool, std::unique_ptr<TLSClientSocket>) {},
         srv_runner_));
     server_ready.Signal();
@@ -334,19 +347,14 @@ TEST_F(TlsSocketTest, DestructionDuringHandshake) {
   server_ready.Wait();
 
   // ---- TLS client: start handshake, destroy before completion ----
-  auto client = std::make_shared<TLSClientSocket>(
-      std::make_unique<TCPClientSocket>(), client_ctx_.get());
+  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), client_ctx_.get());
 
   io_runner_->PostTask(FROM_HERE, [&]() {
-    client->Connect(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
-        [](bool) {},
-        io_runner_);
+    client->Connect(IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), [](bool) {}, io_runner_);
   });
 
   // Let TCP connect + ClientHello get sent, then blow it away.
-  auto drain = std::make_shared<WaitableEvent>(
-      WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto drain = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
   io_runner_->PostTask(FROM_HERE, [drain]() { drain->Signal(); });
   drain->Wait();
 
@@ -374,7 +382,7 @@ TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
   uint16_t port = FindFreePort();
   ASSERT_NE(port, 0);
 
-  constexpr size_t kPayloadSize = 10 * 1024 * 1024;  // 10 MB
+  constexpr size_t kPayloadSize = 10 * 1024 * 1024; // 10 MB
   auto payload = std::make_shared<std::vector<unsigned char>>(kPayloadSize);
   for (size_t i = 0; i < kPayloadSize; ++i)
     (*payload)[i] = static_cast<unsigned char>((i * 7 + 13) & 0xFF);
@@ -382,14 +390,14 @@ TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
   // ---- Server: accept, receive entire payload ----
   auto recv_buf = std::make_shared<std::vector<unsigned char>>();
   recv_buf->reserve(kPayloadSize);
-  auto server_done = std::make_shared<WaitableEvent>(
-      WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto server_done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
   auto server_ok = std::make_shared<std::atomic<bool>>(false);
 
   auto server = std::make_shared<TLSServerSocket>(server_ctx_.get());
   srv_runner_->PostTask(FROM_HERE, [&, server_done]() {
     ASSERT_TRUE(server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+        1,
         [&, server_done](bool ok, std::unique_ptr<TLSClientSocket> tls) {
           ASSERT_TRUE(ok);
           auto tls_shared = std::make_shared<TLSClientSocket>(std::move(*tls));
@@ -403,14 +411,15 @@ TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
               return;
             }
             auto chunk = MakeRefCounted<IOBufferWithSize>(remain);
-            tls_shared->ReadAsync(chunk, remain,
-                [=](bool s, size_t n) {
-                  if (!s || n == 0) { server_done->Signal(); return; }
-                  recv_buf->insert(recv_buf->end(),
-                                   chunk->data(), chunk->data() + n);
-                  *offset += n;
-                  (*do_read)();
-                });
+            tls_shared->ReadAsync(chunk, remain, [=](bool s, size_t n) {
+              if (!s || n == 0) {
+                server_done->Signal();
+                return;
+              }
+              recv_buf->insert(recv_buf->end(), chunk->data(), chunk->data() + n);
+              *offset += n;
+              (*do_read)();
+            });
           };
           (*do_read)();
         },
@@ -418,10 +427,8 @@ TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
   });
 
   // ---- Client: connect, send whole payload ----
-  auto client = std::make_shared<TLSClientSocket>(
-      std::make_unique<TCPClientSocket>(), client_ctx_.get());
-  auto client_done = std::make_shared<WaitableEvent>(
-      WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), client_ctx_.get());
+  auto client_done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
 
   io_runner_->PostTask(FROM_HERE, [&, client_done]() {
     client->Connect(
@@ -434,17 +441,19 @@ TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
           auto do_write = std::make_shared<std::function<void()>>();
           *do_write = [=]() {
             size_t remain = kPayloadSize - *offset;
-            if (remain == 0) { client_done->Signal(); return; }
+            if (remain == 0) {
+              client_done->Signal();
+              return;
+            }
             // Create a sub-buffer view for the remaining data so each
             // WriteAsync call advances the write position.
             auto chunk = MakeRefCounted<IOBufferWithSize>(remain);
             std::memcpy(chunk->data(), send_buf->data() + *offset, remain);
-            client->WriteAsync(chunk, remain,
-                [=](bool s, size_t n) {
-                  ASSERT_TRUE(s);
-                  *offset += n;
-                  (*do_write)();
-                });
+            client->WriteAsync(chunk, remain, [=](bool s, size_t n) {
+              ASSERT_TRUE(s);
+              *offset += n;
+              (*do_write)();
+            });
           };
           (*do_write)();
         },
@@ -457,8 +466,7 @@ TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
 
   // Verify byte-for-byte match.
   ASSERT_EQ(recv_buf->size(), kPayloadSize);
-  EXPECT_EQ(*recv_buf, *payload)
-      << "10 MB TLS round-trip: data corruption detected!";
+  EXPECT_EQ(*recv_buf, *payload) << "10 MB TLS round-trip: data corruption detected!";
 }
 
 // =============================================================================
@@ -480,7 +488,8 @@ TEST_F(TlsSocketTest, StrictPeerVerificationFailure) {
   WaitableEvent server_ready(WaitableEvent::ResetPolicy::kAutomatic, false);
   srv_runner_->PostTask(FROM_HERE, [&]() {
     ASSERT_TRUE(server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+        1,
         [](bool, std::unique_ptr<TLSClientSocket>) {},
         srv_runner_));
     server_ready.Signal();
@@ -492,8 +501,7 @@ TEST_F(TlsSocketTest, StrictPeerVerificationFailure) {
   strict_cli.SetPeerVerify(PeerVerify::kRequired);
   ASSERT_TRUE(strict_cli.SetCAChain(wrong_cert.cert_pem));
 
-  auto client = std::make_shared<TLSClientSocket>(
-      std::make_unique<TCPClientSocket>(), &strict_cli);
+  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), &strict_cli);
 
   WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> connect_ok{true};
@@ -501,16 +509,18 @@ TEST_F(TlsSocketTest, StrictPeerVerificationFailure) {
   io_runner_->PostTask(FROM_HERE, [&]() {
     client->Connect(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
-        [&](bool ok) { connect_ok.store(ok); done.Signal(); },
+        [&](bool ok) {
+          connect_ok.store(ok);
+          done.Signal();
+        },
         io_runner_);
   });
 
   ASSERT_TRUE(done.TimedWait(std::chrono::seconds(10)));
-  EXPECT_FALSE(connect_ok.load())
-      << "TLS handshake must FAIL with untrusted certificate";
+  EXPECT_FALSE(connect_ok.load()) << "TLS handshake must FAIL with untrusted certificate";
 
   server->Close();
 }
 
-}  // namespace
-}  // namespace nei::net
+} // namespace
+} // namespace nei::net

@@ -14,7 +14,7 @@ namespace nei {
 using MaxConcurrencyCallback = RepeatingCallback<size_t(size_t worker_count)>;
 
 class NEI_API JobDelegate {
- public:
+public:
   virtual ~JobDelegate() = default;
   virtual bool ShouldYield() = 0;
   virtual bool IsCompleted() const = 0;
@@ -22,5 +22,5 @@ class NEI_API JobDelegate {
   virtual std::size_t GetTaskId() const = 0;
 };
 
-}  // namespace nei
-#endif  // NEIXX_TASK_JOB_DELEGATE_H_
+} // namespace nei
+#endif // NEIXX_TASK_JOB_DELEGATE_H_

@@ -34,7 +34,7 @@ template <typename T>
 using WeakPtr = nei::WeakPtr<T>;
 template <typename T>
 using WeakPtrFactory = nei::WeakPtrFactory<T>;
-}  // namespace base
+} // namespace base
 
 namespace {
 
@@ -56,43 +56,42 @@ std::atomic<std::uint64_t> g_read_exec_seq{0};
 
 DWORD ToWinAccess(AsyncFile::OpenMode mode) {
   switch (mode) {
-    case AsyncFile::OpenMode::kReadOnly:
-      return GENERIC_READ;
-    case AsyncFile::OpenMode::kWriteOnly:
-      return GENERIC_WRITE;
-    case AsyncFile::OpenMode::kReadWrite:
-      return GENERIC_READ | GENERIC_WRITE;
-    case AsyncFile::OpenMode::kAppend:
-      // Keep explicit OVERLAPPED offsets effective in append mode.
-      return GENERIC_WRITE;
+  case AsyncFile::OpenMode::kReadOnly:
+    return GENERIC_READ;
+  case AsyncFile::OpenMode::kWriteOnly:
+    return GENERIC_WRITE;
+  case AsyncFile::OpenMode::kReadWrite:
+    return GENERIC_READ | GENERIC_WRITE;
+  case AsyncFile::OpenMode::kAppend:
+    // Keep explicit OVERLAPPED offsets effective in append mode.
+    return GENERIC_WRITE;
   }
   return GENERIC_READ;
 }
 
 DWORD ToWinDisposition(AsyncFile::OpenDisposition disposition) {
   switch (disposition) {
-    case AsyncFile::OpenDisposition::kOpenExisting:
-      return OPEN_EXISTING;
-    case AsyncFile::OpenDisposition::kCreateAlways:
-      return CREATE_ALWAYS;
-    case AsyncFile::OpenDisposition::kOpenAlways:
-      return OPEN_ALWAYS;
-    case AsyncFile::OpenDisposition::kCreateNew:
-      return CREATE_NEW;
-    case AsyncFile::OpenDisposition::kTruncateExisting:
-      return TRUNCATE_EXISTING;
+  case AsyncFile::OpenDisposition::kOpenExisting:
+    return OPEN_EXISTING;
+  case AsyncFile::OpenDisposition::kCreateAlways:
+    return CREATE_ALWAYS;
+  case AsyncFile::OpenDisposition::kOpenAlways:
+    return OPEN_ALWAYS;
+  case AsyncFile::OpenDisposition::kCreateNew:
+    return CREATE_NEW;
+  case AsyncFile::OpenDisposition::kTruncateExisting:
+    return TRUNCATE_EXISTING;
   }
   return OPEN_EXISTING;
 }
 
-std::wstring ToWide(const std::string& utf8) {
+std::wstring ToWide(const std::string &utf8) {
   const std::u16string u16 = UTF8ToUTF16(utf8);
-  static_assert(sizeof(wchar_t) == sizeof(char16_t),
-                "Windows wchar_t must be 16-bit for UTF-16 reinterpretation");
-  return std::wstring(reinterpret_cast<const wchar_t*>(u16.data()), u16.size());
+  static_assert(sizeof(wchar_t) == sizeof(char16_t), "Windows wchar_t must be 16-bit for UTF-16 reinterpretation");
+  return std::wstring(reinterpret_cast<const wchar_t *>(u16.data()), u16.size());
 }
 
-}  // namespace
+} // namespace
 
 // AsyncFileWin::Impl uses WeakPtr in cross-thread callbacks (posted from
 // IO thread to background thread and back).  The Impl guards its mutable
@@ -102,7 +101,7 @@ template <>
 struct WeakPtrThreadSafe<AsyncFileWin::Impl> : std::true_type {};
 
 class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
- public:
+public:
   friend class AsyncFileWin;
   enum class State {
     kDisconnected,
@@ -117,7 +116,9 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       kWrite,
     };
 
-    explicit IOContext(Type io_type) : type(io_type) {}
+    explicit IOContext(Type io_type)
+        : type(io_type) {
+    }
 
     Type type;
     OVERLAPPED overlapped{};
@@ -150,12 +151,14 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
   ~Impl() override = default;
 
-  scoped_refptr<TaskRunner> io_task_runner() const { return io_task_runner_; }
+  scoped_refptr<TaskRunner> io_task_runner() const {
+    return io_task_runner_;
+  }
 
-  void OpenAsync(const std::string& path,
+  void OpenAsync(const std::string &path,
                  OpenMode mode,
                  OpenDisposition disposition,
-                 const scoped_refptr<TaskRunner>& background_runner,
+                 const scoped_refptr<TaskRunner> &background_runner,
                  OpenCallback callback) {
     if (!io_task_runner_) {
       DCHECK(false);
@@ -164,29 +167,26 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     OpenCallback post_failure_callback = callback;
     const bool posted = io_task_runner_->PostTask(
         FROM_HERE,
-        [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), path, mode, disposition,
-         background_runner, callback = std::move(callback)]() mutable {
+        [weak_this = weak_factory_.GetWeakPtr(FROM_HERE),
+         path,
+         mode,
+         disposition,
+         background_runner,
+         callback = std::move(callback)]() mutable {
           if (!weak_this) {
             return;
           }
-          weak_this->OpenAsyncOnIoThread(path, mode, disposition, background_runner,
-                                         std::move(callback));
+          weak_this->OpenAsyncOnIoThread(path, mode, disposition, background_runner, std::move(callback));
         });
     if (!posted && post_failure_callback) {
-      post_failure_callback(false, internal::NormalizeAsyncFileError(
-                                      static_cast<std::uint32_t>(ERROR_BUSY)));
+      post_failure_callback(false, internal::NormalizeAsyncFileError(static_cast<std::uint32_t>(ERROR_BUSY)));
     }
   }
 
-  void ReadAsync(scoped_refptr<IOBuffer> buf,
-                 std::size_t bytes_to_read,
-                 std::uint64_t offset,
-                 ReadCallback callback) {
+  void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t bytes_to_read, std::uint64_t offset, ReadCallback callback) {
     if (!io_task_runner_ || !callback || !buf) {
       if (callback) {
-        callback(false, 0,
-                 internal::NormalizeAsyncFileError(
-                     static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER)));
+        callback(false, 0, internal::NormalizeAsyncFileError(static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER)));
       }
       return;
     }
@@ -200,29 +200,22 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
     ReadCallback post_failure_callback = op.read_callback;
     const bool posted = io_task_runner_->PostTask(
-        FROM_HERE,
-        [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), op = std::move(op)]() mutable {
+        FROM_HERE, [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), op = std::move(op)]() mutable {
           if (!weak_this) {
             return;
           }
           weak_this->EnqueueOperationOnIoThread(std::move(op));
         });
     if (!posted) {
-      post_failure_callback(false, 0,
-                            internal::NormalizeAsyncFileError(
-                                static_cast<std::uint32_t>(ERROR_BUSY)));
+      post_failure_callback(false, 0, internal::NormalizeAsyncFileError(static_cast<std::uint32_t>(ERROR_BUSY)));
     }
   }
 
-  void WriteAsync(scoped_refptr<IOBuffer> buf,
-                  std::size_t bytes_to_write,
-                  std::uint64_t offset,
-                  WriteCallback callback) {
+  void
+  WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t bytes_to_write, std::uint64_t offset, WriteCallback callback) {
     if (!io_task_runner_ || !callback || !buf) {
       if (callback) {
-        callback(false, 0,
-                 internal::NormalizeAsyncFileError(
-                     static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER)));
+        callback(false, 0, internal::NormalizeAsyncFileError(static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER)));
       }
       return;
     }
@@ -236,31 +229,29 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
     WriteCallback post_failure_callback = op.write_callback;
     const bool posted = io_task_runner_->PostTask(
-        FROM_HERE,
-        [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), op = std::move(op)]() mutable {
+        FROM_HERE, [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), op = std::move(op)]() mutable {
           if (!weak_this) {
             return;
           }
           weak_this->EnqueueOperationOnIoThread(std::move(op));
         });
     if (!posted) {
-      post_failure_callback(false, 0,
-                            internal::NormalizeAsyncFileError(
-                                static_cast<std::uint32_t>(ERROR_BUSY)));
+      post_failure_callback(false, 0, internal::NormalizeAsyncFileError(static_cast<std::uint32_t>(ERROR_BUSY)));
     }
   }
 
   void CloseAsync(CloseCallback callback) {
     TRACE_EVENT0("nei.io", "AsyncFileWin::Close");
     if (!io_task_runner_) {
-      if (callback) callback();
+      if (callback)
+        callback();
       return;
     }
     const bool posted = io_task_runner_->PostTask(
-        FROM_HERE, [weak_this = weak_factory_.GetWeakPtr(FROM_HERE),
-                    callback = std::move(callback)]() mutable {
+        FROM_HERE, [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), callback = std::move(callback)]() mutable {
           if (!weak_this) {
-            if (callback) callback();
+            if (callback)
+              callback();
             return;
           }
           weak_this->CloseOnIoThread(false, std::move(callback));
@@ -284,7 +275,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   }
 
   void OnIOCompleted(NativeIOHandle handle,
-                     void* overlapped_context,
+                     void *overlapped_context,
                      std::uint32_t bytes_transferred,
                      std::uint32_t error_code) override {
     g_iocp_completed.fetch_add(1, std::memory_order_relaxed);
@@ -294,29 +285,26 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     {
       std::lock_guard<std::mutex> lock(lock_);
       file_snapshot = file_handle_;
-      if ((state_ != State::kConnected && state_ != State::kClosing) ||
-          file_snapshot == INVALID_HANDLE_VALUE ||
-          reinterpret_cast<HANDLE>(handle) != file_snapshot) {
+      if ((state_ != State::kConnected && state_ != State::kClosing) || file_snapshot == INVALID_HANDLE_VALUE
+          || reinterpret_cast<HANDLE>(handle) != file_snapshot) {
         return;
       }
     }
 
-    OnChunkCompletedOnIoThread(static_cast<OVERLAPPED*>(overlapped_context),
-                               static_cast<DWORD>(bytes_transferred),
-                               error_code);
+    OnChunkCompletedOnIoThread(
+        static_cast<OVERLAPPED *>(overlapped_context), static_cast<DWORD>(bytes_transferred), error_code);
   }
 
- private:
-  void OpenAsyncOnIoThread(const std::string& path,
+private:
+  void OpenAsyncOnIoThread(const std::string &path,
                            OpenMode mode,
                            OpenDisposition disposition,
-                           const scoped_refptr<TaskRunner>& background_runner,
+                           const scoped_refptr<TaskRunner> &background_runner,
                            OpenCallback callback) {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     TRACE_EVENT0("nei.io", "AsyncFileWin::Open");
     if (!background_runner) {
-      PostOpenCallback(std::move(callback), false,
-                       static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER));
+      PostOpenCallback(std::move(callback), false, static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER));
       return;
     }
 
@@ -324,8 +312,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     {
       std::lock_guard<std::mutex> lock(lock_);
       if (state_ != State::kDisconnected) {
-        PostOpenCallback(std::move(callback), false,
-                         static_cast<std::uint32_t>(ERROR_BUSY));
+        PostOpenCallback(std::move(callback), false, static_cast<std::uint32_t>(ERROR_BUSY));
         return;
       }
       state_ = State::kOpening;
@@ -341,16 +328,15 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     base::WeakPtr<Impl> weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
 
     background_runner->PostTask(
-        FROM_HERE,
-        [weak_this, io_runner_snapshot, open_id, path_wide, desired_access,
-         disposition_dw]() mutable {
-          HANDLE opened = ::CreateFileW(
-              path_wide.c_str(), desired_access,
-              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-              disposition_dw, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
-              nullptr);
-          const DWORD open_error =
-              (opened == INVALID_HANDLE_VALUE) ? ::GetLastError() : ERROR_SUCCESS;
+        FROM_HERE, [weak_this, io_runner_snapshot, open_id, path_wide, desired_access, disposition_dw]() mutable {
+          HANDLE opened = ::CreateFileW(path_wide.c_str(),
+                                        desired_access,
+                                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                        nullptr,
+                                        disposition_dw,
+                                        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
+                                        nullptr);
+          const DWORD open_error = (opened == INVALID_HANDLE_VALUE) ? ::GetLastError() : ERROR_SUCCESS;
 
           if (!io_runner_snapshot) {
             if (opened != INVALID_HANDLE_VALUE) {
@@ -359,27 +345,23 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
             return;
           }
 
-          io_runner_snapshot->PostTask(
-              FROM_HERE,
-              [weak_this, open_id, opened, open_error]() mutable {
-                if (!weak_this) {
-                  if (opened != INVALID_HANDLE_VALUE) {
-                    (void)::CloseHandle(opened);
-                  }
-                  return;
-                }
-                weak_this->OnOpenCompletedOnIoThread(open_id, opened, open_error);
-              });
+          io_runner_snapshot->PostTask(FROM_HERE, [weak_this, open_id, opened, open_error]() mutable {
+            if (!weak_this) {
+              if (opened != INVALID_HANDLE_VALUE) {
+                (void)::CloseHandle(opened);
+              }
+              return;
+            }
+            weak_this->OnOpenCompletedOnIoThread(open_id, opened, open_error);
+          });
         });
   }
 
-  void OnOpenCompletedOnIoThread(std::uint64_t open_id,
-                                 HANDLE opened,
-                                 DWORD open_error) {
+  void OnOpenCompletedOnIoThread(std::uint64_t open_id, HANDLE opened, DWORD open_error) {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     OpenCallback callback;
 
-    MessagePumpForIO* pump = MessagePumpForIO::Current();
+    MessagePumpForIO *pump = MessagePumpForIO::Current();
     DCHECK(pump != nullptr);
     if (pump == nullptr) {
       if (opened != INVALID_HANDLE_VALUE) {
@@ -392,8 +374,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
           callback = std::move(pending_open_callback_);
         }
       }
-      PostOpenCallback(std::move(callback), false,
-                       static_cast<std::uint32_t>(ERROR_INVALID_HANDLE));
+      PostOpenCallback(std::move(callback), false, static_cast<std::uint32_t>(ERROR_INVALID_HANDLE));
       return;
     }
 
@@ -413,26 +394,24 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
         std::lock_guard<std::mutex> lock(lock_);
         state_ = State::kDisconnected;
       }
-      PostOpenCallback(std::move(callback), false,
-                       static_cast<std::uint32_t>(open_error));
+      PostOpenCallback(std::move(callback), false, static_cast<std::uint32_t>(open_error));
       return;
     }
 
-    if (!controller_.StartWatching(
-            pump, reinterpret_cast<NativeIOHandle>(opened),
-            MessagePumpForIO::FdWatchController::Mode::READ_WRITE, this)) {
+    if (!controller_.StartWatching(pump,
+                                   reinterpret_cast<NativeIOHandle>(opened),
+                                   MessagePumpForIO::FdWatchController::Mode::READ_WRITE,
+                                   this)) {
       (void)::CloseHandle(opened);
       {
         std::lock_guard<std::mutex> lock(lock_);
         state_ = State::kDisconnected;
       }
-      PostOpenCallback(std::move(callback), false,
-                       static_cast<std::uint32_t>(ERROR_INVALID_HANDLE));
+      PostOpenCallback(std::move(callback), false, static_cast<std::uint32_t>(ERROR_INVALID_HANDLE));
       return;
     }
 
-    (void)::SetFileCompletionNotificationModes(
-        opened, FILE_SKIP_COMPLETION_PORT_ON_SUCCESS);
+    (void)::SetFileCompletionNotificationModes(opened, FILE_SKIP_COMPLETION_PORT_ON_SUCCESS);
 
     {
       std::lock_guard<std::mutex> lock(lock_);
@@ -441,24 +420,18 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       state_ = State::kConnected;
     }
 
-    PostOpenCallback(std::move(callback), true,
-                     static_cast<std::uint32_t>(ERROR_SUCCESS));
+    PostOpenCallback(std::move(callback), true, static_cast<std::uint32_t>(ERROR_SUCCESS));
     MaybeStartNextOperationOnIoThread();
   }
 
   void EnqueueOperationOnIoThread(PendingOperation op) {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
-    TRACE_EVENT0("nei.io",
-                 op.type == IOContext::Type::kRead
-                     ? "AsyncFileWin::Read"
-                     : "AsyncFileWin::Write");
+    TRACE_EVENT0("nei.io", op.type == IOContext::Type::kRead ? "AsyncFileWin::Read" : "AsyncFileWin::Write");
     if (!op.buffer) {
       if (op.type == IOContext::Type::kRead) {
-        PostReadCallback(std::move(op.read_callback), false, 0,
-                         static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER));
+        PostReadCallback(std::move(op.read_callback), false, 0, static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER));
       } else {
-        PostWriteCallback(std::move(op.write_callback), false, 0,
-                          static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER));
+        PostWriteCallback(std::move(op.write_callback), false, 0, static_cast<std::uint32_t>(ERROR_INVALID_PARAMETER));
       }
       return;
     }
@@ -467,11 +440,9 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       std::lock_guard<std::mutex> lock(lock_);
       if (state_ != State::kConnected || file_handle_ == INVALID_HANDLE_VALUE) {
         if (op.type == IOContext::Type::kRead) {
-          PostReadCallback(std::move(op.read_callback), false, 0,
-                           static_cast<std::uint32_t>(ERROR_INVALID_HANDLE));
+          PostReadCallback(std::move(op.read_callback), false, 0, static_cast<std::uint32_t>(ERROR_INVALID_HANDLE));
         } else {
-          PostWriteCallback(std::move(op.write_callback), false, 0,
-                            static_cast<std::uint32_t>(ERROR_INVALID_HANDLE));
+          PostWriteCallback(std::move(op.write_callback), false, 0, static_cast<std::uint32_t>(ERROR_INVALID_HANDLE));
         }
         return;
       }
@@ -488,8 +459,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     std::uint32_t start_error = static_cast<std::uint32_t>(ERROR_SUCCESS);
     {
       std::lock_guard<std::mutex> lock(lock_);
-      if (state_ != State::kConnected || file_handle_ == INVALID_HANDLE_VALUE ||
-          active_io_ != nullptr || pending_operations_.empty()) {
+      if (state_ != State::kConnected || file_handle_ == INVALID_HANDLE_VALUE || active_io_ != nullptr
+          || pending_operations_.empty()) {
         return;
       }
 
@@ -538,9 +509,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     }
 
     if (context->transferred_bytes >= context->total_bytes) {
-      FinalizeOperationOnIoThread(std::move(context),
-                                  static_cast<std::uint32_t>(ERROR_SUCCESS), 0,
-                                  true, true);
+      FinalizeOperationOnIoThread(std::move(context), static_cast<std::uint32_t>(ERROR_SUCCESS), 0, true, true);
       return;
     }
 
@@ -548,9 +517,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     {
       std::lock_guard<std::mutex> lock(lock_);
       if (state_ != State::kConnected || file_handle_ == INVALID_HANDLE_VALUE) {
-        FinalizeOperationOnIoThread(std::move(context),
-                                    static_cast<std::uint32_t>(ERROR_INVALID_HANDLE),
-                                    0, false, true);
+        FinalizeOperationOnIoThread(
+            std::move(context), static_cast<std::uint32_t>(ERROR_INVALID_HANDLE), 0, false, true);
         return;
       }
       handle = file_handle_;
@@ -559,10 +527,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     const std::size_t remaining = context->total_bytes - context->transferred_bytes;
     const std::size_t chunk = (std::min)(remaining, kMaxChunkBytes);
     context->active_chunk_bytes = chunk;
-    const std::uint64_t chunk_offset =
-      context->base_offset + static_cast<std::uint64_t>(context->transferred_bytes);
-    FillOverlappedOffset(&context->overlapped,
-               chunk_offset);
+    const std::uint64_t chunk_offset = context->base_offset + static_cast<std::uint64_t>(context->transferred_bytes);
+    FillOverlappedOffset(&context->overlapped, chunk_offset);
 
     {
       std::lock_guard<std::mutex> lock(lock_);
@@ -574,28 +540,29 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     if (context->type == IOContext::Type::kRead) {
       ok = ::ReadFile(handle,
                       context->buffer->data() + context->transferred_bytes,
-                      static_cast<DWORD>(chunk), &transferred_now,
+                      static_cast<DWORD>(chunk),
+                      &transferred_now,
                       &context->overlapped);
     } else {
       ok = ::WriteFile(handle,
                        context->buffer->data() + context->transferred_bytes,
-                       static_cast<DWORD>(chunk), &transferred_now,
+                       static_cast<DWORD>(chunk),
+                       &transferred_now,
                        &context->overlapped);
     }
 
     if (ok) {
       // Inline completion is normalized into an async IO-sequence task.
-      const bool posted = io_task_runner_->PostTask(
-          FROM_HERE,
-          [weak_this = weak_factory_.GetWeakPtr(FROM_HERE),
-           ov = &context->overlapped,
-           transferred = transferred_now]() {
-            if (!weak_this) {
-              return;
-            }
-            weak_this->OnChunkCompletedOnIoThread(
-                ov, transferred, static_cast<std::uint32_t>(ERROR_SUCCESS));
-          });
+      const bool posted = io_task_runner_->PostTask(FROM_HERE,
+                                                    [weak_this = weak_factory_.GetWeakPtr(FROM_HERE),
+                                                     ov = &context->overlapped,
+                                                     transferred = transferred_now]() {
+                                                      if (!weak_this) {
+                                                        return;
+                                                      }
+                                                      weak_this->OnChunkCompletedOnIoThread(
+                                                          ov, transferred, static_cast<std::uint32_t>(ERROR_SUCCESS));
+                                                    });
       if (!posted) {
         // Task queue is shutting down.  The inline-completed context is
         // still registered in pending_io_; remove and finalize it now,
@@ -612,9 +579,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
           }
         }
         if (removed) {
-          FinalizeOperationOnIoThread(std::move(removed),
-                                      static_cast<std::uint32_t>(ERROR_SUCCESS),
-                                      transferred_now, true, true);
+          FinalizeOperationOnIoThread(
+              std::move(removed), static_cast<std::uint32_t>(ERROR_SUCCESS), transferred_now, true, true);
         }
         CloseOnIoThread(true);
       }
@@ -636,13 +602,10 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       }
     }
 
-    FinalizeOperationOnIoThread(removed ? removed : context,
-                                static_cast<std::uint32_t>(err), 0, false, true);
+    FinalizeOperationOnIoThread(removed ? removed : context, static_cast<std::uint32_t>(err), 0, false, true);
   }
 
-  void OnChunkCompletedOnIoThread(OVERLAPPED* overlapped,
-                                  DWORD bytes_transferred,
-                                  std::uint32_t error_code) {
+  void OnChunkCompletedOnIoThread(OVERLAPPED *overlapped, DWORD bytes_transferred, std::uint32_t error_code) {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     std::shared_ptr<IOContext> context;
     {
@@ -669,41 +632,33 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
     const std::size_t chunk_transferred = static_cast<std::size_t>(bytes_transferred);
     if (chunk_transferred > context->active_chunk_bytes) {
-      FinalizeOperationOnIoThread(std::move(context),
-                                  static_cast<std::uint32_t>(ERROR_INVALID_DATA), 0,
-                                  false, true);
+      FinalizeOperationOnIoThread(std::move(context), static_cast<std::uint32_t>(ERROR_INVALID_DATA), 0, false, true);
       return;
     }
 
     context->transferred_bytes += chunk_transferred;
 
-    if (context->type == IOContext::Type::kRead &&
-        chunk_transferred < context->active_chunk_bytes) {
-      FinalizeOperationOnIoThread(std::move(context),
-                                  static_cast<std::uint32_t>(ERROR_SUCCESS),
-                                  bytes_transferred, true, true);
+    if (context->type == IOContext::Type::kRead && chunk_transferred < context->active_chunk_bytes) {
+      FinalizeOperationOnIoThread(
+          std::move(context), static_cast<std::uint32_t>(ERROR_SUCCESS), bytes_transferred, true, true);
       return;
     }
 
-    if (context->type == IOContext::Type::kWrite && chunk_transferred == 0 &&
-        context->transferred_bytes < context->total_bytes) {
-      FinalizeOperationOnIoThread(std::move(context),
-                                  static_cast<std::uint32_t>(ERROR_WRITE_FAULT), 0,
-                                  false, true);
+    if (context->type == IOContext::Type::kWrite && chunk_transferred == 0
+        && context->transferred_bytes < context->total_bytes) {
+      FinalizeOperationOnIoThread(std::move(context), static_cast<std::uint32_t>(ERROR_WRITE_FAULT), 0, false, true);
       return;
     }
 
     if (context->transferred_bytes >= context->total_bytes) {
-      FinalizeOperationOnIoThread(std::move(context),
-                                  static_cast<std::uint32_t>(ERROR_SUCCESS),
-                                  bytes_transferred, true, true);
+      FinalizeOperationOnIoThread(
+          std::move(context), static_cast<std::uint32_t>(ERROR_SUCCESS), bytes_transferred, true, true);
       return;
     }
 
     // The next chunk is always launched in a fresh posted task.
-    const bool posted = io_task_runner_->PostTask(
-        FROM_HERE,
-        [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), context]() mutable {
+    const bool posted =
+        io_task_runner_->PostTask(FROM_HERE, [weak_this = weak_factory_.GetWeakPtr(FROM_HERE), context]() mutable {
           if (!weak_this) {
             return;
           }
@@ -714,9 +669,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
       // completed) context inline, then force a synchronous close for
       // remaining state since the pump can no longer deliver IOCP
       // completions.
-      FinalizeOperationOnIoThread(std::move(context),
-                                  static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED),
-                                  0, false, true);
+      FinalizeOperationOnIoThread(
+          std::move(context), static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED), 0, false, true);
       CloseOnIoThread(true);
     }
   }
@@ -728,10 +682,8 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     {
       std::lock_guard<std::mutex> lock(lock_);
       file_snapshot = file_handle_;
-      if ((state_ != State::kConnected && state_ != State::kClosing) ||
-          file_snapshot == INVALID_HANDLE_VALUE ||
-          reinterpret_cast<HANDLE>(handle) != file_snapshot ||
-          pending_io_.empty()) {
+      if ((state_ != State::kConnected && state_ != State::kClosing) || file_snapshot == INVALID_HANDLE_VALUE
+          || reinterpret_cast<HANDLE>(handle) != file_snapshot || pending_io_.empty()) {
         return;
       }
       auto it = pending_io_.begin();
@@ -739,20 +691,17 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     }
 
     DWORD transferred = 0;
-    const BOOL ok =
-        ::GetOverlappedResult(file_snapshot, &context->overlapped, &transferred, FALSE);
+    const BOOL ok = ::GetOverlappedResult(file_snapshot, &context->overlapped, &transferred, FALSE);
     if (!ok) {
       const DWORD err = ::GetLastError();
       if (err == ERROR_IO_INCOMPLETE) {
         return;
       }
-      OnChunkCompletedOnIoThread(&context->overlapped, 0,
-                                 static_cast<std::uint32_t>(err));
+      OnChunkCompletedOnIoThread(&context->overlapped, 0, static_cast<std::uint32_t>(err));
       return;
     }
 
-    OnChunkCompletedOnIoThread(&context->overlapped, transferred,
-                               static_cast<std::uint32_t>(ERROR_SUCCESS));
+    OnChunkCompletedOnIoThread(&context->overlapped, transferred, static_cast<std::uint32_t>(ERROR_SUCCESS));
   }
 
   void FinalizeOperationOnIoThread(std::shared_ptr<IOContext> context,
@@ -768,20 +717,20 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     if (context->type == IOContext::Type::kRead) {
       g_read_finalize_attempted.fetch_add(1, std::memory_order_relaxed);
       if (!success) {
-        PostReadCallback(std::move(context->read_callback), false,
-                         context->transferred_bytes, error_code);
+        PostReadCallback(std::move(context->read_callback), false, context->transferred_bytes, error_code);
       } else {
         (void)last_chunk_bytes;
-        PostReadCallback(std::move(context->read_callback), true,
+        PostReadCallback(std::move(context->read_callback),
+                         true,
                          context->transferred_bytes,
                          static_cast<std::uint32_t>(ERROR_SUCCESS));
       }
     } else {
       const std::size_t bytes_written = context->transferred_bytes;
-      PostWriteCallback(std::move(context->write_callback), success,
+      PostWriteCallback(std::move(context->write_callback),
+                        success,
                         bytes_written,
-                        success ? static_cast<std::uint32_t>(ERROR_SUCCESS)
-                                : error_code);
+                        success ? static_cast<std::uint32_t>(ERROR_SUCCESS) : error_code);
     }
 
     if (clear_active_slot) {
@@ -843,8 +792,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
 
     {
       std::lock_guard<std::mutex> lock(lock_);
-      if (state_ == State::kDisconnected &&
-          file_handle_ == INVALID_HANDLE_VALUE) {
+      if (state_ == State::kDisconnected && file_handle_ == INVALID_HANDLE_VALUE) {
         // Must self-destruct outside the lock to avoid mutex
         // destruction-while-owned diagnostics.
       } else {
@@ -870,11 +818,11 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     CloseCallback cb;
     std::swap(cb, pending_close_callback_);
-    if (cb) cb();
+    if (cb)
+      cb();
   }
 
-  void CloseOnIoThread(bool force_sync_drain = false,
-                       CloseCallback callback = nullptr) {
+  void CloseOnIoThread(bool force_sync_drain = false, CloseCallback callback = nullptr) {
     if (callback) {
       pending_close_callback_ = std::move(callback);
     }
@@ -919,17 +867,14 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     // kernel.  These PendingOperation objects own no OVERLAPPED, so it is
     // always safe to destroy them immediately.
     if (open_callback) {
-      PostOpenCallback(std::move(open_callback), false,
-                       static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
+      PostOpenCallback(std::move(open_callback), false, static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
     }
 
-    for (auto& op : queued) {
+    for (auto &op : queued) {
       if (op.type == IOContext::Type::kRead) {
-        PostReadCallback(std::move(op.read_callback), false, 0,
-                         static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
+        PostReadCallback(std::move(op.read_callback), false, 0, static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
       } else {
-        PostWriteCallback(std::move(op.write_callback), false, 0,
-                          static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
+        PostWriteCallback(std::move(op.write_callback), false, 0, static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
       }
     }
 
@@ -947,7 +892,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     OpenCallback open_callback;
     std::deque<PendingOperation> queued;
     std::shared_ptr<IOContext> active;
-    std::unordered_map<OVERLAPPED*, std::shared_ptr<IOContext>> pending;
+    std::unordered_map<OVERLAPPED *, std::shared_ptr<IOContext>> pending;
     HANDLE to_close = INVALID_HANDLE_VALUE;
 
     {
@@ -973,11 +918,10 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     // Synchronously drain every outstanding OVERLAPPED completion before
     // freeing any IOContext memory.
     if (to_close != INVALID_HANDLE_VALUE) {
-      for (auto& item : pending) {
+      for (auto &item : pending) {
         if (item.second) {
           DWORD transferred = 0;
-          (void)::GetOverlappedResult(to_close, &item.second->overlapped,
-                                      &transferred, TRUE);
+          (void)::GetOverlappedResult(to_close, &item.second->overlapped, &transferred, TRUE);
         }
       }
     }
@@ -988,43 +932,44 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     }
 
     if (open_callback) {
-      PostOpenCallback(std::move(open_callback), false,
-                       static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
+      PostOpenCallback(std::move(open_callback), false, static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
     }
 
-    for (auto& op : queued) {
+    for (auto &op : queued) {
       if (op.type == IOContext::Type::kRead) {
-        PostReadCallback(std::move(op.read_callback), false, 0,
-                         static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
+        PostReadCallback(std::move(op.read_callback), false, 0, static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
       } else {
-        PostWriteCallback(std::move(op.write_callback), false, 0,
-                          static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
+        PostWriteCallback(std::move(op.write_callback), false, 0, static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
       }
     }
 
     if (active) {
       if (active->type == IOContext::Type::kRead) {
-        PostReadCallback(std::move(active->read_callback), false,
+        PostReadCallback(std::move(active->read_callback),
+                         false,
                          active->transferred_bytes,
                          static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
       } else {
-        PostWriteCallback(std::move(active->write_callback), false,
+        PostWriteCallback(std::move(active->write_callback),
+                          false,
                           active->transferred_bytes,
                           static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
       }
     }
 
-    for (auto& item : pending) {
+    for (auto &item : pending) {
       std::shared_ptr<IOContext> context = std::move(item.second);
       if (!context) {
         continue;
       }
       if (context->type == IOContext::Type::kRead) {
-        PostReadCallback(std::move(context->read_callback), false,
+        PostReadCallback(std::move(context->read_callback),
+                         false,
                          context->transferred_bytes,
                          static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
       } else {
-        PostWriteCallback(std::move(context->write_callback), false,
+        PostWriteCallback(std::move(context->write_callback),
+                          false,
                           context->transferred_bytes,
                           static_cast<std::uint32_t>(ERROR_OPERATION_ABORTED));
       }
@@ -1040,9 +985,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     }
   }
 
-  void PostOpenCallback(OpenCallback callback,
-                        bool success,
-                        std::uint32_t error_code) {
+  void PostOpenCallback(OpenCallback callback, bool success, std::uint32_t error_code) {
     // Called from IO thread normally, but also from non-IO-thread close/error
     // fallback paths (CloseOnIoThread with force_sync, CancelAndSelfDestruct).
     // Therefore no DCHECK_CALLED_ON_VALID_THREAD here.
@@ -1053,10 +996,7 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     callback(success, internal::NormalizeAsyncFileError(error_code));
   }
 
-  void PostReadCallback(ReadCallback callback,
-                        bool success,
-                        std::size_t bytes_read,
-                        std::uint32_t error_code) {
+  void PostReadCallback(ReadCallback callback, bool success, std::size_t bytes_read, std::uint32_t error_code) {
     // Called from IO thread normally, but also from non-IO-thread close/error
     // fallback paths. No DCHECK here.
     if (!callback) {
@@ -1064,26 +1004,20 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
     }
     g_read_posted.fetch_add(1, std::memory_order_relaxed);
     g_read_reached.fetch_add(1, std::memory_order_relaxed);
-    callback(success, bytes_read,
-             internal::NormalizeAsyncFileError(error_code));
+    callback(success, bytes_read, internal::NormalizeAsyncFileError(error_code));
   }
 
-  void PostWriteCallback(WriteCallback callback,
-                         bool success,
-                         std::size_t bytes_written,
-                         std::uint32_t error_code) {
+  void PostWriteCallback(WriteCallback callback, bool success, std::size_t bytes_written, std::uint32_t error_code) {
     // Called from IO thread normally, but also from non-IO-thread close/error
     // fallback paths. No DCHECK here.
     if (!callback) {
       return;
     }
     g_write_reached.fetch_add(1, std::memory_order_relaxed);
-    callback(success, bytes_written,
-             internal::NormalizeAsyncFileError(error_code));
+    callback(success, bytes_written, internal::NormalizeAsyncFileError(error_code));
   }
 
-  static void FillOverlappedOffset(OVERLAPPED* overlapped,
-                                   std::uint64_t offset) {
+  static void FillOverlappedOffset(OVERLAPPED *overlapped, std::uint64_t offset) {
     std::memset(overlapped, 0, sizeof(*overlapped));
     overlapped->Offset = static_cast<DWORD>(offset & 0xFFFFFFFFULL);
     overlapped->OffsetHigh = static_cast<DWORD>((offset >> 32) & 0xFFFFFFFFULL);
@@ -1102,18 +1036,20 @@ class AsyncFileWin::Impl final : public MessagePumpForIO::CompletionWatcher {
   MessagePumpForIO::FdWatchController controller_;
   std::deque<PendingOperation> pending_operations_;
   std::shared_ptr<IOContext> active_io_;
-  std::unordered_map<OVERLAPPED*, std::shared_ptr<IOContext>> pending_io_;
+  std::unordered_map<OVERLAPPED *, std::shared_ptr<IOContext>> pending_io_;
   DECLARE_THREAD_CHECKER(io_thread_checker_);
   base::WeakPtrFactory<Impl> weak_factory_{this, FROM_HERE_MEMBER};
 };
 
 AsyncFileWin::AsyncFileWin(scoped_refptr<TaskRunner> io_task_runner)
-    : impl_(std::make_unique<Impl>(std::move(io_task_runner))) {}
+    : impl_(std::make_unique<Impl>(std::move(io_task_runner))) {
+}
 
-AsyncFileWin::AsyncFileWin(AsyncFileWin&& other) noexcept
-    : impl_(std::move(other.impl_)) {}
+AsyncFileWin::AsyncFileWin(AsyncFileWin &&other) noexcept
+    : impl_(std::move(other.impl_)) {
+}
 
-AsyncFileWin& AsyncFileWin::operator=(AsyncFileWin&& other) noexcept {
+AsyncFileWin &AsyncFileWin::operator=(AsyncFileWin &&other) noexcept {
   if (this == &other) {
     return *this;
   }
@@ -1132,23 +1068,20 @@ AsyncFileWin::~AsyncFileWin() {
     return;
   }
 
-  Impl* raw_impl = impl_.release();
-  const bool posted = io_runner->PostTask(FROM_HERE, [raw_impl]() {
-    raw_impl->CancelAndSelfDestruct();
-  });
+  Impl *raw_impl = impl_.release();
+  const bool posted = io_runner->PostTask(FROM_HERE, [raw_impl]() { raw_impl->CancelAndSelfDestruct(); });
   if (!posted) {
     // IO thread is dead; force synchronous cleanup on calling thread.
     raw_impl->CancelAndSelfDestruct(true);
   }
 }
 
-void AsyncFileWin::OpenAsync(const std::string& path,
+void AsyncFileWin::OpenAsync(const std::string &path,
                              OpenMode mode,
                              OpenDisposition disposition,
-                             const scoped_refptr<TaskRunner>& background_runner,
+                             const scoped_refptr<TaskRunner> &background_runner,
                              OpenCallback callback) {
-  impl_->OpenAsync(path, mode, disposition, background_runner,
-                   std::move(callback));
+  impl_->OpenAsync(path, mode, disposition, background_runner, std::move(callback));
 }
 
 void AsyncFileWin::ReadAsync(scoped_refptr<IOBuffer> buf,
@@ -1162,8 +1095,7 @@ void AsyncFileWin::WriteAsync(scoped_refptr<IOBuffer> buf,
                               std::size_t bytes_to_write,
                               std::uint64_t offset,
                               WriteCallback callback) {
-  impl_->WriteAsync(std::move(buf), bytes_to_write, offset,
-                    std::move(callback));
+  impl_->WriteAsync(std::move(buf), bytes_to_write, offset, std::move(callback));
 }
 
 void AsyncFileWin::ResetStageCountersForTesting() {
@@ -1191,13 +1123,10 @@ AsyncFileWin::StageCounters AsyncFileWin::GetStageCountersForTesting() {
   out.iocp_completed = g_iocp_completed.load(std::memory_order_relaxed);
   out.context_hit = g_context_hit.load(std::memory_order_relaxed);
   out.context_miss = g_context_miss.load(std::memory_order_relaxed);
-  out.read_finalize_attempted =
-      g_read_finalize_attempted.load(std::memory_order_relaxed);
+  out.read_finalize_attempted = g_read_finalize_attempted.load(std::memory_order_relaxed);
   out.read_posted = g_read_posted.load(std::memory_order_relaxed);
-  out.callback_weak_dropped =
-      g_callback_weak_dropped.load(std::memory_order_relaxed);
-  out.callback_post_failed =
-      g_callback_post_failed.load(std::memory_order_relaxed);
+  out.callback_weak_dropped = g_callback_weak_dropped.load(std::memory_order_relaxed);
+  out.callback_post_failed = g_callback_post_failed.load(std::memory_order_relaxed);
   out.write_post_seq = g_write_post_seq.load(std::memory_order_relaxed);
   out.write_exec_seq = g_write_exec_seq.load(std::memory_order_relaxed);
   out.read_post_seq = g_read_post_seq.load(std::memory_order_relaxed);
@@ -1213,6 +1142,6 @@ bool AsyncFileWin::is_open() const {
   return impl_->is_open();
 }
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // defined(_WIN32)
+#endif // defined(_WIN32)

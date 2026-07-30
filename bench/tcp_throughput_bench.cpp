@@ -50,17 +50,24 @@ using Clock = std::chrono::high_resolution_clock;
 // IO thread helper
 // ---------------------------------------------------------------------------
 class IoThread {
- public:
-  explicit IoThread(const std::string& name) {
+public:
+  explicit IoThread(const std::string &name) {
     nei::Thread::Options opts;
     opts.message_pump_type = nei::MessagePumpType::IO;
     thread_ = std::make_unique<nei::Thread>(name);
     thread_->StartWithOptions(opts);
     runner_ = thread_->GetTaskRunner();
   }
-  ~IoThread() { thread_->Stop(); }
-  nei::scoped_refptr<nei::TaskRunner> runner() const { return runner_; }
- private:
+
+  ~IoThread() {
+    thread_->Stop();
+  }
+
+  nei::scoped_refptr<nei::TaskRunner> runner() const {
+    return runner_;
+  }
+
+private:
   std::unique_ptr<nei::Thread> thread_;
   nei::scoped_refptr<nei::TaskRunner> runner_;
 };
@@ -69,26 +76,28 @@ static uint16_t FindFreePort() {
 #if defined(_WIN32)
   nei::net::EnsureWsa();
   SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (s == INVALID_SOCKET) return 0;
+  if (s == INVALID_SOCKET)
+    return 0;
   struct sockaddr_in addr = {};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = 0;
-  ::bind(s, (struct sockaddr*)&addr, sizeof(addr));
+  ::bind(s, (struct sockaddr *)&addr, sizeof(addr));
   int len = sizeof(addr);
-  ::getsockname(s, (struct sockaddr*)&addr, &len);
+  ::getsockname(s, (struct sockaddr *)&addr, &len);
   ::closesocket(s);
   return ntohs(addr.sin_port);
 #else
   int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) return 0;
+  if (fd < 0)
+    return 0;
   struct sockaddr_in addr = {};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = 0;
-  ::bind(fd, (struct sockaddr*)&addr, sizeof(addr));
+  ::bind(fd, (struct sockaddr *)&addr, sizeof(addr));
   socklen_t len = sizeof(addr);
-  ::getsockname(fd, (struct sockaddr*)&addr, &len);
+  ::getsockname(fd, (struct sockaddr *)&addr, &len);
   ::close(fd);
   return ntohs(addr.sin_port);
 #endif
@@ -99,7 +108,10 @@ static uint16_t FindFreePort() {
 // ---------------------------------------------------------------------------
 void RunBenchmark(size_t total_bytes, size_t buffer_size) {
   const uint16_t port = FindFreePort();
-  if (port == 0) { std::cerr << "ERROR: no free port" << std::endl; return; }
+  if (port == 0) {
+    std::cerr << "ERROR: no free port" << std::endl;
+    return;
+  }
 
   // Separate IO threads — server and client run concurrently to
   // saturate loopback bandwidth (single-thread serializes send/recv).
@@ -120,10 +132,8 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
   auto recv_hash = std::make_shared<uint64_t>(0xcbf29ce484222325ULL);
   auto recv_bytes = std::make_shared<std::atomic<size_t>>(0);
 
-  auto bench_done = std::make_shared<nei::WaitableEvent>(
-      nei::WaitableEvent::ResetPolicy::kAutomatic, false);
-  auto server_ready = std::make_shared<nei::WaitableEvent>(
-      nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto bench_done = std::make_shared<nei::WaitableEvent>(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto server_ready = std::make_shared<nei::WaitableEvent>(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
 
   auto server = std::make_shared<nei::net::TCPServerSocket>();
   auto client = std::make_shared<nei::net::TCPClientSocket>();
@@ -136,44 +146,59 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
   // --- Server: listen + read loop on srv_runner ---
   srv_runner->PostTask(FROM_HERE, [=]() {
     bool ok = server->Listen(
-        nei::net::IPEndPoint(
-            nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
+        nei::net::IPEndPoint(nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
+        1,
         [=](bool success, std::unique_ptr<nei::net::TCPClientSocket> conn) {
-          if (!success) { bench_done->Signal(); return; }
+          if (!success) {
+            bench_done->Signal();
+            return;
+          }
           auto sock = std::shared_ptr<nei::net::TCPClientSocket>(conn.release());
           auto do_read = std::make_shared<std::function<void()>>();
           std::weak_ptr<std::function<void()>> do_read_weak = do_read;
           *do_read = [=]() {
             auto chunk = nei::MakeRefCounted<nei::IOBufferWithSize>(buffer_size);
-            sock->ReadAsync(chunk, buffer_size,
-                [=, dr = do_read_weak.lock()](bool s, size_t n) {
-                  if (!dr) return;
-                  if (!s) { bench_done->Signal(); return; }
-                  if (n == 0) { sock->Close(); bench_done->Signal(); return; }
-                  recv_bytes->fetch_add(n);
-                  uint64_t h = *recv_hash;
-                  for (size_t i = 0; i < n; ++i) {
-                    h ^= static_cast<unsigned char>(chunk->data()[i]);
-                    h *= 0x100000001b3ULL;
-                  }
-                  *recv_hash = h;
-                  (*dr)();
-                });
+            sock->ReadAsync(chunk, buffer_size, [=, dr = do_read_weak.lock()](bool s, size_t n) {
+              if (!dr)
+                return;
+              if (!s) {
+                bench_done->Signal();
+                return;
+              }
+              if (n == 0) {
+                sock->Close();
+                bench_done->Signal();
+                return;
+              }
+              recv_bytes->fetch_add(n);
+              uint64_t h = *recv_hash;
+              for (size_t i = 0; i < n; ++i) {
+                h ^= static_cast<unsigned char>(chunk->data()[i]);
+                h *= 0x100000001b3ULL;
+              }
+              *recv_hash = h;
+              (*dr)();
+            });
           };
           (*do_read)();
         },
         srv_runner);
-    if (!ok) { bench_done->Signal(); return; }
+    if (!ok) {
+      bench_done->Signal();
+      return;
+    }
     server_ready->Signal();
   });
 
   // --- Client: connect + write loop on cli_runner ---
   cli_runner->PostTask(FROM_HERE, [=]() {
     client->Connect(
-        nei::net::IPEndPoint(
-            nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
+        nei::net::IPEndPoint(nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
         [=](bool ok) {
-          if (!ok) { bench_done->Signal(); return; }
+          if (!ok) {
+            bench_done->Signal();
+            return;
+          }
           auto offset = std::make_shared<size_t>(0);
           auto do_write = std::make_shared<std::function<void()>>();
           std::weak_ptr<std::function<void()>> do_write_weak = do_write;
@@ -183,17 +208,19 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
               client->Close();
               return;
             }
-            auto chunk = nei::MakeRefCounted<nei::IOBufferWithSize>(
-                std::min(remain, buffer_size));
+            auto chunk = nei::MakeRefCounted<nei::IOBufferWithSize>(std::min(remain, buffer_size));
             for (size_t i = 0; i < chunk->size(); ++i)
               chunk->data()[i] = static_cast<unsigned char>(((*offset + i) * 37 + 17) & 0xFF);
-            client->WriteAsync(chunk, chunk->size(),
-                [=, dw = do_write_weak.lock()](bool s, size_t n) {
-                  if (!dw) return;
-                  if (!s) { bench_done->Signal(); return; }
-                  *offset += n;
-                  (*dw)();
-                });
+            client->WriteAsync(chunk, chunk->size(), [=, dw = do_write_weak.lock()](bool s, size_t n) {
+              if (!dw)
+                return;
+              if (!s) {
+                bench_done->Signal();
+                return;
+              }
+              *offset += n;
+              (*dw)();
+            });
           };
           (*do_write)();
         },
@@ -213,32 +240,31 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
   std::cout << "\n=== TCP Throughput Benchmark ===\n"
             << "  Data       : " << (total_bytes >> 20) << " MB\n"
             << "  Buffer     : " << (buffer_size >> 10) << " KB\n"
-            << "  Elapsed    : " << std::fixed << std::setprecision(3)
-            << elapsed << " s\n"
-            << "  Throughput : " << std::fixed << std::setprecision(1)
-            << rate << " MB/s\n";
+            << "  Elapsed    : " << std::fixed << std::setprecision(3) << elapsed << " s\n"
+            << "  Throughput : " << std::fixed << std::setprecision(1) << rate << " MB/s\n";
 
   bool ok = (*recv_hash == *expected_hash) && (received == total_bytes);
   if (!ok) {
     std::cerr << "ERROR: integrity check FAILED"
-              << "  sent=" << total_bytes << "  recv=" << received
-              << "  expected_hash=0x" << std::hex << *expected_hash
+              << "  sent=" << total_bytes << "  recv=" << received << "  expected_hash=0x" << std::hex << *expected_hash
               << "  actual_hash=0x" << *recv_hash << std::dec << std::endl;
   } else {
     std::cout << "  Integrity   : OK (FNV-1a hash match)" << std::endl;
   }
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   nei::AtExitManager at_exit;
 
   size_t total_mb = 10;
   size_t buffer_kb = 64;
 
-  if (argc > 1) total_mb = static_cast<size_t>(std::atoll(argv[1]));
-  if (argc > 2) buffer_kb = static_cast<size_t>(std::atoll(argv[2]));
+  if (argc > 1)
+    total_mb = static_cast<size_t>(std::atoll(argv[1]));
+  if (argc > 2)
+    buffer_kb = static_cast<size_t>(std::atoll(argv[2]));
 
   if (total_mb == 0 || total_mb > 8192) {
     std::cerr << "Usage: " << argv[0] << " [total_MB=10] [buffer_KB=64]\n"

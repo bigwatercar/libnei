@@ -17,7 +17,7 @@
 namespace nei {
 
 class NEI_API ThreadPool final {
- public:
+public:
   class Impl;
 
   /// Parameters controlling the physical characteristics of the worker pool.
@@ -48,16 +48,15 @@ class NEI_API ThreadPool final {
   };
 
   ThreadPool();
-  explicit ThreadPool(const InitParams& params);
+  explicit ThreadPool(const InitParams &params);
   ~ThreadPool();
 
-  ThreadPool(const ThreadPool&) = delete;
-  ThreadPool& operator=(const ThreadPool&) = delete;
-  ThreadPool(ThreadPool&&) = delete;
-  ThreadPool& operator=(ThreadPool&&) = delete;
+  ThreadPool(const ThreadPool &) = delete;
+  ThreadPool &operator=(const ThreadPool &) = delete;
+  ThreadPool(ThreadPool &&) = delete;
+  ThreadPool &operator=(ThreadPool &&) = delete;
 
-  scoped_refptr<TaskRunner> CreateSequencedTaskRunner(
-      const TaskTraits& traits = TaskTraits());
+  scoped_refptr<TaskRunner> CreateSequencedTaskRunner(const TaskTraits &traits = TaskTraits());
 
   /// Creates a TaskRunner whose tasks may run in parallel on different
   /// worker threads.  Unlike sequenced runners, there is no guarantee of
@@ -66,8 +65,7 @@ class NEI_API ThreadPool final {
   ///
   /// NOTE: Callers must ensure their tasks are thread-safe when using a
   /// parallel runner.
-  scoped_refptr<TaskRunner> CreateParallelTaskRunner(
-      const TaskTraits& traits = TaskTraits());
+  scoped_refptr<TaskRunner> CreateParallelTaskRunner(const TaskTraits &traits = TaskTraits());
 
   /// Posts a barrier task to every registered queue and blocks until all
   /// currently-queued work has been executed.  This is a coarse-grained
@@ -96,14 +94,14 @@ class NEI_API ThreadPool final {
   /// The observer is called from worker threads and must be thread-safe.
   /// Pass nullptr to unregister. The observer must outlive all worker threads
   /// (i.e., be cleared before or at Shutdown).
-  void SetTaskObserver(TaskObserver* observer);
+  void SetTaskObserver(TaskObserver *observer);
 
- private:
+private:
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_TASK_THREAD_POOL_H_
+#endif // NEIXX_TASK_THREAD_POOL_H_

@@ -22,13 +22,13 @@ internal::Task MakeTask(std::int64_t sequence_num, OnceClosure task) {
   return result;
 }
 
-void RunTask(internal::Task* task) {
+void RunTask(internal::Task *task) {
   ASSERT_NE(task, nullptr);
   ASSERT_TRUE(task->task);
   std::move(task->task).Run();
 }
 
-}  // namespace
+} // namespace
 
 TEST(TaskQueueTest, CreatesValidSequenceToken) {
   internal::TaskQueue queue;
@@ -187,7 +187,7 @@ TEST(TaskQueueTest, ConcurrentPostTaskFromMultipleThreads) {
     });
   }
 
-  for (auto& thread : threads) {
+  for (auto &thread : threads) {
     thread.join();
   }
 
@@ -206,9 +206,7 @@ TEST(TaskQueueTest, OnTaskPostedCallbackCalledWhenQueueBecomesNonEmpty) {
   internal::TaskQueue queue;
 
   std::atomic<int> callback_count{0};
-  queue.SetOnTaskPostedCallback([&callback_count]() {
-    callback_count.fetch_add(1);
-  });
+  queue.SetOnTaskPostedCallback([&callback_count]() { callback_count.fetch_add(1); });
 
   // First task posted to empty queue should trigger callback
   ASSERT_TRUE(queue.PushImmediateTask(MakeTask(1, []() {})));
@@ -228,9 +226,7 @@ TEST(TaskQueueTest, OnTaskPostedCallbackNotCalledWhenQueueNonEmpty) {
   internal::TaskQueue queue;
 
   std::atomic<int> callback_count{0};
-  queue.SetOnTaskPostedCallback([&callback_count]() {
-    callback_count.fetch_add(1);
-  });
+  queue.SetOnTaskPostedCallback([&callback_count]() { callback_count.fetch_add(1); });
 
   // First task to make queue non-empty
   ASSERT_TRUE(queue.PushImmediateTask(MakeTask(1, []() {})));
@@ -238,11 +234,11 @@ TEST(TaskQueueTest, OnTaskPostedCallbackNotCalledWhenQueueNonEmpty) {
 
   // Second task posted to non-empty queue should NOT trigger callback
   ASSERT_TRUE(queue.PushImmediateTask(MakeTask(2, []() {})));
-  EXPECT_EQ(callback_count.load(), 1);  // Still 1, not 2
+  EXPECT_EQ(callback_count.load(), 1); // Still 1, not 2
 
   // Third task also should not trigger callback
   ASSERT_TRUE(queue.PushImmediateTask(MakeTask(3, []() {})));
-  EXPECT_EQ(callback_count.load(), 1);  // Still 1, not 3
+  EXPECT_EQ(callback_count.load(), 1); // Still 1, not 3
 }
 
 TEST(TaskRunnerTest, PostTaskEnqueuesImmediateTask) {
@@ -299,10 +295,7 @@ TEST(TaskRunnerTest, PostDelayedTaskExtremeDelayFallsBackToImmediate) {
   auto runner = TaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
-  runner->PostDelayedTask(
-      FROM_HERE,
-      []() {},
-      TimeDelta::FromMicroseconds(std::numeric_limits<std::int64_t>::max()));
+  runner->PostDelayedTask(FROM_HERE, []() {}, TimeDelta::FromMicroseconds(std::numeric_limits<std::int64_t>::max()));
 
   EXPECT_TRUE(queue.HasImmediateWork());
   EXPECT_FALSE(queue.HasDelayedWork());
@@ -317,10 +310,7 @@ TEST(TaskRunnerTest, DelayedOverflowFallbackCounterIncrements) {
 
   EXPECT_EQ(TaskRunner::GetDelayedOverflowFallbackCountForTesting(), 0);
 
-  runner->PostDelayedTask(
-      FROM_HERE,
-      []() {},
-      TimeDelta::FromMicroseconds(std::numeric_limits<std::int64_t>::max()));
+  runner->PostDelayedTask(FROM_HERE, []() {}, TimeDelta::FromMicroseconds(std::numeric_limits<std::int64_t>::max()));
 
   EXPECT_EQ(TaskRunner::GetDelayedOverflowFallbackCountForTesting(), 1);
 }
@@ -373,4 +363,4 @@ TEST(TaskRunnerTest, PostTaskAfterQueueDestroyedDoesNotCrash) {
   SUCCEED();
 }
 
-}  // namespace nei
+} // namespace nei

@@ -34,40 +34,55 @@ namespace nei {
 // I/O and released when the final IOCP completion (or error) drains, so
 // the OVERLAPPED memory always outlives any kernel writes.
 // ---------------------------------------------------------------------------
-class DirWatchContext final
-    : public RefCountedThreadSafe<DirWatchContext>,
-      public MessagePumpForIO::CompletionWatcher {
- public:
-  using CompletionFn = std::function<void(std::uint32_t bytes,
-                                          std::uint32_t error)>;
+class DirWatchContext final : public RefCountedThreadSafe<DirWatchContext>, public MessagePumpForIO::CompletionWatcher {
+public:
+  using CompletionFn = std::function<void(std::uint32_t bytes, std::uint32_t error)>;
 
   ~DirWatchContext() override;
 
   // MessagePumpForIO::CompletionWatcher:
-  void OnFileCanReadWithoutBlocking(NativeIOHandle) override {}
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {}
-  void OnIOCompleted(NativeIOHandle handle, void* overlapped_context,
+  void OnFileCanReadWithoutBlocking(NativeIOHandle) override {
+  }
+
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {
+  }
+
+  void OnIOCompleted(NativeIOHandle handle,
+                     void *overlapped_context,
                      std::uint32_t bytes_transferred,
                      std::uint32_t error_code) override;
 
   // Factory.  Returns nullptr on failure.
-  static scoped_refptr<DirWatchContext> Create(
-      HANDLE dir_handle, bool recursive, CompletionFn on_completion);
+  static scoped_refptr<DirWatchContext> Create(HANDLE dir_handle, bool recursive, CompletionFn on_completion);
 
   // Severs the completion callback so residual IOCP packets become no-ops.
   void Cancel();
 
-  HANDLE dir_handle() const { return dir_handle_; }
-  OVERLAPPED* overlapped() { return &overlapped_; }
-  std::vector<std::uint8_t>& notify_buf() { return notify_buf_; }
-  bool recursive() const { return recursive_; }
+  HANDLE dir_handle() const {
+    return dir_handle_;
+  }
 
- private:
-  DirWatchContext() : notify_buf_(kNotifyBufSize) {}
+  OVERLAPPED *overlapped() {
+    return &overlapped_;
+  }
+
+  std::vector<std::uint8_t> &notify_buf() {
+    return notify_buf_;
+  }
+
+  bool recursive() const {
+    return recursive_;
+  }
+
+private:
+  DirWatchContext()
+      : notify_buf_(kNotifyBufSize) {
+  }
+
   bool IssueReadDirectoryChanges();
 
   CompletionFn on_completion_;
-  bool is_pinned_ = false;  // self-pin via manual AddRef/Release
+  bool is_pinned_ = false; // self-pin via manual AddRef/Release
   HANDLE dir_handle_ = nullptr;
   bool recursive_ = false;
   bool io_pending_ = false;
@@ -84,29 +99,28 @@ class DirWatchContext final
 namespace detail {
 template <>
 struct IsRefCountedLike<DirWatchContext> : std::true_type {};
-}  // namespace detail
+} // namespace detail
 
 // ===========================================================================
 // Impl
 // ===========================================================================
 
 class FilePathWatcher::Impl final {
- public:
+public:
   explicit Impl(scoped_refptr<TaskRunner> task_runner);
   ~Impl();
 
-  bool Watch(const std::string& path, bool recursive,
-             FilePathWatcher::Callback callback);
+  bool Watch(const std::string &path, bool recursive, FilePathWatcher::Callback callback);
   void Cancel();
 
-  bool is_watching() const { return watching_; }
+  bool is_watching() const {
+    return watching_;
+  }
 
- private:
-  void OnDirIOCompleted(std::uint32_t bytes_transferred,
-                        std::uint32_t error_code);
+private:
+  void OnDirIOCompleted(std::uint32_t bytes_transferred, std::uint32_t error_code);
 
-  void DeliverChange(const std::string& relative_path,
-                     FilePathWatcher::ChangeType type);
+  void DeliverChange(const std::string &relative_path, FilePathWatcher::ChangeType type);
 
   static FilePathWatcher::ChangeType MapFileAction(DWORD action);
 
@@ -123,11 +137,11 @@ class FilePathWatcher::Impl final {
   WeakPtrFactory<Impl> weak_factory_;
 };
 
-}  // namespace nei
+} // namespace nei
 
 // Enable cross-thread WeakPtr — IOCP completions fire on the IO thread.
 template <>
 struct nei::WeakPtrThreadSafe<nei::FilePathWatcher::Impl> : std::true_type {};
 
-#endif  // defined(_WIN32)
-#endif  // NEIXX_FILES_FILE_PATH_WATCHER_WIN_H_
+#endif // defined(_WIN32)
+#endif // NEIXX_FILES_FILE_PATH_WATCHER_WIN_H_

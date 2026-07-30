@@ -19,14 +19,14 @@ extern "C" {
  * @brief Memory usage information for the current process.
  */
 typedef struct nei_process_memory_info_st {
-    /** Total virtual address space in bytes. */
-    uint64_t virtual_bytes;
-    /** Physical memory currently in use (working set / RSS) in bytes. */
-    uint64_t resident_bytes;
-    /** Peak virtual address space ever used, in bytes. */
-    uint64_t peak_virtual_bytes;
-    /** Peak physical memory ever used, in bytes. */
-    uint64_t peak_resident_bytes;
+  /** Total virtual address space in bytes. */
+  uint64_t virtual_bytes;
+  /** Physical memory currently in use (working set / RSS) in bytes. */
+  uint64_t resident_bytes;
+  /** Peak virtual address space ever used, in bytes. */
+  uint64_t peak_virtual_bytes;
+  /** Peak physical memory ever used, in bytes. */
+  uint64_t peak_resident_bytes;
 } nei_process_memory_info_st;
 
 /**
@@ -153,25 +153,24 @@ NEI_API int nei_get_current_directory(char *buf, size_t size);
 #include <string>
 
 inline std::string nei_get_current_directory() {
-    char buf[4096];
-    int len = ::nei_get_current_directory(buf, sizeof(buf));
-    if (len < 0) {
-        return {};
-    }
-    return std::string(buf, static_cast<size_t>(len));
+  char buf[4096];
+  int len = ::nei_get_current_directory(buf, sizeof(buf));
+  if (len < 0) {
+    return {};
+  }
+  return std::string(buf, static_cast<size_t>(len));
 }
 
 inline std::filesystem::path nei_get_current_directory_path() {
-    char buf[4096];
-    int len = ::nei_get_current_directory(buf, sizeof(buf));
-    if (len < 0) {
-        return {};
-    }
+  char buf[4096];
+  int len = ::nei_get_current_directory(buf, sizeof(buf));
+  if (len < 0) {
+    return {};
+  }
 #if __cplusplus >= 202002L
-    return std::filesystem::path(
-        std::u8string(reinterpret_cast<const char8_t*>(buf), static_cast<size_t>(len)));
+  return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(buf), static_cast<size_t>(len)));
 #else
-    return std::filesystem::u8path(std::string(buf, static_cast<size_t>(len)));
+  return std::filesystem::u8path(std::string(buf, static_cast<size_t>(len)));
 #endif
 }
 
@@ -184,30 +183,28 @@ inline std::filesystem::path nei_get_current_directory_path() {
 //   interprets as the system ANSI/ACP code page on Windows.
 
 inline std::filesystem::path nei_get_executable_path() {
-    char buf[4096];
-    int len = ::nei_get_executable_path(buf, sizeof(buf));
-    if (len < 0) {
-        throw std::runtime_error("Failed to get executable path");
-    }
+  char buf[4096];
+  int len = ::nei_get_executable_path(buf, sizeof(buf));
+  if (len < 0) {
+    throw std::runtime_error("Failed to get executable path");
+  }
 #if __cplusplus >= 202002L
-    return std::filesystem::path(
-        std::u8string(reinterpret_cast<const char8_t*>(buf), (size_t)len));
+  return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(buf), (size_t)len));
 #else
-    return std::filesystem::u8path(std::string(buf, (size_t)len));
+  return std::filesystem::u8path(std::string(buf, (size_t)len));
 #endif
 }
 
 inline std::filesystem::path nei_get_executable_dir() {
-    char buf[4096];
-    int len = ::nei_get_executable_dir(buf, sizeof(buf));
-    if (len < 0) {
-        throw std::runtime_error("Failed to get executable directory");
-    }
+  char buf[4096];
+  int len = ::nei_get_executable_dir(buf, sizeof(buf));
+  if (len < 0) {
+    throw std::runtime_error("Failed to get executable directory");
+  }
 #if __cplusplus >= 202002L
-    return std::filesystem::path(
-        std::u8string(reinterpret_cast<const char8_t*>(buf), (size_t)len));
+  return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(buf), (size_t)len));
 #else
-    return std::filesystem::u8path(std::string(buf, (size_t)len));
+  return std::filesystem::u8path(std::string(buf, (size_t)len));
 #endif
 }
 

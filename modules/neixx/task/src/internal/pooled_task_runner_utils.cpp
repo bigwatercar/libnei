@@ -6,20 +6,20 @@ namespace nei {
 namespace internal {
 namespace {
 
-ThreadLocalStorage::Slot& GetCurrentQueueSlot() {
+ThreadLocalStorage::Slot &GetCurrentQueueSlot() {
   static ThreadLocalStorage::Slot slot(nullptr);
   return slot;
 }
 
-}  // namespace
+} // namespace
 
-TaskQueue* GetCurrentPooledTaskQueue() {
-  return static_cast<TaskQueue*>(GetCurrentQueueSlot().Get());
+TaskQueue *GetCurrentPooledTaskQueue() {
+  return static_cast<TaskQueue *>(GetCurrentQueueSlot().Get());
 }
 
-void SetCurrentPooledTaskQueue(TaskQueue* queue) {
+void SetCurrentPooledTaskQueue(TaskQueue *queue) {
   GetCurrentQueueSlot().Set(queue);
 }
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei

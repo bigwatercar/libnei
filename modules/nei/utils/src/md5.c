@@ -11,10 +11,10 @@
 #define NEI_MD5_I(x, y, z) ((y) ^ ((x) | (~(z))))
 #define NEI_MD5_ROTL32(x, n) (((x) << (n)) | ((x) >> (32U - (n))))
 
-#define NEI_MD5_STEP(func, a, b, c, d, xk, t, s) \
-  do {                                              \
-    (a) += func((b), (c), (d)) + (xk) + (t);       \
-    (a) = (b) + NEI_MD5_ROTL32((a), (s));          \
+#define NEI_MD5_STEP(func, a, b, c, d, xk, t, s)                                                                       \
+  do {                                                                                                                 \
+    (a) += func((b), (c), (d)) + (xk) + (t);                                                                           \
+    (a) = (b) + NEI_MD5_ROTL32((a), (s));                                                                              \
   } while (0)
 
 static uint32_t nei_md5_load_u32_le(const uint8_t *p) {
@@ -30,10 +30,9 @@ static void nei_md5_store_u32_le(uint8_t *p, uint32_t v) {
 
 static void nei_md5_transform(uint32_t state[4], const uint8_t block[64]) {
   static const uint32_t s_table[64] = {
-      7U, 12U, 17U, 22U, 7U, 12U, 17U, 22U, 7U, 12U, 17U, 22U, 7U, 12U, 17U, 22U,
-      5U, 9U, 14U, 20U, 5U, 9U, 14U, 20U, 5U, 9U, 14U, 20U, 5U, 9U, 14U, 20U,
-      4U, 11U, 16U, 23U, 4U, 11U, 16U, 23U, 4U, 11U, 16U, 23U, 4U, 11U, 16U, 23U,
-      6U, 10U, 15U, 21U, 6U, 10U, 15U, 21U, 6U, 10U, 15U, 21U, 6U, 10U, 15U, 21U,
+      7U,  12U, 17U, 22U, 7U,  12U, 17U, 22U, 7U,  12U, 17U, 22U, 7U,  12U, 17U, 22U, 5U,  9U,  14U, 20U, 5U,  9U,
+      14U, 20U, 5U,  9U,  14U, 20U, 5U,  9U,  14U, 20U, 4U,  11U, 16U, 23U, 4U,  11U, 16U, 23U, 4U,  11U, 16U, 23U,
+      4U,  11U, 16U, 23U, 6U,  10U, 15U, 21U, 6U,  10U, 15U, 21U, 6U,  10U, 15U, 21U, 6U,  10U, 15U, 21U,
   };
   static const uint32_t k_table[64] = {
       0xd76aa478U, 0xe8c7b756U, 0x242070dbU, 0xc1bdceeeU, 0xf57c0fafU, 0x4787c62aU, 0xa8304613U, 0xfd469501U,

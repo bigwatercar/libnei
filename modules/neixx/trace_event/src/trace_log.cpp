@@ -28,29 +28,29 @@ std::atomic<bool> g_trace_enabled{false};
 namespace {
 
 // TLS 析构回调: 线程退出时通知 TraceLog 释放此线程的 Buffer
-void DestroyThreadTraceBuffer(void* ptr) {
-  auto* buf = static_cast<ThreadTraceBuffer*>(ptr);
+void DestroyThreadTraceBuffer(void *ptr) {
+  auto *buf = static_cast<ThreadTraceBuffer *>(ptr);
   if (buf) {
     TraceLog::GetInstance().UnregisterBuffer(buf);
   }
 }
 
-ThreadLocalStorage::Slot& GetTraceBufferTLSSlot() {
+ThreadLocalStorage::Slot &GetTraceBufferTLSSlot() {
   static ThreadLocalStorage::Slot slot(&DestroyThreadTraceBuffer);
   return slot;
 }
 
 // 获取或创建当前线程的 TraceBuffer
-ThreadTraceBuffer* GetOrCreateThreadBuffer() {
-  ThreadLocalStorage::Slot& slot = GetTraceBufferTLSSlot();
-  void* ptr = slot.Get();
+ThreadTraceBuffer *GetOrCreateThreadBuffer() {
+  ThreadLocalStorage::Slot &slot = GetTraceBufferTLSSlot();
+  void *ptr = slot.Get();
   if (ptr) {
-    return static_cast<ThreadTraceBuffer*>(ptr);
+    return static_cast<ThreadTraceBuffer *>(ptr);
   }
 
   // 首次访问: 分配 Buffer
   auto buf = std::make_unique<ThreadTraceBuffer>();
-  ThreadTraceBuffer* raw = buf.get();
+  ThreadTraceBuffer *raw = buf.get();
 
   // 注册到 TraceLog (TraceLog 获得所有权, 防止线程退出时内存泄漏)
   TraceLog::GetInstance().RegisterBuffer(std::move(buf));
@@ -60,7 +60,7 @@ ThreadTraceBuffer* GetOrCreateThreadBuffer() {
   return raw;
 }
 
-}  // namespace
+} // namespace
 
 // =============================================================================
 // TraceLog
@@ -70,8 +70,11 @@ ThreadTraceBuffer* GetOrCreateThreadBuffer() {
 // 这防止残存后台线程在 main() 结束后访问已析构的 TraceLog 导致段错误。
 template <>
 struct LeakySingletonTraits<TraceLog> {
-  static TraceLog* New() { return new TraceLog(); }
-  static void Delete(TraceLog* log) {
+  static TraceLog *New() {
+    return new TraceLog();
+  }
+
+  static void Delete(TraceLog *log) {
     // 清理内部资源 (释放线程 Buffer 和事件数据)
     log->Clear();
     // 故意不 delete log: 外壳内存由 OS 在进程退出时回收。
@@ -80,7 +83,7 @@ struct LeakySingletonTraits<TraceLog> {
   }
 };
 
-TraceLog& TraceLog::GetInstance() {
+TraceLog &TraceLog::GetInstance() {
   return *Singleton<TraceLog, LeakySingletonTraits<TraceLog>>::GetInstance();
 }
 
@@ -92,7 +95,7 @@ bool TraceLog::IsEnabled() const {
   return g_trace_enabled.load(std::memory_order_relaxed);
 }
 
-ThreadTraceBuffer* TraceLog::RegisterCurrentThread() {
+ThreadTraceBuffer *TraceLog::RegisterCurrentThread() {
   return GetOrCreateThreadBuffer();
 }
 
@@ -101,7 +104,7 @@ void TraceLog::RegisterBuffer(std::unique_ptr<ThreadTraceBuffer> buf) {
   thread_buffers_.push_back(std::move(buf));
 }
 
-void TraceLog::UnregisterBuffer(ThreadTraceBuffer* buf) {
+void TraceLog::UnregisterBuffer(ThreadTraceBuffer *buf) {
   std::lock_guard<std::mutex> lock(registry_lock_);
   for (auto it = thread_buffers_.begin(); it != thread_buffers_.end(); ++it) {
     if (it->get() == buf) {
@@ -117,8 +120,9 @@ void TraceLog::AddEvent(TraceEvent event) {
     return;
   }
 
-  ThreadTraceBuffer* buf = GetOrCreateThreadBuffer();
-  if (!buf) return;
+  ThreadTraceBuffer *buf = GetOrCreateThreadBuffer();
+  if (!buf)
+    return;
 
   // * 线程独占写入: 加锁但无竞争 (同类线程不会同时访问同一个 buf)
   //   仅在 Flush() 时主线程会短暂持有此锁来提取数据。
@@ -126,29 +130,28 @@ void TraceLog::AddEvent(TraceEvent event) {
   buf->events.push_back(std::move(event));
 }
 
-void TraceLog::Flush(std::ostream& out) {
+void TraceLog::Flush(std::ostream &out) {
   // 归集所有线程的 Buffer 事件 (每个 Buffer 加锁提取, 安全无竞争)
   std::vector<TraceEvent> all_events;
   {
     std::lock_guard<std::mutex> lock(registry_lock_);
-    for (auto& buf : thread_buffers_) {
-      if (!buf) continue;
+    for (auto &buf : thread_buffers_) {
+      if (!buf)
+        continue;
 
       // * 对每个 Buffer 加锁 -> 提取 -> 清空 -> 解锁
       //   彻底消除 "主线程遍历 + 工作线程 push_back" 的并发修改 UB
       std::lock_guard<std::mutex> buf_lock(buf->mutex);
-      all_events.insert(all_events.end(),
-                        std::make_move_iterator(buf->events.begin()),
-                        std::make_move_iterator(buf->events.end()));
+      all_events.insert(
+          all_events.end(), std::make_move_iterator(buf->events.begin()), std::make_move_iterator(buf->events.end()));
       buf->events.clear();
     }
   }
 
   // 按时间戳排序
-  std::sort(all_events.begin(), all_events.end(),
-            [](const TraceEvent& a, const TraceEvent& b) {
-              return a.timestamp_us < b.timestamp_us;
-            });
+  std::sort(all_events.begin(), all_events.end(), [](const TraceEvent &a, const TraceEvent &b) {
+    return a.timestamp_us < b.timestamp_us;
+  });
 
   // 输出 JSON 数组 (按 phase 输出不同字段)
   //   'X' (Complete):  ph, ts, dur
@@ -157,10 +160,8 @@ void TraceLog::Flush(std::ostream& out) {
   //   'I' (Instant):   ph, ts, s="t"
   out << "[\n";
   for (std::size_t i = 0; i < all_events.size(); ++i) {
-    const TraceEvent& e = all_events[i];
-    out << "{\"name\":\"" << e.name
-        << "\",\"cat\":\"" << e.category
-        << "\",\"ph\":\"" << e.phase << "\"";
+    const TraceEvent &e = all_events[i];
+    out << "{\"name\":\"" << e.name << "\",\"cat\":\"" << e.category << "\",\"ph\":\"" << e.phase << "\"";
 
     out << ",\"ts\":" << e.timestamp_us;
 
@@ -174,17 +175,18 @@ void TraceLog::Flush(std::ostream& out) {
     // B / E 事件: 无额外字段
 
     out << ",\"pid\":0"
-        << ",\"tid\":" << e.thread_id
-        << "}";
-    if (i + 1 < all_events.size()) out << ",\n";
-    else out << "\n";
+        << ",\"tid\":" << e.thread_id << "}";
+    if (i + 1 < all_events.size())
+      out << ",\n";
+    else
+      out << "\n";
   }
   out << "]\n";
 }
 
 void TraceLog::Clear() {
   std::lock_guard<std::mutex> lock(registry_lock_);
-  for (auto& buf : thread_buffers_) {
+  for (auto &buf : thread_buffers_) {
     if (buf) {
       std::lock_guard<std::mutex> buf_lock(buf->mutex);
       buf->events.clear();
@@ -202,6 +204,6 @@ std::uint64_t GetCurrentThreadId() {
   return static_cast<std::uint64_t>(PlatformThread::CurrentId());
 }
 
-}  // namespace internal
+} // namespace internal
 
-}  // namespace nei
+} // namespace nei

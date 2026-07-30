@@ -22,22 +22,24 @@ using TaskMinHeap = std::priority_queue<Task, std::vector<Task>, std::greater<Ta
 // move-only).  The const_cast is safe here because we immediately pop()
 // afterwards, removing the element from the heap before any other access
 // can observe the moved-from state.
-Task PopTop(TaskMinHeap* queue) {
-  Task task = std::move(const_cast<Task&>(queue->top()));
+Task PopTop(TaskMinHeap *queue) {
+  Task task = std::move(const_cast<Task &>(queue->top()));
   queue->pop();
   return task;
 }
 
-bool IsShutdownBlockingTask(const Task& task) {
+bool IsShutdownBlockingTask(const Task &task) {
   return task.traits.shutdown_behavior() == TaskShutdownBehavior::BLOCK_SHUTDOWN;
 }
 
-}  // namespace
+} // namespace
 
 class TaskQueue::Impl {
- public:
-  explicit Impl(TaskQueue* owner, const TaskTraits& traits)
-      : traits_(traits), weak_factory_(owner, FROM_HERE) {}
+public:
+  explicit Impl(TaskQueue *owner, const TaskTraits &traits)
+      : traits_(traits)
+      , weak_factory_(owner, FROM_HERE) {
+  }
 
   bool HasImmediateTasksLocked() const {
     return !immediate_fifo_queue_.empty();
@@ -75,17 +77,14 @@ class TaskQueue::Impl {
       // insert (O(n) element shift).  This path only triggers when tasks
       // are posted with pre-assigned sequence numbers from different
       // producers that don't coordinate ordering  --  rare in practice.
-      if (immediate_fifo_queue_.empty() ||
-          task.sequence_num >= immediate_fifo_queue_.back().sequence_num) {
-        immediate_fifo_queue_.push_back(std::move(task));         // O(1)
+      if (immediate_fifo_queue_.empty() || task.sequence_num >= immediate_fifo_queue_.back().sequence_num) {
+        immediate_fifo_queue_.push_back(std::move(task)); // O(1)
       } else {
-        const auto insert_it = std::upper_bound(                  // O(log n)
+        const auto insert_it = std::upper_bound( // O(log n)
             immediate_fifo_queue_.begin(),
             immediate_fifo_queue_.end(),
             task.sequence_num,
-            [](std::int64_t sequence_num, const Task& queued_task) {
-              return sequence_num < queued_task.sequence_num;
-            });
+            [](std::int64_t sequence_num, const Task &queued_task) { return sequence_num < queued_task.sequence_num; });
         immediate_fifo_queue_.insert(insert_it, std::move(task)); // O(n)
       }
 
@@ -128,8 +127,7 @@ class TaskQueue::Impl {
       }
 
       const bool had_delayed_tasks = !delayed_incoming_queue_.empty();
-      const TimeTicks previous_head = had_delayed_tasks ? delayed_incoming_queue_.top().delayed_run_time
-                                                        : TimeTicks();
+      const TimeTicks previous_head = had_delayed_tasks ? delayed_incoming_queue_.top().delayed_run_time : TimeTicks();
 
       delayed_incoming_queue_.push(std::move(task));
 
@@ -153,7 +151,7 @@ class TaskQueue::Impl {
     return true;
   }
 
-  bool TakeImmediateTask(Task* task) {
+  bool TakeImmediateTask(Task *task) {
     if (task == nullptr) {
       return false;
     }
@@ -168,7 +166,7 @@ class TaskQueue::Impl {
     return true;
   }
 
-  std::size_t TakeImmediateTasks(Task* tasks, std::size_t max_tasks) {
+  std::size_t TakeImmediateTasks(Task *tasks, std::size_t max_tasks) {
     if (tasks == nullptr || max_tasks == 0) {
       return 0;
     }
@@ -190,16 +188,16 @@ class TaskQueue::Impl {
     return count;
   }
 
-  bool TakeReadyDelayedTask(const TimeTicks& now, Task* task) {
+  bool TakeReadyDelayedTask(const TimeTicks &now, Task *task) {
     PromoteReadyDelayedTasks(now);
     return TakeImmediateTask(task);
   }
 
-  std::size_t PromoteReadyDelayedTasks(const TimeTicks& now) {
+  std::size_t PromoteReadyDelayedTasks(const TimeTicks &now) {
     AutoLock lock(lock_);
     std::size_t promoted = 0;
     while (!delayed_incoming_queue_.empty()) {
-      const Task& next_task = delayed_incoming_queue_.top();
+      const Task &next_task = delayed_incoming_queue_.top();
       if (next_task.delayed_run_time > now) {
         break;
       }
@@ -256,11 +254,11 @@ class TaskQueue::Impl {
     return shut_down_;
   }
 
-  const SequenceToken& sequence_token() const {
+  const SequenceToken &sequence_token() const {
     return sequence_token_;
   }
 
-  const TaskTraits& traits() const {
+  const TaskTraits &traits() const {
     return traits_;
   }
 
@@ -301,8 +299,7 @@ class TaskQueue::Impl {
     // Use memory_order_acquire on the increment so that the caller
     // observes all prior task-enqueue effects, and release on the
     // saturation check so that other workers see the updated count.
-    const int prev =
-        running_worker_count_.fetch_add(1, std::memory_order_acquire);
+    const int prev = running_worker_count_.fetch_add(1, std::memory_order_acquire);
     const int current = prev + 1;
 
     // Shut down?  Revert and disallow.
@@ -333,8 +330,7 @@ class TaskQueue::Impl {
     // Use memory_order_release so that task-completion effects
     // (e.g. new tasks posted during execution) are visible to the
     // next worker that acquires a slot.
-    const int prev =
-        running_worker_count_.fetch_sub(1, std::memory_order_release);
+    const int prev = running_worker_count_.fetch_sub(1, std::memory_order_release);
 
     // If we were at or above saturation and now dropped below,
     // AND the queue still has work, tell the caller to re-enqueue.
@@ -360,16 +356,15 @@ class TaskQueue::Impl {
       // Sequenced: at most one worker.
       return running_worker_count_.load(std::memory_order_acquire) == 0 ? 1 : 0;
     }
-    const int running =
-        running_worker_count_.load(std::memory_order_acquire);
+    const int running = running_worker_count_.load(std::memory_order_acquire);
     if (running >= TaskQueue::kMaxParallelWorkers) {
       return 0;
     }
     return static_cast<size_t>(TaskQueue::kMaxParallelWorkers - running);
   }
 
- private:
-  void CancelNonShutdownBlockingTasksLockedImpl(std::vector<Task>* dropped_tasks) {
+private:
+  void CancelNonShutdownBlockingTasksLockedImpl(std::vector<Task> *dropped_tasks) {
     if (dropped_tasks == nullptr) {
       return;
     }
@@ -425,8 +420,9 @@ class TaskQueue::Impl {
   std::atomic<int> running_worker_count_{0};
 };
 
-TaskQueue::TaskQueue(const TaskTraits& traits)
-    : impl_(std::make_unique<Impl>(this, traits)) {}
+TaskQueue::TaskQueue(const TaskTraits &traits)
+    : impl_(std::make_unique<Impl>(this, traits)) {
+}
 
 TaskQueue::~TaskQueue() = default;
 
@@ -438,19 +434,19 @@ bool TaskQueue::PushDelayedTask(Task task) {
   return impl_->PushDelayedTask(std::move(task));
 }
 
-bool TaskQueue::TakeImmediateTask(Task* task) {
+bool TaskQueue::TakeImmediateTask(Task *task) {
   return impl_->TakeImmediateTask(task);
 }
 
-std::size_t TaskQueue::TakeImmediateTasks(Task* tasks, std::size_t max_tasks) {
+std::size_t TaskQueue::TakeImmediateTasks(Task *tasks, std::size_t max_tasks) {
   return impl_->TakeImmediateTasks(tasks, max_tasks);
 }
 
-bool TaskQueue::TakeReadyDelayedTask(const TimeTicks& now, Task* task) {
+bool TaskQueue::TakeReadyDelayedTask(const TimeTicks &now, Task *task) {
   return impl_->TakeReadyDelayedTask(now, task);
 }
 
-std::size_t TaskQueue::PromoteReadyDelayedTasks(const TimeTicks& now) {
+std::size_t TaskQueue::PromoteReadyDelayedTasks(const TimeTicks &now) {
   return impl_->PromoteReadyDelayedTasks(now);
 }
 
@@ -478,11 +474,11 @@ bool TaskQueue::is_shutdown() const {
   return impl_->is_shutdown();
 }
 
-const SequenceToken& TaskQueue::sequence_token() const {
+const SequenceToken &TaskQueue::sequence_token() const {
   return impl_->sequence_token();
 }
 
-const TaskTraits& TaskQueue::traits() const {
+const TaskTraits &TaskQueue::traits() const {
   return impl_->traits();
 }
 
@@ -518,5 +514,5 @@ size_t TaskQueue::GetRemainingParallelism() const {
   return impl_->GetRemainingParallelism();
 }
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei

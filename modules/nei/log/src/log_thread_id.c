@@ -41,8 +41,7 @@ void _nei_log_tls_thread_id_cstr(const char **out_str, size_t *out_len) {
       size_t j;
       for (j = 0; j < sizeof(self) && off < (int)sizeof(s_tls_tid_buf) - 3; ++j) {
         const size_t idx = little_endian ? (sizeof(self) - 1U - j) : j;
-        off += snprintf(s_tls_tid_buf + off, sizeof(s_tls_tid_buf) - (size_t)off,
-                        "%02x", (unsigned)p[idx]);
+        off += snprintf(s_tls_tid_buf + off, sizeof(s_tls_tid_buf) - (size_t)off, "%02x", (unsigned)p[idx]);
       }
     }
     s_tls_tid_pt = self;

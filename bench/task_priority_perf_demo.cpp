@@ -33,15 +33,15 @@ constexpr std::size_t PriorityIndex(nei::TaskPriority priority) {
   return static_cast<std::size_t>(priority);
 }
 
-constexpr const char* PriorityName(nei::TaskPriority priority) {
+constexpr const char *PriorityName(nei::TaskPriority priority) {
   switch (priority) {
-    case nei::TaskPriority::USER_BLOCKING:
-      return "UserBlocking";
-    case nei::TaskPriority::BEST_EFFORT:
-      return "BestEffort";
-    case nei::TaskPriority::USER_VISIBLE:
-    default:
-      return "UserVisible";
+  case nei::TaskPriority::USER_BLOCKING:
+    return "UserBlocking";
+  case nei::TaskPriority::BEST_EFFORT:
+    return "BestEffort";
+  case nei::TaskPriority::USER_VISIBLE:
+  default:
+    return "UserVisible";
   }
 }
 
@@ -54,10 +54,9 @@ struct PriorityStats {
   std::atomic<std::int64_t> max_run_duration_us{0};
 };
 
-void UpdateMax(std::atomic<std::int64_t>& target, std::int64_t value) {
+void UpdateMax(std::atomic<std::int64_t> &target, std::int64_t value) {
   std::int64_t current = target.load(std::memory_order_relaxed);
-  while (value > current && !target.compare_exchange_weak(
-                              current, value, std::memory_order_relaxed)) {
+  while (value > current && !target.compare_exchange_weak(current, value, std::memory_order_relaxed)) {
   }
 }
 
@@ -69,10 +68,12 @@ void BusyWork(int busy_micros) {
 }
 
 class PerformanceObserver final : public nei::TaskObserver {
- public:
+public:
   explicit PerformanceObserver(std::uint64_t total_tasks)
-      : total_tasks_(total_tasks), progress_step_(std::max<std::uint64_t>(1, total_tasks / 4)),
-        next_progress_report_(progress_step_) {}
+      : total_tasks_(total_tasks)
+      , progress_step_(std::max<std::uint64_t>(1, total_tasks / 4))
+      , next_progress_report_(progress_step_) {
+  }
 
   void OnTaskPosted(bool posted_ok) {
     if (!posted_ok) {
@@ -85,9 +86,9 @@ class PerformanceObserver final : public nei::TaskObserver {
     UpdateMax(peak_pending_, pending_now);
   }
 
-  void OnTaskStarted(const nei::internal::Task& task, nei::TimeDelta queue_delay) override {
+  void OnTaskStarted(const nei::internal::Task &task, nei::TimeDelta queue_delay) override {
     const std::size_t index = PriorityIndex(task.traits.priority());
-    auto& stats = stats_[index];
+    auto &stats = stats_[index];
 
     stats.started.fetch_add(1, std::memory_order_relaxed);
     const std::int64_t delay_us = queue_delay.InMicroseconds();
@@ -104,9 +105,9 @@ class PerformanceObserver final : public nei::TaskObserver {
     }
   }
 
-  void OnTaskCompleted(const nei::internal::Task& task, nei::TimeDelta run_duration) override {
+  void OnTaskCompleted(const nei::internal::Task &task, nei::TimeDelta run_duration) override {
     const std::size_t index = PriorityIndex(task.traits.priority());
-    auto& stats = stats_[index];
+    auto &stats = stats_[index];
 
     stats.completed.fetch_add(1, std::memory_order_relaxed);
     const std::int64_t run_us = run_duration.InMicroseconds();
@@ -129,23 +130,17 @@ class PerformanceObserver final : public nei::TaskObserver {
     std::lock_guard<std::mutex> lock(cout_mutex_);
 
     const std::uint64_t total_completed = completed_total_.load(std::memory_order_relaxed);
-    const double throughput = total_elapsed.InSecondsF() > 0.0
-                                  ? static_cast<double>(total_completed) / total_elapsed.InSecondsF()
-                                  : 0.0;
+    const double throughput =
+        total_elapsed.InSecondsF() > 0.0 ? static_cast<double>(total_completed) / total_elapsed.InSecondsF() : 0.0;
 
     std::cout << "\n=== Task Priority Performance Report ===\n";
-    std::cout << std::left << std::setw(10) << "Priority"
-              << std::setw(12) << "Started"
-              << std::setw(12) << "Completed"
-              << std::setw(16) << "Avg Queue(ms)"
-              << std::setw(16) << "Avg Run(ms)"
-              << std::setw(16) << "Max Queue(ms)"
+    std::cout << std::left << std::setw(10) << "Priority" << std::setw(12) << "Started" << std::setw(12) << "Completed"
+              << std::setw(16) << "Avg Queue(ms)" << std::setw(16) << "Avg Run(ms)" << std::setw(16) << "Max Queue(ms)"
               << std::setw(16) << "Max Run(ms)"
               << "Share" << '\n';
 
-    for (nei::TaskPriority priority : {nei::TaskPriority::USER_BLOCKING,
-                                       nei::TaskPriority::USER_VISIBLE,
-                                       nei::TaskPriority::BEST_EFFORT}) {
+    for (nei::TaskPriority priority :
+         {nei::TaskPriority::USER_BLOCKING, nei::TaskPriority::USER_VISIBLE, nei::TaskPriority::BEST_EFFORT}) {
       const auto index = PriorityIndex(priority);
       const auto started = stats_[index].started.load(std::memory_order_relaxed);
       const auto completed = stats_[index].completed.load(std::memory_order_relaxed);
@@ -160,45 +155,40 @@ class PerformanceObserver final : public nei::TaskObserver {
       const double max_run_ms = static_cast<double>(max_run) / 1000.0;
       const double share = total_completed > 0 ? static_cast<double>(completed) * 100.0 / total_completed : 0.0;
 
-      std::cout << std::left << std::setw(10) << PriorityName(priority)
-                << std::setw(12) << started
-                << std::setw(12) << completed
-                << std::setw(16) << FormatMs(avg_queue_ms)
-                << std::setw(16) << FormatMs(avg_run_ms)
-                << std::setw(16) << FormatMs(max_queue_ms)
-                << std::setw(16) << FormatMs(max_run_ms)
+      std::cout << std::left << std::setw(10) << PriorityName(priority) << std::setw(12) << started << std::setw(12)
+                << completed << std::setw(16) << FormatMs(avg_queue_ms) << std::setw(16) << FormatMs(avg_run_ms)
+                << std::setw(16) << FormatMs(max_queue_ms) << std::setw(16) << FormatMs(max_run_ms)
                 << FormatPercent(share) << '\n';
     }
 
     std::cout << "\nFirst " << kPrioritySampleWindow << " task starts: UserBlocking="
-          << first_window_counts_[PriorityIndex(nei::TaskPriority::USER_BLOCKING)].load(std::memory_order_relaxed)
-          << ", UserVisible="
-          << first_window_counts_[PriorityIndex(nei::TaskPriority::USER_VISIBLE)].load(std::memory_order_relaxed)
-          << ", BestEffort="
-          << first_window_counts_[PriorityIndex(nei::TaskPriority::BEST_EFFORT)].load(std::memory_order_relaxed)
+              << first_window_counts_[PriorityIndex(nei::TaskPriority::USER_BLOCKING)].load(std::memory_order_relaxed)
+              << ", UserVisible="
+              << first_window_counts_[PriorityIndex(nei::TaskPriority::USER_VISIBLE)].load(std::memory_order_relaxed)
+              << ", BestEffort="
+              << first_window_counts_[PriorityIndex(nei::TaskPriority::BEST_EFFORT)].load(std::memory_order_relaxed)
               << '\n';
 
-          const std::uint64_t posted_ok = posted_ok_total_.load(std::memory_order_relaxed);
-          const std::uint64_t post_failed = failed_posts_.load(std::memory_order_relaxed);
-          const std::int64_t peak_pending = peak_pending_.load(std::memory_order_relaxed);
-          const std::int64_t total_queue_us =
-            stats_[PriorityIndex(nei::TaskPriority::USER_BLOCKING)].total_queue_delay_us.load(std::memory_order_relaxed) +
-            stats_[PriorityIndex(nei::TaskPriority::USER_VISIBLE)].total_queue_delay_us.load(std::memory_order_relaxed) +
-            stats_[PriorityIndex(nei::TaskPriority::BEST_EFFORT)].total_queue_delay_us.load(std::memory_order_relaxed);
-          const double global_avg_queue_ms = total_completed > 0
-                               ? static_cast<double>(total_queue_us) / total_completed / 1000.0
-                               : 0.0;
+    const std::uint64_t posted_ok = posted_ok_total_.load(std::memory_order_relaxed);
+    const std::uint64_t post_failed = failed_posts_.load(std::memory_order_relaxed);
+    const std::int64_t peak_pending = peak_pending_.load(std::memory_order_relaxed);
+    const std::int64_t total_queue_us =
+        stats_[PriorityIndex(nei::TaskPriority::USER_BLOCKING)].total_queue_delay_us.load(std::memory_order_relaxed)
+        + stats_[PriorityIndex(nei::TaskPriority::USER_VISIBLE)].total_queue_delay_us.load(std::memory_order_relaxed)
+        + stats_[PriorityIndex(nei::TaskPriority::BEST_EFFORT)].total_queue_delay_us.load(std::memory_order_relaxed);
+    const double global_avg_queue_ms =
+        total_completed > 0 ? static_cast<double>(total_queue_us) / total_completed / 1000.0 : 0.0;
 
-          std::cout << "Posted OK: " << posted_ok << ", Post Failed: " << post_failed << '\n';
-          std::cout << "Peak Pending (demo observed): " << peak_pending << " tasks" << '\n';
-          std::cout << "Global Avg Queue Delay: " << std::fixed << std::setprecision(2)
-                << global_avg_queue_ms << " ms" << '\n';
+    std::cout << "Posted OK: " << posted_ok << ", Post Failed: " << post_failed << '\n';
+    std::cout << "Peak Pending (demo observed): " << peak_pending << " tasks" << '\n';
+    std::cout << "Global Avg Queue Delay: " << std::fixed << std::setprecision(2) << global_avg_queue_ms << " ms"
+              << '\n';
 
     std::cout << "Throughput: " << std::fixed << std::setprecision(2) << throughput << " tasks/sec" << '\n';
     std::cout << "Total elapsed: " << total_elapsed.InMillisecondsF() << " ms" << '\n';
   }
 
- private:
+private:
   static std::string FormatMs(double value) {
     std::ostringstream os;
     os << std::fixed << std::setprecision(2) << value << " ms";
@@ -215,22 +205,23 @@ class PerformanceObserver final : public nei::TaskObserver {
     std::uint64_t target = next_progress_report_.load(std::memory_order_relaxed);
     while (completed >= target && target <= total_tasks_) {
       if (next_progress_report_.compare_exchange_weak(
-              target, std::min<std::uint64_t>(target + progress_step_, total_tasks_ + progress_step_),
+              target,
+              std::min<std::uint64_t>(target + progress_step_, total_tasks_ + progress_step_),
               std::memory_order_relaxed)) {
         std::lock_guard<std::mutex> lock(cout_mutex_);
-        std::cout << "[progress] completed=" << completed << '/' << total_tasks_
-                  << " user_blocking=" << stats_[PriorityIndex(nei::TaskPriority::USER_BLOCKING)].completed.load(std::memory_order_relaxed)
-                  << " visible=" << stats_[PriorityIndex(nei::TaskPriority::USER_VISIBLE)].completed.load(std::memory_order_relaxed)
-                  << " best_effort=" << stats_[PriorityIndex(nei::TaskPriority::BEST_EFFORT)].completed.load(std::memory_order_relaxed)
+        std::cout << "[progress] completed=" << completed << '/' << total_tasks_ << " user_blocking="
+                  << stats_[PriorityIndex(nei::TaskPriority::USER_BLOCKING)].completed.load(std::memory_order_relaxed)
+                  << " visible="
+                  << stats_[PriorityIndex(nei::TaskPriority::USER_VISIBLE)].completed.load(std::memory_order_relaxed)
+                  << " best_effort="
+                  << stats_[PriorityIndex(nei::TaskPriority::BEST_EFFORT)].completed.load(std::memory_order_relaxed)
                   << '\n';
         return;
       }
     }
   }
 
-  void MaybePrintSlowTask(const nei::internal::Task& task,
-                          nei::TimeDelta queue_delay,
-                          nei::TimeDelta run_duration) {
+  void MaybePrintSlowTask(const nei::internal::Task &task, nei::TimeDelta queue_delay, nei::TimeDelta run_duration) {
     const std::size_t index = PriorityIndex(task.traits.priority());
     if (printed_slow_samples_[index].fetch_add(1, std::memory_order_relaxed) >= 1) {
       return;
@@ -269,7 +260,7 @@ struct DemoConfig {
   int busy_work_micros = kBusyWorkMicros;
 };
 
-DemoConfig ParseArgs(int argc, char* argv[]) {
+DemoConfig ParseArgs(int argc, char *argv[]) {
   DemoConfig config;
   try {
     if (argc > 1) {
@@ -284,15 +275,15 @@ DemoConfig ParseArgs(int argc, char* argv[]) {
       const long long parsed = std::stoll(argv[3]);
       config.busy_work_micros = static_cast<int>(parsed);
     }
-  } catch (const std::exception&) {
+  } catch (const std::exception &) {
     config.tasks_per_priority = 0;
   }
   return config;
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   const DemoConfig config = ParseArgs(argc, argv);
   if (config.tasks_per_priority == 0 || config.worker_count == 0 || config.busy_work_micros < 0) {
     std::cerr << "Usage: task_priority_perf_demo [tasks_per_priority] [worker_count] [busy_work_micros]\n";
@@ -308,8 +299,7 @@ int main(int argc, char* argv[]) {
   nei::WaitableEvent all_done(nei::WaitableEvent::ResetPolicy::kManual, false);
 
   std::cout << "=== neixx task priority performance demo ===\n";
-  std::cout << "workers=" << config.worker_count
-            << " tasks_per_priority=" << config.tasks_per_priority
+  std::cout << "workers=" << config.worker_count << " tasks_per_priority=" << config.tasks_per_priority
             << " busy_work=" << config.busy_work_micros << " us\n";
   std::cout << "total_tasks=" << total_tasks << "\n";
 
@@ -322,19 +312,19 @@ int main(int argc, char* argv[]) {
   const nei::scoped_refptr<nei::TaskRunner> normal_runner = pool.CreateSequencedTaskRunner(user_visible_traits);
   const nei::scoped_refptr<nei::TaskRunner> high_runner = pool.CreateSequencedTaskRunner(user_blocking_traits);
 
-  auto post_task = [&](nei::TaskRunner& runner) {
-    const bool posted_ok = runner.PostTask(
-        FROM_HERE,
-        nei::BindOnce(
-            [](int work_us, std::atomic<std::uint32_t>& shared_remaining, nei::WaitableEvent& done) {
-              BusyWork(work_us);
-              if (shared_remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                done.Signal();
-              }
-            },
-            config.busy_work_micros,
-            std::ref(remaining),
-            std::ref(all_done)));
+  auto post_task = [&](nei::TaskRunner &runner) {
+    const bool posted_ok =
+        runner.PostTask(FROM_HERE,
+                        nei::BindOnce(
+                            [](int work_us, std::atomic<std::uint32_t> &shared_remaining, nei::WaitableEvent &done) {
+                              BusyWork(work_us);
+                              if (shared_remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                                done.Signal();
+                              }
+                            },
+                            config.busy_work_micros,
+                            std::ref(remaining),
+                            std::ref(all_done)));
     observer.OnTaskPosted(posted_ok);
     if (!posted_ok) {
       if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
@@ -343,7 +333,7 @@ int main(int argc, char* argv[]) {
     }
   };
 
-  auto post_priority_concurrently = [&](nei::TaskRunner& runner) {
+  auto post_priority_concurrently = [&](nei::TaskRunner &runner) {
     std::vector<std::thread> posters;
     posters.reserve(kPosterThreadCount);
     const std::uint32_t base_chunk = config.tasks_per_priority / static_cast<std::uint32_t>(kPosterThreadCount);
@@ -359,7 +349,7 @@ int main(int argc, char* argv[]) {
       });
       begin = end;
     }
-    for (std::thread& poster : posters) {
+    for (std::thread &poster : posters) {
       poster.join();
     }
   };

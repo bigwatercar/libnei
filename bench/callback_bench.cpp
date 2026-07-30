@@ -40,14 +40,15 @@ struct LargePayload {
   int64_t e = 5;
   int64_t f = 6;
   int64_t g = 7;
-  int64_t h = 8;  // 8 × 8 = 64 bytes > 48 SBO limit
+  int64_t h = 8; // 8 × 8 = 64 bytes > 48 SBO limit
 
   // Non-trivial to prevent the compiler from optimising away.
-  int64_t Sum() const { return a + b + c + d + e + f + g + h; }
+  int64_t Sum() const {
+    return a + b + c + d + e + f + g + h;
+  }
 };
 
-static_assert(sizeof(LargePayload) > 48,
-              "LargePayload must exceed SBO threshold");
+static_assert(sizeof(LargePayload) > 48, "LargePayload must exceed SBO threshold");
 
 // ---------------------------------------------------------------------------
 // OnceCallback — move-only, single-shot (non-SBO)
@@ -59,17 +60,14 @@ void BenchOnceNonSbo(int iterations) {
   for (int i = 0; i < iterations; ++i) {
     int64_t result = 0;
     LargePayload payload{i, i + 1, i + 2, i + 3, i + 4, i + 5, i + 6, i + 7};
-    OnceCallback<void()> cb = [&result, p = std::move(payload)]() {
-      result = p.Sum();
-    };
+    OnceCallback<void()> cb = [&result, p = std::move(payload)]() { result = p.Sum(); };
     std::move(cb).Run();
     sink ^= result;
   }
 
   auto t1 = Clock::now();
   double elapsed = std::chrono::duration<double>(t1 - t0).count();
-  std::cout << "  OnceCallback (non-SBO): " << iterations
-            << " iterations, " << elapsed << " s, "
+  std::cout << "  OnceCallback (non-SBO): " << iterations << " iterations, " << elapsed << " s, "
             << static_cast<int>(iterations / elapsed) << " /s"
             << "  (sink=" << sink << ")" << std::endl;
 }
@@ -82,19 +80,16 @@ void BenchRepeatingNonSbo(int iterations) {
   auto t0 = Clock::now();
 
   LargePayload base{10, 20, 30, 40, 50, 60, 70, 80};
-  RepeatingCallback<void()> cb = [p = base, &sink, i = 0]() mutable {
-    sink ^= p.Sum() + (++i);
-  };
+  RepeatingCallback<void()> cb = [p = base, &sink, i = 0]() mutable { sink ^= p.Sum() + (++i); };
 
   for (int i = 0; i < iterations; ++i) {
-    RepeatingCallback<void()> replica = cb;  // heap copy (non-SBO)
+    RepeatingCallback<void()> replica = cb; // heap copy (non-SBO)
     replica.Run();
   }
 
   auto t1 = Clock::now();
   double elapsed = std::chrono::duration<double>(t1 - t0).count();
-  std::cout << "  RepeatingCallback (non-SBO): " << iterations
-            << " iterations, " << elapsed << " s, "
+  std::cout << "  RepeatingCallback (non-SBO): " << iterations << " iterations, " << elapsed << " s, "
             << static_cast<int>(iterations / elapsed) << " /s"
             << "  (sink=" << sink << ")" << std::endl;
 }
@@ -114,17 +109,14 @@ void BenchMixedSboNonSbo(int iterations) {
     } else {
       // Non-SBO path — large payload
       LargePayload payload{i, i, i, i, i, i, i, i};
-      OnceCallback<void()> cb = [&sink, p = std::move(payload), i]() {
-        sink ^= p.Sum() + i;
-      };
+      OnceCallback<void()> cb = [&sink, p = std::move(payload), i]() { sink ^= p.Sum() + i; };
       std::move(cb).Run();
     }
   }
 
   auto t1 = Clock::now();
   double elapsed = std::chrono::duration<double>(t1 - t0).count();
-  std::cout << "  Mixed SBO/non-SBO: " << iterations
-            << " iterations, " << elapsed << " s, "
+  std::cout << "  Mixed SBO/non-SBO: " << iterations << " iterations, " << elapsed << " s, "
             << static_cast<int>(iterations / elapsed) << " /s"
             << "  (sink=" << sink << ")" << std::endl;
 }
@@ -139,27 +131,24 @@ void BenchBindOnceNonSbo(int iterations) {
   for (int i = 0; i < iterations; ++i) {
     LargePayload payload{i, i + 1, i + 2, i + 3, i + 4, i + 5, i + 6, i + 7};
     // BindOnce produces OnceClosure (void()) — non-SBO path via heap
-    auto cb = BindOnce(
-        [p = std::move(payload), &sink]() { sink ^= p.Sum(); });
+    auto cb = BindOnce([p = std::move(payload), &sink]() { sink ^= p.Sum(); });
     std::move(cb).Run();
   }
 
   auto t1 = Clock::now();
   double elapsed = std::chrono::duration<double>(t1 - t0).count();
-  std::cout << "  BindOnce (non-SBO): " << iterations
-            << " iterations, " << elapsed << " s, "
+  std::cout << "  BindOnce (non-SBO): " << iterations << " iterations, " << elapsed << " s, "
             << static_cast<int>(iterations / elapsed) << " /s"
             << "  (sink=" << sink << ")" << std::endl;
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   const int kIterations = 100000;
 
   std::cout << "=== Callback Non-SBO Stress ===" << std::endl;
-  std::cout << "SBO threshold: 48 bytes, LargePayload: "
-            << sizeof(LargePayload) << " bytes" << std::endl;
+  std::cout << "SBO threshold: 48 bytes, LargePayload: " << sizeof(LargePayload) << " bytes" << std::endl;
   std::cout << std::endl;
 
   BenchOnceNonSbo(kIterations);

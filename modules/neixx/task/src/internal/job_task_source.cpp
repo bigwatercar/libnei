@@ -12,19 +12,23 @@ namespace internal {
 // Pool workers check this to avoid yielding the joiner.
 static thread_local bool tls_is_joiner = false;
 
-JobTaskSource::JobTaskSource(RepeatingCallback<void(JobDelegate*)> task,
+JobTaskSource::JobTaskSource(RepeatingCallback<void(JobDelegate *)> task,
                              MaxConcurrencyCallback max_concurrency_cb,
                              int initial_workers)
-    : task_(std::move(task)), max_concurrency_cb_(std::move(max_concurrency_cb)),
-      initial_workers_(initial_workers),
-      completion_event_(WaitableEvent::ResetPolicy::kManual, false),
-      priority_(static_cast<int>(TaskPriority::USER_VISIBLE)) {
-  DCHECK(task_); DCHECK(max_concurrency_cb_);
+    : task_(std::move(task))
+    , max_concurrency_cb_(std::move(max_concurrency_cb))
+    , initial_workers_(initial_workers)
+    , completion_event_(WaitableEvent::ResetPolicy::kManual, false)
+    , priority_(static_cast<int>(TaskPriority::USER_VISIBLE)) {
+  DCHECK(task_);
+  DCHECK(max_concurrency_cb_);
 }
 
 bool JobTaskSource::ShouldYield() {
-  if (is_cancelled_.load(std::memory_order_acquire)) return true;
-  if (is_completed_.load(std::memory_order_acquire)) return true;
+  if (is_cancelled_.load(std::memory_order_acquire))
+    return true;
+  if (is_completed_.load(std::memory_order_acquire))
+    return true;
 
   int running = running_workers_.load(std::memory_order_acquire);
   size_t desired = max_concurrency_cb_.Run(static_cast<size_t>(running));
@@ -36,23 +40,31 @@ bool JobTaskSource::ShouldYield() {
     return (desired == 0);
 
   // Pool workers: yield if there are more workers than desired.
-  if (static_cast<int>(desired) < running) return true;
+  if (static_cast<int>(desired) < running)
+    return true;
   return false;
 }
 
-bool JobTaskSource::IsCompleted() const { return is_completed_.load(std::memory_order_acquire); }
+bool JobTaskSource::IsCompleted() const {
+  return is_completed_.load(std::memory_order_acquire);
+}
 
 void JobTaskSource::NotifyConcurrencyIncrease(std::int32_t count) {
-  if (count <= 0) return;
+  if (count <= 0)
+    return;
   is_completed_.store(false, std::memory_order_release);
   pending_concurrency_increases_.fetch_add(count, std::memory_order_release);
-  if (runner_) PostWorkers(count);
+  if (runner_)
+    PostWorkers(count);
 }
 
 std::size_t JobTaskSource::GetTaskId() const {
   static thread_local std::size_t tls_id = std::numeric_limits<std::size_t>::max();
-  static thread_local const JobTaskSource* tls_src = nullptr;
-  if (tls_src != this) { tls_src = this; tls_id = const_cast<JobTaskSource*>(this)->AssignTaskId(); }
+  static thread_local const JobTaskSource *tls_src = nullptr;
+  if (tls_src != this) {
+    tls_src = this;
+    tls_id = const_cast<JobTaskSource *>(this)->AssignTaskId();
+  }
   return tls_id;
 }
 
@@ -70,7 +82,8 @@ void JobTaskSource::RunWorkerLoop() {
 }
 
 void JobTaskSource::PostWorkers(int count) {
-  if (!runner_ || count <= 0) return;
+  if (!runner_ || count <= 0)
+    return;
   // Consume pending concurrency increases so completion detection does
   // not deadlock (pending was only ever incremented, never decremented).
   int pending = pending_concurrency_increases_.load(std::memory_order_acquire);
@@ -87,22 +100,32 @@ void JobTaskSource::PostWorkers(int count) {
 void JobTaskSource::MaybeSpawnWorkers() {
   // Bail out if already completed — prevents calling max_concurrency_cb_
   // after the joiner has signalled completion and client stack is gone.
-  if (is_completed_.load(std::memory_order_acquire)) return;
-  if (!runner_ || !max_concurrency_cb_) return;
+  if (is_completed_.load(std::memory_order_acquire))
+    return;
+  if (!runner_ || !max_concurrency_cb_)
+    return;
   int running = running_workers_.load(std::memory_order_acquire);
   int assigned = assigned_workers_.load(std::memory_order_acquire);
   size_t desired = max_concurrency_cb_.Run(static_cast<size_t>(running));
   // need = desired - (already running + already assigned)
   int need = static_cast<int>(desired) - running - assigned;
-  if (need > 0) PostWorkers(need);
+  if (need > 0)
+    PostWorkers(need);
 }
 
-void JobTaskSource::SetRunner(scoped_refptr<TaskRunner> runner) { runner_ = std::move(runner); }
+void JobTaskSource::SetRunner(scoped_refptr<TaskRunner> runner) {
+  runner_ = std::move(runner);
+}
 
 void JobTaskSource::PostInitialWorkers(int count) {
   int n = count;
-  if (n <= 0 && max_concurrency_cb_) n = static_cast<int>(max_concurrency_cb_.Run(0));
-  if (n <= 0) { is_completed_.store(true, std::memory_order_release); completion_event_.Signal(); return; }
+  if (n <= 0 && max_concurrency_cb_)
+    n = static_cast<int>(max_concurrency_cb_.Run(0));
+  if (n <= 0) {
+    is_completed_.store(true, std::memory_order_release);
+    completion_event_.Signal();
+    return;
+  }
   PostWorkers(n);
 }
 
@@ -145,11 +168,17 @@ void JobTaskSource::Join(bool steal_work) {
   }
 }
 
-void JobTaskSource::Cancel() { is_cancelled_.store(true, std::memory_order_release); }
+void JobTaskSource::Cancel() {
+  is_cancelled_.store(true, std::memory_order_release);
+}
 
-void JobTaskSource::UpdatePriority(TaskPriority p) { priority_.store(static_cast<int>(p), std::memory_order_release); }
+void JobTaskSource::UpdatePriority(TaskPriority p) {
+  priority_.store(static_cast<int>(p), std::memory_order_release);
+}
 
-std::size_t JobTaskSource::AssignTaskId() { return next_task_id_.fetch_add(1, std::memory_order_relaxed); }
+std::size_t JobTaskSource::AssignTaskId() {
+  return next_task_id_.fetch_add(1, std::memory_order_relaxed);
+}
 
 void JobTaskSource::OnWorkerExited() {
   int prev_running = running_workers_.fetch_sub(1, std::memory_order_release);
@@ -167,5 +196,5 @@ void JobTaskSource::OnWorkerExited() {
   }
 }
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei

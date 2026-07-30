@@ -25,6 +25,6 @@ enum class MessagePumpType {
   UI,
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_TASK_MESSAGE_LOOP_MESSAGE_PUMP_TYPE_H_
+#endif // NEIXX_TASK_MESSAGE_LOOP_MESSAGE_PUMP_TYPE_H_

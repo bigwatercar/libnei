@@ -24,12 +24,8 @@ enum class PunctuationNormalization {
 };
 
 // Unicode normalization (NFC/NFKC). Returns false if normalization is unavailable.
-NEI_API bool NormalizeUnicode(std::string_view input,
-                              UnicodeNormalizationForm form,
-                              std::string *output);
-NEI_API bool NormalizeUnicode(std::u16string_view input,
-                              UnicodeNormalizationForm form,
-                              std::u16string *output);
+NEI_API bool NormalizeUnicode(std::string_view input, UnicodeNormalizationForm form, std::string *output);
+NEI_API bool NormalizeUnicode(std::u16string_view input, UnicodeNormalizationForm form, std::u16string *output);
 
 // Width conversion helpers for East Asian text.
 NEI_API std::string ToHalfWidth(std::string_view input);
@@ -38,9 +34,8 @@ NEI_API std::string ToFullWidth(std::string_view input);
 NEI_API std::u16string ToFullWidth(std::u16string_view input);
 
 // Common Chinese-text cleanup: full-width spaces, repeated spaces, and optional punctuation mapping.
-NEI_API std::string NormalizeChineseText(std::string_view input,
-                                         SpaceNormalization space_mode,
-                                         PunctuationNormalization punctuation_mode);
+NEI_API std::string
+NormalizeChineseText(std::string_view input, SpaceNormalization space_mode, PunctuationNormalization punctuation_mode);
 NEI_API std::u16string NormalizeChineseText(std::u16string_view input,
                                             SpaceNormalization space_mode,
                                             PunctuationNormalization punctuation_mode);

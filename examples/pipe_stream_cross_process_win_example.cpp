@@ -37,14 +37,11 @@ BufferHolder AcquireBuffer(std::size_t size) {
   return holder;
 }
 
-std::string BuildPipeName(const char* suffix) {
+std::string BuildPipeName(const char *suffix) {
   static std::atomic<unsigned long long> counter{0};
-  const unsigned long long id =
-      counter.fetch_add(1, std::memory_order_relaxed);
-  return "\\\\.\\pipe\\nei_pipe_stream_demo_" +
-         std::to_string(GetCurrentProcessId()) + "_" +
-         std::to_string(GetTickCount64()) + "_" + std::to_string(id) + "_" +
-         suffix;
+  const unsigned long long id = counter.fetch_add(1, std::memory_order_relaxed);
+  return "\\\\.\\pipe\\nei_pipe_stream_demo_" + std::to_string(GetCurrentProcessId()) + "_"
+         + std::to_string(GetTickCount64()) + "_" + std::to_string(id) + "_" + suffix;
 }
 
 bool ConnectNamedPipeServer(HANDLE pipe) {
@@ -62,23 +59,28 @@ std::string GetSelfPath() {
   return std::string(buffer, written);
 }
 
-bool RunChild(const std::string& read_pipe_name,
-              const std::string& write_pipe_name) {
-  HANDLE read_handle = CreateFileA(
-      read_pipe_name.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
-      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
+bool RunChild(const std::string &read_pipe_name, const std::string &write_pipe_name) {
+  HANDLE read_handle = CreateFileA(read_pipe_name.c_str(),
+                                   GENERIC_READ,
+                                   0,
+                                   nullptr,
+                                   OPEN_EXISTING,
+                                   FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
+                                   nullptr);
   if (read_handle == INVALID_HANDLE_VALUE) {
-    std::cerr << "[child] Failed to open read pipe, error=" << GetLastError()
-              << std::endl;
+    std::cerr << "[child] Failed to open read pipe, error=" << GetLastError() << std::endl;
     return false;
   }
 
-  HANDLE write_handle = CreateFileA(
-      write_pipe_name.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
-      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
+  HANDLE write_handle = CreateFileA(write_pipe_name.c_str(),
+                                    GENERIC_WRITE,
+                                    0,
+                                    nullptr,
+                                    OPEN_EXISTING,
+                                    FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
+                                    nullptr);
   if (write_handle == INVALID_HANDLE_VALUE) {
-    std::cerr << "[child] Failed to open write pipe, error=" << GetLastError()
-              << std::endl;
+    std::cerr << "[child] Failed to open write pipe, error=" << GetLastError() << std::endl;
     CloseHandle(read_handle);
     return false;
   }
@@ -97,51 +99,41 @@ bool RunChild(const std::string& read_pipe_name,
   nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> ok{false};
 
-  io_runner->PostTask(
-      FROM_HERE,
-      [io_runner, &done, &ok, read_handle, write_handle]() mutable {
-        auto input = std::make_shared<nei::PipeInputStream>(io_runner);
-        auto output = std::make_shared<nei::PipeOutputStream>(io_runner);
-        if (!input->BindPlatformHandle(
-                nei::PlatformHandle::FromNativeHandle<nei::DefaultHandleTraits>(
-                    read_handle)) ||
-            !output->BindPlatformHandle(
-                nei::PlatformHandle::FromNativeHandle<nei::DefaultHandleTraits>(
-                    write_handle))) {
-          done.Signal();
-          return;
-        }
+  io_runner->PostTask(FROM_HERE, [io_runner, &done, &ok, read_handle, write_handle]() mutable {
+    auto input = std::make_shared<nei::PipeInputStream>(io_runner);
+    auto output = std::make_shared<nei::PipeOutputStream>(io_runner);
+    if (!input->BindPlatformHandle(nei::PlatformHandle::FromNativeHandle<nei::DefaultHandleTraits>(read_handle))
+        || !output->BindPlatformHandle(nei::PlatformHandle::FromNativeHandle<nei::DefaultHandleTraits>(write_handle))) {
+      done.Signal();
+      return;
+    }
 
-        auto read_holder = AcquireBuffer(kBufferSize);
-        input->ReadAsync(
-            read_holder.buf, kBufferSize,
-            [io_runner, &done, &ok, read_holder, input, output](bool success,
-                                                                 std::size_t n) {
-              if (!success || n == 0) {
-                done.Signal();
-                return;
-              }
+    auto read_holder = AcquireBuffer(kBufferSize);
+    input->ReadAsync(
+        read_holder.buf, kBufferSize, [io_runner, &done, &ok, read_holder, input, output](bool success, std::size_t n) {
+          if (!success || n == 0) {
+            done.Signal();
+            return;
+          }
 
-              const std::string request(reinterpret_cast<const char*>(read_holder.buf->data()), n);
-              std::cout << "[child] received: " << request << std::endl;
-              if (request != "ping from parent") {
-                done.Signal();
-                return;
-              }
+          const std::string request(reinterpret_cast<const char *>(read_holder.buf->data()), n);
+          std::cout << "[child] received: " << request << std::endl;
+          if (request != "ping from parent") {
+            done.Signal();
+            return;
+          }
 
-              const std::string reply = "pong from child";
-              auto write_holder = AcquireBuffer(reply.size());
-              std::memcpy(write_holder.buf->data(), reply.data(), reply.size());
-              output->WriteAsync(
-                  write_holder.buf, reply.size(),
-                  [&done, &ok, write_holder, output](bool write_success,
-                                                     std::size_t written) {
-                    ok.store(write_success && written == 15,
-                             std::memory_order_release);
-                    done.Signal();
-                  });
-            });
-      });
+          const std::string reply = "pong from child";
+          auto write_holder = AcquireBuffer(reply.size());
+          std::memcpy(write_holder.buf->data(), reply.data(), reply.size());
+          output->WriteAsync(write_holder.buf,
+                             reply.size(),
+                             [&done, &ok, write_holder, output](bool write_success, std::size_t written) {
+                               ok.store(write_success && written == 15, std::memory_order_release);
+                               done.Signal();
+                             });
+        });
+  });
 
   const bool finished = done.TimedWait(std::chrono::seconds(10));
   io_thread.Stop();
@@ -152,23 +144,29 @@ bool RunParent() {
   const std::string parent_to_child = BuildPipeName("parent_to_child");
   const std::string child_to_parent = BuildPipeName("child_to_parent");
 
-  HANDLE write_server = CreateNamedPipeA(
-      parent_to_child.c_str(),
-      PIPE_ACCESS_OUTBOUND | FILE_FLAG_OVERLAPPED,
-      PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 0, 0, 0, nullptr);
+  HANDLE write_server = CreateNamedPipeA(parent_to_child.c_str(),
+                                         PIPE_ACCESS_OUTBOUND | FILE_FLAG_OVERLAPPED,
+                                         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                                         1,
+                                         0,
+                                         0,
+                                         0,
+                                         nullptr);
   if (write_server == INVALID_HANDLE_VALUE) {
-    std::cerr << "[parent] Failed to create write server pipe, error="
-              << GetLastError() << std::endl;
+    std::cerr << "[parent] Failed to create write server pipe, error=" << GetLastError() << std::endl;
     return false;
   }
 
-  HANDLE read_server = CreateNamedPipeA(
-      child_to_parent.c_str(),
-      PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
-      PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 0, 0, 0, nullptr);
+  HANDLE read_server = CreateNamedPipeA(child_to_parent.c_str(),
+                                        PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
+                                        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                                        1,
+                                        0,
+                                        0,
+                                        0,
+                                        nullptr);
   if (read_server == INVALID_HANDLE_VALUE) {
-    std::cerr << "[parent] Failed to create read server pipe, error="
-              << GetLastError() << std::endl;
+    std::cerr << "[parent] Failed to create read server pipe, error=" << GetLastError() << std::endl;
     CloseHandle(write_server);
     return false;
   }
@@ -181,16 +179,12 @@ bool RunParent() {
     return false;
   }
 
-  std::string command_line = "\"" + self_path + "\" --child \"" +
-                             parent_to_child + "\" \"" + child_to_parent +
-                             "\"";
+  std::string command_line = "\"" + self_path + "\" --child \"" + parent_to_child + "\" \"" + child_to_parent + "\"";
   STARTUPINFOA si = {};
   si.cb = sizeof(si);
   PROCESS_INFORMATION pi = {};
-  if (!CreateProcessA(nullptr, command_line.data(), nullptr, nullptr, FALSE, 0,
-                      nullptr, nullptr, &si, &pi)) {
-    std::cerr << "[parent] Failed to spawn child, error=" << GetLastError()
-              << std::endl;
+  if (!CreateProcessA(nullptr, command_line.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+    std::cerr << "[parent] Failed to spawn child, error=" << GetLastError() << std::endl;
     CloseHandle(write_server);
     CloseHandle(read_server);
     return false;
@@ -228,40 +222,30 @@ bool RunParent() {
   std::string response;
   std::atomic<bool> ok{false};
 
-  io_runner->PostTask(
-      FROM_HERE,
-      [io_runner, &done, &ok, &response, write_server, read_server]() mutable {
-        auto output = std::make_shared<nei::PipeOutputStream>(io_runner);
-        auto input = std::make_shared<nei::PipeInputStream>(io_runner);
-        if (!output->BindPlatformHandle(
-                nei::PlatformHandle::FromNativeHandle<nei::DefaultHandleTraits>(
-                    write_server)) ||
-            !input->BindPlatformHandle(
-                nei::PlatformHandle::FromNativeHandle<nei::DefaultHandleTraits>(
-                    read_server))) {
+  io_runner->PostTask(FROM_HERE, [io_runner, &done, &ok, &response, write_server, read_server]() mutable {
+    auto output = std::make_shared<nei::PipeOutputStream>(io_runner);
+    auto input = std::make_shared<nei::PipeInputStream>(io_runner);
+    if (!output->BindPlatformHandle(nei::PlatformHandle::FromNativeHandle<nei::DefaultHandleTraits>(write_server))
+        || !input->BindPlatformHandle(nei::PlatformHandle::FromNativeHandle<nei::DefaultHandleTraits>(read_server))) {
+      done.Signal();
+      return;
+    }
+
+    auto read_holder = AcquireBuffer(kBufferSize);
+    input->ReadAsync(
+        read_holder.buf, kBufferSize, [&done, &ok, &response, read_holder, input](bool success, std::size_t n) {
+          if (success && n > 0) {
+            response.assign(reinterpret_cast<const char *>(read_holder.buf->data()), n);
+            ok.store(response == "pong from child", std::memory_order_release);
+          }
           done.Signal();
-          return;
-        }
+        });
 
-        auto read_holder = AcquireBuffer(kBufferSize);
-        input->ReadAsync(
-            read_holder.buf, kBufferSize,
-            [&done, &ok, &response, read_holder, input](bool success,
-                                                        std::size_t n) {
-              if (success && n > 0) {
-                response.assign(reinterpret_cast<const char*>(read_holder.buf->data()), n);
-                ok.store(response == "pong from child",
-                         std::memory_order_release);
-              }
-              done.Signal();
-            });
-
-        const std::string request = "ping from parent";
-        auto write_holder = AcquireBuffer(request.size());
-        std::memcpy(write_holder.buf->data(), request.data(), request.size());
-        output->WriteAsync(write_holder.buf, request.size(),
-                           [write_holder, output](bool, std::size_t) {});
-      });
+    const std::string request = "ping from parent";
+    auto write_holder = AcquireBuffer(request.size());
+    std::memcpy(write_holder.buf->data(), request.data(), request.size());
+    output->WriteAsync(write_holder.buf, request.size(), [write_holder, output](bool, std::size_t) {});
+  });
 
   const bool finished = done.TimedWait(std::chrono::seconds(10));
   WaitForSingleObject(pi.hProcess, INFINITE);
@@ -273,8 +257,7 @@ bool RunParent() {
   io_thread.Stop();
 
   if (!finished || !ok.load(std::memory_order_acquire) || exit_code != 0) {
-    std::cerr << "[parent] Demo failed, child_exit=" << exit_code
-              << ", response='" << response << "'" << std::endl;
+    std::cerr << "[parent] Demo failed, child_exit=" << exit_code << ", response='" << response << "'" << std::endl;
     return false;
   }
 
@@ -282,9 +265,9 @@ bool RunParent() {
   return true;
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   nei::AtExitManager at_exit;
 
   if (argc == 4 && std::string(argv[1]) == "--child") {
@@ -297,9 +280,8 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  std::cout << "PipeStream Windows cross-process demo completed successfully."
-            << std::endl;
+  std::cout << "PipeStream Windows cross-process demo completed successfully." << std::endl;
   return 0;
 }
 
-#endif  // defined(_WIN32)
+#endif // defined(_WIN32)

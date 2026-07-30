@@ -56,7 +56,7 @@ class TaskRunner;
 // OneShotTimer  --  单次高精度定时器
 // =============================================================================
 class NEI_API OneShotTimer final {
- public:
+public:
   // Creates a timer. The TaskRunner is captured from the current thread
   // at Start() time via ThreadTaskRunnerHandle::Get().
   OneShotTimer();
@@ -66,13 +66,13 @@ class NEI_API OneShotTimer final {
 
   ~OneShotTimer();
 
-  OneShotTimer(const OneShotTimer&) = delete;
-  OneShotTimer& operator=(const OneShotTimer&) = delete;
+  OneShotTimer(const OneShotTimer &) = delete;
+  OneShotTimer &operator=(const OneShotTimer &) = delete;
 
   // Starts the timer. |task| will be run on the bound sequence after |delay|.
   // If the timer is already running, it is first stopped.
   // Must be called on the bound sequence.
-  void Start(const Location& from_here, TimeDelta delay, OnceCallback<void()> task);
+  void Start(const Location &from_here, TimeDelta delay, OnceCallback<void()> task);
 
   // Stops the timer. Invalidates outstanding WeakPtrs so any queued delayed
   // task is silently dropped, and immediately resets the user closure.
@@ -83,9 +83,9 @@ class NEI_API OneShotTimer final {
   bool IsRunning() const;
 
   // Returns the location from which Start() was last called.
-  const Location& posted_from() const;
+  const Location &posted_from() const;
 
- private:
+private:
   class Impl;
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   std::unique_ptr<Impl> impl_;
@@ -96,18 +96,18 @@ class NEI_API OneShotTimer final {
 // RepeatingTimer  --  周期高精度定时器
 // =============================================================================
 class NEI_API RepeatingTimer final {
- public:
+public:
   RepeatingTimer();
   explicit RepeatingTimer(scoped_refptr<TaskRunner> task_runner);
   ~RepeatingTimer();
 
-  RepeatingTimer(const RepeatingTimer&) = delete;
-  RepeatingTimer& operator=(const RepeatingTimer&) = delete;
+  RepeatingTimer(const RepeatingTimer &) = delete;
+  RepeatingTimer &operator=(const RepeatingTimer &) = delete;
 
   // Starts the timer. |task| will be run repeatedly every |delay| on the
   // bound sequence until Stop() is called.
   // Must be called on the bound sequence.
-  void Start(const Location& from_here, TimeDelta delay, RepeatingCallback<void()> task);
+  void Start(const Location &from_here, TimeDelta delay, RepeatingCallback<void()> task);
 
   // Stops the timer. Invalidates outstanding WeakPtrs and resets the user task.
   // Safe to call from within the user callback (re-entrancy safe).
@@ -116,15 +116,15 @@ class NEI_API RepeatingTimer final {
 
   bool IsRunning() const;
 
-  const Location& posted_from() const;
+  const Location &posted_from() const;
 
- private:
+private:
   class Impl;
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   std::unique_ptr<Impl> impl_;
   NEI_SUPPRESS_MSC_WARNING_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_TASK_TIMER_H_
+#endif // NEIXX_TASK_TIMER_H_

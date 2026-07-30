@@ -30,43 +30,42 @@ namespace nei::net {
 // Thread-safe: all public methods may be called from any thread.
 // =============================================================================
 class CaresContext {
- public:
-  using ResolveCallback = void (*)(void* arg, int status, int timeouts,
-                                   struct ares_addrinfo* result);
+public:
+  using ResolveCallback = void (*)(void *arg, int status, int timeouts, struct ares_addrinfo *result);
 
-  static CaresContext* Get();
+  static CaresContext *Get();
 
-  CaresContext(const CaresContext&) = delete;
-  CaresContext& operator=(const CaresContext&) = delete;
+  CaresContext(const CaresContext &) = delete;
+  CaresContext &operator=(const CaresContext &) = delete;
 
   // |target_runner|  --  callback is always delivered on this runner.
   // If |target_runner| is null, the callback is called directly (error path)
   // or on the c-ares event thread (success path).
-  void Resolve(const std::string& host,
-               const HostResolverOptions& options,
-               const struct ares_addrinfo_hints* hints,
+  void Resolve(const std::string &host,
+               const HostResolverOptions &options,
+               const struct ares_addrinfo_hints *hints,
                ResolveCallback callback,
-               void* arg,
+               void *arg,
                scoped_refptr<TaskRunner> target_runner);
 
- private:
+private:
   struct ChannelEntry {
-    ares_channel_t* channel = nullptr;
+    ares_channel_t *channel = nullptr;
     Lock lock;
   };
 
   CaresContext();
   ~CaresContext();
 
-  ChannelEntry* GetOrCreateChannel(const HostResolverOptions& options);
+  ChannelEntry *GetOrCreateChannel(const HostResolverOptions &options);
   // Locked variant — caller must hold lock_.
-  ChannelEntry* GetOrCreateChannelLocked(const HostResolverOptions& options);
+  ChannelEntry *GetOrCreateChannelLocked(const HostResolverOptions &options);
   void Shutdown();
 
   mutable Lock lock_;
   std::map<HostResolverOptions, std::unique_ptr<ChannelEntry>> channels_;
 };
 
-}  // namespace nei::net
+} // namespace nei::net
 
-#endif  // NEIXX_NET_SRC_CARES_CONTEXT_H_
+#endif // NEIXX_NET_SRC_CARES_CONTEXT_H_

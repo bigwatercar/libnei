@@ -22,10 +22,9 @@ namespace {
 // =============================================================================
 
 class ScopedSequenceManager {
- public:
+public:
   ScopedSequenceManager() {
-    manager_ = std::make_unique<SequenceManager>(
-        std::make_unique<MessagePumpDefault>());
+    manager_ = std::make_unique<SequenceManager>(std::make_unique<MessagePumpDefault>());
     runner_ = manager_->CreateTaskRunner();
   }
 
@@ -36,25 +35,31 @@ class ScopedSequenceManager {
     }
   }
 
-  SequenceManager* manager() { return manager_.get(); }
-  TaskRunner* runner() { return runner_.get(); }
+  SequenceManager *manager() {
+    return manager_.get();
+  }
+
+  TaskRunner *runner() {
+    return runner_.get();
+  }
 
   // Drive the pump until Quit() is called.  The caller is responsible
   // for ensuring Quit() will be invoked — if a test callback fails an
   // EXPECT before posting Quit, the pump will hang.  Prefer
   // RunPumpWithTimeout() when the test does not guarantee Quit().
-  void RunPump() { manager_->Run(); }
-
-  // 投递一个延迟 Quit 后驱动 pump
-  void RunPumpWithTimeout(int delay_ms = 200) {
-    runner_->PostDelayedTask(
-        FROM_HERE,
-        BindOnce([](SequenceManager* mgr) { mgr->Quit(); }, manager_.get()),
-        TimeDelta::FromMilliseconds(delay_ms));
+  void RunPump() {
     manager_->Run();
   }
 
- private:
+  // 投递一个延迟 Quit 后驱动 pump
+  void RunPumpWithTimeout(int delay_ms = 200) {
+    runner_->PostDelayedTask(FROM_HERE,
+                             BindOnce([](SequenceManager *mgr) { mgr->Quit(); }, manager_.get()),
+                             TimeDelta::FromMilliseconds(delay_ms));
+    manager_->Run();
+  }
+
+private:
   std::unique_ptr<SequenceManager> manager_;
   scoped_refptr<TaskRunner> runner_;
 };
@@ -69,8 +74,7 @@ TEST(TimerTest, OneShotTimerFiresOnce) {
   OneShotTimer timer;
 
   mgr.runner()->PostTask(FROM_HERE, [&] {
-    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(10),
-                BindOnce([&] { fired.store(true); }));
+    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(10), BindOnce([&] { fired.store(true); }));
   });
 
   mgr.RunPumpWithTimeout();
@@ -83,8 +87,7 @@ TEST(TimerTest, OneShotTimerStopPreventsFire) {
   OneShotTimer timer;
 
   mgr.runner()->PostTask(FROM_HERE, [&] {
-    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(500),
-                BindOnce([&] { fired.store(true); }));
+    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(500), BindOnce([&] { fired.store(true); }));
     timer.Stop();
   });
 
@@ -113,10 +116,8 @@ TEST(TimerTest, OneShotTimerRestartCancelsPrevious) {
   OneShotTimer timer;
 
   mgr.runner()->PostTask(FROM_HERE, [&] {
-    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(500),
-                BindOnce([&] { count.fetch_add(1); }));
-    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(10),
-                BindOnce([&] { count.fetch_add(1); }));
+    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(500), BindOnce([&] { count.fetch_add(1); }));
+    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(10), BindOnce([&] { count.fetch_add(1); }));
   });
 
   mgr.RunPumpWithTimeout(100);
@@ -129,9 +130,9 @@ TEST(TimerTest, OneShotTimerPostedFromRecordsLocation) {
 
   mgr.runner()->PostTask(FROM_HERE, [&] {
     timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(10), BindOnce([&] {
-      EXPECT_FALSE(timer.posted_from().is_null());
-      mgr.manager()->Quit();
-    }));
+                  EXPECT_FALSE(timer.posted_from().is_null());
+                  mgr.manager()->Quit();
+                }));
   });
 
   mgr.RunPump();
@@ -148,8 +149,7 @@ TEST(TimerTest, OneShotTimerDestructionPreventsCallback) {
     ScopedSequenceManager mgr;
     OneShotTimer timer;
     mgr.runner()->PostTask(FROM_HERE, [&] {
-      timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(10),
-                  BindOnce([&] { fired.store(true); }));
+      timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(10), BindOnce([&] { fired.store(true); }));
     });
     // 驱动 pump 确保 Start() 已执行
     mgr.runner()->PostTask(FROM_HERE, [&mgr] { mgr.manager()->Quit(); });
@@ -173,8 +173,7 @@ TEST(TimerTest, RepeatingTimerFiresMultipleTimes) {
   RepeatingTimer timer;
 
   mgr.runner()->PostTask(FROM_HERE, [&] {
-    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(5),
-                BindRepeating([&] {
+    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(5), BindRepeating([&] {
                   if (count.fetch_add(1) >= 3) {
                     timer.Stop();
                     mgr.manager()->Quit();
@@ -196,15 +195,12 @@ TEST(TimerTest, RepeatingTimerStopFromWithinCallback) {
   RepeatingTimer timer;
 
   mgr.runner()->PostTask(FROM_HERE, [&] {
-    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(5),
-                BindRepeating([&] {
+    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(5), BindRepeating([&] {
                   count.fetch_add(1);
                   timer.Stop();
-                  mgr.runner()->PostDelayedTask(
-                      FROM_HERE,
-                      BindOnce([](SequenceManager* m) { m->Quit(); },
-                               mgr.manager()),
-                      TimeDelta::FromMilliseconds(50));
+                  mgr.runner()->PostDelayedTask(FROM_HERE,
+                                                BindOnce([](SequenceManager *m) { m->Quit(); }, mgr.manager()),
+                                                TimeDelta::FromMilliseconds(50));
                 }));
   });
 
@@ -233,10 +229,8 @@ TEST(TimerTest, RepeatingTimerRestartResetsTimer) {
   RepeatingTimer timer;
 
   mgr.runner()->PostTask(FROM_HERE, [&] {
-    timer.Start(FROM_HERE, TimeDelta::FromSeconds(10),
-                BindRepeating([&] { count.fetch_add(1); }));
-    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(5),
-                BindRepeating([&] {
+    timer.Start(FROM_HERE, TimeDelta::FromSeconds(10), BindRepeating([&] { count.fetch_add(1); }));
+    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(5), BindRepeating([&] {
                   if (count.fetch_add(1) >= 2) {
                     timer.Stop();
                     mgr.manager()->Quit();
@@ -255,16 +249,13 @@ TEST(TimerTest, RepeatingTimerStopPreventsFurtherFires) {
 
   mgr.runner()->PostTask(FROM_HERE, [&count, runner = mgr.runner(), mgr_ptr = mgr.manager()] {
     auto t = std::make_unique<RepeatingTimer>();
-    t->Start(FROM_HERE, TimeDelta::FromMilliseconds(5),
-             BindRepeating([&count] { count.fetch_add(1); }));
+    t->Start(FROM_HERE, TimeDelta::FromMilliseconds(5), BindRepeating([&count] { count.fetch_add(1); }));
 
     runner->PostDelayedTask(
         FROM_HERE,
         [t = std::move(t), runner, mgr_ptr] {
           runner->PostDelayedTask(
-              FROM_HERE,
-              BindOnce([](SequenceManager* m) { m->Quit(); }, mgr_ptr),
-              TimeDelta::FromMilliseconds(60));
+              FROM_HERE, BindOnce([](SequenceManager *m) { m->Quit(); }, mgr_ptr), TimeDelta::FromMilliseconds(60));
         },
         TimeDelta::FromMilliseconds(30));
   });
@@ -282,14 +273,12 @@ TEST(TimerTest, ExplicitTaskRunnerBinding) {
   std::atomic<bool> fired{false};
   OneShotTimer timer(scoped_refptr<TaskRunner>(mgr.runner()));
 
-  mgr.runner()->PostTask(FROM_HERE, [&] {
-    timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(5),
-                BindOnce([&] { fired.store(true); }));
-  });
+  mgr.runner()->PostTask(
+      FROM_HERE, [&] { timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(5), BindOnce([&] { fired.store(true); })); });
 
   mgr.RunPumpWithTimeout(100);
   EXPECT_TRUE(fired.load());
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

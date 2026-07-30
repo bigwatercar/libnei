@@ -40,29 +40,29 @@ enum class PriorityBucket : std::size_t {
 };
 
 struct SequenceManagerThreadState {
-  SequenceManager* manager = nullptr;
+  SequenceManager *manager = nullptr;
   std::size_t bind_depth = 0;
 };
 
 #if defined(_WIN32)
-void NTAPI DestroySequenceManagerThreadState(void* state) {
+void NTAPI DestroySequenceManagerThreadState(void *state) {
 #else
-void DestroySequenceManagerThreadState(void* state) {
+void DestroySequenceManagerThreadState(void *state) {
 #endif
-  delete static_cast<SequenceManagerThreadState*>(state);
+  delete static_cast<SequenceManagerThreadState *>(state);
 }
 
-ThreadLocalStorage::Slot& GetSequenceManagerThreadStateSlot() {
+ThreadLocalStorage::Slot &GetSequenceManagerThreadStateSlot() {
   static ThreadLocalStorage::Slot slot(&DestroySequenceManagerThreadState);
   return slot;
 }
 
-SequenceManagerThreadState* GetSequenceManagerThreadState() {
-  return static_cast<SequenceManagerThreadState*>(GetSequenceManagerThreadStateSlot().Get());
+SequenceManagerThreadState *GetSequenceManagerThreadState() {
+  return static_cast<SequenceManagerThreadState *>(GetSequenceManagerThreadStateSlot().Get());
 }
 
-SequenceManagerThreadState* EnsureSequenceManagerThreadState() {
-  SequenceManagerThreadState* state = GetSequenceManagerThreadState();
+SequenceManagerThreadState *EnsureSequenceManagerThreadState() {
+  SequenceManagerThreadState *state = GetSequenceManagerThreadState();
   if (state == nullptr) {
     state = new SequenceManagerThreadState();
     GetSequenceManagerThreadStateSlot().Set(state);
@@ -72,34 +72,35 @@ SequenceManagerThreadState* EnsureSequenceManagerThreadState() {
 
 PriorityBucket GetPriorityBucket(TaskPriority priority) {
   switch (priority) {
-    case TaskPriority::USER_BLOCKING:
-      return PriorityBucket::kUserBlocking;
-    case TaskPriority::BEST_EFFORT:
-      return PriorityBucket::kBestEffort;
-    case TaskPriority::USER_VISIBLE:
-    default:
-      return PriorityBucket::kUserVisible;
+  case TaskPriority::USER_BLOCKING:
+    return PriorityBucket::kUserBlocking;
+  case TaskPriority::BEST_EFFORT:
+    return PriorityBucket::kBestEffort;
+  case TaskPriority::USER_VISIBLE:
+  default:
+    return PriorityBucket::kUserVisible;
   }
 }
 
-}  // namespace
+} // namespace
 
 class SequenceManager::Impl {
- public:
-  explicit Impl(SequenceManager* owner, std::unique_ptr<MessagePump> pump)
-      : owner_(owner), pump_(std::move(pump)) {
+public:
+  explicit Impl(SequenceManager *owner, std::unique_ptr<MessagePump> pump)
+      : owner_(owner)
+      , pump_(std::move(pump)) {
     if (!pump_) {
       pump_ = std::make_unique<MessagePumpDefault>();
     }
   }
 
-  static SequenceManager* Current() {
-    SequenceManagerThreadState* state = GetSequenceManagerThreadState();
+  static SequenceManager *Current() {
+    SequenceManagerThreadState *state = GetSequenceManagerThreadState();
     return state != nullptr ? state->manager : nullptr;
   }
 
   void BindToCurrentThreadIfUnbound() {
-    SequenceManagerThreadState* state = GetSequenceManagerThreadState();
+    SequenceManagerThreadState *state = GetSequenceManagerThreadState();
     if (state != nullptr && state->manager != nullptr) {
       // A SequenceManager is already bound to this thread. Creating a second
       // one on the same thread is a programming error  --  only the first one
@@ -110,7 +111,7 @@ class SequenceManager::Impl {
     (void)BindToCurrentThread();
   }
 
-  scoped_refptr<TaskRunner> CreateTaskRunner(const TaskTraits& traits) {
+  scoped_refptr<TaskRunner> CreateTaskRunner(const TaskTraits &traits) {
     AutoLock lock(lock_);
     return CreateTaskRunnerLocked(traits);
   }
@@ -126,19 +127,19 @@ class SequenceManager::Impl {
     return default_task_runner_;
   }
 
-  scoped_refptr<TaskRunner> CreateTaskRunnerLocked(const TaskTraits& traits) {
+  scoped_refptr<TaskRunner> CreateTaskRunnerLocked(const TaskTraits &traits) {
     if (is_shutdown_) {
       return nullptr;
     }
 
     std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(traits);
-    internal::TaskQueue* raw_queue = queue.get();
+    internal::TaskQueue *raw_queue = queue.get();
     WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
     queue->SetOnTaskPostedCallback([this, weak_queue]() {
       pump_->ScheduleWork();
 
       // If delayed head moved earlier, wake pump's delayed wait path too.
-      internal::TaskQueue* queue = weak_queue.get();
+      internal::TaskQueue *queue = weak_queue.get();
       if (queue == nullptr) {
         return;
       }
@@ -154,20 +155,23 @@ class SequenceManager::Impl {
     return TaskRunner::Create(raw_queue, traits);
   }
 
-  void Run(MessagePump::Delegate* delegate) {
+  void Run(MessagePump::Delegate *delegate) {
     if (!BindToCurrentThread()) {
       return;
     }
 
     class ScopedThreadBindingCleanup final {
-     public:
-      explicit ScopedThreadBindingCleanup(Impl* impl) : impl_(impl) {}
+    public:
+      explicit ScopedThreadBindingCleanup(Impl *impl)
+          : impl_(impl) {
+      }
+
       ~ScopedThreadBindingCleanup() {
         impl_->UnbindFromCurrentThread();
       }
 
-     private:
-      Impl* impl_;
+    private:
+      Impl *impl_;
     } scoped_thread_binding_cleanup(this);
 
     pump_->Run(delegate);
@@ -178,7 +182,7 @@ class SequenceManager::Impl {
   }
 
   void Shutdown() {
-    std::vector<internal::TaskQueue*> queues_to_shutdown;
+    std::vector<internal::TaskQueue *> queues_to_shutdown;
     {
       AutoLock lock(lock_);
       if (is_shutdown_ || in_shutdown_processing_) {
@@ -194,14 +198,14 @@ class SequenceManager::Impl {
       // pointer from WeakPtr::get() before invalidation completes.
       shutdown_queues_.swap(queues_);
       queues_to_shutdown.reserve(shutdown_queues_.size());
-      for (const auto& queue : shutdown_queues_) {
+      for (const auto &queue : shutdown_queues_) {
         queues_to_shutdown.push_back(queue.get());
       }
 
       RebuildQueueViewLocked();
     }
 
-    for (internal::TaskQueue* queue : queues_to_shutdown) {
+    for (internal::TaskQueue *queue : queues_to_shutdown) {
       if (queue == nullptr) {
         continue;
       }
@@ -224,9 +228,8 @@ class SequenceManager::Impl {
     const bool tracing_enabled = internal::IsTaskTracingEnabled();
 
     auto single_queue_fast_path_eligible_locked = [this]() -> bool {
-      return g_single_queue_fast_path_enabled.load(std::memory_order_relaxed)
-             && user_blocking_priority_queues_.empty() && best_effort_priority_queues_.empty()
-             && user_visible_priority_queues_.size() == 1;
+      return g_single_queue_fast_path_enabled.load(std::memory_order_relaxed) && user_blocking_priority_queues_.empty()
+             && best_effort_priority_queues_.empty() && user_visible_priority_queues_.size() == 1;
     };
 
     bool single_queue_fast_path_enabled = false;
@@ -242,8 +245,7 @@ class SequenceManager::Impl {
       // RecordTaskExecutionStarted to avoid a TimeTicks::Now() call per task.
       const TimeTicks batch_now = tracing_enabled ? TimeTicks::Now() : TimeTicks();
       while (processed < kSingleQueueMaxTasksPerDoWork) {
-        const std::size_t take_count = std::min(kSingleQueueTakeBatchSize,
-                                                kSingleQueueMaxTasksPerDoWork - processed);
+        const std::size_t take_count = std::min(kSingleQueueTakeBatchSize, kSingleQueueMaxTasksPerDoWork - processed);
         std::size_t count = 0;
         {
           // Hold lock_ while taking tasks so queue lifetime is protected against
@@ -260,7 +262,7 @@ class SequenceManager::Impl {
 
         processed += count;
         for (std::size_t i = 0; i < count; ++i) {
-          internal::Task& task = tasks[i];
+          internal::Task &task = tasks[i];
           if (!task.task) {
             continue;
           }
@@ -301,7 +303,7 @@ class SequenceManager::Impl {
     return ran_any;
   }
 
-  bool DoDelayedWork(MessagePump::Delegate::NextWorkInfo* next_work_info) {
+  bool DoDelayedWork(MessagePump::Delegate::NextWorkInfo *next_work_info) {
     if (next_work_info == nullptr) {
       return false;
     }
@@ -309,7 +311,7 @@ class SequenceManager::Impl {
     const TimeTicks now = TimeTicks::Now();
     bool promoted_any = false;
 
-    const std::shared_ptr<const std::vector<internal::TaskQueue*>> queues_view = GetQueuesView();
+    const std::shared_ptr<const std::vector<internal::TaskQueue *>> queues_view = GetQueuesView();
     if (!queues_view) {
       next_work_info->recent_now = now;
       next_work_info->next_run_time = MessagePump::Delegate::NextWorkInfo::kNoScheduledRunTime;
@@ -317,7 +319,7 @@ class SequenceManager::Impl {
     }
 
     TimeTicks earliest_next_run_time;
-    for (internal::TaskQueue* queue : *queues_view) {
+    for (internal::TaskQueue *queue : *queues_view) {
       if (queue->PromoteReadyDelayedTasks(now) > 0) {
         promoted_any = true;
       }
@@ -342,9 +344,9 @@ class SequenceManager::Impl {
     return false;
   }
 
- private:
+private:
   bool BindToCurrentThread() {
-    SequenceManagerThreadState* state = EnsureSequenceManagerThreadState();
+    SequenceManagerThreadState *state = EnsureSequenceManagerThreadState();
     if (state->manager != nullptr && state->manager != owner_) {
       // A different SequenceManager is already bound to this thread.
       // This is a fatal programming error in all builds  --  continuing
@@ -362,7 +364,7 @@ class SequenceManager::Impl {
   }
 
   void UnbindFromCurrentThread() {
-    SequenceManagerThreadState* state = GetSequenceManagerThreadState();
+    SequenceManagerThreadState *state = GetSequenceManagerThreadState();
     if (state == nullptr || state->manager != owner_) {
       return;
     }
@@ -380,27 +382,27 @@ class SequenceManager::Impl {
   }
 
   void RebuildQueueViewLocked() {
-    auto new_view = std::make_shared<std::vector<internal::TaskQueue*>>();
+    auto new_view = std::make_shared<std::vector<internal::TaskQueue *>>();
     new_view->reserve(queues_.size());
-    std::vector<internal::TaskQueue*> user_blocking_priority_queues;
-    std::vector<internal::TaskQueue*> user_visible_priority_queues;
-    std::vector<internal::TaskQueue*> best_effort_priority_queues;
+    std::vector<internal::TaskQueue *> user_blocking_priority_queues;
+    std::vector<internal::TaskQueue *> user_visible_priority_queues;
+    std::vector<internal::TaskQueue *> best_effort_priority_queues;
 
-    for (const auto& queue : queues_) {
-      internal::TaskQueue* raw_queue = queue.get();
+    for (const auto &queue : queues_) {
+      internal::TaskQueue *raw_queue = queue.get();
       new_view->push_back(raw_queue);
 
       switch (GetPriorityBucket(raw_queue->traits().priority())) {
-        case PriorityBucket::kUserBlocking:
-          user_blocking_priority_queues.push_back(raw_queue);
-          break;
-        case PriorityBucket::kBestEffort:
-          best_effort_priority_queues.push_back(raw_queue);
-          break;
-        case PriorityBucket::kUserVisible:
-        default:
-          user_visible_priority_queues.push_back(raw_queue);
-          break;
+      case PriorityBucket::kUserBlocking:
+        user_blocking_priority_queues.push_back(raw_queue);
+        break;
+      case PriorityBucket::kBestEffort:
+        best_effort_priority_queues.push_back(raw_queue);
+        break;
+      case PriorityBucket::kUserVisible:
+      default:
+        user_visible_priority_queues.push_back(raw_queue);
+        break;
       }
     }
 
@@ -444,7 +446,7 @@ class SequenceManager::Impl {
     }
   }
 
-  std::shared_ptr<const std::vector<internal::TaskQueue*>> GetQueuesView() const {
+  std::shared_ptr<const std::vector<internal::TaskQueue *>> GetQueuesView() const {
     AutoLock lock(lock_);
     return queues_view_;
   }
@@ -476,7 +478,7 @@ class SequenceManager::Impl {
   // after inspecting each slot, regardless of whether a task was found. An
   // empty high-priority bucket "burns" its allocated quota rather than silently
   // handing it to the next lower bucket.
-  bool TakeNextImmediateTask(internal::Task* out_task) {
+  bool TakeNextImmediateTask(internal::Task *out_task) {
     if (out_task == nullptr) {
       return false;
     }
@@ -491,22 +493,22 @@ class SequenceManager::Impl {
       const std::size_t schedule_index = (next_priority_index_ + offset) % schedule_size;
       const PriorityBucket bucket = priority_schedule_[schedule_index];
 
-      std::vector<internal::TaskQueue*>* queues = nullptr;
-      std::size_t* queue_index = nullptr;
+      std::vector<internal::TaskQueue *> *queues = nullptr;
+      std::size_t *queue_index = nullptr;
       switch (bucket) {
-        case PriorityBucket::kUserBlocking:
-          queues = &user_blocking_priority_queues_;
-          queue_index = &user_blocking_priority_queue_index_;
-          break;
-        case PriorityBucket::kBestEffort:
-          queues = &best_effort_priority_queues_;
-          queue_index = &best_effort_priority_queue_index_;
-          break;
-        case PriorityBucket::kUserVisible:
-        default:
-          queues = &user_visible_priority_queues_;
-          queue_index = &user_visible_priority_queue_index_;
-          break;
+      case PriorityBucket::kUserBlocking:
+        queues = &user_blocking_priority_queues_;
+        queue_index = &user_blocking_priority_queue_index_;
+        break;
+      case PriorityBucket::kBestEffort:
+        queues = &best_effort_priority_queues_;
+        queue_index = &best_effort_priority_queue_index_;
+        break;
+      case PriorityBucket::kUserVisible:
+      default:
+        queues = &user_visible_priority_queues_;
+        queue_index = &user_visible_priority_queue_index_;
+        break;
       }
 
       // Always advance the pointer past this slot. An empty bucket "burns" its
@@ -536,7 +538,7 @@ class SequenceManager::Impl {
     return false;
   }
 
-  SequenceManager* owner_;
+  SequenceManager *owner_;
   mutable Lock lock_;
   std::unique_ptr<MessagePump> pump_;
   std::vector<std::unique_ptr<internal::TaskQueue>> queues_;
@@ -548,11 +550,11 @@ class SequenceManager::Impl {
   // even after Shutdown() swaps queues_ into shutdown_queues_.  The raw
   // TaskQueue* pointers inside the view remain valid because Shutdown()
   // keeps queue objects alive in shutdown_queues_ until Impl destruction.
-  std::shared_ptr<const std::vector<internal::TaskQueue*>> queues_view_ =
-      std::make_shared<std::vector<internal::TaskQueue*>>();
-  std::vector<internal::TaskQueue*> user_blocking_priority_queues_;
-  std::vector<internal::TaskQueue*> user_visible_priority_queues_;
-  std::vector<internal::TaskQueue*> best_effort_priority_queues_;
+  std::shared_ptr<const std::vector<internal::TaskQueue *>> queues_view_ =
+      std::make_shared<std::vector<internal::TaskQueue *>>();
+  std::vector<internal::TaskQueue *> user_blocking_priority_queues_;
+  std::vector<internal::TaskQueue *> user_visible_priority_queues_;
+  std::vector<internal::TaskQueue *> best_effort_priority_queues_;
   std::vector<PriorityBucket> priority_schedule_;
   std::size_t user_blocking_priority_queue_index_ = 0;
   std::size_t user_visible_priority_queue_index_ = 0;
@@ -572,11 +574,11 @@ SequenceManager::~SequenceManager() {
   Shutdown();
 }
 
-SequenceManager* SequenceManager::Current() {
+SequenceManager *SequenceManager::Current() {
   return Impl::Current();
 }
 
-scoped_refptr<TaskRunner> SequenceManager::CreateTaskRunner(const TaskTraits& traits) {
+scoped_refptr<TaskRunner> SequenceManager::CreateTaskRunner(const TaskTraits &traits) {
   return impl_->CreateTaskRunner(traits);
 }
 
@@ -600,7 +602,7 @@ bool SequenceManager::DoWork() {
   return impl_->DoWork();
 }
 
-bool SequenceManager::DoDelayedWork(NextWorkInfo* next_work_info) {
+bool SequenceManager::DoDelayedWork(NextWorkInfo *next_work_info) {
   return impl_->DoDelayedWork(next_work_info);
 }
 
@@ -616,4 +618,4 @@ bool SequenceManager::IsSingleQueueFastPathEnabledForTesting() {
   return g_single_queue_fast_path_enabled.load(std::memory_order_relaxed);
 }
 
-}  // namespace nei
+} // namespace nei

@@ -48,5 +48,5 @@ TEST(ThreadTest, StopCanBeCalledTwice) {
   EXPECT_FALSE(thread.IsRunning());
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

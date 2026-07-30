@@ -46,7 +46,7 @@ template <typename Signature>
 class OnceCallback;
 
 class NEI_API CancelableOnceClosure final {
- public:
+public:
   // Creates an empty (null) closure. Run() and Cancel() are no-ops.
   CancelableOnceClosure();
 
@@ -55,11 +55,11 @@ class NEI_API CancelableOnceClosure final {
 
   ~CancelableOnceClosure();
 
-  CancelableOnceClosure(const CancelableOnceClosure&) = delete;
-  CancelableOnceClosure& operator=(const CancelableOnceClosure&) = delete;
+  CancelableOnceClosure(const CancelableOnceClosure &) = delete;
+  CancelableOnceClosure &operator=(const CancelableOnceClosure &) = delete;
 
-  CancelableOnceClosure(CancelableOnceClosure&& other) noexcept;
-  CancelableOnceClosure& operator=(CancelableOnceClosure&& other) noexcept;
+  CancelableOnceClosure(CancelableOnceClosure &&other) noexcept;
+  CancelableOnceClosure &operator=(CancelableOnceClosure &&other) noexcept;
 
   // Runs the underlying closure if not yet cancelled and not yet run.
   // The closure is consumed on the first call; subsequent calls are no-ops.
@@ -86,14 +86,14 @@ class NEI_API CancelableOnceClosure final {
   // callback returned by this method (or by Run()).
   OnceCallback<void()> callback();
 
- private:
+private:
   class Impl;
   // Raw pointer to RefCountedThreadSafe Impl. scoped_refptr cannot be used
   // in the header because Impl is forward-declared (incomplete type).
   // Manual AddRef/Release is performed in the .cpp where Impl is fully defined.
-  Impl* impl_ = nullptr;
+  Impl *impl_ = nullptr;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEI_FUNCTIONAL_CANCELABLE_CALLBACK_H
+#endif // NEI_FUNCTIONAL_CANCELABLE_CALLBACK_H

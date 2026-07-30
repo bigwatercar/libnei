@@ -77,9 +77,11 @@ static int _nei_log_file_writev_all_fd(int fd, const char *message, size_t lengt
 
 static wchar_t *_nei_log_utf8_to_utf16(const char *utf8) {
   const int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
-  if (wlen <= 0) return NULL;
+  if (wlen <= 0)
+    return NULL;
   wchar_t *wbuf = (wchar_t *)malloc((size_t)wlen * sizeof(wchar_t));
-  if (wbuf == NULL) return NULL;
+  if (wbuf == NULL)
+    return NULL;
   if (MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wbuf, wlen) != wlen) {
     free(wbuf);
     return NULL;
@@ -89,10 +91,12 @@ static wchar_t *_nei_log_utf8_to_utf16(const char *utf8) {
 
 static int _nei_log_remove_utf8(const char *path_utf8) {
   wchar_t *w = _nei_log_utf8_to_utf16(path_utf8);
-  if (w == NULL) return -1;
+  if (w == NULL)
+    return -1;
   const BOOL ok = DeleteFileW(w);
   /* Also try RemoveDirectoryW in case path points to a directory. */
-  if (!ok) (void)RemoveDirectoryW(w);
+  if (!ok)
+    (void)RemoveDirectoryW(w);
   free(w);
   return ok ? 0 : -1;
 }
@@ -111,7 +115,7 @@ static int _nei_log_rename_utf8(const char *old_utf8, const char *new_utf8) {
   return ok ? 0 : -1;
 }
 #else
-#define _nei_log_remove_utf8(path)  remove(path)
+#define _nei_log_remove_utf8(path) remove(path)
 #define _nei_log_rename_utf8(old, new) rename(old, new)
 #endif
 
@@ -171,10 +175,7 @@ static char *_nei_log_file_sink_dup_filename(const char *filename) {
   return copy;
 }
 
-static int _nei_log_file_sink_build_rotated_path(const char *filename_utf8,
-                                                 uint32_t index,
-                                                 char *out,
-                                                 size_t out_cap) {
+static int _nei_log_file_sink_build_rotated_path(const char *filename_utf8, uint32_t index, char *out, size_t out_cap) {
   int written;
   if (filename_utf8 == NULL || out == NULL || out_cap == 0U) {
     return -1;
@@ -217,8 +218,8 @@ static int _nei_log_file_sink_rotate(nei_log_default_file_sink_ctx_st *ctx) {
   }
 
   for (index = ctx->max_backup_files; index > 1U; --index) {
-    if (_nei_log_file_sink_build_rotated_path(ctx->filename, index - 1U, src_path, path_cap) != 0 ||
-        _nei_log_file_sink_build_rotated_path(ctx->filename, index, dst_path, path_cap) != 0) {
+    if (_nei_log_file_sink_build_rotated_path(ctx->filename, index - 1U, src_path, path_cap) != 0
+        || _nei_log_file_sink_build_rotated_path(ctx->filename, index, dst_path, path_cap) != 0) {
       continue;
     }
     (void)_nei_log_remove_utf8(dst_path);
@@ -260,9 +261,8 @@ static int _nei_log_file_sink_is_immediate_flush(const nei_log_default_file_sink
   return ctx != NULL && (ctx->flush_interval <= 1U) && (ctx->write_batch_buf == NULL || ctx->write_batch_cap == 0U);
 }
 
-static void _nei_log_file_sink_write_line_and_flush(nei_log_default_file_sink_ctx_st *ctx,
-                                                    const char *message,
-                                                    size_t length) {
+static void
+_nei_log_file_sink_write_line_and_flush(nei_log_default_file_sink_ctx_st *ctx, const char *message, size_t length) {
   const size_t line_size = length + 1U;
   if (ctx == NULL || ctx->fp == NULL || message == NULL) {
     return;
@@ -355,8 +355,8 @@ static void _nei_log_file_write_line(FILE *fp, const char *message, size_t lengt
 // Stdout sink callbacks
 // ---------------------------------------------------------------------------
 
-static void _nei_log_stdout_llog(const nei_log_sink_st *sink, nei_log_level_e level,
-                                 const char *message, size_t length) {
+static void
+_nei_log_stdout_llog(const nei_log_sink_st *sink, nei_log_level_e level, const char *message, size_t length) {
   (void)sink;
   (void)level;
   if (message == NULL) {
@@ -366,8 +366,7 @@ static void _nei_log_stdout_llog(const nei_log_sink_st *sink, nei_log_level_e le
   (void)fputc('\n', stdout);
 }
 
-static void _nei_log_stdout_vlog(const nei_log_sink_st *sink, int verbose,
-                                 const char *message, size_t length) {
+static void _nei_log_stdout_vlog(const nei_log_sink_st *sink, int verbose, const char *message, size_t length) {
   (void)sink;
   (void)verbose;
   if (message == NULL) {
@@ -382,7 +381,10 @@ static void _nei_log_stdout_sink_release(struct nei_log_sink_st *sink) {
   free(sink);
 }
 
-void _nei_log_default_file_llog(const nei_log_sink_st *sink, nei_log_level_e level, const char *message, size_t length) {
+void _nei_log_default_file_llog(const nei_log_sink_st *sink,
+                                nei_log_level_e level,
+                                const char *message,
+                                size_t length) {
   nei_log_default_file_sink_ctx_st *ctx = NULL;
   (void)level;
   if (sink == NULL || message == NULL) {
@@ -451,7 +453,8 @@ static void _nei_log_default_file_sink_release(struct nei_log_sink_st *sink) {
   free(sink);
 }
 
-void _nei_log_emit_message(const nei_log_config_st *config, int32_t level, int32_t verbose, const char *message, size_t length) {
+void _nei_log_emit_message(
+    const nei_log_config_st *config, int32_t level, int32_t verbose, const char *message, size_t length) {
   const nei_log_config_st *effective = config;
   size_t i;
   if (config == NULL || message == NULL) {
@@ -527,15 +530,15 @@ void _nei_log_auto_flush_file_sinks(void) {
 
 #pragma region public API
 
-#define _NEI_LOG_DEFAULT_FLUSH_INTERVAL    256U
-#define _NEI_LOG_DEFAULT_FILE_BUFFER_BYTES  (1024U * 1024U)
-#define _NEI_LOG_DEFAULT_WRITE_BATCH_BYTES  (64U * 1024U)
+#define _NEI_LOG_DEFAULT_FLUSH_INTERVAL 256U
+#define _NEI_LOG_DEFAULT_FILE_BUFFER_BYTES (1024U * 1024U)
+#define _NEI_LOG_DEFAULT_WRITE_BATCH_BYTES (64U * 1024U)
 
 nei_log_default_file_sink_options_st nei_log_default_file_sink_options(void) {
   nei_log_default_file_sink_options_st opts;
-  opts.max_file_bytes    = 0U;
-  opts.max_backup_files  = 0U;
-  opts.flush_interval    = _NEI_LOG_DEFAULT_FLUSH_INTERVAL;
+  opts.max_file_bytes = 0U;
+  opts.max_backup_files = 0U;
+  opts.flush_interval = _NEI_LOG_DEFAULT_FLUSH_INTERVAL;
   opts.file_buffer_bytes = _NEI_LOG_DEFAULT_FILE_BUFFER_BYTES;
   opts.write_batch_bytes = _NEI_LOG_DEFAULT_WRITE_BATCH_BYTES;
   return opts;
@@ -557,13 +560,13 @@ nei_log_sink_st *nei_log_create_default_file_sink(const char *filename_utf8,
   }
 
   if (options != NULL) {
-    flush_interval    = options->flush_interval;
+    flush_interval = options->flush_interval;
     file_buffer_bytes = options->file_buffer_bytes;
     write_batch_bytes = options->write_batch_bytes;
-    max_file_bytes    = options->max_file_bytes;
-    max_backup_files  = options->max_backup_files;
+    max_file_bytes = options->max_file_bytes;
+    max_backup_files = options->max_backup_files;
   } else {
-    flush_interval    = _NEI_LOG_DEFAULT_FLUSH_INTERVAL;
+    flush_interval = _NEI_LOG_DEFAULT_FLUSH_INTERVAL;
     file_buffer_bytes = _NEI_LOG_DEFAULT_FILE_BUFFER_BYTES;
     write_batch_bytes = _NEI_LOG_DEFAULT_WRITE_BATCH_BYTES;
   }

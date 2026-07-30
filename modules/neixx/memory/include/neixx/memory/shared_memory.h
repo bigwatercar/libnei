@@ -22,15 +22,15 @@ class UnsafeSharedMemoryRegion;
 // kernel object (Windows section handle / POSIX fd) plus the region size.
 // =============================================================================
 class NEI_API SharedMemoryHandle final {
- public:
+public:
   SharedMemoryHandle();
   SharedMemoryHandle(PlatformHandle handle, std::size_t size);
   ~SharedMemoryHandle();
 
-  SharedMemoryHandle(const SharedMemoryHandle&) = delete;
-  SharedMemoryHandle& operator=(const SharedMemoryHandle&) = delete;
-  SharedMemoryHandle(SharedMemoryHandle&& other) noexcept;
-  SharedMemoryHandle& operator=(SharedMemoryHandle&& other) noexcept;
+  SharedMemoryHandle(const SharedMemoryHandle &) = delete;
+  SharedMemoryHandle &operator=(const SharedMemoryHandle &) = delete;
+  SharedMemoryHandle(SharedMemoryHandle &&other) noexcept;
+  SharedMemoryHandle &operator=(SharedMemoryHandle &&other) noexcept;
 
   bool is_valid() const;
   std::size_t size() const;
@@ -43,10 +43,10 @@ class NEI_API SharedMemoryHandle final {
   int GetFd() const;
 #endif
 #if defined(_WIN32)
-  void* GetHandle() const;
+  void *GetHandle() const;
 #endif
 
- private:
+private:
   class Impl;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
@@ -58,23 +58,23 @@ class NEI_API SharedMemoryHandle final {
 // Mapped via MapViewOfFile(FILE_MAP_READ) / mmap(PROT_READ).
 // =============================================================================
 class NEI_API ReadOnlySharedMemoryMapping final {
- public:
+public:
   ReadOnlySharedMemoryMapping();
   ~ReadOnlySharedMemoryMapping();
 
-  ReadOnlySharedMemoryMapping(const ReadOnlySharedMemoryMapping&) = delete;
-  ReadOnlySharedMemoryMapping& operator=(const ReadOnlySharedMemoryMapping&) = delete;
-  ReadOnlySharedMemoryMapping(ReadOnlySharedMemoryMapping&& other) noexcept;
-  ReadOnlySharedMemoryMapping& operator=(ReadOnlySharedMemoryMapping&& other) noexcept;
+  ReadOnlySharedMemoryMapping(const ReadOnlySharedMemoryMapping &) = delete;
+  ReadOnlySharedMemoryMapping &operator=(const ReadOnlySharedMemoryMapping &) = delete;
+  ReadOnlySharedMemoryMapping(ReadOnlySharedMemoryMapping &&other) noexcept;
+  ReadOnlySharedMemoryMapping &operator=(ReadOnlySharedMemoryMapping &&other) noexcept;
 
   bool is_valid() const;
-  const void* memory() const;
+  const void *memory() const;
   std::size_t size() const;
 
   // Internal factory — do not use in application code.
-  static ReadOnlySharedMemoryMapping CreateForPlatform(void* addr, std::size_t size);
+  static ReadOnlySharedMemoryMapping CreateForPlatform(void *addr, std::size_t size);
 
- private:
+private:
   friend class ReadOnlySharedMemoryRegion;
   class Impl;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
@@ -87,23 +87,23 @@ class NEI_API ReadOnlySharedMemoryMapping final {
 // Mapped via MapViewOfFile(FILE_MAP_WRITE) / mmap(PROT_READ|PROT_WRITE).
 // =============================================================================
 class NEI_API WritableSharedMemoryMapping final {
- public:
+public:
   WritableSharedMemoryMapping();
   ~WritableSharedMemoryMapping();
 
-  WritableSharedMemoryMapping(const WritableSharedMemoryMapping&) = delete;
-  WritableSharedMemoryMapping& operator=(const WritableSharedMemoryMapping&) = delete;
-  WritableSharedMemoryMapping(WritableSharedMemoryMapping&& other) noexcept;
-  WritableSharedMemoryMapping& operator=(WritableSharedMemoryMapping&& other) noexcept;
+  WritableSharedMemoryMapping(const WritableSharedMemoryMapping &) = delete;
+  WritableSharedMemoryMapping &operator=(const WritableSharedMemoryMapping &) = delete;
+  WritableSharedMemoryMapping(WritableSharedMemoryMapping &&other) noexcept;
+  WritableSharedMemoryMapping &operator=(WritableSharedMemoryMapping &&other) noexcept;
 
   bool is_valid() const;
-  void* memory();
+  void *memory();
   std::size_t size() const;
 
   // Internal factory — do not use in application code.
-  static WritableSharedMemoryMapping CreateForPlatform(void* addr, std::size_t size);
+  static WritableSharedMemoryMapping CreateForPlatform(void *addr, std::size_t size);
 
- private:
+private:
   friend class WritableSharedMemoryRegion;
   class Impl;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
@@ -118,14 +118,14 @@ class NEI_API WritableSharedMemoryMapping final {
 // Supports mapping through Map() which returns a ReadOnlySharedMemoryMapping.
 // =============================================================================
 class NEI_API ReadOnlySharedMemoryRegion final {
- public:
+public:
   ReadOnlySharedMemoryRegion();
   ~ReadOnlySharedMemoryRegion();
 
-  ReadOnlySharedMemoryRegion(const ReadOnlySharedMemoryRegion&) = delete;
-  ReadOnlySharedMemoryRegion& operator=(const ReadOnlySharedMemoryRegion&) = delete;
-  ReadOnlySharedMemoryRegion(ReadOnlySharedMemoryRegion&& other) noexcept;
-  ReadOnlySharedMemoryRegion& operator=(ReadOnlySharedMemoryRegion&& other) noexcept;
+  ReadOnlySharedMemoryRegion(const ReadOnlySharedMemoryRegion &) = delete;
+  ReadOnlySharedMemoryRegion &operator=(const ReadOnlySharedMemoryRegion &) = delete;
+  ReadOnlySharedMemoryRegion(ReadOnlySharedMemoryRegion &&other) noexcept;
+  ReadOnlySharedMemoryRegion &operator=(ReadOnlySharedMemoryRegion &&other) noexcept;
 
   bool is_valid() const;
   std::size_t size() const;
@@ -133,7 +133,7 @@ class NEI_API ReadOnlySharedMemoryRegion final {
   ReadOnlySharedMemoryMapping Map();
   SharedMemoryHandle TakeHandle() &&;
 
- private:
+private:
   friend class WritableSharedMemoryRegion;
   friend class UnsafeSharedMemoryRegion;
   // Constructed only via WritableSharedMemoryRegion::ConvertToReadOnly()
@@ -153,16 +153,16 @@ class NEI_API ReadOnlySharedMemoryRegion final {
 // returns a ReadOnlySharedMemoryRegion with the write privilege stripped.
 // =============================================================================
 class NEI_API WritableSharedMemoryRegion final {
- public:
+public:
   static WritableSharedMemoryRegion Create(std::size_t size);
 
   WritableSharedMemoryRegion();
   ~WritableSharedMemoryRegion();
 
-  WritableSharedMemoryRegion(const WritableSharedMemoryRegion&) = delete;
-  WritableSharedMemoryRegion& operator=(const WritableSharedMemoryRegion&) = delete;
-  WritableSharedMemoryRegion(WritableSharedMemoryRegion&& other) noexcept;
-  WritableSharedMemoryRegion& operator=(WritableSharedMemoryRegion&& other) noexcept;
+  WritableSharedMemoryRegion(const WritableSharedMemoryRegion &) = delete;
+  WritableSharedMemoryRegion &operator=(const WritableSharedMemoryRegion &) = delete;
+  WritableSharedMemoryRegion(WritableSharedMemoryRegion &&other) noexcept;
+  WritableSharedMemoryRegion &operator=(WritableSharedMemoryRegion &&other) noexcept;
 
   bool is_valid() const;
   std::size_t size() const;
@@ -176,7 +176,7 @@ class NEI_API WritableSharedMemoryRegion final {
   // Transfers handle ownership for cross-process transfer.
   SharedMemoryHandle TakeHandle() &&;
 
- private:
+private:
   friend class UnsafeSharedMemoryRegion;
   explicit WritableSharedMemoryRegion(SharedMemoryHandle handle);
   class Impl;
@@ -206,7 +206,7 @@ class NEI_API WritableSharedMemoryRegion final {
 // symmetric bidirectional shared state.
 // =============================================================================
 class NEI_API UnsafeSharedMemoryRegion final {
- public:
+public:
   // Creates a new region of |size| bytes.  Equivalent to
   // WritableSharedMemoryRegion::Create() but the region is not typed.
   static UnsafeSharedMemoryRegion Create(std::size_t size);
@@ -217,10 +217,10 @@ class NEI_API UnsafeSharedMemoryRegion final {
   UnsafeSharedMemoryRegion();
   ~UnsafeSharedMemoryRegion();
 
-  UnsafeSharedMemoryRegion(const UnsafeSharedMemoryRegion&) = delete;
-  UnsafeSharedMemoryRegion& operator=(const UnsafeSharedMemoryRegion&) = delete;
-  UnsafeSharedMemoryRegion(UnsafeSharedMemoryRegion&& other) noexcept;
-  UnsafeSharedMemoryRegion& operator=(UnsafeSharedMemoryRegion&& other) noexcept;
+  UnsafeSharedMemoryRegion(const UnsafeSharedMemoryRegion &) = delete;
+  UnsafeSharedMemoryRegion &operator=(const UnsafeSharedMemoryRegion &) = delete;
+  UnsafeSharedMemoryRegion(UnsafeSharedMemoryRegion &&other) noexcept;
+  UnsafeSharedMemoryRegion &operator=(UnsafeSharedMemoryRegion &&other) noexcept;
 
   bool is_valid() const;
   std::size_t size() const;
@@ -238,7 +238,7 @@ class NEI_API UnsafeSharedMemoryRegion final {
   // Transfers handle ownership for cross-process transfer.
   SharedMemoryHandle TakeHandle() &&;
 
- private:
+private:
   explicit UnsafeSharedMemoryRegion(SharedMemoryHandle handle);
   class Impl;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
@@ -246,6 +246,6 @@ class NEI_API UnsafeSharedMemoryRegion final {
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_MEMORY_SHARED_MEMORY_H_
+#endif // NEIXX_MEMORY_SHARED_MEMORY_H_

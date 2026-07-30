@@ -27,9 +27,9 @@ TEST(IOBufferTest, WrappedIOBufferUsesExternalStorageWithoutCopy) {
   char external[16] = {};
   external[3] = 'x';
 
-  scoped_refptr<WrappedIOBuffer> wrapped(new WrappedIOBuffer(reinterpret_cast<unsigned char*>(external)));
+  scoped_refptr<WrappedIOBuffer> wrapped(new WrappedIOBuffer(reinterpret_cast<unsigned char *>(external)));
   ASSERT_TRUE(wrapped);
-    ASSERT_EQ(wrapped->data(), reinterpret_cast<unsigned char*>(external));
+  ASSERT_EQ(wrapped->data(), reinterpret_cast<unsigned char *>(external));
   EXPECT_EQ(wrapped->data()[3], static_cast<unsigned char>('x'));
 
   wrapped->data()[4] = 'y';
@@ -43,8 +43,7 @@ TEST(IOBufferTest, DrainableIOBufferTracksOffsetAndRemainingBytes) {
     base->data()[i] = static_cast<unsigned char>(i);
   }
 
-  scoped_refptr<DrainableIOBuffer> drainable(
-      new DrainableIOBuffer(base, 16));
+  scoped_refptr<DrainableIOBuffer> drainable(new DrainableIOBuffer(base, 16));
   ASSERT_TRUE(drainable);
 
   EXPECT_EQ(drainable->BytesConsumed(), 0u);
@@ -62,8 +61,7 @@ TEST(IOBufferTest, DrainableIOBufferConsumeAllMovesToEnd) {
   scoped_refptr<IOBufferWithSize> base(new IOBufferWithSize(8));
   ASSERT_TRUE(base);
 
-  scoped_refptr<DrainableIOBuffer> drainable(
-      new DrainableIOBuffer(base, 8));
+  scoped_refptr<DrainableIOBuffer> drainable(new DrainableIOBuffer(base, 8));
   ASSERT_TRUE(drainable);
 
   drainable->DidConsume(8);
@@ -73,7 +71,7 @@ TEST(IOBufferTest, DrainableIOBufferConsumeAllMovesToEnd) {
 }
 
 TEST(IOBufferTest, IOBufferPoolNormalizesHotBucketSizes) {
-  IOBufferPool& pool = IOBufferPool::GetInstance();
+  IOBufferPool &pool = IOBufferPool::GetInstance();
   pool.PurgeMemory();
 
   scoped_refptr<IOBufferWithSize> b1 = pool.AcquireBuffer(1);
@@ -96,11 +94,11 @@ TEST(IOBufferTest, IOBufferPoolNormalizesHotBucketSizes) {
 }
 
 TEST(IOBufferTest, IOBufferPoolReusesReleased4KBuffer) {
-  IOBufferPool& pool = IOBufferPool::GetInstance();
+  IOBufferPool &pool = IOBufferPool::GetInstance();
   pool.PurgeMemory();
   pool.SetBucketLimitForTesting(4096u, 8u);
 
-  unsigned char* first_ptr = nullptr;
+  unsigned char *first_ptr = nullptr;
   {
     scoped_refptr<IOBufferWithSize> first = pool.AcquireBuffer(1024);
     ASSERT_TRUE(first);
@@ -120,13 +118,12 @@ TEST(IOBufferTest, IOBufferPoolReusesReleased4KBuffer) {
 TEST(IOBufferTest, DrainableIOBufferOverConsumeTriggersDcheck) {
   scoped_refptr<IOBufferWithSize> base(new IOBufferWithSize(8));
   ASSERT_TRUE(base);
-  scoped_refptr<DrainableIOBuffer> drainable(
-      new DrainableIOBuffer(scoped_refptr<IOBuffer>(base.get()), 8));
+  scoped_refptr<DrainableIOBuffer> drainable(new DrainableIOBuffer(scoped_refptr<IOBuffer>(base.get()), 8));
   ASSERT_TRUE(drainable);
 
   EXPECT_DEATH({ drainable->DidConsume(9); }, "CHECK_LE");
 }
 #endif
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

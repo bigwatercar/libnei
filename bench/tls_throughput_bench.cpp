@@ -78,17 +78,21 @@ TestCert GenerateSelfSignedCert() {
 
   mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &entropy, nullptr, 0);
 
-  int ret = mbedtls_pk_setup(&key,
-      mbedtls_pk_info_from_type(MBEDTLS_PK_RSA));
-  if (ret != 0) { std::cerr << "pk_setup failed" << std::endl; return {}; }
-  ret = mbedtls_rsa_gen_key(mbedtls_pk_rsa(key),
-      mbedtls_ctr_drbg_random, &drbg, 2048, 65537);
-  if (ret != 0) { std::cerr << "rsa_gen_key failed" << std::endl; return {}; }
+  int ret = mbedtls_pk_setup(&key, mbedtls_pk_info_from_type(MBEDTLS_PK_RSA));
+  if (ret != 0) {
+    std::cerr << "pk_setup failed" << std::endl;
+    return {};
+  }
+  ret = mbedtls_rsa_gen_key(mbedtls_pk_rsa(key), mbedtls_ctr_drbg_random, &drbg, 2048, 65537);
+  if (ret != 0) {
+    std::cerr << "rsa_gen_key failed" << std::endl;
+    return {};
+  }
 
   mbedtls_x509write_crt_set_version(&crt, MBEDTLS_X509_CRT_VERSION_3);
   mbedtls_x509write_crt_set_md_alg(&crt, MBEDTLS_MD_SHA256);
   mbedtls_mpi_lset(&serial, 1);
-  const char* subj = "CN=tls-bench,O=NEI,C=CN";
+  const char *subj = "CN=tls-bench,O=NEI,C=CN";
   mbedtls_x509write_crt_set_subject_name(&crt, subj);
   mbedtls_x509write_crt_set_issuer_name(&crt, subj);
   mbedtls_x509write_crt_set_validity(&crt, "20250101000000", "20350101000000");
@@ -97,26 +101,33 @@ TestCert GenerateSelfSignedCert() {
   mbedtls_x509write_crt_set_basic_constraints(&crt, 0, -1);
 
   unsigned char der[4096];
-  ret = mbedtls_x509write_crt_der(&crt, der, sizeof(der),
-      mbedtls_ctr_drbg_random, &drbg);
+  ret = mbedtls_x509write_crt_der(&crt, der, sizeof(der), mbedtls_ctr_drbg_random, &drbg);
   std::string cert_pem, key_pem;
   if (ret > 0) {
-    unsigned char pem[8192]; size_t olen = 0;
+    unsigned char pem[8192];
+    size_t olen = 0;
     mbedtls_pem_write_buffer("-----BEGIN CERTIFICATE-----\n",
-        "-----END CERTIFICATE-----\n",
-        der + sizeof(der) - ret, static_cast<size_t>(ret),
-        pem, sizeof(pem), &olen);
-    cert_pem.assign(reinterpret_cast<char*>(pem), olen);
+                             "-----END CERTIFICATE-----\n",
+                             der + sizeof(der) - ret,
+                             static_cast<size_t>(ret),
+                             pem,
+                             sizeof(pem),
+                             &olen);
+    cert_pem.assign(reinterpret_cast<char *>(pem), olen);
   }
   unsigned char kder[4096];
   int klen = mbedtls_pk_write_key_der(&key, kder, sizeof(kder));
   if (klen > 0) {
-    unsigned char pem[8192]; size_t olen = 0;
+    unsigned char pem[8192];
+    size_t olen = 0;
     mbedtls_pem_write_buffer("-----BEGIN RSA PRIVATE KEY-----\n",
-        "-----END RSA PRIVATE KEY-----\n",
-        kder + sizeof(kder) - klen, static_cast<size_t>(klen),
-        pem, sizeof(pem), &olen);
-    key_pem.assign(reinterpret_cast<char*>(pem), olen);
+                             "-----END RSA PRIVATE KEY-----\n",
+                             kder + sizeof(kder) - klen,
+                             static_cast<size_t>(klen),
+                             pem,
+                             sizeof(pem),
+                             &olen);
+    key_pem.assign(reinterpret_cast<char *>(pem), olen);
   }
 
   mbedtls_pk_free(&key);
@@ -131,17 +142,24 @@ TestCert GenerateSelfSignedCert() {
 // IO thread helper
 // ---------------------------------------------------------------------------
 class IoThread {
- public:
-  explicit IoThread(const std::string& name) {
+public:
+  explicit IoThread(const std::string &name) {
     nei::Thread::Options opts;
     opts.message_pump_type = nei::MessagePumpType::IO;
     thread_ = std::make_unique<nei::Thread>(name);
     thread_->StartWithOptions(opts);
     runner_ = thread_->GetTaskRunner();
   }
-  ~IoThread() { thread_->Stop(); }
-  nei::scoped_refptr<nei::TaskRunner> runner() const { return runner_; }
- private:
+
+  ~IoThread() {
+    thread_->Stop();
+  }
+
+  nei::scoped_refptr<nei::TaskRunner> runner() const {
+    return runner_;
+  }
+
+private:
   std::unique_ptr<nei::Thread> thread_;
   nei::scoped_refptr<nei::TaskRunner> runner_;
 };
@@ -150,26 +168,28 @@ static uint16_t FindFreePort() {
 #if defined(_WIN32)
   nei::net::EnsureWsa();
   SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (s == INVALID_SOCKET) return 0;
+  if (s == INVALID_SOCKET)
+    return 0;
   struct sockaddr_in addr = {};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = 0;
-  ::bind(s, (struct sockaddr*)&addr, sizeof(addr));
+  ::bind(s, (struct sockaddr *)&addr, sizeof(addr));
   int len = sizeof(addr);
-  ::getsockname(s, (struct sockaddr*)&addr, &len);
+  ::getsockname(s, (struct sockaddr *)&addr, &len);
   ::closesocket(s);
   return ntohs(addr.sin_port);
 #else
   int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) return 0;
+  if (fd < 0)
+    return 0;
   struct sockaddr_in addr = {};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = 0;
-  ::bind(fd, (struct sockaddr*)&addr, sizeof(addr));
+  ::bind(fd, (struct sockaddr *)&addr, sizeof(addr));
   socklen_t len = sizeof(addr);
-  ::getsockname(fd, (struct sockaddr*)&addr, &len);
+  ::getsockname(fd, (struct sockaddr *)&addr, &len);
   ::close(fd);
   return ntohs(addr.sin_port);
 #endif
@@ -180,7 +200,10 @@ static uint16_t FindFreePort() {
 // ---------------------------------------------------------------------------
 void RunBenchmark(size_t total_bytes, size_t buffer_size) {
   const uint16_t port = FindFreePort();
-  if (port == 0) { std::cerr << "ERROR: no free port" << std::endl; return; }
+  if (port == 0) {
+    std::cerr << "ERROR: no free port" << std::endl;
+    return;
+  }
 
   // Single IO thread — avoids cross-thread race between client send
   // and server receive that causes truncated reads on WSL.
@@ -213,26 +236,25 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
   auto recv_hash = std::make_shared<uint64_t>(0xcbf29ce484222325ULL);
   auto recv_bytes = std::make_shared<std::atomic<size_t>>(0);
 
-  auto bench_done = std::make_shared<nei::WaitableEvent>(
-      nei::WaitableEvent::ResetPolicy::kAutomatic, false);
-  auto server_ready = std::make_shared<nei::WaitableEvent>(
-      nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto bench_done = std::make_shared<nei::WaitableEvent>(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto server_ready = std::make_shared<nei::WaitableEvent>(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
 
   auto server = std::make_shared<nei::net::TLSServerSocket>(&srv_ctx);
-  auto client = std::make_shared<nei::net::TLSClientSocket>(
-      std::make_unique<nei::net::TCPClientSocket>(), &cli_ctx);
+  auto client = std::make_shared<nei::net::TLSClientSocket>(std::make_unique<nei::net::TCPClientSocket>(), &cli_ctx);
 
   auto t_start = Clock::now();
 
   auto runner = io.runner();
   runner->PostTask(FROM_HERE, [=]() mutable {
     bool ok = server->Listen(
-        nei::net::IPEndPoint(
-            nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
+        nei::net::IPEndPoint(nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
+        1,
         [=](bool success, std::unique_ptr<nei::net::TLSClientSocket> tls) {
-          if (!success) { bench_done->Signal(); return; }
-          auto sock = std::make_shared<nei::net::TLSClientSocket>(
-              std::move(*tls));
+          if (!success) {
+            bench_done->Signal();
+            return;
+          }
+          auto sock = std::make_shared<nei::net::TLSClientSocket>(std::move(*tls));
           auto do_read = std::make_shared<std::function<void()>>();
           // Use weak_ptr in the outer lambda to break the
           // shared_ptr -> function -> lambda -> shared_ptr cycle.
@@ -241,32 +263,44 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
           std::weak_ptr<std::function<void()>> do_read_weak = do_read;
           *do_read = [=]() {
             auto chunk = nei::MakeRefCounted<nei::IOBufferWithSize>(buffer_size);
-            sock->ReadAsync(chunk, buffer_size,
-                [=, dr = do_read_weak.lock()](bool s, size_t n) {
-                  if (!dr) return;
-                  if (!s) { bench_done->Signal(); return; }
-                  if (n == 0) { sock->Close(); bench_done->Signal(); return; }
-                  recv_bytes->fetch_add(n);
-                  uint64_t h = *recv_hash;
-                  for (size_t i = 0; i < n; ++i) {
-                    h ^= static_cast<unsigned char>(chunk->data()[i]);
-                    h *= 0x100000001b3ULL;
-                  }
-                  *recv_hash = h;
-                  (*dr)();
-                });
+            sock->ReadAsync(chunk, buffer_size, [=, dr = do_read_weak.lock()](bool s, size_t n) {
+              if (!dr)
+                return;
+              if (!s) {
+                bench_done->Signal();
+                return;
+              }
+              if (n == 0) {
+                sock->Close();
+                bench_done->Signal();
+                return;
+              }
+              recv_bytes->fetch_add(n);
+              uint64_t h = *recv_hash;
+              for (size_t i = 0; i < n; ++i) {
+                h ^= static_cast<unsigned char>(chunk->data()[i]);
+                h *= 0x100000001b3ULL;
+              }
+              *recv_hash = h;
+              (*dr)();
+            });
           };
           (*do_read)();
         },
         runner);
-    if (!ok) { bench_done->Signal(); return; }
+    if (!ok) {
+      bench_done->Signal();
+      return;
+    }
     server_ready->Signal();
 
     client->Connect(
-        nei::net::IPEndPoint(
-            nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
+        nei::net::IPEndPoint(nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
         [=](bool ok) {
-          if (!ok) { bench_done->Signal(); return; }
+          if (!ok) {
+            bench_done->Signal();
+            return;
+          }
           auto offset = std::make_shared<size_t>(0);
           auto do_write = std::make_shared<std::function<void()>>();
           // Same weak_ptr pattern as do_read above.
@@ -277,17 +311,19 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
               client->Close();
               return;
             }
-            auto chunk = nei::MakeRefCounted<nei::IOBufferWithSize>(
-                std::min(remain, buffer_size));
+            auto chunk = nei::MakeRefCounted<nei::IOBufferWithSize>(std::min(remain, buffer_size));
             for (size_t i = 0; i < chunk->size(); ++i)
               chunk->data()[i] = static_cast<unsigned char>(((*offset + i) * 37 + 17) & 0xFF);
-            client->WriteAsync(chunk, chunk->size(),
-                [=, dw = do_write_weak.lock()](bool s, size_t n) {
-                  if (!dw) return;
-                  if (!s) { bench_done->Signal(); return; }
-                  *offset += n;
-                  (*dw)();
-                });
+            client->WriteAsync(chunk, chunk->size(), [=, dw = do_write_weak.lock()](bool s, size_t n) {
+              if (!dw)
+                return;
+              if (!s) {
+                bench_done->Signal();
+                return;
+              }
+              *offset += n;
+              (*dw)();
+            });
           };
           (*do_write)();
         },
@@ -307,32 +343,31 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
   std::cout << "\n=== TLS Throughput Benchmark ===\n"
             << "  Data       : " << (total_bytes >> 20) << " MB\n"
             << "  Buffer     : " << (buffer_size >> 10) << " KB\n"
-            << "  Elapsed    : " << std::fixed << std::setprecision(3)
-            << elapsed << " s\n"
-            << "  Throughput : " << std::fixed << std::setprecision(1)
-            << rate << " MB/s\n";
+            << "  Elapsed    : " << std::fixed << std::setprecision(3) << elapsed << " s\n"
+            << "  Throughput : " << std::fixed << std::setprecision(1) << rate << " MB/s\n";
 
   bool ok = (*recv_hash == *expected_hash) && (received == total_bytes);
   if (!ok) {
     std::cerr << "ERROR: integrity check FAILED"
-              << "  sent=" << total_bytes << "  recv=" << received
-              << "  expected_hash=0x" << std::hex << *expected_hash
+              << "  sent=" << total_bytes << "  recv=" << received << "  expected_hash=0x" << std::hex << *expected_hash
               << "  actual_hash=0x" << *recv_hash << std::dec << std::endl;
   } else {
     std::cout << "  Integrity   : OK (FNV-1a hash match)" << std::endl;
   }
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   nei::AtExitManager at_exit;
 
   size_t total_mb = 10;
   size_t buffer_kb = 64;
 
-  if (argc > 1) total_mb = static_cast<size_t>(std::atoll(argv[1]));
-  if (argc > 2) buffer_kb = static_cast<size_t>(std::atoll(argv[2]));
+  if (argc > 1)
+    total_mb = static_cast<size_t>(std::atoll(argv[1]));
+  if (argc > 2)
+    buffer_kb = static_cast<size_t>(std::atoll(argv[2]));
 
   if (total_mb == 0 || total_mb > 8192) {
     std::cerr << "Usage: " << argv[0] << " [total_MB=10] [buffer_KB=64]\n"

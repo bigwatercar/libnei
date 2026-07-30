@@ -20,14 +20,13 @@ namespace nei {
 // =============================================================================
 namespace {
 
-using PathServiceImplSingleton =
-    Singleton<PathService::Impl, LeakySingletonTraits<PathService::Impl>>;
+using PathServiceImplSingleton = Singleton<PathService::Impl, LeakySingletonTraits<PathService::Impl>>;
 
 PathService::Impl &GetImpl() {
   return *PathServiceImplSingleton::GetInstance();
 }
 
-}  // namespace
+} // namespace
 
 // =============================================================================
 // PathService  --  lifecycle
@@ -41,8 +40,7 @@ PathService::~PathService() = default;
 // PathService  --  static interface (forwards to singleton Impl)
 // =============================================================================
 
-void PathService::RegisterProvider(PathProvider provider, int key_start,
-                                   int key_end) {
+void PathService::RegisterProvider(PathProvider provider, int key_start, int key_end) {
   GetImpl().RegisterProvider(provider, key_start, key_end);
 }
 
@@ -72,8 +70,7 @@ PathService::Impl::~Impl() = default;
 // PathService::Impl  --  RegisterProvider
 // =============================================================================
 
-void PathService::Impl::RegisterProvider(PathProvider provider, int key_start,
-                                         int key_end) {
+void PathService::Impl::RegisterProvider(PathProvider provider, int key_start, int key_end) {
   DCHECK(provider != nullptr);
   DCHECK(key_start <= key_end);
 
@@ -81,8 +78,7 @@ void PathService::Impl::RegisterProvider(PathProvider provider, int key_start,
 
   /* Insert at the head so that the most recently registered provider is
    * consulted first (LIFO priority). */
-  providers_.insert(providers_.begin(),
-                    ProviderInfo{provider, key_start, key_end});
+  providers_.insert(providers_.begin(), ProviderInfo{provider, key_start, key_end});
 }
 
 // =============================================================================
@@ -106,7 +102,7 @@ std::optional<std::filesystem::path> PathService::Impl::Get(int key) {
 
     std::filesystem::path result;
     if (info.provider(key, &result)) {
-      cache_[key] = result;   // cache for subsequent calls
+      cache_[key] = result; // cache for subsequent calls
       return result;
     }
   }
@@ -124,4 +120,4 @@ void PathService::Impl::Override(int key, const std::filesystem::path &path) {
   cache_[key] = path;
 }
 
-}  // namespace nei
+} // namespace nei

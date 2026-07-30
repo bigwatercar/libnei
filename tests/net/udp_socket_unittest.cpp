@@ -30,7 +30,7 @@ namespace {
 // UdpSocketTest — IO thread + main-thread RunLoop support
 // =============================================================================
 class UdpSocketTest : public testing::Test {
- protected:
+protected:
   void SetUp() override {
     // Main-thread SequenceManager so RunLoop::Run() works on the test thread.
     main_mgr_ = std::make_unique<SequenceManager>();
@@ -48,8 +48,7 @@ class UdpSocketTest : public testing::Test {
   }
 
   // Bind a socket to 127.0.0.1:0; return assigned endpoint.  IO-thread only.
-  static IPEndPoint BindToLoopback(UDPSocket* sock,
-                                   scoped_refptr<TaskRunner> runner) {
+  static IPEndPoint BindToLoopback(UDPSocket *sock, scoped_refptr<TaskRunner> runner) {
     IPEndPoint local(IPAddress::FromIPv4(127, 0, 0, 1), 0);
     EXPECT_TRUE(sock->Bind(local, std::move(runner)));
     IPEndPoint bound;
@@ -67,10 +66,10 @@ class UdpSocketTest : public testing::Test {
 // =============================================================================
 TEST_F(UdpSocketTest, ZeroByteDatagram) {
   std::atomic<bool> send_ok{false};
-  std::atomic<int>  send_bytes{-1};
+  std::atomic<int> send_bytes{-1};
   std::atomic<bool> recv_ok{false};
-  std::atomic<int>  recv_bytes{-1};
-  std::atomic<int>  completions{0};
+  std::atomic<int> recv_bytes{-1};
+  std::atomic<int> completions{0};
 
   RunLoop loop;
   auto quit_ptr = std::make_shared<OnceClosure>(loop.QuitClosure());
@@ -84,25 +83,23 @@ TEST_F(UdpSocketTest, ZeroByteDatagram) {
 
     // RecvFrom first so it pends.
     auto recv_buf = MakeRefCounted<IOBufferWithSize>(2048);
-    sock->RecvFrom(recv_buf, 2048,
-                   [&, quit_ptr, sock](bool ok, int n, const IPEndPoint& /*peer*/) {
-                     EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
-                     recv_ok.store(ok);
-                     recv_bytes.store(n);
-                     if (completions.fetch_add(1) + 1 == 2)
-                       std::move(*quit_ptr).Run();
-                   });
+    sock->RecvFrom(recv_buf, 2048, [&, quit_ptr, sock](bool ok, int n, const IPEndPoint & /*peer*/) {
+      EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
+      recv_ok.store(ok);
+      recv_bytes.store(n);
+      if (completions.fetch_add(1) + 1 == 2)
+        std::move(*quit_ptr).Run();
+    });
 
     // Send a zero-length datagram to ourselves.
     auto send_buf = MakeRefCounted<IOBufferWithSize>(0);
-    sock->SendTo(send_buf, 0, bound,
-                 [&, quit_ptr, sock](bool ok, int n) {
-                   EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
-                   send_ok.store(ok);
-                   send_bytes.store(n);
-                   if (completions.fetch_add(1) + 1 == 2)
-                     std::move(*quit_ptr).Run();
-                 });
+    sock->SendTo(send_buf, 0, bound, [&, quit_ptr, sock](bool ok, int n) {
+      EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
+      send_ok.store(ok);
+      send_bytes.store(n);
+      if (completions.fetch_add(1) + 1 == 2)
+        std::move(*quit_ptr).Run();
+    });
   });
 
   loop.Run();
@@ -157,14 +154,13 @@ TEST_F(UdpSocketTest, OrphanedWhileRecvPending) {
     EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
 
     auto sock = std::make_shared<UDPSocket>();
-    BindToLoopback(sock.get(), io_runner_);  // bind side-effect only
+    BindToLoopback(sock.get(), io_runner_); // bind side-effect only
 
     // Issue RecvFrom — it will pend waiting for data.
     auto recv_buf = MakeRefCounted<IOBufferWithSize>(2048);
-    sock->RecvFrom(recv_buf, 2048,
-                   [](bool /*ok*/, int /*n*/, const IPEndPoint& /*peer*/) {
-                     // May fire on cancel; the point is we don't crash.
-                   });
+    sock->RecvFrom(recv_buf, 2048, [](bool /*ok*/, int /*n*/, const IPEndPoint & /*peer*/) {
+      // May fire on cancel; the point is we don't crash.
+    });
 
     // Destroy the socket in a subsequent task while I/O is in-flight.
     io_runner_->PostTask(FROM_HERE, [sock, quit_ptr]() {
@@ -189,19 +185,16 @@ TEST_F(UdpSocketTest, ReentrantCloseInCallback) {
     EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
 
     auto sock = std::make_shared<UDPSocket>();
-    BindToLoopback(sock.get(), io_runner_);  // bind side-effect only
+    BindToLoopback(sock.get(), io_runner_); // bind side-effect only
 
     // Issue RecvFrom with a callback that re-enters Close().
     auto recv_buf = MakeRefCounted<IOBufferWithSize>(2048);
-    sock->RecvFrom(
-        recv_buf, 2048,
-        [sock, this, quit_ptr](bool /*ok*/, int /*n*/,
-                                const IPEndPoint& /*peer*/) {
-          EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
-          // Re-enter Close from inside the callback — must not deadlock.
-          sock->Close();
-          std::move(*quit_ptr).Run();
-        });
+    sock->RecvFrom(recv_buf, 2048, [sock, this, quit_ptr](bool /*ok*/, int /*n*/, const IPEndPoint & /*peer*/) {
+      EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
+      // Re-enter Close from inside the callback — must not deadlock.
+      sock->Close();
+      std::move(*quit_ptr).Run();
+    });
 
     // Close from a separate task to trigger the failure callback path.
     io_runner_->PostTask(FROM_HERE, [sock]() { sock->Close(); });
@@ -226,8 +219,8 @@ TEST_F(UdpSocketTest, ReentrantCloseInCallback) {
 //
 TEST_F(UdpSocketTest, HighConcurrencyDrain) {
   const int kDatagramCount = 500;
-  const int kPayloadSize   = 64;
-  const int kTimeoutMs     = 5000;  // Safety timeout — prevents hang on loss
+  const int kPayloadSize = 64;
+  const int kTimeoutMs = 5000; // Safety timeout — prevents hang on loss
 
   RunLoop loop;
   auto quit = loop.QuitClosure();
@@ -240,11 +233,10 @@ TEST_F(UdpSocketTest, HighConcurrencyDrain) {
     std::atomic<bool> done{false};
     std::function<void()> start_recv;
   };
+
   auto state = std::make_shared<DrainState>();
 
-  io_runner_->PostTask(FROM_HERE,
-                       [this, quit_ptr, state, kDatagramCount,
-                        kPayloadSize, kTimeoutMs]() mutable {
+  io_runner_->PostTask(FROM_HERE, [this, quit_ptr, state, kDatagramCount, kPayloadSize, kTimeoutMs]() mutable {
     EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
 
     auto sock = std::make_shared<UDPSocket>();
@@ -253,27 +245,24 @@ TEST_F(UdpSocketTest, HighConcurrencyDrain) {
     // Safety timeout: quit the loop after kTimeoutMs regardless of
     // delivery progress.  Prevents the test from hanging forever when
     // the kernel silently drops UDP datagrams under congestion.
-    io_runner_->PostDelayedTask(
-        FROM_HERE,
-        BindOnce(
-            [quit_ptr, state]() {
-              bool expected = false;
-              if (state->done.compare_exchange_strong(expected, true)) {
-                std::move(*quit_ptr).Run();
-              }
-            }),
-        TimeDelta::FromMilliseconds(kTimeoutMs));
+    io_runner_->PostDelayedTask(FROM_HERE,
+                                BindOnce([quit_ptr, state]() {
+                                  bool expected = false;
+                                  if (state->done.compare_exchange_strong(expected, true)) {
+                                    std::move(*quit_ptr).Run();
+                                  }
+                                }),
+                                TimeDelta::FromMilliseconds(kTimeoutMs));
 
     auto recv_buf = MakeRefCounted<IOBufferWithSize>(2048);
 
-    state->start_recv = [&, quit_ptr, state, sock, recv_buf,
-                         kDatagramCount, kPayloadSize]() {
+    state->start_recv = [&, quit_ptr, state, sock, recv_buf, kDatagramCount, kPayloadSize]() {
       if (state->done.load(std::memory_order_acquire))
         return;
       sock->RecvFrom(
-          recv_buf, 2048,
-          [this, quit_ptr, state, sock, kDatagramCount, kPayloadSize](
-              bool ok, int n, const IPEndPoint& /*peer*/) {
+          recv_buf,
+          2048,
+          [this, quit_ptr, state, sock, kDatagramCount, kPayloadSize](bool ok, int n, const IPEndPoint & /*peer*/) {
             EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
             if (state->done.load(std::memory_order_acquire))
               return;
@@ -300,14 +289,13 @@ TEST_F(UdpSocketTest, HighConcurrencyDrain) {
     for (int i = 0; i < kDatagramCount; ++i) {
       auto send_buf = MakeRefCounted<IOBufferWithSize>(kPayloadSize);
       std::memset(send_buf->data(), static_cast<unsigned char>(i & 0xFF), kPayloadSize);
-      sock->SendTo(send_buf, kPayloadSize, bound,
-                   [state](bool ok, int /*n*/) {
-                     state->sent.fetch_add(1, std::memory_order_relaxed);
-                     if (!ok)
-                       state->send_failures.fetch_add(1, std::memory_order_relaxed);
-                     // NOTE: ok may be false under congestion.
-                     // This is valid UDP behavior — do not EXPECT_TRUE here.
-                   });
+      sock->SendTo(send_buf, kPayloadSize, bound, [state](bool ok, int /*n*/) {
+        state->sent.fetch_add(1, std::memory_order_relaxed);
+        if (!ok)
+          state->send_failures.fetch_add(1, std::memory_order_relaxed);
+        // NOTE: ok may be false under congestion.
+        // This is valid UDP behavior — do not EXPECT_TRUE here.
+      });
     }
   });
 
@@ -321,12 +309,8 @@ TEST_F(UdpSocketTest, HighConcurrencyDrain) {
   EXPECT_GT(recv, 0) << "No datagrams received — basic I/O path is broken";
 
   // Log delivery statistics for manual inspection.
-  std::cout << "[HighConcurrencyDrain] sent=" << sent
-            << " failures=" << failures
-            << " received=" << recv
-            << " delivery_ratio="
-            << (sent > 0 ? (100.0 * recv / sent) : 0.0) << "%"
-            << std::endl;
+  std::cout << "[HighConcurrencyDrain] sent=" << sent << " failures=" << failures << " received=" << recv
+            << " delivery_ratio=" << (sent > 0 ? (100.0 * recv / sent) : 0.0) << "%" << std::endl;
 
   SUCCEED();
 }
@@ -337,8 +321,8 @@ TEST_F(UdpSocketTest, HighConcurrencyDrain) {
 TEST_F(UdpSocketTest, IPv6Loopback) {
   std::atomic<bool> send_ok{false};
   std::atomic<bool> recv_ok{false};
-  std::atomic<int>  recv_bytes{-1};
-  std::atomic<int>  completions{0};
+  std::atomic<int> recv_bytes{-1};
+  std::atomic<int> completions{0};
 
   RunLoop loop;
   auto quit_ptr = std::make_shared<OnceClosure>(loop.QuitClosure());
@@ -362,28 +346,26 @@ TEST_F(UdpSocketTest, IPv6Loopback) {
 
     // RecvFrom first.
     auto recv_buf = MakeRefCounted<IOBufferWithSize>(2048);
-    sock->RecvFrom(recv_buf, 2048,
-                   [&, quit_ptr, sock](bool ok, int n, const IPEndPoint& peer) {
-                     EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
-                     recv_ok.store(ok);
-                     recv_bytes.store(n);
-                     if (ok) {
-                       EXPECT_TRUE(peer.address().IsIPv6());
-                     }
-                     if (completions.fetch_add(1) + 1 == 2)
-                       std::move(*quit_ptr).Run();
-                   });
+    sock->RecvFrom(recv_buf, 2048, [&, quit_ptr, sock](bool ok, int n, const IPEndPoint &peer) {
+      EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
+      recv_ok.store(ok);
+      recv_bytes.store(n);
+      if (ok) {
+        EXPECT_TRUE(peer.address().IsIPv6());
+      }
+      if (completions.fetch_add(1) + 1 == 2)
+        std::move(*quit_ptr).Run();
+    });
 
     // Send a datagram to ourselves via IPv6 loopback.
     auto send_buf = MakeRefCounted<IOBufferWithSize>(32);
     std::memset(send_buf->data(), 0xAA, 32);
-    sock->SendTo(send_buf, 32, bound,
-                 [&, quit_ptr, sock](bool ok, int /*n*/) {
-                   EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
-                   send_ok.store(ok);
-                   if (completions.fetch_add(1) + 1 == 2)
-                     std::move(*quit_ptr).Run();
-                 });
+    sock->SendTo(send_buf, 32, bound, [&, quit_ptr, sock](bool ok, int /*n*/) {
+      EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
+      send_ok.store(ok);
+      if (completions.fetch_add(1) + 1 == 2)
+        std::move(*quit_ptr).Run();
+    });
   });
 
   loop.Run();
@@ -399,7 +381,7 @@ TEST_F(UdpSocketTest, IPv6Loopback) {
 TEST_F(UdpSocketTest, SetBroadcast) {
   std::atomic<bool> send_ok{false};
   std::atomic<bool> recv_ok{false};
-  std::atomic<int>  completions{0};
+  std::atomic<int> completions{0};
 
   RunLoop loop;
   auto quit_ptr = std::make_shared<OnceClosure>(loop.QuitClosure());
@@ -424,18 +406,18 @@ TEST_F(UdpSocketTest, SetBroadcast) {
     EXPECT_TRUE(sock->GetLocalAddress(&bound));
 
     auto recv_buf = MakeRefCounted<IOBufferWithSize>(64);
-    sock->RecvFrom(recv_buf, 64,
-                   [&, quit_ptr, sock](bool ok, int /*n*/, const IPEndPoint&) {
-                     EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
-                     recv_ok.store(ok);
-                     if (completions.fetch_add(1) + 1 == 2)
-                       std::move(*quit_ptr).Run();
-                   });
+    sock->RecvFrom(recv_buf, 64, [&, quit_ptr, sock](bool ok, int /*n*/, const IPEndPoint &) {
+      EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
+      recv_ok.store(ok);
+      if (completions.fetch_add(1) + 1 == 2)
+        std::move(*quit_ptr).Run();
+    });
 
     auto send_buf = MakeRefCounted<IOBufferWithSize>(16);
     std::memset(send_buf->data(), 0xBB, 16);
-    sock->SendTo(send_buf, 16, IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1),
-                                          bound.port()),
+    sock->SendTo(send_buf,
+                 16,
+                 IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), bound.port()),
                  [&, quit_ptr, sock](bool ok, int /*n*/) {
                    EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
                    send_ok.store(ok);
@@ -535,31 +517,26 @@ TEST_F(UdpSocketTest, MultiplePendingRecvFrom) {
     // Issue kNumPackets concurrent RecvFrom calls.
     for (int i = 0; i < kNumPackets; ++i) {
       auto buf = MakeRefCounted<IOBufferWithSize>(128);
-      sock->RecvFrom(
-          buf, 128,
-          [&, quit_ptr, sock, buf](bool ok, int n,
-                                    const IPEndPoint& /*peer*/) {
-            EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
-            if (ok) {
-              EXPECT_EQ(n, 32);
-              // Record which tagged packet arrived (order-independent).
-              uint8_t tag = static_cast<uint8_t>(buf->data()[0]);
-              EXPECT_LT(tag, kNumPackets);
-              recv_mask.fetch_or(1 << tag, std::memory_order_relaxed);
-            }
-            if (recv_count.fetch_add(1) + 1 == kNumPackets)
-              std::move(*quit_ptr).Run();
-          });
+      sock->RecvFrom(buf, 128, [&, quit_ptr, sock, buf](bool ok, int n, const IPEndPoint & /*peer*/) {
+        EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
+        if (ok) {
+          EXPECT_EQ(n, 32);
+          // Record which tagged packet arrived (order-independent).
+          uint8_t tag = static_cast<uint8_t>(buf->data()[0]);
+          EXPECT_LT(tag, kNumPackets);
+          recv_mask.fetch_or(1 << tag, std::memory_order_relaxed);
+        }
+        if (recv_count.fetch_add(1) + 1 == kNumPackets)
+          std::move(*quit_ptr).Run();
+      });
     }
 
     // Send kNumPackets with index-tagged payloads.
     for (int i = 0; i < kNumPackets; ++i) {
       auto send_buf = MakeRefCounted<IOBufferWithSize>(32);
       std::memset(send_buf->data(), static_cast<unsigned char>(i), 32);
-      sock->SendTo(send_buf, 32, bound,
-                   [&](bool /*ok*/, int /*n*/) {
-                     send_count.fetch_add(1, std::memory_order_relaxed);
-                   });
+      sock->SendTo(
+          send_buf, 32, bound, [&](bool /*ok*/, int /*n*/) { send_count.fetch_add(1, std::memory_order_relaxed); });
     }
   });
 
@@ -583,8 +560,8 @@ TEST_F(UdpSocketTest, LargeDatagram) {
 
   std::atomic<bool> send_ok{false};
   std::atomic<bool> recv_ok{false};
-  std::atomic<int>  recv_bytes{0};
-  std::atomic<int>  completions{0};
+  std::atomic<int> recv_bytes{0};
+  std::atomic<int> completions{0};
 
   RunLoop loop;
   auto quit_ptr = std::make_shared<OnceClosure>(loop.QuitClosure());
@@ -596,25 +573,23 @@ TEST_F(UdpSocketTest, LargeDatagram) {
     IPEndPoint bound = BindToLoopback(sock.get(), io_runner_);
 
     auto recv_buf = MakeRefCounted<IOBufferWithSize>(2048);
-    sock->RecvFrom(recv_buf, 2048,
-                   [&, quit_ptr, sock](bool ok, int n, const IPEndPoint&) {
-                     EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
-                     recv_ok.store(ok);
-                     recv_bytes.store(n);
-                     if (completions.fetch_add(1) + 1 == 2)
-                       std::move(*quit_ptr).Run();
-                   });
+    sock->RecvFrom(recv_buf, 2048, [&, quit_ptr, sock](bool ok, int n, const IPEndPoint &) {
+      EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
+      recv_ok.store(ok);
+      recv_bytes.store(n);
+      if (completions.fetch_add(1) + 1 == 2)
+        std::move(*quit_ptr).Run();
+    });
 
     auto send_buf = MakeRefCounted<IOBufferWithSize>(kPayloadSize);
     std::memset(send_buf->data(), 0x7E, kPayloadSize);
-    sock->SendTo(send_buf, kPayloadSize, bound,
-                 [&, quit_ptr, sock](bool ok, int n) {
-                   EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
-                   send_ok.store(ok);
-                   EXPECT_EQ(n, kPayloadSize);
-                   if (completions.fetch_add(1) + 1 == 2)
-                     std::move(*quit_ptr).Run();
-                 });
+    sock->SendTo(send_buf, kPayloadSize, bound, [&, quit_ptr, sock](bool ok, int n) {
+      EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
+      send_ok.store(ok);
+      EXPECT_EQ(n, kPayloadSize);
+      if (completions.fetch_add(1) + 1 == 2)
+        std::move(*quit_ptr).Run();
+    });
   });
 
   loop.Run();
@@ -655,5 +630,5 @@ TEST_F(UdpSocketTest, SetBufferSizes) {
   SUCCEED();
 }
 
-}  // namespace
-}  // namespace nei::net
+} // namespace
+} // namespace nei::net

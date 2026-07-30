@@ -28,11 +28,11 @@ namespace nei {
 // thread that drives stream_->ReadAsync().  Internally the reader is
 // lock-free; all state is accessed only from that thread.
 class NEI_API AsyncLineReader {
- public:
-  explicit AsyncLineReader(AsyncInputStream* input_stream);
+public:
+  explicit AsyncLineReader(AsyncInputStream *input_stream);
   ~AsyncLineReader();
 
-  using LineCallback = std::function<void(std::string&& line)>;
+  using LineCallback = std::function<void(std::string &&line)>;
 
   // Begin reading lines from the stream.  callback is invoked once per
   // complete line (including CRLF handling).  May only be called once.
@@ -43,19 +43,17 @@ class NEI_API AsyncLineReader {
   // trailing output.  No-op if there is no pending data.
   void FlushPendingLine();
 
- private:
+private:
   struct State;
-  static void IssueNextRead(const std::shared_ptr<State>& state);
-  static void OnChunkReceived(const std::shared_ptr<State>& state,
-                               bool ok,
-                               std::size_t bytes_read);
+  static void IssueNextRead(const std::shared_ptr<State> &state);
+  static void OnChunkReceived(const std::shared_ptr<State> &state, bool ok, std::size_t bytes_read);
 
-  AsyncInputStream* stream_ = nullptr;
+  AsyncInputStream *stream_ = nullptr;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::shared_ptr<State> state_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_IO_ASYNC_LINE_READER_H_
+#endif // NEIXX_IO_ASYNC_LINE_READER_H_

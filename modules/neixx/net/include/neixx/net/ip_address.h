@@ -21,7 +21,7 @@ namespace nei::net {
 // conversion (FromString / ToString) is implemented in ip_address.cpp where
 // inet_pton / inet_ntop are used behind the ABI boundary.
 class NEI_API IPAddress {
- public:
+public:
   enum class Family : uint8_t {
     kUnspecified = 0,
     kIPv4 = 4,
@@ -34,7 +34,7 @@ class NEI_API IPAddress {
   // Constructs an address from raw bytes.
   // |family| must be kIPv4 (4 bytes used) or kIPv6 (16 bytes used).
   // |bytes| is copied; for kIPv4 only the first 4 bytes are meaningful.
-  IPAddress(Family family, const uint8_t* bytes);
+  IPAddress(Family family, const uint8_t *bytes);
 
   // Convenience factories.
   static IPAddress FromIPv4(uint8_t a, uint8_t b, uint8_t c, uint8_t d);
@@ -42,27 +42,40 @@ class NEI_API IPAddress {
 
   // Parses a numeric IP string (e.g. "127.0.0.1", "::1").
   // Returns an unspecified address on failure.
-  static IPAddress FromString(const std::string& str);
+  static IPAddress FromString(const std::string &str);
 
-  bool IsIPv4() const noexcept { return family_ == Family::kIPv4; }
-  bool IsIPv6() const noexcept { return family_ == Family::kIPv6; }
-  bool IsUnspecified() const noexcept { return family_ == Family::kUnspecified; }
+  bool IsIPv4() const noexcept {
+    return family_ == Family::kIPv4;
+  }
 
-  Family family() const noexcept { return family_; }
-  const std::array<uint8_t, 16>& data() const noexcept { return data_; }
+  bool IsIPv6() const noexcept {
+    return family_ == Family::kIPv6;
+  }
+
+  bool IsUnspecified() const noexcept {
+    return family_ == Family::kUnspecified;
+  }
+
+  Family family() const noexcept {
+    return family_;
+  }
+
+  const std::array<uint8_t, 16> &data() const noexcept {
+    return data_;
+  }
 
   // Returns a human-readable representation (e.g. "127.0.0.1", "::1").
   std::string ToString() const;
 
-  bool operator==(const IPAddress& other) const noexcept;
-  bool operator!=(const IPAddress& other) const noexcept;
-  bool operator<(const IPAddress& other) const noexcept;
+  bool operator==(const IPAddress &other) const noexcept;
+  bool operator!=(const IPAddress &other) const noexcept;
+  bool operator<(const IPAddress &other) const noexcept;
 
- private:
+private:
   Family family_ = Family::kUnspecified;
   std::array<uint8_t, 16> data_{};
 };
 
-}  // namespace nei::net
+} // namespace nei::net
 
-#endif  // NEIXX_NET_IP_ADDRESS_H_
+#endif // NEIXX_NET_IP_ADDRESS_H_

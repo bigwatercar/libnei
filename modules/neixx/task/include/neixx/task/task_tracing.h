@@ -27,7 +27,7 @@ NEI_API void SetTaskTracingEnabled(bool enabled);
 NEI_API TaskTracingStats GetTaskTracingStatsForTesting();
 NEI_API void ResetTaskTracingStatsForTesting();
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei
 
-#endif  // NEIXX_TASK_TASK_TRACING_H_
+#endif // NEIXX_TASK_TASK_TRACING_H_

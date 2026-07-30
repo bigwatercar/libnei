@@ -95,10 +95,8 @@ std::basic_string<CharT> JoinStringT(const std::vector<std::basic_string<CharT>>
 
 } // namespace
 
-std::vector<std::string> SplitString(std::string_view input,
-                                     char delimiter,
-                                     WhitespaceHandling whitespace,
-                                     SplitResult result_type) {
+std::vector<std::string>
+SplitString(std::string_view input, char delimiter, WhitespaceHandling whitespace, SplitResult result_type) {
   const char delim_buffer[1] = {delimiter};
   return SplitStringT<char>(input, std::string_view(delim_buffer, 1), whitespace, result_type);
 }
@@ -110,10 +108,8 @@ std::vector<std::string> SplitString(std::string_view input,
   return SplitStringT<char>(input, delimiter, whitespace, result_type);
 }
 
-std::vector<std::u16string> SplitString(std::u16string_view input,
-                                        char16_t delimiter,
-                                        WhitespaceHandling whitespace,
-                                        SplitResult result_type) {
+std::vector<std::u16string>
+SplitString(std::u16string_view input, char16_t delimiter, WhitespaceHandling whitespace, SplitResult result_type) {
   const char16_t delim_buffer[1] = {delimiter};
   return SplitStringT<char16_t>(input, std::u16string_view(delim_buffer, 1), whitespace, result_type);
 }

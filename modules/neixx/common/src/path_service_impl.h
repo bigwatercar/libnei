@@ -37,9 +37,9 @@ class PathService::Impl {
 public:
   /** @brief Metadata for a registered path provider. */
   struct ProviderInfo {
-    PathProvider provider;  ///< Provider callback.
-    int          key_start; ///< First key (inclusive) handled by this provider.
-    int          key_end;   ///< Last key (inclusive) handled by this provider.
+    PathProvider provider; ///< Provider callback.
+    int key_start;         ///< First key (inclusive) handled by this provider.
+    int key_end;           ///< Last key (inclusive) handled by this provider.
   };
 
   // ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ public:
   Impl();
   ~Impl();
 
-  Impl(const Impl &)            = delete;
+  Impl(const Impl &) = delete;
   Impl &operator=(const Impl &) = delete;
 
   // ---------------------------------------------------------------------------
@@ -79,11 +79,11 @@ private:
   // Members
   // ---------------------------------------------------------------------------
 
-  std::mutex                                     lock_;
+  std::mutex lock_;
   std::unordered_map<int, std::filesystem::path> cache_;
-  std::vector<ProviderInfo>                      providers_;
+  std::vector<ProviderInfo> providers_;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_COMMON_PATH_SERVICE_IMPL_H
+#endif // NEIXX_COMMON_PATH_SERVICE_IMPL_H

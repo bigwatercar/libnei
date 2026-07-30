@@ -18,9 +18,7 @@ TEST(RunLoopTest, QuitClosureStopsRun) {
 
   std::atomic<int> executed{0};
   std::atomic<bool> inner_loop_completed{false};
-  std::thread run_thread([&manager]() {
-    manager.Run();
-  });
+  std::thread run_thread([&manager]() { manager.Run(); });
 
   runner->PostTask(FROM_HERE, [&runner, &executed, &inner_loop_completed, &manager]() {
     // RunLoop must be created while the current thread is inside manager.Run().
@@ -44,9 +42,7 @@ TEST(ThreadTaskRunnerHandleTest, GetReturnsRunnerWhenSequenceManagerBound) {
 
   std::atomic<int> executed{0};
   std::atomic<bool> got_runner{false};
-  std::thread run_thread([&manager]() {
-    manager.Run();
-  });
+  std::thread run_thread([&manager]() { manager.Run(); });
 
   bootstrap_runner->PostTask(FROM_HERE, [&executed, &got_runner, &manager]() {
     auto runner = ThreadTaskRunnerHandle::Get();
@@ -71,5 +67,5 @@ TEST(ThreadTaskRunnerHandleTest, GetReturnsNullptrWhenNoSequenceManager) {
   check_thread.join();
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

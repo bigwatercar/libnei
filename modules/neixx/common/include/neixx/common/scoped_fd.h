@@ -27,19 +27,25 @@
 namespace nei {
 
 class ScopedFD {
- public:
+public:
   ScopedFD() = default;
 
-  explicit ScopedFD(int fd) : fd_(fd) {}
+  explicit ScopedFD(int fd)
+      : fd_(fd) {
+  }
 
-  ~ScopedFD() { reset(); }
+  ~ScopedFD() {
+    reset();
+  }
 
-  ScopedFD(const ScopedFD&) = delete;
-  ScopedFD& operator=(const ScopedFD&) = delete;
+  ScopedFD(const ScopedFD &) = delete;
+  ScopedFD &operator=(const ScopedFD &) = delete;
 
-  ScopedFD(ScopedFD&& other) noexcept : fd_(other.release()) {}
+  ScopedFD(ScopedFD &&other) noexcept
+      : fd_(other.release()) {
+  }
 
-  ScopedFD& operator=(ScopedFD&& other) noexcept {
+  ScopedFD &operator=(ScopedFD &&other) noexcept {
     if (this != &other) {
       reset();
       fd_ = other.release();
@@ -50,10 +56,14 @@ class ScopedFD {
   // ---- Accessors ---------------------------------------------------------
 
   // Returns the raw fd without transferring ownership.
-  int get() const { return fd_; }
+  int get() const {
+    return fd_;
+  }
 
   // Returns true if the fd is non-negative.
-  bool is_valid() const { return fd_ >= 0; }
+  bool is_valid() const {
+    return fd_ >= 0;
+  }
 
   // ---- Ownership transfer -------------------------------------------------
 
@@ -74,18 +84,18 @@ class ScopedFD {
 
   // ---- Swap ---------------------------------------------------------------
 
-  void swap(ScopedFD& other) noexcept {
+  void swap(ScopedFD &other) noexcept {
     std::swap(fd_, other.fd_);
   }
 
- private:
+private:
   int fd_ = -1;
 };
 
-inline void swap(ScopedFD& a, ScopedFD& b) noexcept {
+inline void swap(ScopedFD &a, ScopedFD &b) noexcept {
   a.swap(b);
 }
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_COMMON_SCOPED_FD_H_
+#endif // NEIXX_COMMON_SCOPED_FD_H_

@@ -25,15 +25,15 @@ namespace nei {
 //   3) Completion is always bounced to the construction sequence.
 //   4) WeakPtr gate drops late completions after destruction safely.
 class NEI_API StreamReader final {
- public:
-  using ReadBytesCallback = std::function<void(bool success, std::vector<std::uint8_t>&& data)>;
-  using ReadStringCallback = std::function<void(bool success, std::string&& data)>;
+public:
+  using ReadBytesCallback = std::function<void(bool success, std::vector<std::uint8_t> &&data)>;
+  using ReadStringCallback = std::function<void(bool success, std::string &&data)>;
 
-  explicit StreamReader(AsyncInputStream* stream);
+  explicit StreamReader(AsyncInputStream *stream);
   ~StreamReader();
 
-  StreamReader(const StreamReader&) = delete;
-  StreamReader& operator=(const StreamReader&) = delete;
+  StreamReader(const StreamReader &) = delete;
+  StreamReader &operator=(const StreamReader &) = delete;
 
   // Reads up to |bytes_to_read| bytes and returns an owning byte vector.
   void ReadBytes(std::size_t bytes_to_read, ReadBytesCallback user_callback);
@@ -41,14 +41,14 @@ class NEI_API StreamReader final {
   // Reads up to |bytes_to_read| bytes and returns an owning std::string.
   void ReadString(std::size_t bytes_to_read, ReadStringCallback user_callback);
 
- private:
-  AsyncInputStream* stream_ = nullptr;  // Non-owning.
+private:
+  AsyncInputStream *stream_ = nullptr; // Non-owning.
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   scoped_refptr<TaskRunner> target_task_runner_;
   WeakPtrFactory<StreamReader> weak_factory_{this, FROM_HERE_MEMBER};
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_IO_STREAM_READER_H_
+#endif // NEIXX_IO_STREAM_READER_H_

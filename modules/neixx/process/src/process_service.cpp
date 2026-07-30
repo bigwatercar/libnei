@@ -17,19 +17,21 @@ namespace {
 #if !defined(_WIN32)
 void IgnoreSigPipeGlobalOnce() {
   static std::once_flag once;
-  std::call_once(once, []() {
-    (void)signal(SIGPIPE, SIG_IGN);
-  });
+  std::call_once(once, []() { (void)signal(SIGPIPE, SIG_IGN); });
 }
 #endif
 
-}  // namespace
+} // namespace
 
 class ProcessService::Impl final {
- public:
-  explicit Impl(std::string thread_name) : io_thread_(std::move(thread_name)) {}
+public:
+  explicit Impl(std::string thread_name)
+      : io_thread_(std::move(thread_name)) {
+  }
 
-  ~Impl() { Shutdown(); }
+  ~Impl() {
+    Shutdown();
+  }
 
   bool Start() {
 #if !defined(_WIN32)
@@ -72,10 +74,8 @@ class ProcessService::Impl final {
     if (io_runner_.get() == nullptr) {
       return false;
     }
-    const PlatformThread::PlatformThreadId service_thread_id =
-        io_thread_.GetThreadId();
-    return service_thread_id != 0 &&
-           PlatformThread::CurrentId() == service_thread_id;
+    const PlatformThread::PlatformThreadId service_thread_id = io_thread_.GetThreadId();
+    return service_thread_id != 0 && PlatformThread::CurrentId() == service_thread_id;
   }
 
   scoped_refptr<TaskRunner> GetTaskRunner() const {
@@ -83,7 +83,7 @@ class ProcessService::Impl final {
     return io_runner_;
   }
 
- private:
+private:
   void Shutdown() {
     scoped_refptr<TaskRunner> runner;
     {
@@ -103,7 +103,7 @@ class ProcessService::Impl final {
   bool start_failed_ = false;
 };
 
-scoped_refptr<ProcessService> ProcessService::Create(const std::string& thread_name) {
+scoped_refptr<ProcessService> ProcessService::Create(const std::string &thread_name) {
   return MakeRefCounted<ProcessService>(thread_name);
 }
 
@@ -135,8 +135,9 @@ scoped_refptr<ProcessService> ProcessService::GetDefault() {
   return default_service;
 }
 
-ProcessService::ProcessService(const std::string& thread_name)
-    : impl_(std::make_unique<Impl>(thread_name)) {}
+ProcessService::ProcessService(const std::string &thread_name)
+    : impl_(std::make_unique<Impl>(thread_name)) {
+}
 
 ProcessService::~ProcessService() = default;
 
@@ -156,4 +157,4 @@ scoped_refptr<TaskRunner> ProcessService::GetTaskRunner() const {
   return impl_->GetTaskRunner();
 }
 
-}  // namespace nei
+} // namespace nei

@@ -40,27 +40,14 @@ std::string UTF16ToUTF8Impl(std::u16string_view utf16) {
   const wchar_t *input = reinterpret_cast<const wchar_t *>(utf16.data());
   const int input_len = static_cast<int>(utf16.size());
 
-  int needed = WideCharToMultiByte(CP_UTF8,
-                                   WC_ERR_INVALID_CHARS,
-                                   input,
-                                   input_len,
-                                   nullptr,
-                                   0,
-                                   nullptr,
-                                   nullptr);
+  int needed = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, input, input_len, nullptr, 0, nullptr, nullptr);
   if (needed <= 0) {
     return internal::UTF16ToUTF8Fallback(utf16);
   }
 
   std::string out(static_cast<std::size_t>(needed), '\0');
-  const int written = WideCharToMultiByte(CP_UTF8,
-                                          WC_ERR_INVALID_CHARS,
-                                          input,
-                                          input_len,
-                                          out.data(),
-                                          needed,
-                                          nullptr,
-                                          nullptr);
+  const int written =
+      WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, input, input_len, out.data(), needed, nullptr, nullptr);
   if (written <= 0) {
     return internal::UTF16ToUTF8Fallback(utf16);
   }
@@ -82,18 +69,15 @@ std::u16string SystemCodepageToUTF16Impl(std::string_view mbcs) {
   }
 
   const int input_len = static_cast<int>(mbcs.size());
-  int needed = MultiByteToWideChar(CP_ACP, 0, mbcs.data(), input_len,
-                                   nullptr, 0);
+  int needed = MultiByteToWideChar(CP_ACP, 0, mbcs.data(), input_len, nullptr, 0);
   if (needed <= 0) {
     return {};
   }
 
   std::u16string out(static_cast<std::size_t>(needed), u'\0');
-  static_assert(sizeof(wchar_t) == sizeof(char16_t),
-                "Windows wchar_t must be UTF-16");
+  static_assert(sizeof(wchar_t) == sizeof(char16_t), "Windows wchar_t must be UTF-16");
   wchar_t *buffer = reinterpret_cast<wchar_t *>(out.data());
-  const int written = MultiByteToWideChar(CP_ACP, 0, mbcs.data(), input_len,
-                                          buffer, needed);
+  const int written = MultiByteToWideChar(CP_ACP, 0, mbcs.data(), input_len, buffer, needed);
   if (written <= 0) {
     return {};
   }
@@ -115,20 +99,17 @@ std::string UTF16ToSystemCodepageImpl(std::u16string_view utf16) {
     return {};
   }
 
-  static_assert(sizeof(wchar_t) == sizeof(char16_t),
-                "Windows wchar_t must be UTF-16");
+  static_assert(sizeof(wchar_t) == sizeof(char16_t), "Windows wchar_t must be UTF-16");
   const wchar_t *input = reinterpret_cast<const wchar_t *>(utf16.data());
   const int input_len = static_cast<int>(utf16.size());
 
-  int needed = WideCharToMultiByte(CP_ACP, 0, input, input_len,
-                                   nullptr, 0, nullptr, nullptr);
+  int needed = WideCharToMultiByte(CP_ACP, 0, input, input_len, nullptr, 0, nullptr, nullptr);
   if (needed <= 0) {
     return {};
   }
 
   std::string out(static_cast<std::size_t>(needed), '\0');
-  const int written = WideCharToMultiByte(CP_ACP, 0, input, input_len,
-                                          out.data(), needed, nullptr, nullptr);
+  const int written = WideCharToMultiByte(CP_ACP, 0, input, input_len, out.data(), needed, nullptr, nullptr);
   if (written <= 0) {
     return {};
   }
@@ -149,13 +130,29 @@ std::string UTF8ToSystemCodepageImpl(std::string_view utf8) {
 
 // Public API: always use std::string_view / std::string for UTF-8 to maintain
 // compatibility across C++17 and C++20.
-std::u16string UTF8ToUTF16(std::string_view utf8) { return UTF8ToUTF16Impl(utf8); }
-std::string UTF16ToUTF8(std::u16string_view utf16) { return UTF16ToUTF8Impl(utf16); }
+std::u16string UTF8ToUTF16(std::string_view utf8) {
+  return UTF8ToUTF16Impl(utf8);
+}
 
-std::string SystemCodepageToUTF8(std::string_view mbcs) { return SystemCodepageToUTF8Impl(mbcs); }
-std::u16string SystemCodepageToUTF16(std::string_view mbcs) { return SystemCodepageToUTF16Impl(mbcs); }
-std::string UTF8ToSystemCodepage(std::string_view utf8) { return UTF8ToSystemCodepageImpl(utf8); }
-std::string UTF16ToSystemCodepage(std::u16string_view utf16) { return UTF16ToSystemCodepageImpl(utf16); }
+std::string UTF16ToUTF8(std::u16string_view utf16) {
+  return UTF16ToUTF8Impl(utf16);
+}
+
+std::string SystemCodepageToUTF8(std::string_view mbcs) {
+  return SystemCodepageToUTF8Impl(mbcs);
+}
+
+std::u16string SystemCodepageToUTF16(std::string_view mbcs) {
+  return SystemCodepageToUTF16Impl(mbcs);
+}
+
+std::string UTF8ToSystemCodepage(std::string_view utf8) {
+  return UTF8ToSystemCodepageImpl(utf8);
+}
+
+std::string UTF16ToSystemCodepage(std::u16string_view utf16) {
+  return UTF16ToSystemCodepageImpl(utf16);
+}
 
 } // namespace nei
 

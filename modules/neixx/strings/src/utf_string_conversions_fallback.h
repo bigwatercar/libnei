@@ -11,10 +11,14 @@ namespace internal {
 inline constexpr char32_t kReplacementCodePoint = 0xFFFD;
 
 inline int UTF8SequenceLength(unsigned char lead) {
-  if (lead < 0x80u) return 1;
-  if (lead >= 0xC2u && lead <= 0xDFu) return 2;
-  if (lead >= 0xE0u && lead <= 0xEFu) return 3;
-  if (lead >= 0xF0u && lead <= 0xF4u) return 4;
+  if (lead < 0x80u)
+    return 1;
+  if (lead >= 0xC2u && lead <= 0xDFu)
+    return 2;
+  if (lead >= 0xE0u && lead <= 0xEFu)
+    return 3;
+  if (lead >= 0xF0u && lead <= 0xF4u)
+    return 4;
   return 1;
 }
 
@@ -129,8 +133,7 @@ inline std::u16string UTF8ToUTF16Fallback(std::string_view utf8) {
         ++i;
         continue;
       }
-      const char32_t cp = ((b0 & 0x07u) << 18) | ((b1 & 0x3Fu) << 12) |
-                          ((b2 & 0x3Fu) << 6) | (b3 & 0x3Fu);
+      const char32_t cp = ((b0 & 0x07u) << 18) | ((b1 & 0x3Fu) << 12) | ((b2 & 0x3Fu) << 6) | (b3 & 0x3Fu);
       if (cp < 0x10000 || cp > 0x10FFFF) {
         AppendUTF16FromCodePoint(out, kReplacementCodePoint);
       } else {

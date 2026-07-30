@@ -86,12 +86,8 @@ static int _nei_log_payload_write_padded_zero(uint8_t *out, size_t out_cap, size
   return 0;
 }
 
-static int _nei_log_payload_emit_arg(uint8_t *out,
-                                     size_t out_cap,
-                                     size_t *used,
-                                     uint8_t payload_type,
-                                     uint8_t conv_lm,
-                                     _NEI_LOG_VA_PARAM args) {
+static int _nei_log_payload_emit_arg(
+    uint8_t *out, size_t out_cap, size_t *used, uint8_t payload_type, uint8_t conv_lm, _NEI_LOG_VA_PARAM args) {
   if (_nei_log_payload_write_u8(out, out_cap, used, payload_type) != 0) {
     return -1;
   }
@@ -490,11 +486,13 @@ static const char *_nei_log_wstr_to_mbs_or_placeholder(const wchar_t *ws, char *
 static void _nei_log_strcpy_trunc(char *dst, size_t dst_cap, const char *src) {
   size_t n;
   if (src == NULL || dst_cap == 0U) {
-    if (dst_cap > 0U) dst[0] = '\0';
+    if (dst_cap > 0U)
+      dst[0] = '\0';
     return;
   }
   n = strlen(src);
-  if (n >= dst_cap) n = dst_cap - 1U;
+  if (n >= dst_cap)
+    n = dst_cap - 1U;
   memcpy(dst, src, n);
   dst[n] = '\0';
 }
@@ -525,7 +523,7 @@ size_t _nei_log_serialize_event(uint8_t *out,
   header.config_handle = config_handle;
   _nei_log_strcpy_trunc(header.file, sizeof(header.file), file);
   _nei_log_strcpy_trunc(header.func, sizeof(header.func), func);
-  _nei_log_strcpy_trunc(header.fmt,  sizeof(header.fmt),  fmt);
+  _nei_log_strcpy_trunc(header.fmt, sizeof(header.fmt), fmt);
   header.level = level;
   header.line = line;
   header.verbose = verbose;
@@ -549,12 +547,9 @@ size_t _nei_log_serialize_event(uint8_t *out,
 
   if (plan != NULL) {
     for (op_idx = 0U; op_idx < plan->op_count; ++op_idx) {
-      if (_nei_log_payload_emit_arg(out,
-                                    out_cap,
-                                    &used,
-                                    plan->ops[op_idx].payload_type,
-                                    plan->ops[op_idx].conv_lm,
-                                    _NEI_LOG_VA_PASS(args)) != 0) {
+      if (_nei_log_payload_emit_arg(
+              out, out_cap, &used, plan->ops[op_idx].payload_type, plan->ops[op_idx].conv_lm, _NEI_LOG_VA_PASS(args))
+          != 0) {
         return 0;
       }
     }

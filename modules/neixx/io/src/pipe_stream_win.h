@@ -25,38 +25,35 @@ namespace nei {
 namespace pipe_detail {
 
 template <typename Callback>
-void PostError(const scoped_refptr<TaskRunner>& runner, Callback&& cb) {
-  if (!cb) return;
+void PostError(const scoped_refptr<TaskRunner> &runner, Callback &&cb) {
+  if (!cb)
+    return;
   if (runner) {
-    BindPostTask(runner,
-                 BindOnce([](Callback c) { c(false, 0u); },
-                          std::forward<Callback>(cb)))
-        .Run();
+    BindPostTask(runner, BindOnce([](Callback c) { c(false, 0u); }, std::forward<Callback>(cb))).Run();
   } else {
     cb(false, 0u);
   }
 }
 
 template <typename Callback>
-void PostResult(const scoped_refptr<TaskRunner>& runner,
-                Callback&& cb,
-                bool success,
-                std::size_t bytes) {
-  if (!cb) return;
+void PostResult(const scoped_refptr<TaskRunner> &runner, Callback &&cb, bool success, std::size_t bytes) {
+  if (!cb)
+    return;
   if (runner) {
-    BindPostTask(runner,
-                 BindOnce([](Callback c, bool s, std::size_t n) { c(s, n); },
-                          std::forward<Callback>(cb), success, bytes))
+    BindPostTask(
+        runner,
+        BindOnce([](Callback c, bool s, std::size_t n) { c(s, n); }, std::forward<Callback>(cb), success, bytes))
         .Run();
   } else {
     cb(success, bytes);
   }
 }
 
-}  // namespace pipe_detail
+} // namespace pipe_detail
 
 template <>
 struct WeakPtrThreadSafe<PipeInputStream::Impl> : std::true_type {};
+
 template <>
 struct WeakPtrThreadSafe<PipeOutputStream::Impl> : std::true_type {};
 
@@ -66,8 +63,14 @@ struct ReadContext {
   AsyncInputStream::IOReadCallback callback;
   HANDLE io_event = nullptr;
 
-  ReadContext() { io_event = CreateEventW(nullptr, TRUE, FALSE, nullptr); }
-  ~ReadContext() { if (io_event) CloseHandle(io_event); }
+  ReadContext() {
+    io_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  }
+
+  ~ReadContext() {
+    if (io_event)
+      CloseHandle(io_event);
+  }
 };
 
 struct WriteContext {
@@ -77,41 +80,49 @@ struct WriteContext {
   AsyncOutputStream::IOWriteCallback callback;
   HANDLE io_event = nullptr;
 
-  WriteContext() { io_event = CreateEventW(nullptr, TRUE, FALSE, nullptr); }
-  ~WriteContext() { if (io_event) CloseHandle(io_event); }
+  WriteContext() {
+    io_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  }
+
+  ~WriteContext() {
+    if (io_event)
+      CloseHandle(io_event);
+  }
 };
 
 // ===========================================================================
 // PipeInputStream::Impl
 // ===========================================================================
 
-class PipeInputStream::Impl final
-    : public MessagePumpForIO::CompletionWatcher {
- public:
+class PipeInputStream::Impl final : public MessagePumpForIO::CompletionWatcher {
+public:
   explicit Impl(scoped_refptr<TaskRunner> io_task_runner);
   ~Impl() override;
 
   bool BindPlatformHandle(PlatformHandle handle);
 
-  void ReadAsync(scoped_refptr<IOBuffer> buf,
-                 std::size_t buf_len,
-                 IOReadCallback callback);
+  void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback);
 
   void Close();
 
   void OnIOCompleted(NativeIOHandle handle,
-                     void* overlapped_context,
+                     void *overlapped_context,
                      std::uint32_t bytes_transferred,
                      std::uint32_t error_code) override;
 
-  void OnFileCanReadWithoutBlocking(NativeIOHandle) override {}
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {}
+  void OnFileCanReadWithoutBlocking(NativeIOHandle) override {
+  }
+
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {
+  }
 
   void ShutdownAndSelfDestruct();
 
-  scoped_refptr<TaskRunner> io_task_runner() const { return io_task_runner_; }
+  scoped_refptr<TaskRunner> io_task_runner() const {
+    return io_task_runner_;
+  }
 
- private:
+private:
   void IssueRead(std::size_t buf_len);
   void MaybeCloseHandle();
 
@@ -131,35 +142,37 @@ class PipeInputStream::Impl final
 // PipeOutputStream::Impl
 // ===========================================================================
 
-class PipeOutputStream::Impl final
-    : public MessagePumpForIO::CompletionWatcher {
- public:
+class PipeOutputStream::Impl final : public MessagePumpForIO::CompletionWatcher {
+public:
   explicit Impl(scoped_refptr<TaskRunner> io_task_runner);
   ~Impl() override;
 
   bool BindPlatformHandle(PlatformHandle handle);
 
-  void WriteAsync(scoped_refptr<IOBuffer> buf,
-                  std::size_t buf_len,
-                  IOWriteCallback callback);
+  void WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOWriteCallback callback);
 
   void Close();
 
   void OnIOCompleted(NativeIOHandle handle,
-                     void* overlapped_context,
+                     void *overlapped_context,
                      std::uint32_t bytes_transferred,
                      std::uint32_t error_code) override;
 
   void MaybeStartNextQueuedWrite();
 
-  void OnFileCanReadWithoutBlocking(NativeIOHandle) override {}
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {}
+  void OnFileCanReadWithoutBlocking(NativeIOHandle) override {
+  }
+
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {
+  }
 
   void ShutdownAndSelfDestruct();
 
-  scoped_refptr<TaskRunner> io_task_runner() const { return io_task_runner_; }
+  scoped_refptr<TaskRunner> io_task_runner() const {
+    return io_task_runner_;
+  }
 
- private:
+private:
   void IssueWrite(std::size_t buf_len);
   void MaybeCloseHandle();
 
@@ -176,7 +189,7 @@ class PipeOutputStream::Impl final
   WeakPtrFactory<Impl> weak_factory_;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // defined(_WIN32)
-#endif  // NEIXX_IO_PIPE_STREAM_WIN_H_
+#endif // defined(_WIN32)
+#endif // NEIXX_IO_PIPE_STREAM_WIN_H_

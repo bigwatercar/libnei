@@ -49,8 +49,8 @@ namespace {
 // Test helpers
 // ===========================================================================
 
-constexpr std::size_t kSmallBufSize  = 4096;
-constexpr std::size_t kLargeBufSize  = 64 * 1024;   // 64 KiB
+constexpr std::size_t kSmallBufSize = 4096;
+constexpr std::size_t kLargeBufSize = 64 * 1024; // 64 KiB
 
 // ---------------------------------------------------------------------------
 // CreateAsyncPipePair  --  creates a cross-platform pipe pair suitable for
@@ -63,40 +63,34 @@ constexpr std::size_t kLargeBufSize  = 64 * 1024;   // 64 KiB
 // Returns true on success.  On failure both handles are invalid.
 // The caller owns both handles (via PlatformHandle RAII).
 // ---------------------------------------------------------------------------
-bool CreateAsyncPipePair(PlatformHandle& read_handle,
-                         PlatformHandle& write_handle,
-                         bool overlapped_write = true) {
-  (void)overlapped_write;  // Only meaningful on Windows (FILE_FLAG_OVERLAPPED)
+bool CreateAsyncPipePair(PlatformHandle &read_handle, PlatformHandle &write_handle, bool overlapped_write = true) {
+  (void)overlapped_write; // Only meaningful on Windows (FILE_FLAG_OVERLAPPED)
 #if defined(_WIN32)
   static std::atomic<unsigned long long> pipe_counter{0};
-  const DWORD pid  = GetCurrentProcessId();
+  const DWORD pid = GetCurrentProcessId();
   const ULONGLONG tick = GetTickCount64();
-  const unsigned long long counter =
-      pipe_counter.fetch_add(1, std::memory_order_relaxed);
-  const std::string pipe_name =
-      "\\\\.\\pipe\\nei_pipe_stream_test_" + std::to_string(pid) +
-      "_" + std::to_string(tick) + "_" + std::to_string(counter);
+  const unsigned long long counter = pipe_counter.fetch_add(1, std::memory_order_relaxed);
+  const std::string pipe_name = "\\\\.\\pipe\\nei_pipe_stream_test_" + std::to_string(pid) + "_" + std::to_string(tick)
+                                + "_" + std::to_string(counter);
 
-  HANDLE server = CreateNamedPipeA(
-      pipe_name.c_str(),
-      PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
-      PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-      1,                    // max instances
-      0,                    // out buffer size (system default)
-      0,                    // in  buffer size (system default)
-      0,                    // default timeout
-      nullptr);             // default security
-  if (server == INVALID_HANDLE_VALUE) return false;
+  HANDLE server = CreateNamedPipeA(pipe_name.c_str(),
+                                   PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
+                                   PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                                   1,        // max instances
+                                   0,        // out buffer size (system default)
+                                   0,        // in  buffer size (system default)
+                                   0,        // default timeout
+                                   nullptr); // default security
+  if (server == INVALID_HANDLE_VALUE)
+    return false;
 
-  HANDLE client = CreateFileA(
-      pipe_name.c_str(),
-      GENERIC_WRITE,
-      0,                    // no sharing
-      nullptr,              // default security
-      OPEN_EXISTING,
-      FILE_ATTRIBUTE_NORMAL |
-        (overlapped_write ? FILE_FLAG_OVERLAPPED : 0),
-      nullptr);
+  HANDLE client = CreateFileA(pipe_name.c_str(),
+                              GENERIC_WRITE,
+                              0,       // no sharing
+                              nullptr, // default security
+                              OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL | (overlapped_write ? FILE_FLAG_OVERLAPPED : 0),
+                              nullptr);
   if (client == INVALID_HANDLE_VALUE) {
     CloseHandle(server);
     return false;
@@ -105,19 +99,20 @@ bool CreateAsyncPipePair(PlatformHandle& read_handle,
   // Connect: ConnectNamedPipe completes synchronously because the client
   // already called CreateFile.
   const BOOL connected = ConnectNamedPipe(server, nullptr);
-  const DWORD conn_err  = connected ? ERROR_SUCCESS : GetLastError();
+  const DWORD conn_err = connected ? ERROR_SUCCESS : GetLastError();
   if (!connected && conn_err != ERROR_PIPE_CONNECTED) {
     CloseHandle(server);
     CloseHandle(client);
     return false;
   }
 
-  read_handle  = PlatformHandle::FromNativeHandle<DefaultHandleTraits>(server);
+  read_handle = PlatformHandle::FromNativeHandle<DefaultHandleTraits>(server);
   write_handle = PlatformHandle::FromNativeHandle<DefaultHandleTraits>(client);
   return true;
 #else
   int fds[2];
-  if (pipe(fds) != 0) return false;
+  if (pipe(fds) != 0)
+    return false;
 
   // Read end must be non-blocking for epoll integration.  Write end
   // stays blocking so the writer thread does not spin on EAGAIN when
@@ -129,7 +124,7 @@ bool CreateAsyncPipePair(PlatformHandle& read_handle,
     return false;
   }
 
-  read_handle  = PlatformHandle::FromNativeHandle(fds[0]);
+  read_handle = PlatformHandle::FromNativeHandle(fds[0]);
   write_handle = PlatformHandle::FromNativeHandle(fds[1]);
   return true;
 #endif
@@ -140,34 +135,34 @@ bool CreateAsyncPipePair(PlatformHandle& read_handle,
 // all bytes are written.  Blocks if the pipe buffer is full.
 // Returns true on success.
 // ---------------------------------------------------------------------------
-bool WriteAll(const PlatformHandle& write_handle,
-              const void* data,
-              std::size_t size) {
+bool WriteAll(const PlatformHandle &write_handle, const void *data, std::size_t size) {
 #if defined(_WIN32)
   HANDLE h = static_cast<HANDLE>(write_handle.GetHandle());
-  const char* p   = static_cast<const char*>(data);
+  const char *p = static_cast<const char *>(data);
   std::size_t rem = size;
   while (rem > 0) {
     DWORD written = 0;
     if (!WriteFile(h, p, static_cast<DWORD>(rem), &written, nullptr))
       return false;
-    if (written == 0) return false;
-    p   += written;
+    if (written == 0)
+      return false;
+    p += written;
     rem -= written;
   }
   return true;
 #else
   int fd = write_handle.GetFd();
-  const char* p   = static_cast<const char*>(data);
+  const char *p = static_cast<const char *>(data);
   std::size_t rem = size;
   while (rem > 0) {
     ssize_t n = write(fd, p, rem);
     if (n < 0) {
       // Write end is blocking; EINTR is the only expected benign error.
-      if (errno == EINTR) continue;
+      if (errno == EINTR)
+        continue;
       return false;
     }
-    p   += n;
+    p += n;
     rem -= static_cast<std::size_t>(n);
   }
   return true;
@@ -180,13 +175,13 @@ bool WriteAll(const PlatformHandle& write_handle,
 // ---------------------------------------------------------------------------
 struct IOBufHolder {
   scoped_refptr<IOBufferWithSize> sized;
-  scoped_refptr<IOBuffer>         buf;
+  scoped_refptr<IOBuffer> buf;
 };
 
 IOBufHolder AcquireIOBuf(std::size_t size) {
   IOBufHolder h;
   h.sized = IOBufferPool::GetInstance().AcquireBuffer(size);
-  h.buf   = scoped_refptr<IOBuffer>(h.sized.get());
+  h.buf = scoped_refptr<IOBuffer>(h.sized.get());
   return h;
 }
 
@@ -195,7 +190,7 @@ IOBufHolder AcquireIOBuf(std::size_t size) {
 // ===========================================================================
 
 class PipeStreamTest : public testing::Test {
- protected:
+protected:
   void SetUp() override {
 #if !defined(_WIN32)
     // Prevent SIGPIPE from killing the process when writing to a pipe
@@ -218,7 +213,7 @@ class PipeStreamTest : public testing::Test {
     nei::g_trace_enabled.store(true, std::memory_order_release);
   }
 
-  static void DisableTracingAndDump(const char* filename) {
+  static void DisableTracingAndDump(const char *filename) {
     nei::g_trace_enabled.store(false, std::memory_order_release);
     std::ofstream out(filename);
     if (out.is_open()) {
@@ -227,7 +222,7 @@ class PipeStreamTest : public testing::Test {
   }
 
   // Shortcut: create a pipe pair via the IO thread and return handles.
-  bool MakePipe(PlatformHandle& read_h, PlatformHandle& write_h) {
+  bool MakePipe(PlatformHandle &read_h, PlatformHandle &write_h) {
     return CreateAsyncPipePair(read_h, write_h);
   }
 
@@ -250,34 +245,26 @@ TEST_F(PipeStreamTest, ReadAsyncNeverCallsBackSynchronously) {
   const std::string payload = "Hello, async pipe!";
   WaitableEvent test_done(WaitableEvent::ResetPolicy::kAutomatic, false);
 
-  io_runner_->PostTask(
-      FROM_HERE,
-      [&, read_h = std::move(read_h), write_h = std::move(write_h), payload]() mutable {
-        auto writer = std::make_shared<PipeOutputStream>(io_runner_);
-        ASSERT_TRUE(writer->BindPlatformHandle(std::move(write_h)));
+  io_runner_->PostTask(FROM_HERE, [&, read_h = std::move(read_h), write_h = std::move(write_h), payload]() mutable {
+    auto writer = std::make_shared<PipeOutputStream>(io_runner_);
+    ASSERT_TRUE(writer->BindPlatformHandle(std::move(write_h)));
 
-        auto write_holder = AcquireIOBuf(payload.size());
-        std::memcpy(write_holder.buf->data(), payload.data(), payload.size());
-        writer->WriteAsync(write_holder.buf, payload.size(),
-                           [write_holder, writer](bool, std::size_t) {});
+    auto write_holder = AcquireIOBuf(payload.size());
+    std::memcpy(write_holder.buf->data(), payload.data(), payload.size());
+    writer->WriteAsync(write_holder.buf, payload.size(), [write_holder, writer](bool, std::size_t) {});
 
-        auto stream = std::make_shared<PipeInputStream>(io_runner_);
-        ASSERT_TRUE(stream->BindPlatformHandle(std::move(read_h)));
+    auto stream = std::make_shared<PipeInputStream>(io_runner_);
+    ASSERT_TRUE(stream->BindPlatformHandle(std::move(read_h)));
 
-        auto fired = std::make_shared<bool>(false);
-        auto holder = AcquireIOBuf(kSmallBufSize);
-        stream->ReadAsync(
-            holder.buf, kSmallBufSize,
-            [fired, holder, stream](bool /*ok*/, std::size_t /*n*/) {
-              *fired = true;
-            });
+    auto fired = std::make_shared<bool>(false);
+    auto holder = AcquireIOBuf(kSmallBufSize);
+    stream->ReadAsync(
+        holder.buf, kSmallBufSize, [fired, holder, stream](bool /*ok*/, std::size_t /*n*/) { *fired = true; });
 
-        EXPECT_FALSE(*fired)
-            << "ReadAsync invoked the callback synchronously.";
+    EXPECT_FALSE(*fired) << "ReadAsync invoked the callback synchronously.";
 
-        io_runner_->PostTask(FROM_HERE,
-                             [&test_done]() { test_done.Signal(); });
-      });
+    io_runner_->PostTask(FROM_HERE, [&test_done]() { test_done.Signal(); });
+  });
 
   ASSERT_TRUE(test_done.TimedWait(std::chrono::seconds(5)));
   SUCCEED();
@@ -298,13 +285,9 @@ TEST_F(PipeStreamTest, WriteAsyncNeverCallsBackSynchronously) {
 
     auto holder = AcquireIOBuf(kSmallBufSize);
     stream->WriteAsync(
-        holder.buf, kSmallBufSize,
-        [fired, holder, stream](bool /*ok*/, std::size_t /*n*/) {
-          *fired = true;
-        });
+        holder.buf, kSmallBufSize, [fired, holder, stream](bool /*ok*/, std::size_t /*n*/) { *fired = true; });
 
-    EXPECT_FALSE(*fired)
-        << "WriteAsync invoked the callback synchronously.";
+    EXPECT_FALSE(*fired) << "WriteAsync invoked the callback synchronously.";
 
     io_runner_->PostTask(FROM_HERE, [&test_done]() { test_done.Signal(); });
   });
@@ -332,17 +315,16 @@ TEST_F(PipeStreamTest, CrossThreadDeleteWhileReadPending) {
   WaitableEvent io_armed(WaitableEvent::ResetPolicy::kAutomatic, false);
 
   // Raw pointer + manual ownership transfer across threads.
-  PipeInputStream* raw_stream = nullptr;
+  PipeInputStream *raw_stream = nullptr;
 
   io_runner_->PostTask(FROM_HERE, [&, read_h = std::move(read_h)]() mutable {
     auto stream = std::make_unique<PipeInputStream>(io_runner_);
     ASSERT_TRUE(stream->BindPlatformHandle(std::move(read_h)));
 
     auto holder = AcquireIOBuf(kSmallBufSize);
-    stream->ReadAsync(holder.buf, kSmallBufSize,
-                      [holder](bool, std::size_t) {
-                        // Should not be called  --  pipe has no data.
-                      });
+    stream->ReadAsync(holder.buf, kSmallBufSize, [holder](bool, std::size_t) {
+      // Should not be called  --  pipe has no data.
+    });
 
     // Transfer ownership to the test thread.
     raw_stream = stream.release();
@@ -359,9 +341,7 @@ TEST_F(PipeStreamTest, CrossThreadDeleteWhileReadPending) {
 
   // Give the IO thread a moment to process ShutdownAndSelfDestruct.
   WaitableEvent cleanup_done(WaitableEvent::ResetPolicy::kAutomatic, false);
-  io_runner_->PostTask(FROM_HERE, [&cleanup_done]() {
-    cleanup_done.Signal();
-  });
+  io_runner_->PostTask(FROM_HERE, [&cleanup_done]() { cleanup_done.Signal(); });
   ASSERT_TRUE(cleanup_done.TimedWait(std::chrono::seconds(5)));
 
   // Close the write handle so the pipe is fully torn down.
@@ -376,16 +356,15 @@ TEST_F(PipeStreamTest, CrossThreadDeleteWhileWritePending) {
   ASSERT_TRUE(MakePipe(read_h, write_h));
 
   WaitableEvent io_armed(WaitableEvent::ResetPolicy::kAutomatic, false);
-  PipeOutputStream* raw_stream = nullptr;
+  PipeOutputStream *raw_stream = nullptr;
 
   io_runner_->PostTask(FROM_HERE, [&, write_h = std::move(write_h)]() mutable {
     auto stream = std::make_unique<PipeOutputStream>(io_runner_);
     ASSERT_TRUE(stream->BindPlatformHandle(std::move(write_h)));
 
     // Write a large buffer to fill the pipe and trigger PENDING.
-    auto holder = AcquireIOBuf(1024 * 1024);  // 1 MiB
-    stream->WriteAsync(holder.buf, 1024 * 1024,
-                       [holder](bool, std::size_t) {});
+    auto holder = AcquireIOBuf(1024 * 1024); // 1 MiB
+    stream->WriteAsync(holder.buf, 1024 * 1024, [holder](bool, std::size_t) {});
 
     raw_stream = stream.release();
     io_armed.Signal();
@@ -397,12 +376,10 @@ TEST_F(PipeStreamTest, CrossThreadDeleteWhileWritePending) {
   delete raw_stream;
 
   WaitableEvent cleanup_done(WaitableEvent::ResetPolicy::kAutomatic, false);
-  io_runner_->PostTask(FROM_HERE, [&cleanup_done]() {
-    cleanup_done.Signal();
-  });
+  io_runner_->PostTask(FROM_HERE, [&cleanup_done]() { cleanup_done.Signal(); });
   ASSERT_TRUE(cleanup_done.TimedWait(std::chrono::seconds(5)));
 
-  read_h  = PlatformHandle();
+  read_h = PlatformHandle();
   write_h = PlatformHandle();
   SUCCEED();
 }
@@ -429,7 +406,8 @@ TEST_F(PipeStreamTest, PosixYieldQuotaPreventsStarvation) {
 #if defined(F_SETPIPE_SZ)
   {
     int fd = read_h.GetFd();
-    if (fd >= 0) fcntl(fd, F_SETPIPE_SZ, static_cast<int>(kTotalBytes));
+    if (fd >= 0)
+      fcntl(fd, F_SETPIPE_SZ, static_cast<int>(kTotalBytes));
   }
 #endif
 
@@ -451,16 +429,13 @@ TEST_F(PipeStreamTest, PosixYieldQuotaPreventsStarvation) {
     ASSERT_TRUE(stream->BindPlatformHandle(std::move(read_h)));
 
     auto holder = AcquireIOBuf(kTotalBytes);
-    stream->ReadAsync(holder.buf, kTotalBytes,
-                 [&total_read, &read_done, holder, stream](
-                     bool ok, std::size_t n) {
-                   if (ok) total_read.store(n);
-                   read_done.Signal();
-                 });
-
-    io_runner_->PostTask(FROM_HERE, [&marker_ran]() {
-      marker_ran.store(true);
+    stream->ReadAsync(holder.buf, kTotalBytes, [&total_read, &read_done, holder, stream](bool ok, std::size_t n) {
+      if (ok)
+        total_read.store(n);
+      read_done.Signal();
     });
+
+    io_runner_->PostTask(FROM_HERE, [&marker_ran]() { marker_ran.store(true); });
   });
 
   ASSERT_TRUE(read_done.TimedWait(std::chrono::seconds(10)));
@@ -469,12 +444,11 @@ TEST_F(PipeStreamTest, PosixYieldQuotaPreventsStarvation) {
   writer.join();
   ASSERT_TRUE(write_ok.load());
 
-  EXPECT_TRUE(marker_ran.load())
-      << "Marker task did NOT run  --  drain loop may be starving "
-         "other tasks on the I/O thread.";
+  EXPECT_TRUE(marker_ran.load()) << "Marker task did NOT run  --  drain loop may be starving "
+                                    "other tasks on the I/O thread.";
   EXPECT_EQ(total_read.load(), kTotalBytes);
 }
-#endif  // !defined(_WIN32)
+#endif // !defined(_WIN32)
 
 // ===========================================================================
 // 🟡 Test 4  --  Peer Disconnect (clean EOF / broken pipe)
@@ -502,20 +476,19 @@ TEST_F(PipeStreamTest, PeerDisconnectDeliversCleanEof) {
     ASSERT_TRUE(stream->BindPlatformHandle(std::move(read_h)));
 
     auto holder = AcquireIOBuf(kSmallBufSize);
-    stream->ReadAsync(holder.buf, kSmallBufSize,
-                     [&callback_fired, &saw_eof, &read_done, holder,
-                      stream](bool ok, std::size_t n) {
-                       callback_fired.store(true);
-                       if (!ok || n == 0) saw_eof.store(true);
-                       read_done.Signal();
-                     });
+    stream->ReadAsync(
+        holder.buf, kSmallBufSize, [&callback_fired, &saw_eof, &read_done, holder, stream](bool ok, std::size_t n) {
+          callback_fired.store(true);
+          if (!ok || n == 0)
+            saw_eof.store(true);
+          read_done.Signal();
+        });
   });
 
   ASSERT_TRUE(read_done.TimedWait(std::chrono::seconds(5)));
   EXPECT_TRUE(callback_fired.load());
-  EXPECT_TRUE(saw_eof.load())
-      << "Expected (false, 0) on peer disconnect but got success or "
-         "the callback was never delivered.";
+  EXPECT_TRUE(saw_eof.load()) << "Expected (false, 0) on peer disconnect but got success or "
+                                 "the callback was never delivered.";
 }
 
 // Also test the write direction peer disconnect.
@@ -539,16 +512,14 @@ TEST_F(PipeStreamTest, WriteToDisconnectedPeerFailsCleanly) {
     ASSERT_TRUE(stream->BindPlatformHandle(std::move(write_h)));
 
     auto holder = AcquireIOBuf(kSmallBufSize);
-    stream->WriteAsync(holder.buf, kSmallBufSize,
-                      [&write_done, holder, stream](bool /*ok*/, std::size_t /*n*/) {
-                        write_done.Signal();
-                      });
+    stream->WriteAsync(holder.buf, kSmallBufSize, [&write_done, holder, stream](bool /*ok*/, std::size_t /*n*/) {
+      write_done.Signal();
+    });
   });
 
   ASSERT_TRUE(write_done.TimedWait(std::chrono::seconds(5)));
   SUCCEED();
 }
-
 
 // ===========================================================================
 // 🟡 Test 5  --  Rapid Cancel & Retry
@@ -572,10 +543,9 @@ TEST_F(PipeStreamTest, RapidCancelAndRetryStateMachine) {
     ASSERT_TRUE(stream->BindPlatformHandle(std::move(rh)));
 
     auto holder = AcquireIOBuf(kSmallBufSize);
-    stream->ReadAsync(holder.buf, kSmallBufSize,
-                     [holder](bool, std::size_t) {
-                       // May or may not fire  --  we Close() immediately.
-                     });
+    stream->ReadAsync(holder.buf, kSmallBufSize, [holder](bool, std::size_t) {
+      // May or may not fire  --  we Close() immediately.
+    });
 
     // Cancel before any data arrives.
     stream->Close();
@@ -586,9 +556,7 @@ TEST_F(PipeStreamTest, RapidCancelAndRetryStateMachine) {
     stream.reset();
 
     // Now safe to signal 鈥?ShutdownAndSelfDestruct will run first.
-    io_runner_->PostTask(FROM_HERE, [&phase1_done]() {
-      phase1_done.Signal();
-    });
+    io_runner_->PostTask(FROM_HERE, [&phase1_done]() { phase1_done.Signal(); });
   });
 
   ASSERT_TRUE(phase1_done.TimedWait(std::chrono::seconds(5)));
@@ -610,27 +578,24 @@ TEST_F(PipeStreamTest, RapidCancelAndRetryStateMachine) {
     ASSERT_TRUE(stream2->BindPlatformHandle(std::move(rh)));
 
     auto holder = AcquireIOBuf(kSmallBufSize);
-    stream2->ReadAsync(holder.buf, kSmallBufSize,
-                 [&received, &phase2_done, holder, stream2](
-                     bool ok, std::size_t n) {
-                   if (ok && n > 0)
-                     received.assign(reinterpret_cast<const char*>(holder.buf->data()), n);
-                   phase2_done.Signal();
-                 });
+    stream2->ReadAsync(holder.buf, kSmallBufSize, [&received, &phase2_done, holder, stream2](bool ok, std::size_t n) {
+      if (ok && n > 0)
+        received.assign(reinterpret_cast<const char *>(holder.buf->data()), n);
+      phase2_done.Signal();
+    });
   });
 
   // Write data to the *second* pipe's write end.
   ASSERT_TRUE(WriteAll(h2_write, message.data(), message.size()));
-  h2_write = PlatformHandle();   // close write -> EOF
+  h2_write = PlatformHandle(); // close write -> EOF
 
   ASSERT_TRUE(phase2_done.TimedWait(std::chrono::seconds(5)));
 
   // 🔴 KEY ASSERTION: the second read must have succeeded with the
   // expected payload, proving the state machine was clean after Close().
-  EXPECT_EQ(received, message)
-      << "Second read after cancel/retry did not receive the correct "
-         "data  --  state machine may have stale state from the first "
-         "cancelled operation.";
+  EXPECT_EQ(received, message) << "Second read after cancel/retry did not receive the correct "
+                                  "data  --  state machine may have stale state from the first "
+                                  "cancelled operation.";
 }
 
 // Same for the write path.
@@ -645,13 +610,10 @@ TEST_F(PipeStreamTest, RapidWriteCancelAndRetry) {
     ASSERT_TRUE(stream->BindPlatformHandle(std::move(wh)));
 
     auto holder = AcquireIOBuf(kLargeBufSize);
-    stream->WriteAsync(holder.buf, kLargeBufSize,
-                      [holder](bool, std::size_t) {});
+    stream->WriteAsync(holder.buf, kLargeBufSize, [holder](bool, std::size_t) {});
     stream->Close();
     stream.reset();
-    io_runner_->PostTask(FROM_HERE, [&phase1_done]() {
-      phase1_done.Signal();
-    });
+    io_runner_->PostTask(FROM_HERE, [&phase1_done]() { phase1_done.Signal(); });
   });
 
   ASSERT_TRUE(phase1_done.TimedWait(std::chrono::seconds(5)));
@@ -664,26 +626,22 @@ TEST_F(PipeStreamTest, RapidWriteCancelAndRetry) {
   WaitableEvent phase2_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> write_ok{false};
 
-  io_runner_->PostTask(FROM_HERE,
-                       [&, rh = std::move(h2_read), wh = std::move(h2_write)]() mutable {
+  io_runner_->PostTask(FROM_HERE, [&, rh = std::move(h2_read), wh = std::move(h2_write)]() mutable {
     auto reader2 = std::make_shared<PipeInputStream>(io_runner_);
     ASSERT_TRUE(reader2->BindPlatformHandle(std::move(rh)));
 
     auto read_holder = AcquireIOBuf(kSmallBufSize);
-    reader2->ReadAsync(read_holder.buf, kSmallBufSize,
-                       [read_holder, reader2](bool, std::size_t) {});
+    reader2->ReadAsync(read_holder.buf, kSmallBufSize, [read_holder, reader2](bool, std::size_t) {});
 
     auto stream2 = std::make_shared<PipeOutputStream>(io_runner_);
     ASSERT_TRUE(stream2->BindPlatformHandle(std::move(wh)));
 
     auto holder = AcquireIOBuf(kSmallBufSize);
     std::memcpy(holder.buf->data(), "OK", 2);
-    stream2->WriteAsync(holder.buf, 2u,
-                  [&write_ok, &phase2_done, holder, stream2](
-                      bool ok, std::size_t n) {
-                    write_ok.store(ok && n == 2);
-                    phase2_done.Signal();
-                  });
+    stream2->WriteAsync(holder.buf, 2u, [&write_ok, &phase2_done, holder, stream2](bool ok, std::size_t n) {
+      write_ok.store(ok && n == 2);
+      phase2_done.Signal();
+    });
   });
 
   ASSERT_TRUE(phase2_done.TimedWait(std::chrono::seconds(5)));
@@ -706,28 +664,24 @@ TEST_F(PipeStreamTest, TraceSingleReadAsync) {
   WaitableEvent read_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> callback_fired{false};
 
-  io_runner_->PostTask(
-      FROM_HERE,
-      [&, read_h = std::move(read_h), write_h = std::move(write_h), payload]() mutable {
-        auto writer = std::make_shared<PipeOutputStream>(io_runner_);
-        ASSERT_TRUE(writer->BindPlatformHandle(std::move(write_h)));
+  io_runner_->PostTask(FROM_HERE, [&, read_h = std::move(read_h), write_h = std::move(write_h), payload]() mutable {
+    auto writer = std::make_shared<PipeOutputStream>(io_runner_);
+    ASSERT_TRUE(writer->BindPlatformHandle(std::move(write_h)));
 
-        auto write_holder = AcquireIOBuf(payload.size());
-        std::memcpy(write_holder.buf->data(), payload.data(), payload.size());
-        writer->WriteAsync(write_holder.buf, payload.size(),
-                           [write_holder, writer](bool, std::size_t) {});
+    auto write_holder = AcquireIOBuf(payload.size());
+    std::memcpy(write_holder.buf->data(), payload.data(), payload.size());
+    writer->WriteAsync(write_holder.buf, payload.size(), [write_holder, writer](bool, std::size_t) {});
 
-        auto stream = std::make_shared<PipeInputStream>(io_runner_);
-        ASSERT_TRUE(stream->BindPlatformHandle(std::move(read_h)));
+    auto stream = std::make_shared<PipeInputStream>(io_runner_);
+    ASSERT_TRUE(stream->BindPlatformHandle(std::move(read_h)));
 
-        auto holder = AcquireIOBuf(kSmallBufSize);
-        stream->ReadAsync(holder.buf, kSmallBufSize,
-                         [&callback_fired, &read_done, holder, stream](
-                             bool /*ok*/, std::size_t /*n*/) {
-                           callback_fired.store(true);
-                           read_done.Signal();
-                         });
-      });
+    auto holder = AcquireIOBuf(kSmallBufSize);
+    stream->ReadAsync(
+        holder.buf, kSmallBufSize, [&callback_fired, &read_done, holder, stream](bool /*ok*/, std::size_t /*n*/) {
+          callback_fired.store(true);
+          read_done.Signal();
+        });
+  });
 
   bool done = read_done.TimedWait(std::chrono::seconds(5));
   DisableTracingAndDump("/tmp/pipe_stream_trace.json");
@@ -736,5 +690,5 @@ TEST_F(PipeStreamTest, TraceSingleReadAsync) {
   EXPECT_TRUE(callback_fired.load());
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

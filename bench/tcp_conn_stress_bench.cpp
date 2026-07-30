@@ -48,17 +48,24 @@ namespace {
 using Clock = std::chrono::high_resolution_clock;
 
 class IoThread {
- public:
-  explicit IoThread(const std::string& name) {
+public:
+  explicit IoThread(const std::string &name) {
     nei::Thread::Options opts;
     opts.message_pump_type = nei::MessagePumpType::IO;
     thread_ = std::make_unique<nei::Thread>(name);
     thread_->StartWithOptions(opts);
     runner_ = thread_->GetTaskRunner();
   }
-  ~IoThread() { thread_->Stop(); }
-  nei::scoped_refptr<nei::TaskRunner> runner() const { return runner_; }
- private:
+
+  ~IoThread() {
+    thread_->Stop();
+  }
+
+  nei::scoped_refptr<nei::TaskRunner> runner() const {
+    return runner_;
+  }
+
+private:
   std::unique_ptr<nei::Thread> thread_;
   nei::scoped_refptr<nei::TaskRunner> runner_;
 };
@@ -66,26 +73,28 @@ class IoThread {
 static uint16_t FindFreePort() {
 #if defined(_WIN32)
   SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (s == INVALID_SOCKET) return 0;
+  if (s == INVALID_SOCKET)
+    return 0;
   struct sockaddr_in addr = {};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = 0;
-  ::bind(s, (struct sockaddr*)&addr, sizeof(addr));
+  ::bind(s, (struct sockaddr *)&addr, sizeof(addr));
   int len = sizeof(addr);
-  ::getsockname(s, (struct sockaddr*)&addr, &len);
+  ::getsockname(s, (struct sockaddr *)&addr, &len);
   ::closesocket(s);
   return ntohs(addr.sin_port);
 #else
   int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) return 0;
+  if (fd < 0)
+    return 0;
   struct sockaddr_in addr = {};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = 0;
-  ::bind(fd, (struct sockaddr*)&addr, sizeof(addr));
+  ::bind(fd, (struct sockaddr *)&addr, sizeof(addr));
   socklen_t len = sizeof(addr);
-  ::getsockname(fd, (struct sockaddr*)&addr, &len);
+  ::getsockname(fd, (struct sockaddr *)&addr, &len);
   ::close(fd);
   return ntohs(addr.sin_port);
 #endif
@@ -93,7 +102,10 @@ static uint16_t FindFreePort() {
 
 void RunStressTest(int total_connections) {
   const uint16_t port = FindFreePort();
-  if (port == 0) { std::cerr << "ERROR: no free port" << std::endl; return; }
+  if (port == 0) {
+    std::cerr << "ERROR: no free port" << std::endl;
+    return;
+  }
 
   // Use multiple IO worker threads via Multi-Reactor so the accept
   // load is spread across workers and the listen backlog doesn't
@@ -106,8 +118,7 @@ void RunStressTest(int total_connections) {
 
   IoThread acceptor_thread("stress-acceptor");
 
-  nei::WaitableEvent server_ready(
-      nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+  nei::WaitableEvent server_ready(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<int> server_accepted{0};
   std::atomic<int> server_failed{0};
 
@@ -120,28 +131,26 @@ void RunStressTest(int total_connections) {
   };
 
   // ---- Server: accept all connections (Multi-Reactor) ----
-  acceptor_thread.runner()->PostTask(FROM_HERE,
-      [&, acc_runner = acceptor_thread.runner(), ws = std::move(worker_selector)]() mutable {
-    bool ok = server->Listen(
-        nei::net::IPEndPoint(
-            nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
-        total_connections + 100,
-        [&](bool success,
-            std::unique_ptr<nei::net::TCPClientSocket> accepted) {
-          if (!success) {
-            server_failed.fetch_add(1);
-            return;
-          }
-          server_accepted.fetch_add(1);
-          accepted->Close();
-        },
-        acc_runner,
-        std::move(ws));
-    server_ready.Signal();
-    if (!ok) {
-      std::cerr << "server Listen failed" << std::endl;
-    }
-  });
+  acceptor_thread.runner()->PostTask(
+      FROM_HERE, [&, acc_runner = acceptor_thread.runner(), ws = std::move(worker_selector)]() mutable {
+        bool ok = server->Listen(
+            nei::net::IPEndPoint(nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
+            total_connections + 100,
+            [&](bool success, std::unique_ptr<nei::net::TCPClientSocket> accepted) {
+              if (!success) {
+                server_failed.fetch_add(1);
+                return;
+              }
+              server_accepted.fetch_add(1);
+              accepted->Close();
+            },
+            acc_runner,
+            std::move(ws));
+        server_ready.Signal();
+        if (!ok) {
+          std::cerr << "server Listen failed" << std::endl;
+        }
+      });
 
   server_ready.Wait();
 
@@ -152,8 +161,7 @@ void RunStressTest(int total_connections) {
   const int batch_size = 500;
   std::atomic<int> client_done{0};
   std::atomic<int> client_fail{0};
-  nei::WaitableEvent all_done(
-      nei::WaitableEvent::ResetPolicy::kManual, false);
+  nei::WaitableEvent all_done(nei::WaitableEvent::ResetPolicy::kManual, false);
 
   // Use the acceptor thread's runner for client-side Connect I/O.
   auto cli_runner = acceptor_thread.runner();
@@ -164,8 +172,7 @@ void RunStressTest(int total_connections) {
   while (launched < total_connections) {
     int batch_count = std::min(batch_size, total_connections - launched);
     auto batch_remaining = std::make_shared<std::atomic<int>>(batch_count);
-    auto batch_event = std::make_shared<nei::WaitableEvent>(
-        nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+    auto batch_event = std::make_shared<nei::WaitableEvent>(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
 
     std::vector<std::shared_ptr<nei::net::TCPClientSocket>> batch_clients;
 
@@ -174,14 +181,12 @@ void RunStressTest(int total_connections) {
       batch_clients.push_back(client);
 
       client->Connect(
-          nei::net::IPEndPoint(
-              nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
-          [client, &client_done, &client_fail, &all_done, total_connections,
-           batch_remaining, batch_event](bool ok) {
+          nei::net::IPEndPoint(nei::net::IPAddress::FromIPv4(127, 0, 0, 1), port),
+          [client, &client_done, &client_fail, &all_done, total_connections, batch_remaining, batch_event](bool ok) {
             if (!ok) {
               client_fail.fetch_add(1);
             }
-            client->Close();  // Explicit close to trigger proper cleanup.
+            client->Close(); // Explicit close to trigger proper cleanup.
             if (client_done.fetch_add(1) + 1 == total_connections) {
               all_done.Signal();
             }
@@ -207,7 +212,6 @@ void RunStressTest(int total_connections) {
   server->Close();
   server.reset();
 
-
   // Drain remaining I/O tasks.
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
@@ -221,34 +225,29 @@ void RunStressTest(int total_connections) {
 
   std::cout << "  Connections   : " << total_connections << std::endl;
   std::cout << "  Workers       : " << kWorkers << std::endl;
-  std::cout << "  Server accepts: " << accepted
-            << "  (failures: " << srv_fail << ")" << std::endl;
-  std::cout << "  Client done   : " << cli_done
-            << "  (failures: " << cli_fail << ")" << std::endl;
-  std::cout << "  Elapsed       : "
-            << std::fixed << std::setprecision(3) << elapsed << " s"
-            << std::endl;
+  std::cout << "  Server accepts: " << accepted << "  (failures: " << srv_fail << ")" << std::endl;
+  std::cout << "  Client done   : " << cli_done << "  (failures: " << cli_fail << ")" << std::endl;
+  std::cout << "  Elapsed       : " << std::fixed << std::setprecision(3) << elapsed << " s" << std::endl;
   if (elapsed > 0.001) {
-    std::cout << "  Rate          : "
-              << std::fixed << std::setprecision(1)
-              << (total_connections / elapsed) << " conn/s"
-              << std::endl;
+    std::cout << "  Rate          : " << std::fixed << std::setprecision(1) << (total_connections / elapsed)
+              << " conn/s" << std::endl;
   }
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
 #if defined(_WIN32)
   nei::net::EnsureWsa();
 #endif
   nei::AtExitManager at_exit;
-  nei::ThreadPoolInstance::CreateAndStart(
-      nei::ThreadPoolInstance::InitParams{});
+  nei::ThreadPoolInstance::CreateAndStart(nei::ThreadPoolInstance::InitParams{});
 
   int total = 1000;
-  if (argc > 1) total = std::atoi(argv[1]);
-  if (total <= 0) total = 1000;
+  if (argc > 1)
+    total = std::atoi(argv[1]);
+  if (total <= 0)
+    total = 1000;
 
   std::cout << "=== TCP Connection Stress ===" << std::endl;
   RunStressTest(total);

@@ -33,34 +33,58 @@ static void EncodeUTF8(char32_t cp, std::string &out) {
 // Validates one UTF-8 sequence starting at p[i] (len = total buffer length).
 // On success, sets seq_len to the sequence length and returns true.
 // On failure, seq_len is set to 1 so the caller can skip one byte.
-static bool ValidateUTF8Sequence(const unsigned char *p,
-                                 std::size_t len,
-                                 std::size_t i,
-                                 int &seq_len) {
+static bool ValidateUTF8Sequence(const unsigned char *p, std::size_t len, std::size_t i, int &seq_len) {
   unsigned char c = p[i];
   if (c < 0x80) {
     seq_len = 1;
     return true;
   }
-  if (c < 0xC2) { seq_len = 1; return false; } // 0x80-0xBF: lone continuation; 0xC0-0xC1: overlong
-  if (c < 0xE0) { seq_len = 2; }
-  else if (c < 0xF0) { seq_len = 3; }
-  else if (c <= 0xF4) { seq_len = 4; }
-  else { seq_len = 1; return false; }
+  if (c < 0xC2) {
+    seq_len = 1;
+    return false;
+  } // 0x80-0xBF: lone continuation; 0xC0-0xC1: overlong
+  if (c < 0xE0) {
+    seq_len = 2;
+  } else if (c < 0xF0) {
+    seq_len = 3;
+  } else if (c <= 0xF4) {
+    seq_len = 4;
+  } else {
+    seq_len = 1;
+    return false;
+  }
 
-  if (i + static_cast<std::size_t>(seq_len) > len) { seq_len = 1; return false; }
+  if (i + static_cast<std::size_t>(seq_len) > len) {
+    seq_len = 1;
+    return false;
+  }
 
   for (int j = 1; j < seq_len; ++j) {
-    if ((p[i + j] & 0xC0u) != 0x80u) { seq_len = 1; return false; }
+    if ((p[i + j] & 0xC0u) != 0x80u) {
+      seq_len = 1;
+      return false;
+    }
   }
 
   // Overlong / surrogate / out-of-range checks
   if (seq_len == 3) {
-    if (c == 0xE0 && p[i + 1] < 0xA0) { seq_len = 1; return false; } // overlong
-    if (c == 0xED && p[i + 1] >= 0xA0) { seq_len = 1; return false; } // surrogate D800-DFFF
+    if (c == 0xE0 && p[i + 1] < 0xA0) {
+      seq_len = 1;
+      return false;
+    } // overlong
+    if (c == 0xED && p[i + 1] >= 0xA0) {
+      seq_len = 1;
+      return false;
+    } // surrogate D800-DFFF
   } else if (seq_len == 4) {
-    if (c == 0xF0 && p[i + 1] < 0x90) { seq_len = 1; return false; } // overlong
-    if (c == 0xF4 && p[i + 1] > 0x8F) { seq_len = 1; return false; } // > U+10FFFF
+    if (c == 0xF0 && p[i + 1] < 0x90) {
+      seq_len = 1;
+      return false;
+    } // overlong
+    if (c == 0xF4 && p[i + 1] > 0x8F) {
+      seq_len = 1;
+      return false;
+    } // > U+10FFFF
   }
 
   return true;
@@ -68,13 +92,14 @@ static bool ValidateUTF8Sequence(const unsigned char *p,
 
 // Decodes a validated UTF-8 sequence (seq_len must be correct) starting at p[i].
 static char32_t DecodeUTF8Seq(const unsigned char *p, std::size_t i, int seq_len) {
-  if (seq_len == 1) return p[i];
-  if (seq_len == 2) return ((p[i] & 0x1Fu) << 6) | (p[i + 1] & 0x3Fu);
+  if (seq_len == 1)
+    return p[i];
+  if (seq_len == 2)
+    return ((p[i] & 0x1Fu) << 6) | (p[i + 1] & 0x3Fu);
   if (seq_len == 3) {
     return ((p[i] & 0x0Fu) << 12) | ((p[i + 1] & 0x3Fu) << 6) | (p[i + 2] & 0x3Fu);
   }
-  return ((p[i] & 0x07u) << 18) | ((p[i + 1] & 0x3Fu) << 12) |
-         ((p[i + 2] & 0x3Fu) << 6) | (p[i + 3] & 0x3Fu);
+  return ((p[i] & 0x07u) << 18) | ((p[i + 1] & 0x3Fu) << 12) | ((p[i + 2] & 0x3Fu) << 6) | (p[i + 3] & 0x3Fu);
 }
 
 // Iterates UTF-8 codepoints in |input|, applies |fn| to each, and writes the
@@ -158,40 +183,64 @@ static std::u16string TransformUTF16(std::u16string_view input, Fn &&fn) {
 // Fullwidth ASCII/Latin (U+FF01-U+FF5E) <-> ASCII (U+0021-U+007E)
 // Ideographic space (U+3000) <-> regular space (U+0020)
 static char32_t ToHalfWidthCP(char32_t cp) {
-  if (cp >= 0xFF01u && cp <= 0xFF5Eu) return cp - 0xFF01u + 0x0021u;
-  if (cp == 0x3000u) return 0x0020u;
+  if (cp >= 0xFF01u && cp <= 0xFF5Eu)
+    return cp - 0xFF01u + 0x0021u;
+  if (cp == 0x3000u)
+    return 0x0020u;
   return cp;
 }
 
 static char32_t ToFullWidthCP(char32_t cp) {
-  if (cp >= 0x0021u && cp <= 0x007Eu) return cp - 0x0021u + 0xFF01u;
-  if (cp == 0x0020u) return 0x3000u;
+  if (cp >= 0x0021u && cp <= 0x007Eu)
+    return cp - 0x0021u + 0xFF01u;
+  if (cp == 0x0020u)
+    return 0x3000u;
   return cp;
 }
 
 // Common Chinese punctuation to ASCII (kZhToAscii mode).
 static char32_t ChinesePunctToASCII(char32_t cp) {
   switch (cp) {
-    case 0x3002u: return '.';
-    case 0xFF0Cu: return ',';
-    case 0x3001u: return ',';
-    case 0xFF01u: return '!';
-    case 0xFF1Fu: return '?';
-    case 0xFF1Au: return ':';
-    case 0xFF1Bu: return ';';
-    case 0x300Cu: return '"';
-    case 0x300Du: return '"';
-    case 0x300Eu: return '"';
-    case 0x300Fu: return '"';
-    case 0x2018u: return '\'';
-    case 0x2019u: return '\'';
-    case 0x201Cu: return '"';
-    case 0x201Du: return '"';
-    case 0x2014u: return '-';
-    case 0x2013u: return '-';
-    case 0x2026u: return '.';
-    case 0x00B7u: return '.';
-    default:      return cp;
+  case 0x3002u:
+    return '.';
+  case 0xFF0Cu:
+    return ',';
+  case 0x3001u:
+    return ',';
+  case 0xFF01u:
+    return '!';
+  case 0xFF1Fu:
+    return '?';
+  case 0xFF1Au:
+    return ':';
+  case 0xFF1Bu:
+    return ';';
+  case 0x300Cu:
+    return '"';
+  case 0x300Du:
+    return '"';
+  case 0x300Eu:
+    return '"';
+  case 0x300Fu:
+    return '"';
+  case 0x2018u:
+    return '\'';
+  case 0x2019u:
+    return '\'';
+  case 0x201Cu:
+    return '"';
+  case 0x201Du:
+    return '"';
+  case 0x2014u:
+    return '-';
+  case 0x2013u:
+    return '-';
+  case 0x2026u:
+    return '.';
+  case 0x00B7u:
+    return '.';
+  default:
+    return cp;
   }
 }
 
@@ -202,7 +251,8 @@ static std::string CollapseSpaceRunsUTF8(std::string result) {
   bool prev_space = false;
   for (char c : result) {
     if (c == ' ') {
-      if (!prev_space) out.push_back(c);
+      if (!prev_space)
+        out.push_back(c);
       prev_space = true;
     } else {
       out.push_back(c);
@@ -218,7 +268,8 @@ static std::u16string CollapseSpaceRunsUTF16(std::u16string result) {
   bool prev_space = false;
   for (char16_t c : result) {
     if (c == u' ') {
-      if (!prev_space) out.push_back(c);
+      if (!prev_space)
+        out.push_back(c);
       prev_space = true;
     } else {
       out.push_back(c);
@@ -232,9 +283,7 @@ static std::u16string CollapseSpaceRunsUTF16(std::u16string result) {
 
 // ---- Public API -------------------------------------------------------------
 
-bool NormalizeUnicode(std::string_view input,
-                      UnicodeNormalizationForm form,
-                      std::string *output) {
+bool NormalizeUnicode(std::string_view input, UnicodeNormalizationForm form, std::string *output) {
   if (output == nullptr) {
     return false;
   }
@@ -250,9 +299,7 @@ bool NormalizeUnicode(std::string_view input,
   return true;
 }
 
-bool NormalizeUnicode(std::u16string_view input,
-                      UnicodeNormalizationForm form,
-                      std::u16string *output) {
+bool NormalizeUnicode(std::u16string_view input, UnicodeNormalizationForm form, std::u16string *output) {
   if (output == nullptr) {
     return false;
   }
@@ -281,11 +328,11 @@ std::u16string ToFullWidth(std::u16string_view input) {
   return TransformUTF16(input, ToFullWidthCP);
 }
 
-std::string NormalizeChineseText(std::string_view input,
-                                 SpaceNormalization space_mode,
-                                 PunctuationNormalization punctuation_mode) {
+std::string
+NormalizeChineseText(std::string_view input, SpaceNormalization space_mode, PunctuationNormalization punctuation_mode) {
   std::string result = TransformUTF8(input, [&](char32_t cp) -> char32_t {
-    if (cp == 0x3000u) return 0x0020u; // ideographic space to space
+    if (cp == 0x3000u)
+      return 0x0020u; // ideographic space to space
     if (punctuation_mode == PunctuationNormalization::kZhToAscii)
       return ChinesePunctToASCII(cp);
     return cp;
@@ -299,7 +346,8 @@ std::u16string NormalizeChineseText(std::u16string_view input,
                                     SpaceNormalization space_mode,
                                     PunctuationNormalization punctuation_mode) {
   std::u16string result = TransformUTF16(input, [&](char32_t cp) -> char32_t {
-    if (cp == 0x3000u) return 0x0020u;
+    if (cp == 0x3000u)
+      return 0x0020u;
     if (punctuation_mode == PunctuationNormalization::kZhToAscii)
       return ChinesePunctToASCII(cp);
     return cp;

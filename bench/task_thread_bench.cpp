@@ -21,7 +21,7 @@ constexpr std::uint32_t kDefaultTaskCount = 100000;
 std::atomic<std::uint64_t> g_sum_sink{0};
 std::atomic<std::uint64_t> g_executed_task_count{0};
 
-std::uint32_t ParseTaskCount(int argc, char* argv[]) {
+std::uint32_t ParseTaskCount(int argc, char *argv[]) {
   if (argc < 2) {
     return kDefaultTaskCount;
   }
@@ -32,9 +32,8 @@ std::uint32_t ParseTaskCount(int argc, char* argv[]) {
       throw std::out_of_range("task count out of range");
     }
     return static_cast<std::uint32_t>(parsed);
-  } catch (const std::exception&) {
-    std::cerr << "Invalid task_count: " << argv[1]
-              << "\nUsage: task_thread_bench.exe [task_count]\n";
+  } catch (const std::exception &) {
+    std::cerr << "Invalid task_count: " << argv[1] << "\nUsage: task_thread_bench.exe [task_count]\n";
     return 0;
   }
 }
@@ -51,7 +50,7 @@ struct BenchmarkResult {
   bool verification_ok = false;
 };
 
-bool ParseTracingEnabled(int argc, char* argv[], bool* ok) {
+bool ParseTracingEnabled(int argc, char *argv[], bool *ok) {
   if (ok != nullptr) {
     *ok = true;
   }
@@ -80,29 +79,28 @@ void AddTaskBodyNoArgs() {
   g_sum_sink.fetch_add(1 + 2, std::memory_order_relaxed);
 }
 
-void AddTaskBodyAndSignalLast(std::atomic<std::uint32_t>* pending_task_count,
-                              std::atomic<bool>* posting_done,
-                              nei::WaitableEvent* done_event) {
+void AddTaskBodyAndSignalLast(std::atomic<std::uint32_t> *pending_task_count,
+                              std::atomic<bool> *posting_done,
+                              nei::WaitableEvent *done_event) {
   AddTaskBodyNoArgs();
 
   if (pending_task_count == nullptr || posting_done == nullptr || done_event == nullptr) {
     return;
   }
 
-  const std::uint32_t remaining =
-      pending_task_count->fetch_sub(1, std::memory_order_relaxed) - 1;
+  const std::uint32_t remaining = pending_task_count->fetch_sub(1, std::memory_order_relaxed) - 1;
   if (remaining == 0 && posting_done->load(std::memory_order_acquire)) {
     done_event->Signal();
   }
 }
 
-void SignalDone(nei::WaitableEvent* done_event) {
+void SignalDone(nei::WaitableEvent *done_event) {
   if (done_event != nullptr) {
     done_event->Signal();
   }
 }
 
-BenchmarkResult RunAddBenchmark(nei::TaskRunner& runner, std::uint32_t task_count) {
+BenchmarkResult RunAddBenchmark(nei::TaskRunner &runner, std::uint32_t task_count) {
   std::atomic<std::uint32_t> failed_task_posts(0);
   bool sentinel_failed = false;
   nei::WaitableEvent all_done(nei::WaitableEvent::ResetPolicy::kManual, false);
@@ -112,9 +110,7 @@ BenchmarkResult RunAddBenchmark(nei::TaskRunner& runner, std::uint32_t task_coun
 
   for (std::uint32_t value = 1; value <= task_count; ++value) {
     (void)value;
-    const bool ok = runner.PostTask(
-        FROM_HERE,
-      nei::BindOnce(&AddTaskBodyNoArgs));
+    const bool ok = runner.PostTask(FROM_HERE, nei::BindOnce(&AddTaskBodyNoArgs));
     if (!ok) {
       failed_task_posts.fetch_add(1, std::memory_order_relaxed);
     }
@@ -122,9 +118,7 @@ BenchmarkResult RunAddBenchmark(nei::TaskRunner& runner, std::uint32_t task_coun
 
   // Sequenced runner guarantee: when this sentinel runs, all previously posted
   // tasks have already finished.
-  const bool sentinel_ok = runner.PostTask(
-      FROM_HERE,
-      nei::BindOnce(&SignalDone, &all_done));
+  const bool sentinel_ok = runner.PostTask(FROM_HERE, nei::BindOnce(&SignalDone, &all_done));
   if (!sentinel_ok) {
     sentinel_failed = true;
     all_done.Signal();
@@ -143,13 +137,12 @@ BenchmarkResult RunAddBenchmark(nei::TaskRunner& runner, std::uint32_t task_coun
   result.executed_tasks = g_executed_task_count.load(std::memory_order_relaxed);
   result.expected_sum = static_cast<std::uint64_t>(result.posted_ok) * 3;
   result.sum = g_sum_sink.load(std::memory_order_relaxed);
-  result.verification_ok =
-      (result.executed_tasks == result.posted_ok) && (result.sum == result.expected_sum);
+  result.verification_ok = (result.executed_tasks == result.posted_ok) && (result.sum == result.expected_sum);
   return result;
 }
 
 // Benchmark for delayed tasks (non-fast-path): tests PostDelayedTask instead of PostTask
-BenchmarkResult RunDelayedBenchmark(nei::TaskRunner& runner, std::uint32_t task_count) {
+BenchmarkResult RunDelayedBenchmark(nei::TaskRunner &runner, std::uint32_t task_count) {
   std::atomic<std::uint32_t> failed_task_posts(0);
   std::atomic<std::uint32_t> pending_task_count(0);
   std::atomic<bool> posting_done(false);
@@ -163,10 +156,10 @@ BenchmarkResult RunDelayedBenchmark(nei::TaskRunner& runner, std::uint32_t task_
   for (std::uint32_t value = 1; value <= task_count; ++value) {
     (void)value;
     pending_task_count.fetch_add(1, std::memory_order_relaxed);
-    const bool ok = runner.PostDelayedTask(
-        FROM_HERE,
-        nei::BindOnce(&AddTaskBodyAndSignalLast, &pending_task_count, &posting_done, &all_done),
-        small_delay);
+    const bool ok =
+        runner.PostDelayedTask(FROM_HERE,
+                               nei::BindOnce(&AddTaskBodyAndSignalLast, &pending_task_count, &posting_done, &all_done),
+                               small_delay);
     if (!ok) {
       failed_task_posts.fetch_add(1, std::memory_order_relaxed);
       pending_task_count.fetch_sub(1, std::memory_order_relaxed);
@@ -191,13 +184,12 @@ BenchmarkResult RunDelayedBenchmark(nei::TaskRunner& runner, std::uint32_t task_
   result.executed_tasks = g_executed_task_count.load(std::memory_order_relaxed);
   result.expected_sum = static_cast<std::uint64_t>(result.posted_ok) * 3;
   result.sum = g_sum_sink.load(std::memory_order_relaxed);
-  result.verification_ok =
-      (result.executed_tasks == result.posted_ok) && (result.sum == result.expected_sum);
+  result.verification_ok = (result.executed_tasks == result.posted_ok) && (result.sum == result.expected_sum);
   return result;
 }
 
 // Benchmark for multi-threaded posting: multiple threads post tasks to same runner
-BenchmarkResult RunMultiThreadPostBenchmark(nei::TaskRunner& runner, std::uint32_t task_count) {
+BenchmarkResult RunMultiThreadPostBenchmark(nei::TaskRunner &runner, std::uint32_t task_count) {
   std::atomic<std::uint32_t> failed_task_posts(0);
   bool sentinel_failed = false;
   nei::WaitableEvent all_done(nei::WaitableEvent::ResetPolicy::kManual, false);
@@ -213,9 +205,7 @@ BenchmarkResult RunMultiThreadPostBenchmark(nei::TaskRunner& runner, std::uint32
   for (std::uint32_t t = 0; t < kNumPostThreads; ++t) {
     auto post_lambda = [&runner, &failed_task_posts, t, tasks_per_thread]() {
       for (std::uint32_t i = 0; i < tasks_per_thread; ++i) {
-        const bool ok = runner.PostTask(
-            FROM_HERE,
-            nei::BindOnce(&AddTaskBodyNoArgs));
+        const bool ok = runner.PostTask(FROM_HERE, nei::BindOnce(&AddTaskBodyNoArgs));
         if (!ok) {
           failed_task_posts.fetch_add(1, std::memory_order_relaxed);
         }
@@ -226,15 +216,13 @@ BenchmarkResult RunMultiThreadPostBenchmark(nei::TaskRunner& runner, std::uint32
 
   // Wait for all posting threads to finish
   const auto post_started_at = std::chrono::steady_clock::now();
-  for (auto& future : post_futures) {
+  for (auto &future : post_futures) {
     future.wait();
   }
   const auto post_finished_at = std::chrono::steady_clock::now();
 
   // Post sentinel task to signal completion
-  const bool sentinel_ok = runner.PostTask(
-      FROM_HERE,
-      nei::BindOnce(&SignalDone, &all_done));
+  const bool sentinel_ok = runner.PostTask(FROM_HERE, nei::BindOnce(&SignalDone, &all_done));
   if (!sentinel_ok) {
     sentinel_failed = true;
     all_done.Signal();
@@ -252,14 +240,13 @@ BenchmarkResult RunMultiThreadPostBenchmark(nei::TaskRunner& runner, std::uint32
   result.executed_tasks = g_executed_task_count.load(std::memory_order_relaxed);
   result.expected_sum = static_cast<std::uint64_t>(result.posted_ok) * 3;
   result.sum = g_sum_sink.load(std::memory_order_relaxed);
-  result.verification_ok =
-      (result.executed_tasks == result.posted_ok) && (result.sum == result.expected_sum);
+  result.verification_ok = (result.executed_tasks == result.posted_ok) && (result.sum == result.expected_sum);
   return result;
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   const std::uint32_t task_count = ParseTaskCount(argc, argv);
   if (task_count == 0) {
     return 2;
@@ -294,6 +281,7 @@ int main(int argc, char* argv[]) {
     std::string name;
     BenchmarkResult result;
   };
+
   std::vector<ScenarioResult> all_results;
 
   // Scenario 1: Standard fast-path PostTask
@@ -325,16 +313,14 @@ int main(int argc, char* argv[]) {
   std::cout << '\n';
 
   bool all_passed = true;
-  for (const auto& scenario : all_results) {
-    const auto& res = scenario.result;
+  for (const auto &scenario : all_results) {
+    const auto &res = scenario.result;
     const double post_sec = res.post_elapsed.count() / 1000.0;
     const double total_sec = res.total_elapsed.count() / 1000.0;
     const double post_throughput = post_sec > 0.0 ? static_cast<double>(res.posted_ok) / post_sec : 0.0;
     const double total_throughput = total_sec > 0.0 ? static_cast<double>(res.posted_ok) / total_sec : 0.0;
-    const double post_ns_per_task =
-        res.posted_ok > 0 ? (res.post_elapsed.count() * 1000000.0) / res.posted_ok : 0.0;
-    const double total_ns_per_task =
-        res.posted_ok > 0 ? (res.total_elapsed.count() * 1000000.0) / res.posted_ok : 0.0;
+    const double post_ns_per_task = res.posted_ok > 0 ? (res.post_elapsed.count() * 1000000.0) / res.posted_ok : 0.0;
+    const double total_ns_per_task = res.posted_ok > 0 ? (res.total_elapsed.count() * 1000000.0) / res.posted_ok : 0.0;
     const double drain_ns_per_task = std::max(0.0, total_ns_per_task - post_ns_per_task);
 
     std::cout << "--- " << scenario.name << " ---" << '\n';
@@ -352,8 +338,8 @@ int main(int argc, char* argv[]) {
     std::cout << "Avg total ns/task: " << total_ns_per_task << '\n';
     std::cout << "Verification: " << (res.verification_ok ? "PASS" : "FAIL");
     if (!res.verification_ok) {
-      std::cout << " (executed=" << res.executed_tasks << " vs expected=" << res.posted_ok
-                << ", sum=" << res.sum << " vs expected=" << res.expected_sum << ")";
+      std::cout << " (executed=" << res.executed_tasks << " vs expected=" << res.posted_ok << ", sum=" << res.sum
+                << " vs expected=" << res.expected_sum << ")";
     }
     std::cout << '\n' << '\n';
 

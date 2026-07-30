@@ -23,8 +23,8 @@ namespace {
 // ---- RPC frame constants --------------------------------------------------
 
 // Message type tags.
-constexpr uint8_t kOneWay   = 0;
-constexpr uint8_t kRequest  = 1;
+constexpr uint8_t kOneWay = 0;
+constexpr uint8_t kRequest = 1;
 constexpr uint8_t kResponse = 2;
 
 // RPC header: [1-byte type][8-byte request_id LE].
@@ -32,7 +32,7 @@ constexpr std::size_t kRpcHeaderSize = 9;
 
 // ---- Little-endian helpers for uint64_t -----------------------------------
 
-void WriteUint64LE(uint8_t* dst, uint64_t value) {
+void WriteUint64LE(uint8_t *dst, uint64_t value) {
   dst[0] = static_cast<uint8_t>(value);
   dst[1] = static_cast<uint8_t>(value >> 8);
   dst[2] = static_cast<uint8_t>(value >> 16);
@@ -43,28 +43,22 @@ void WriteUint64LE(uint8_t* dst, uint64_t value) {
   dst[7] = static_cast<uint8_t>(value >> 56);
 }
 
-uint64_t ReadUint64LE(const uint8_t* src) {
-  return (static_cast<uint64_t>(src[0])) |
-         (static_cast<uint64_t>(src[1]) << 8) |
-         (static_cast<uint64_t>(src[2]) << 16) |
-         (static_cast<uint64_t>(src[3]) << 24) |
-         (static_cast<uint64_t>(src[4]) << 32) |
-         (static_cast<uint64_t>(src[5]) << 40) |
-         (static_cast<uint64_t>(src[6]) << 48) |
-         (static_cast<uint64_t>(src[7]) << 56);
+uint64_t ReadUint64LE(const uint8_t *src) {
+  return (static_cast<uint64_t>(src[0])) | (static_cast<uint64_t>(src[1]) << 8) | (static_cast<uint64_t>(src[2]) << 16)
+         | (static_cast<uint64_t>(src[3]) << 24) | (static_cast<uint64_t>(src[4]) << 32)
+         | (static_cast<uint64_t>(src[5]) << 40) | (static_cast<uint64_t>(src[6]) << 48)
+         | (static_cast<uint64_t>(src[7]) << 56);
 }
 
 // ---- RPC frame builder ----------------------------------------------------
 
-scoped_refptr<IOBufferWithSize> BuildRpcFrame(
-    uint8_t type,
-    uint64_t request_id,
-    scoped_refptr<IOBufferWithSize> payload) {
+scoped_refptr<IOBufferWithSize>
+BuildRpcFrame(uint8_t type, uint64_t request_id, scoped_refptr<IOBufferWithSize> payload) {
   const std::size_t payload_len = payload ? payload->size() : 0;
   const std::size_t total = kRpcHeaderSize + payload_len;
   auto buf = IOBufferPool::GetInstance().AcquireBuffer(total);
   buf->data()[0] = type;
-  WriteUint64LE(reinterpret_cast<uint8_t*>(buf->data()) + 1, request_id);
+  WriteUint64LE(reinterpret_cast<uint8_t *>(buf->data()) + 1, request_id);
   if (payload_len > 0) {
     std::memcpy(buf->data() + kRpcHeaderSize, payload->data(), payload_len);
   }
@@ -73,13 +67,11 @@ scoped_refptr<IOBufferWithSize> BuildRpcFrame(
 
 // Parses the RPC header from the beginning of |buf|.
 // Returns the business-payload slice starting after the header.
-scoped_refptr<IOBufferWithSize> ParseRpcFrame(
-    scoped_refptr<IOBufferWithSize> buf,
-    uint8_t* out_type,
-    uint64_t* out_request_id) {
+scoped_refptr<IOBufferWithSize>
+ParseRpcFrame(scoped_refptr<IOBufferWithSize> buf, uint8_t *out_type, uint64_t *out_request_id) {
   DCHECK(buf);
   DCHECK(buf->size() >= kRpcHeaderSize);
-  const uint8_t* data = reinterpret_cast<const uint8_t*>(buf->data());
+  const uint8_t *data = reinterpret_cast<const uint8_t *>(buf->data());
   *out_type = data[0];
   *out_request_id = ReadUint64LE(data + 1);
 
@@ -92,25 +84,22 @@ scoped_refptr<IOBufferWithSize> ParseRpcFrame(
   return payload;
 }
 
-}  // namespace
+} // namespace
 
 // ===========================================================================
 // RpcEndpoint::Impl
 // ===========================================================================
 
 class RpcEndpoint::Impl final {
- public:
+public:
   Impl(scoped_refptr<TaskRunner> io_task_runner,
        scoped_refptr<TaskRunner> client_task_runner,
-       AsyncInputStream* read_stream,
-       AsyncOutputStream* write_stream)
-      : io_task_runner_(std::move(io_task_runner)),
-        client_task_runner_(std::move(client_task_runner)),
-        channel_(std::make_unique<MessageChannel>(io_task_runner_,
-                                                   client_task_runner_,
-                                                   read_stream,
-                                                   write_stream)),
-        weak_factory_(this, FROM_HERE) {
+       AsyncInputStream *read_stream,
+       AsyncOutputStream *write_stream)
+      : io_task_runner_(std::move(io_task_runner))
+      , client_task_runner_(std::move(client_task_runner))
+      , channel_(std::make_unique<MessageChannel>(io_task_runner_, client_task_runner_, read_stream, write_stream))
+      , weak_factory_(this, FROM_HERE) {
     DCHECK(io_task_runner_ != nullptr);
     DCHECK(client_task_runner_ != nullptr);
   }
@@ -126,11 +115,11 @@ class RpcEndpoint::Impl final {
   void Start(ErrorHandler on_error) {
     std::lock_guard<std::mutex> guard(lock_);
     error_handler_ = std::move(on_error);
-    if (!request_handler_) return;  // handler not set yet  --  caller error
+    if (!request_handler_)
+      return; // handler not set yet  --  caller error
 
-    channel_->StartReading(
-        [this](MessageChannel::Message msg) { OnMessageReceived(std::move(msg)); },
-        [this]() { OnChannelError(); });
+    channel_->StartReading([this](MessageChannel::Message msg) { OnMessageReceived(std::move(msg)); },
+                           [this]() { OnChannelError(); });
   }
 
   void SendOneWay(MessageBuffer payload) {
@@ -138,9 +127,7 @@ class RpcEndpoint::Impl final {
     channel_->Send(std::move(frame));
   }
 
-  void SendRequest(MessageBuffer payload,
-                   TimeDelta timeout,
-                   ResponseCallback on_response) {
+  void SendRequest(MessageBuffer payload, TimeDelta timeout, ResponseCallback on_response) {
     const uint64_t id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
     if (id == 0) {
       // Reserve id 0 for potential future use; skip if wraparound hits it.
@@ -163,9 +150,9 @@ class RpcEndpoint::Impl final {
     // Post timer installation to client_task_runner_ (OneShotTimer::Start
     // must be called on its bound sequence).
     auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-    BindPostTask(client_task_runner_,
-                 BindOnce([weak_this, request_id, timeout]() mutable {
-                   if (!weak_this) return;
+    BindPostTask(client_task_runner_, BindOnce([weak_this, request_id, timeout]() mutable {
+                   if (!weak_this)
+                     return;
                    weak_this->InstallTimeoutTimer(request_id, timeout);
                  }))
         .Run();
@@ -176,7 +163,7 @@ class RpcEndpoint::Impl final {
     request_handler_ = std::move(handler);
   }
 
- private:
+private:
   // =========================================================================
   // Message dispatch (called on client_task_runner_ via MessageChannel)
   // =========================================================================
@@ -193,56 +180,57 @@ class RpcEndpoint::Impl final {
     MessageBuffer payload = ParseRpcFrame(std::move(msg), &type, &request_id);
 
     switch (type) {
-      case kOneWay:
-        // Fire-and-forget  --  no built-in dispatch; reserved for future use.
-        break;
+    case kOneWay:
+      // Fire-and-forget  --  no built-in dispatch; reserved for future use.
+      break;
 
-      case kRequest: {
-        RequestHandler handler;
-        {
-          std::lock_guard<std::mutex> guard(lock_);
-          handler = request_handler_;
-        }
-        if (handler) {
-          // Create a ReplyCallback that captures the request_id and sends
-          // the response back through the channel.
-          auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-          ReplyCallback reply_cb = [weak_this, request_id](MessageBuffer response) {
-            if (!weak_this) return;
-            auto frame = BuildRpcFrame(kResponse, request_id, std::move(response));
-            // channel_->Send() is thread-safe.
-            weak_this->channel_->Send(std::move(frame));
-          };
-          handler(std::move(payload), std::move(reply_cb));
-        }
-        break;
+    case kRequest: {
+      RequestHandler handler;
+      {
+        std::lock_guard<std::mutex> guard(lock_);
+        handler = request_handler_;
       }
+      if (handler) {
+        // Create a ReplyCallback that captures the request_id and sends
+        // the response back through the channel.
+        auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
+        ReplyCallback reply_cb = [weak_this, request_id](MessageBuffer response) {
+          if (!weak_this)
+            return;
+          auto frame = BuildRpcFrame(kResponse, request_id, std::move(response));
+          // channel_->Send() is thread-safe.
+          weak_this->channel_->Send(std::move(frame));
+        };
+        handler(std::move(payload), std::move(reply_cb));
+      }
+      break;
+    }
 
-      case kResponse: {
-        ResponseCallback cb;
-        {
-          std::lock_guard<std::mutex> guard(lock_);
-          auto it = pending_requests_.find(request_id);
-          if (it != pending_requests_.end()) {
-            cb = std::move(it->second.callback);
-            // Cancel the timeout timer (its Stop() posts to client runner).
-            if (it->second.timer) {
-              it->second.timer->Stop();
-            }
-            pending_requests_.erase(it);
+    case kResponse: {
+      ResponseCallback cb;
+      {
+        std::lock_guard<std::mutex> guard(lock_);
+        auto it = pending_requests_.find(request_id);
+        if (it != pending_requests_.end()) {
+          cb = std::move(it->second.callback);
+          // Cancel the timeout timer (its Stop() posts to client runner).
+          if (it->second.timer) {
+            it->second.timer->Stop();
           }
+          pending_requests_.erase(it);
         }
-        // Dispatch OUTSIDE the lock.
-        if (cb) {
-          cb(std::move(payload));
-        }
-        break;
       }
+      // Dispatch OUTSIDE the lock.
+      if (cb) {
+        cb(std::move(payload));
+      }
+      break;
+    }
 
-      default:
-        // Unknown message type  --  protocol violation.
-        SignalError();
-        break;
+    default:
+      // Unknown message type  --  protocol violation.
+      SignalError();
+      break;
     }
   }
 
@@ -256,7 +244,7 @@ class RpcEndpoint::Impl final {
       std::lock_guard<std::mutex> guard(lock_);
 
       // Stop all in-flight timers and collect callbacks.
-      for (auto& kv : pending_requests_) {
+      for (auto &kv : pending_requests_) {
         if (kv.second.timer) {
           kv.second.timer->Stop();
         }
@@ -273,7 +261,7 @@ class RpcEndpoint::Impl final {
     // abort to every in-flight SendRequest caller.  This prevents them
     // from hanging indefinitely waiting for a response that will never
     // arrive.
-    for (ResponseCallback& cb : orphaned_callbacks) {
+    for (ResponseCallback &cb : orphaned_callbacks) {
       if (cb) {
         cb(nullptr);
       }
@@ -301,9 +289,9 @@ class RpcEndpoint::Impl final {
 
     auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
     auto timer = std::make_unique<OneShotTimer>(client_task_runner_);
-    timer->Start(FROM_HERE, timeout,
-                 BindOnce([weak_this, request_id]() {
-                   if (!weak_this) return;
+    timer->Start(FROM_HERE, timeout, BindOnce([weak_this, request_id]() {
+                   if (!weak_this)
+                     return;
                    weak_this->OnRequestTimeout(request_id);
                  }));
     it->second.timer = std::move(timer);
@@ -373,12 +361,11 @@ class RpcEndpoint::Impl final {
 
 RpcEndpoint::RpcEndpoint(scoped_refptr<TaskRunner> io_task_runner,
                          scoped_refptr<TaskRunner> client_task_runner,
-                         AsyncInputStream* read_stream,
-                         AsyncOutputStream* write_stream)
-    : impl_(std::make_unique<Impl>(std::move(io_task_runner),
-                                   std::move(client_task_runner),
-                                   read_stream,
-                                   write_stream)) {}
+                         AsyncInputStream *read_stream,
+                         AsyncOutputStream *write_stream)
+    : impl_(
+          std::make_unique<Impl>(std::move(io_task_runner), std::move(client_task_runner), read_stream, write_stream)) {
+}
 
 RpcEndpoint::~RpcEndpoint() = default;
 
@@ -390,9 +377,7 @@ void RpcEndpoint::SendOneWay(MessageBuffer payload) {
   impl_->SendOneWay(std::move(payload));
 }
 
-void RpcEndpoint::SendRequest(MessageBuffer payload,
-                              TimeDelta timeout,
-                              ResponseCallback on_response) {
+void RpcEndpoint::SendRequest(MessageBuffer payload, TimeDelta timeout, ResponseCallback on_response) {
   impl_->SendRequest(std::move(payload), timeout, std::move(on_response));
 }
 
@@ -400,4 +385,4 @@ void RpcEndpoint::SetRequestHandler(RequestHandler handler) {
   impl_->SetRequestHandler(std::move(handler));
 }
 
-}  // namespace nei
+} // namespace nei

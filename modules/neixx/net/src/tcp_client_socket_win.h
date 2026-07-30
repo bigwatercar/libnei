@@ -41,30 +41,26 @@ struct TcpOverlappedContext;
 // TCPClientSocket::Impl (Windows: ConnectEx + WSARecv/WSASend via IOCP)
 // =============================================================================
 
-class TCPClientSocket::Impl final
-    : public RefCountedThreadSafe<Impl>,
-      public MessagePumpForIO::CompletionWatcher {
- public:
+class TCPClientSocket::Impl final : public RefCountedThreadSafe<Impl>, public MessagePumpForIO::CompletionWatcher {
+public:
   Impl();
   // From TCPServerSocket accept  --  socket is already connected, io_runner
   // is bound immediately to prevent accidental Connect() misuse.
   Impl(SOCKET accepted_socket, scoped_refptr<TaskRunner> io_runner);
 
-  bool Connect(const IPEndPoint& addr,
-               TCPClientSocket::ConnectCallback callback,
-               scoped_refptr<TaskRunner> io_runner);
-  void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len,
-                 AsyncInputStream::IOReadCallback callback);
-  void WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len,
-                  AsyncOutputStream::IOWriteCallback callback);
+  bool Connect(const IPEndPoint &addr, TCPClientSocket::ConnectCallback callback, scoped_refptr<TaskRunner> io_runner);
+  void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, AsyncInputStream::IOReadCallback callback);
+  void WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, AsyncOutputStream::IOWriteCallback callback);
   void Close();
   void ShutdownWrite();
-  scoped_refptr<TaskRunner> io_task_runner() const { return io_runner_; }
+
+  scoped_refptr<TaskRunner> io_task_runner() const {
+    return io_runner_;
+  }
 
   // Keep-Alive
-  bool SetKeepAlive(const KeepAliveConfig& config);
-  void StartKeepAliveMonitor(TimeDelta check_interval,
-                             OnceCallback<void()> on_dead);
+  bool SetKeepAlive(const KeepAliveConfig &config);
+  void StartKeepAliveMonitor(TimeDelta check_interval, OnceCallback<void()> on_dead);
   void StopKeepAliveMonitor();
 
   ~Impl();
@@ -74,17 +70,21 @@ class TCPClientSocket::Impl final
   // pending user callbacks, and self-holds until the peer's EOF arrives.
   void Orphan();
 
- private:
+private:
   // MessagePumpForIO::CompletionWatcher
-  void OnFileCanReadWithoutBlocking(NativeIOHandle) override {}
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {}
-  void OnIOCompleted(NativeIOHandle handle, void* overlapped_context,
+  void OnFileCanReadWithoutBlocking(NativeIOHandle) override {
+  }
+
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {
+  }
+
+  void OnIOCompleted(NativeIOHandle handle,
+                     void *overlapped_context,
                      std::uint32_t bytes_transferred,
                      std::uint32_t error_code) override;
 
   void EnsureBound(int family);
-  bool EndPointToSockAddr(const IPEndPoint& ep,
-                          struct sockaddr_storage* out, int* out_len);
+  bool EndPointToSockAddr(const IPEndPoint &ep, struct sockaddr_storage *out, int *out_len);
 
   void RegisterWithPump();
 
@@ -117,8 +117,7 @@ class TCPClientSocket::Impl final
 
   // Actual connect logic (WSASocket, bind, ConnectEx, pump register).
   // Called by Connect() after the trampoline check.
-  bool DoConnect(const IPEndPoint& addr,
-                 TCPClientSocket::ConnectCallback callback);
+  bool DoConnect(const IPEndPoint &addr, TCPClientSocket::ConnectCallback callback);
 
   // Ensures the socket is registered with the current thread's IOCP.
   // Called lazily on first ReadAsync/WriteAsync to support Multi-Reactor
@@ -140,9 +139,9 @@ class TCPClientSocket::Impl final
   std::unique_ptr<TcpOverlappedContext> cached_read_ctx_;
   std::unique_ptr<TcpOverlappedContext> cached_write_ctx_;
 
-  TcpOverlappedContext* AcquireReadCtx();
-  TcpOverlappedContext* AcquireWriteCtx();
-  void RecycleCtx(TcpOverlappedContext* ctx);
+  TcpOverlappedContext *AcquireReadCtx();
+  TcpOverlappedContext *AcquireWriteCtx();
+  void RecycleCtx(TcpOverlappedContext *ctx);
 
   // ---- Keep-Alive ------------------------------------------------
   void OnKeepAliveCheck();
@@ -167,7 +166,7 @@ struct TcpOverlappedContext {
   enum class Op { kConnect, kRead, kWrite } op = Op::kRead;
 
   TCPClientSocket::ConnectCallback connect_cb;
-  AsyncInputStream::IOReadCallback   read_cb;
+  AsyncInputStream::IOReadCallback read_cb;
   AsyncOutputStream::IOWriteCallback write_cb;
 
   // Keeps the Impl alive while the OVERLAPPED is in-flight.  When IOCP
@@ -183,7 +182,7 @@ struct TcpOverlappedContext {
   void Reset() {
     buffer.reset();
     buf_len = 0;
-    read_cb  = {};
+    read_cb = {};
     write_cb = {};
     connect_cb = {};
     self_ref.reset();
@@ -193,7 +192,7 @@ struct TcpOverlappedContext {
   }
 };
 
-}  // namespace nei::net
+} // namespace nei::net
 
 // =============================================================================
 // C10K guidance constants
@@ -208,7 +207,7 @@ struct TcpOverlappedContext {
 // perform a synchronous recv().  This keeps kernel memory near zero for
 // idle sockets.
 // =============================================================================
-constexpr std::size_t kDefaultRecvBufferSize = 4096;  // 4 KB
+constexpr std::size_t kDefaultRecvBufferSize = 4096; // 4 KB
 
-#endif  // _WIN32
-#endif  // NEIXX_NET_TCP_CLIENT_SOCKET_WIN_H_
+#endif // _WIN32
+#endif // NEIXX_NET_TCP_CLIENT_SOCKET_WIN_H_

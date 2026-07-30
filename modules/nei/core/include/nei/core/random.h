@@ -24,8 +24,7 @@ extern "C" {
  *          underscore.  These characters are safe for filenames on
  *          Windows, Linux, and macOS.
  */
-#define NEI_RANDOM_DEFAULT_CHARSET \
-  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+#define NEI_RANDOM_DEFAULT_CHARSET "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
 
 /**
  * @brief Generate a random string using characters from a given charset.
@@ -74,18 +73,16 @@ NEI_API int nei_random_buffer(void *out, size_t len);
 #include <string>
 #include <vector>
 
-inline std::string nei_random_string(size_t len,
-                                     const std::string &charset = {}) {
-    std::string result(len, '\0');
-    nei_random_string(&result[0], len,
-                      charset.empty() ? nullptr : charset.c_str());
-    return result;
+inline std::string nei_random_string(size_t len, const std::string &charset = {}) {
+  std::string result(len, '\0');
+  nei_random_string(&result[0], len, charset.empty() ? nullptr : charset.c_str());
+  return result;
 }
 
 inline std::vector<uint8_t> nei_random_buffer(size_t len) {
-    std::vector<uint8_t> result(len);
-    nei_random_buffer(result.data(), len);
-    return result;
+  std::vector<uint8_t> result(len);
+  nei_random_buffer(result.data(), len);
+  return result;
 }
 
 #endif /* __cplusplus */

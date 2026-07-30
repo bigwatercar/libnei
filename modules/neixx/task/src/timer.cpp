@@ -24,11 +24,12 @@ namespace nei {
 // =============================================================================
 
 class OneShotTimer::Impl {
- public:
+public:
   Impl() = default;
 
   explicit Impl(scoped_refptr<TaskRunner> task_runner)
-      : task_runner_(std::move(task_runner)) {}
+      : task_runner_(std::move(task_runner)) {
+  }
 
   ~Impl() {
     // 析构时确保 WeakPtr 失效，防止在途回调访问已销毁对象。
@@ -36,7 +37,7 @@ class OneShotTimer::Impl {
     weak_ptr_factory_.InvalidateWeakPtrs();
   }
 
-  void Start(const Location& from_here, TimeDelta delay, OnceCallback<void()> task) {
+  void Start(const Location &from_here, TimeDelta delay, OnceCallback<void()> task) {
     DCHECK(sequence_checker_.CalledOnValidSequence());
 
     if (!task_runner_) {
@@ -58,10 +59,7 @@ class OneShotTimer::Impl {
     //   自动校验其有效性（失效则静默跳过）。std::invoke 通过
     //   WeakPtr::operator->() 获取 Impl* 来调用成员函数。
     //   WeakPtrFactory 的惰性 flag 重建机制确保 Stop() 后新 WeakPtr 有效。
-    task_runner_->PostDelayedTask(
-        from_here,
-        BindOnce(&Impl::OnTimerFired, weak_ptr_factory_.GetWeakPtr()),
-        delay);
+    task_runner_->PostDelayedTask(from_here, BindOnce(&Impl::OnTimerFired, weak_ptr_factory_.GetWeakPtr()), delay);
   }
 
   void Stop() {
@@ -81,9 +79,11 @@ class OneShotTimer::Impl {
     return is_running_;
   }
 
-  const Location& posted_from() const { return posted_from_; }
+  const Location &posted_from() const {
+    return posted_from_;
+  }
 
- private:
+private:
   // ---------------------------------------------------------------------------
   // OnTimerFired  --  延迟任务到期回调
   //
@@ -136,17 +136,18 @@ class OneShotTimer::Impl {
 // =============================================================================
 
 class RepeatingTimer::Impl {
- public:
+public:
   Impl() = default;
 
   explicit Impl(scoped_refptr<TaskRunner> task_runner)
-      : task_runner_(std::move(task_runner)) {}
+      : task_runner_(std::move(task_runner)) {
+  }
 
   ~Impl() {
     weak_ptr_factory_.InvalidateWeakPtrs();
   }
 
-  void Start(const Location& from_here, TimeDelta delay, RepeatingCallback<void()> task) {
+  void Start(const Location &from_here, TimeDelta delay, RepeatingCallback<void()> task) {
     DCHECK(sequence_checker_.CalledOnValidSequence());
 
     if (!task_runner_) {
@@ -180,18 +181,17 @@ class RepeatingTimer::Impl {
     return is_running_;
   }
 
-  const Location& posted_from() const { return posted_from_; }
+  const Location &posted_from() const {
+    return posted_from_;
+  }
 
- private:
+private:
   // ---------------------------------------------------------------------------
   // ScheduleNextTick  --  投递下一次定时任务
   // ---------------------------------------------------------------------------
   void ScheduleNextTick() {
     DCHECK(sequence_checker_.CalledOnValidSequence());
-    task_runner_->PostDelayedTask(
-        posted_from_,
-        BindOnce(&Impl::OnTimerFired, weak_ptr_factory_.GetWeakPtr()),
-        delay_);
+    task_runner_->PostDelayedTask(posted_from_, BindOnce(&Impl::OnTimerFired, weak_ptr_factory_.GetWeakPtr()), delay_);
   }
 
   // ---------------------------------------------------------------------------
@@ -215,8 +215,8 @@ class RepeatingTimer::Impl {
     // 先拷贝到局部变量再执行，防止回调内调用 Stop() 导致 user_task_
     // 被销毁而 Run() 仍在访问闭包内存（use-after-destroy / SEH）。
     if (user_task_) {
-      RepeatingCallback<void()> task = user_task_;  // 拷贝 -> 引用计数 +1（或 SBO copy）
-      task.Run();  // 安全：即使 Stop() 销毁 user_task_，task 仍持有引用
+      RepeatingCallback<void()> task = user_task_; // 拷贝 -> 引用计数 +1（或 SBO copy）
+      task.Run();                                  // 安全：即使 Stop() 销毁 user_task_，task 仍持有引用
     }
 
     // *** 自毁灭防御（Re-entrancy Guard）***
@@ -246,16 +246,17 @@ class RepeatingTimer::Impl {
 // OneShotTimer  --  公开接口实现
 // =============================================================================
 
-OneShotTimer::OneShotTimer() : impl_(new Impl()) {}
+OneShotTimer::OneShotTimer()
+    : impl_(new Impl()) {
+}
 
 OneShotTimer::OneShotTimer(scoped_refptr<TaskRunner> task_runner)
-    : impl_(new Impl(std::move(task_runner))) {}
+    : impl_(new Impl(std::move(task_runner))) {
+}
 
 OneShotTimer::~OneShotTimer() = default;
 
-void OneShotTimer::Start(const Location& from_here,
-                         TimeDelta delay,
-                         OnceCallback<void()> task) {
+void OneShotTimer::Start(const Location &from_here, TimeDelta delay, OnceCallback<void()> task) {
   impl_->Start(from_here, delay, std::move(task));
 }
 
@@ -267,7 +268,7 @@ bool OneShotTimer::IsRunning() const {
   return impl_->IsRunning();
 }
 
-const Location& OneShotTimer::posted_from() const {
+const Location &OneShotTimer::posted_from() const {
   return impl_->posted_from();
 }
 
@@ -275,16 +276,17 @@ const Location& OneShotTimer::posted_from() const {
 // RepeatingTimer  --  公开接口实现
 // =============================================================================
 
-RepeatingTimer::RepeatingTimer() : impl_(new Impl()) {}
+RepeatingTimer::RepeatingTimer()
+    : impl_(new Impl()) {
+}
 
 RepeatingTimer::RepeatingTimer(scoped_refptr<TaskRunner> task_runner)
-    : impl_(new Impl(std::move(task_runner))) {}
+    : impl_(new Impl(std::move(task_runner))) {
+}
 
 RepeatingTimer::~RepeatingTimer() = default;
 
-void RepeatingTimer::Start(const Location& from_here,
-                           TimeDelta delay,
-                           RepeatingCallback<void()> task) {
+void RepeatingTimer::Start(const Location &from_here, TimeDelta delay, RepeatingCallback<void()> task) {
   impl_->Start(from_here, delay, std::move(task));
 }
 
@@ -296,8 +298,8 @@ bool RepeatingTimer::IsRunning() const {
   return impl_->IsRunning();
 }
 
-const Location& RepeatingTimer::posted_from() const {
+const Location &RepeatingTimer::posted_from() const {
   return impl_->posted_from();
 }
 
-}  // namespace nei
+} // namespace nei

@@ -16,8 +16,8 @@ namespace nei {
 namespace {
 
 class RecordingPump final : public MessagePump {
- public:
-  void Run(Delegate* delegate) override {
+public:
+  void Run(Delegate *delegate) override {
     delegate_ = delegate;
   }
 
@@ -28,7 +28,7 @@ class RecordingPump final : public MessagePump {
     schedule_work_calls_.fetch_add(1);
   }
 
-  void ScheduleDelayedWork(const TimeTicks& delayed_run_time) override {
+  void ScheduleDelayedWork(const TimeTicks &delayed_run_time) override {
     AutoLock lock(lock_);
     delayed_run_times_.push_back(delayed_run_time);
   }
@@ -42,15 +42,15 @@ class RecordingPump final : public MessagePump {
     return delayed_run_times_;
   }
 
- private:
+private:
   mutable Lock lock_;
-  Delegate* delegate_ = nullptr;
+  Delegate *delegate_ = nullptr;
   std::atomic<int> schedule_work_calls_{0};
   std::vector<TimeTicks> delayed_run_times_;
 };
 
 class ScopedSingleQueueFastPathToggle final {
- public:
+public:
   explicit ScopedSingleQueueFastPathToggle(bool enabled)
       : previous_(SequenceManager::IsSingleQueueFastPathEnabledForTesting()) {
     SequenceManager::SetSingleQueueFastPathEnabledForTesting(enabled);
@@ -60,7 +60,7 @@ class ScopedSingleQueueFastPathToggle final {
     SequenceManager::SetSingleQueueFastPathEnabledForTesting(previous_);
   }
 
- private:
+private:
   bool previous_;
 };
 
@@ -70,9 +70,7 @@ TEST(SequenceManagerTest, RunsImmediateTask) {
   ASSERT_TRUE(runner);
 
   std::atomic<int> executed{0};
-  std::thread run_thread([&manager]() {
-    manager.Run();
-  });
+  std::thread run_thread([&manager]() { manager.Run(); });
 
   runner->PostTask(FROM_HERE, [&executed, &manager]() {
     executed.fetch_add(1);
@@ -91,18 +89,17 @@ TEST(SequenceManagerTest, RunsDelayedTaskAfterDeadline) {
   std::atomic<bool> executed{false};
   std::atomic<long long> elapsed_ms{0};
 
-  std::thread run_thread([&manager]() {
-    manager.Run();
-  });
+  std::thread run_thread([&manager]() { manager.Run(); });
 
   const TimeTicks start = TimeTicks::Now();
-  runner->PostDelayedTask(FROM_HERE,
-                          [&executed, &elapsed_ms, start, &manager]() {
-                            elapsed_ms.store((TimeTicks::Now() - start).InMilliseconds());
-                            executed.store(true);
-                            manager.Quit();
-                          },
-                          TimeDelta::FromMilliseconds(60));
+  runner->PostDelayedTask(
+      FROM_HERE,
+      [&executed, &elapsed_ms, start, &manager]() {
+        elapsed_ms.store((TimeTicks::Now() - start).InMilliseconds());
+        executed.store(true);
+        manager.Quit();
+      },
+      TimeDelta::FromMilliseconds(60));
 
   run_thread.join();
 
@@ -118,18 +115,17 @@ TEST(SequenceManagerTest, DelayedTaskFollowsRealPumpWakeupPath) {
   std::atomic<bool> executed{false};
   std::atomic<long long> elapsed_ms{0};
 
-  std::thread run_thread([&manager]() {
-    manager.Run();
-  });
+  std::thread run_thread([&manager]() { manager.Run(); });
 
   const TimeTicks start = TimeTicks::Now();
-  runner->PostDelayedTask(FROM_HERE,
-                          [&executed, &elapsed_ms, start, &manager]() {
-                            elapsed_ms.store((TimeTicks::Now() - start).InMilliseconds());
-                            executed.store(true);
-                            manager.Quit();
-                          },
-                          TimeDelta::FromMilliseconds(120));
+  runner->PostDelayedTask(
+      FROM_HERE,
+      [&executed, &elapsed_ms, start, &manager]() {
+        elapsed_ms.store((TimeTicks::Now() - start).InMilliseconds());
+        executed.store(true);
+        manager.Quit();
+      },
+      TimeDelta::FromMilliseconds(120));
 
   std::this_thread::sleep_for(std::chrono::milliseconds(25));
   EXPECT_FALSE(executed.load());
@@ -151,13 +147,9 @@ TEST(SequenceManagerTest, RunsTasksFromMultipleQueues) {
   std::atomic<int> executed_a{0};
   std::atomic<int> executed_b{0};
 
-  std::thread run_thread([&manager]() {
-    manager.Run();
-  });
+  std::thread run_thread([&manager]() { manager.Run(); });
 
-  runner_a->PostTask(FROM_HERE, [&executed_a]() {
-    executed_a.fetch_add(1);
-  });
+  runner_a->PostTask(FROM_HERE, [&executed_a]() { executed_a.fetch_add(1); });
   runner_b->PostTask(FROM_HERE, [&executed_b, &manager]() {
     executed_b.fetch_add(1);
     manager.Quit();
@@ -177,9 +169,7 @@ TEST(SequenceManagerTest, RunsImmediateTaskWhenSingleQueueFastPathDisabled) {
   ASSERT_TRUE(runner);
 
   std::atomic<int> executed{0};
-  std::thread run_thread([&manager]() {
-    manager.Run();
-  });
+  std::thread run_thread([&manager]() { manager.Run(); });
 
   runner->PostTask(FROM_HERE, [&executed, &manager]() {
     executed.fetch_add(1);
@@ -195,8 +185,8 @@ TEST(SequenceManagerTest, CurrentThreadBindingIsClearedAfterRunReturns) {
   scoped_refptr<TaskRunner> runner = manager.CreateTaskRunner();
   ASSERT_TRUE(runner);
 
-  std::atomic<SequenceManager*> current_inside_run{nullptr};
-  std::atomic<SequenceManager*> current_after_run{reinterpret_cast<SequenceManager*>(1)};
+  std::atomic<SequenceManager *> current_inside_run{nullptr};
+  std::atomic<SequenceManager *> current_after_run{reinterpret_cast<SequenceManager *>(1)};
 
   std::thread run_thread([&manager, &current_after_run]() {
     manager.Run();
@@ -271,7 +261,7 @@ TEST(SequenceManagerTest, HighPriorityQueuesReceiveMoreSelectorSlotsThanLowPrior
 
 TEST(SequenceManagerTest, EarlierDelayedTaskSchedulesEarlierWakeup) {
   auto pump = std::make_unique<RecordingPump>();
-  RecordingPump* pump_raw = pump.get();
+  RecordingPump *pump_raw = pump.get();
   SequenceManager manager(std::move(pump));
   scoped_refptr<TaskRunner> runner = manager.CreateTaskRunner();
   ASSERT_TRUE(runner);
@@ -299,9 +289,7 @@ TEST(SequenceManagerTest, MultiQueueBurstDoesNotStarveAnyQueue) {
   std::vector<char> execution_order;
   execution_order.reserve(kTasksPerQueue * 2);
 
-  std::thread run_thread([&manager]() {
-    manager.Run();
-  });
+  std::thread run_thread([&manager]() { manager.Run(); });
 
   for (int i = 0; i < kTasksPerQueue; ++i) {
     runner_a->PostTask(FROM_HERE, [&remaining, &manager, &order_mutex, &execution_order]() {
@@ -346,16 +334,13 @@ TEST(SequenceManagerTest, ShutdownDuringConcurrentPostingDoesNotDeadlockOrCrash)
     std::atomic<int> post_success{0};
     std::atomic<int> executed{0};
 
-    std::thread run_thread([&manager]() {
-      manager.Run();
-    });
+    std::thread run_thread([&manager]() { manager.Run(); });
 
     std::thread poster([&]() {
       while (keep_posting.load(std::memory_order_relaxed)) {
         post_attempts.fetch_add(1, std::memory_order_relaxed);
-        const bool ok = runner->PostTask(FROM_HERE, [&executed]() {
-          executed.fetch_add(1, std::memory_order_relaxed);
-        });
+        const bool ok =
+            runner->PostTask(FROM_HERE, [&executed]() { executed.fetch_add(1, std::memory_order_relaxed); });
         if (ok) {
           post_success.fetch_add(1, std::memory_order_relaxed);
         }
@@ -370,8 +355,7 @@ TEST(SequenceManagerTest, ShutdownDuringConcurrentPostingDoesNotDeadlockOrCrash)
     run_thread.join();
 
     EXPECT_GE(post_attempts.load(std::memory_order_relaxed), 1);
-    EXPECT_LE(executed.load(std::memory_order_relaxed),
-              post_success.load(std::memory_order_relaxed));
+    EXPECT_LE(executed.load(std::memory_order_relaxed), post_success.load(std::memory_order_relaxed));
   }
 }
 
@@ -426,12 +410,8 @@ TEST(SequenceManagerTest, EmptyHighPriorityBucketDoesNotInflateLowPriorityQuota)
   std::atomic<int> uv_executed{0};
 
   for (int i = 0; i < kTasksPerQueue; ++i) {
-    ub_runner->PostTask(FROM_HERE, [&ub_executed]() {
-      ub_executed.fetch_add(1, std::memory_order_relaxed);
-    });
-    uv_runner->PostTask(FROM_HERE, [&uv_executed]() {
-      uv_executed.fetch_add(1, std::memory_order_relaxed);
-    });
+    ub_runner->PostTask(FROM_HERE, [&ub_executed]() { ub_executed.fetch_add(1, std::memory_order_relaxed); });
+    uv_runner->PostTask(FROM_HERE, [&uv_executed]() { uv_executed.fetch_add(1, std::memory_order_relaxed); });
   }
 
   manager.DoWork();
@@ -454,21 +434,19 @@ TEST(SequenceManagerTest, EmptyHighPriorityBucketDoesNotInflateLowPriorityQuota)
   // Threshold: UV must get fewer picks than UB. If the scheduler is broken and
   // UV is eating UB's quota, UV would outpace or match UB even though UB has a
   // 4:2 slot advantage. Requiring ub_ran > uv_ran is a strong, stable signal.
-  EXPECT_GT(ub_ran, uv_ran)
-      << "UB should dominate UV in pick count (4 UB slots vs 2 UV slots). "
-      << "Got UB=" << ub_ran << " UV=" << uv_ran << " total=" << total_ran << ". "
-      << "If UV >= UB, UV is inflating into UB's quota budget.";
+  EXPECT_GT(ub_ran, uv_ran) << "UB should dominate UV in pick count (4 UB slots vs 2 UV slots). "
+                            << "Got UB=" << ub_ran << " UV=" << uv_ran << " total=" << total_ran << ". "
+                            << "If UV >= UB, UV is inflating into UB's quota budget.";
 
   // Additional: UV should not exceed half the total picks. With the fix,
   // UV gets ~2/7 ≈ 28.6%; with the bug it would approach 6/7 ≈ 85.7%.
   // Checking UV < 50% of total distinguishes the two clearly.
-  EXPECT_LT(uv_ran * 2, total_ran)
-      << "UV consumed more than half of all picks (" << uv_ran << "/" << total_ran << "). "
-      << "Expected UV < 50% of picks (theoretical 2/7 = 28.6%).";
+  EXPECT_LT(uv_ran * 2, total_ran) << "UV consumed more than half of all picks (" << uv_ran << "/" << total_ran << "). "
+                                   << "Expected UV < 50% of picks (theoretical 2/7 = 28.6%).";
 
   EXPECT_GT(uv_ran, 0) << "UV tasks should have run";
   EXPECT_GT(ub_ran, 0) << "UB tasks should have run";
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

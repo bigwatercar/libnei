@@ -18,7 +18,7 @@
 // Defined here (not in the header) because it depends on the full definition
 // of IOBufferPool, which is only available in this translation unit.
 template <>
-void nei::LeakySingletonTraits<nei::IOBufferPool>::Delete(nei::IOBufferPool* x) {
+void nei::LeakySingletonTraits<nei::IOBufferPool>::Delete(nei::IOBufferPool *x) {
   if (x) {
     x->PurgeMemory();
     // Intentionally do NOT delete x  --  the shell stays alive to prevent
@@ -41,36 +41,36 @@ bool IsPooledBucket(std::size_t block_size) {
 
 std::size_t DefaultBucketLimit(std::size_t block_size) {
   switch (block_size) {
-    case kPage4K:
-      return kDefault4KCacheLimit;
-    case kPage64K:
-      return kDefault64KCacheLimit;
-    default:
-      return 0u;
+  case kPage4K:
+    return kDefault4KCacheLimit;
+  case kPage64K:
+    return kDefault64KCacheLimit;
+  default:
+    return 0u;
   }
 }
 
-}  // namespace
+} // namespace
 
-IOBuffer::IOBuffer(unsigned char* data) : data_(data) {}
+IOBuffer::IOBuffer(unsigned char *data)
+    : data_(data) {
+}
 
 IOBuffer::~IOBuffer() = default;
 
 IOBufferWithSize::IOBufferWithSize(std::size_t size)
-    : IOBufferWithSize(size,
-                       std::make_unique<unsigned char[]>(std::max<std::size_t>(1u, size)),
-                       nullptr,
-                       nullptr) {}
+    : IOBufferWithSize(size, std::make_unique<unsigned char[]>(std::max<std::size_t>(1u, size)), nullptr, nullptr) {
+}
 
 IOBufferWithSize::IOBufferWithSize(std::size_t size,
                                    std::unique_ptr<unsigned char[]> storage,
                                    RecycleFunc recycle_func,
-                                   void* recycle_context)
-    : IOBuffer(storage.get()),
-      storage_(std::move(storage)),
-      size_(size),
-      recycle_func_(recycle_func),
-      recycle_context_(recycle_context) {
+                                   void *recycle_context)
+    : IOBuffer(storage.get())
+    , storage_(std::move(storage))
+    , size_(size)
+    , recycle_func_(recycle_func)
+    , recycle_context_(recycle_context) {
   DCHECK(storage_ != nullptr);
 }
 
@@ -80,13 +80,16 @@ IOBufferWithSize::~IOBufferWithSize() {
   }
 }
 
-WrappedIOBuffer::WrappedIOBuffer(unsigned char* data) : IOBuffer(data) {}
+WrappedIOBuffer::WrappedIOBuffer(unsigned char *data)
+    : IOBuffer(data) {
+}
 
 WrappedIOBuffer::~WrappedIOBuffer() = default;
 
-DrainableIOBuffer::DrainableIOBuffer(scoped_refptr<IOBuffer> base_buffer,
-                                     std::size_t size)
-    : IOBuffer(nullptr), base_buffer_(std::move(base_buffer)), size_(size) {
+DrainableIOBuffer::DrainableIOBuffer(scoped_refptr<IOBuffer> base_buffer, std::size_t size)
+    : IOBuffer(nullptr)
+    , base_buffer_(std::move(base_buffer))
+    , size_(size) {
   DCHECK(base_buffer_ != nullptr);
   RefreshDataPointer();
 }
@@ -127,7 +130,7 @@ void DrainableIOBuffer::RefreshDataPointer() {
   set_data(base_buffer_->data() + offset_);
 }
 
-IOBufferPool& IOBufferPool::GetInstance() {
+IOBufferPool &IOBufferPool::GetInstance() {
   // Delegate to the Singleton template with LeakySingletonTraits.
   //
   // The specialized LeakySingletonTraits<IOBufferPool>::Delete() (defined
@@ -148,7 +151,7 @@ scoped_refptr<IOBufferWithSize> IOBufferPool::AcquireBuffer(std::size_t size) {
   std::unique_ptr<unsigned char[]> storage;
   if (IsPooledBucket(normalized_size)) {
     std::lock_guard<std::mutex> lock(lock_);
-    Bucket& bucket = GetOrCreateBucket(normalized_size);
+    Bucket &bucket = GetOrCreateBucket(normalized_size);
     if (!bucket.free_blocks.empty()) {
       storage = std::move(bucket.free_blocks.back());
       bucket.free_blocks.pop_back();
@@ -160,23 +163,19 @@ scoped_refptr<IOBufferWithSize> IOBufferPool::AcquireBuffer(std::size_t size) {
   }
 
   IOBufferWithSize::RecycleFunc recycle_func = nullptr;
-  void* recycle_context = nullptr;
+  void *recycle_context = nullptr;
   if (IsPooledBucket(normalized_size)) {
     recycle_func = &IOBufferPool::RecycleStorageThunk;
     recycle_context = this;
   }
 
   return scoped_refptr<IOBufferWithSize>(
-      new IOBufferWithSize(normalized_size,
-                           std::move(storage),
-                           recycle_func,
-                           recycle_context));
+      new IOBufferWithSize(normalized_size, std::move(storage), recycle_func, recycle_context));
 }
 
-void IOBufferPool::SetBucketLimitForTesting(std::size_t bucket_size,
-                                            std::size_t max_cached_blocks) {
+void IOBufferPool::SetBucketLimitForTesting(std::size_t bucket_size, std::size_t max_cached_blocks) {
   std::lock_guard<std::mutex> lock(lock_);
-  Bucket& bucket = GetOrCreateBucket(bucket_size);
+  Bucket &bucket = GetOrCreateBucket(bucket_size);
   bucket.max_cached_blocks = max_cached_blocks;
   while (bucket.free_blocks.size() > bucket.max_cached_blocks) {
     bucket.free_blocks.pop_back();
@@ -185,7 +184,7 @@ void IOBufferPool::SetBucketLimitForTesting(std::size_t bucket_size,
 
 void IOBufferPool::PurgeMemory() {
   std::lock_guard<std::mutex> lock(lock_);
-  for (Bucket& bucket : buckets_) {
+  for (Bucket &bucket : buckets_) {
     bucket.free_blocks.clear();
   }
 }
@@ -195,25 +194,24 @@ IOBufferPool::IOBufferPool() = default;
 IOBufferPool::~IOBufferPool() = default;
 
 // static
-void IOBufferPool::RecycleStorageThunk(void* context,
+void IOBufferPool::RecycleStorageThunk(void *context,
                                        std::size_t block_size,
                                        std::unique_ptr<unsigned char[]> storage) {
   if (context == nullptr || storage == nullptr) {
     return;
   }
 
-  static_cast<IOBufferPool*>(context)->RecycleStorage(block_size, std::move(storage));
+  static_cast<IOBufferPool *>(context)->RecycleStorage(block_size, std::move(storage));
 }
 
-void IOBufferPool::RecycleStorage(std::size_t block_size,
-                                  std::unique_ptr<unsigned char[]> storage) {
+void IOBufferPool::RecycleStorage(std::size_t block_size, std::unique_ptr<unsigned char[]> storage) {
   DCHECK(storage != nullptr);
   if (!IsPooledBucket(block_size) || storage == nullptr) {
     return;
   }
 
   std::lock_guard<std::mutex> lock(lock_);
-  Bucket& bucket = GetOrCreateBucket(block_size);
+  Bucket &bucket = GetOrCreateBucket(block_size);
   if (bucket.free_blocks.size() >= bucket.max_cached_blocks) {
     return;
   }
@@ -230,8 +228,8 @@ std::size_t IOBufferPool::NormalizeBucketSize(std::size_t requested_size) const 
   return requested_size;
 }
 
-IOBufferPool::Bucket& IOBufferPool::GetOrCreateBucket(std::size_t block_size) {
-  for (Bucket& bucket : buckets_) {
+IOBufferPool::Bucket &IOBufferPool::GetOrCreateBucket(std::size_t block_size) {
+  for (Bucket &bucket : buckets_) {
     if (bucket.block_size == block_size) {
       return bucket;
     }
@@ -244,4 +242,4 @@ IOBufferPool::Bucket& IOBufferPool::GetOrCreateBucket(std::size_t block_size) {
   return buckets_.back();
 }
 
-}  // namespace nei
+} // namespace nei

@@ -45,7 +45,7 @@ namespace {
 // ===========================================================================
 
 class TcpSocketTest : public testing::Test {
- protected:
+protected:
   void SetUp() override {
     Thread::Options opts;
     opts.message_pump_type = MessagePumpType::IO;
@@ -64,34 +64,39 @@ class TcpSocketTest : public testing::Test {
 #if defined(_WIN32)
     // WSAStartup must be called before any socket API on Windows.
     static const bool wsa_ready = []() {
-      WSADATA d; return WSAStartup(MAKEWORD(2, 2), &d) == 0;
+      WSADATA d;
+      return WSAStartup(MAKEWORD(2, 2), &d) == 0;
     }();
     (void)wsa_ready;
     SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (s == INVALID_SOCKET) return 0;
+    if (s == INVALID_SOCKET)
+      return 0;
     struct sockaddr_in addr = {};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = 0;
-    if (::bind(s, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
-      ::closesocket(s); return 0;
+    if (::bind(s, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+      ::closesocket(s);
+      return 0;
     }
     int len = sizeof(addr);
-    ::getsockname(s, (struct sockaddr*)&addr, &len);
+    ::getsockname(s, (struct sockaddr *)&addr, &len);
     ::closesocket(s);
     return ntohs(addr.sin_port);
 #else
     int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return 0;
+    if (fd < 0)
+      return 0;
     struct sockaddr_in addr = {};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = 0;
-    if (::bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-      ::close(fd); return 0;
+    if (::bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+      ::close(fd);
+      return 0;
     }
     socklen_t len = sizeof(addr);
-    ::getsockname(fd, (struct sockaddr*)&addr, &len);
+    ::getsockname(fd, (struct sockaddr *)&addr, &len);
     ::close(fd);
     return ntohs(addr.sin_port);
 #endif
@@ -117,31 +122,32 @@ TEST_F(TcpSocketTest, BasicHandshake) {
   auto server = std::make_shared<TCPServerSocket>();
   auto client = std::make_shared<TCPClientSocket>();
 
-  io_runner_->PostTask(FROM_HERE, [server, client, this, port,
-                                    &server_accept_done, &client_connect_done,
-                                    &accepted, &connected]() {
-    bool ok = server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
-        [server, &server_accept_done, &accepted](
-            bool success, std::unique_ptr<TCPClientSocket> accepted_client) {
-          accepted.store(success);
-          EXPECT_TRUE(success) << "Server accept should succeed";
-          EXPECT_NE(accepted_client, nullptr);
-          if (accepted_client) accepted_client->Close();
-          server_accept_done.Signal();
-        },
-        io_runner_, {});
-    ASSERT_TRUE(ok) << "Listen should succeed on port " << port;
+  io_runner_->PostTask(
+      FROM_HERE, [server, client, this, port, &server_accept_done, &client_connect_done, &accepted, &connected]() {
+        bool ok = server->Listen(
+            IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+            1,
+            [server, &server_accept_done, &accepted](bool success, std::unique_ptr<TCPClientSocket> accepted_client) {
+              accepted.store(success);
+              EXPECT_TRUE(success) << "Server accept should succeed";
+              EXPECT_NE(accepted_client, nullptr);
+              if (accepted_client)
+                accepted_client->Close();
+              server_accept_done.Signal();
+            },
+            io_runner_,
+            {});
+        ASSERT_TRUE(ok) << "Listen should succeed on port " << port;
 
-    client->Connect(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
-        [client, &client_connect_done, &connected](bool ok) {
-          connected.store(ok);
-          EXPECT_TRUE(ok) << "Client connect should succeed";
-          client_connect_done.Signal();
-        },
-        io_runner_);
-  });
+        client->Connect(
+            IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+            [client, &client_connect_done, &connected](bool ok) {
+              connected.store(ok);
+              EXPECT_TRUE(ok) << "Client connect should succeed";
+              client_connect_done.Signal();
+            },
+            io_runner_);
+      });
 
   ASSERT_TRUE(server_accept_done.TimedWait(std::chrono::seconds(5)));
   ASSERT_TRUE(client_connect_done.TimedWait(std::chrono::seconds(5)));
@@ -169,8 +175,7 @@ TEST_F(TcpSocketTest, AsyncStreamTransfer) {
   auto server = std::make_shared<TCPServerSocket>();
   auto client = std::make_shared<TCPClientSocket>();
 
-  io_runner_->PostTask(FROM_HERE, [server, client, &transfer_done, &data_match,
-                                    this, port, kTransferSize]() {
+  io_runner_->PostTask(FROM_HERE, [server, client, &transfer_done, &data_match, this, port, kTransferSize]() {
     auto ref_buf = MakeRefCounted<IOBufferWithSize>(kTransferSize);
     for (std::size_t i = 0; i < kTransferSize; ++i)
       ref_buf->data()[i] = static_cast<unsigned char>(i & 0xFF);
@@ -186,28 +191,22 @@ TEST_F(TcpSocketTest, AsyncStreamTransfer) {
     scoped_refptr<IOBuffer> recv_base(recv_buf.get());
 
     bool ok = server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
-        [server, &transfer_done, &data_match,
-         ref_base, recv_base, recv_offset, kTransferSize](
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+        1,
+        [server, &transfer_done, &data_match, ref_base, recv_base, recv_offset, kTransferSize](
             bool success, std::unique_ptr<TCPClientSocket> accepted) mutable {
           ASSERT_TRUE(success);
           ASSERT_NE(accepted, nullptr);
 
           // Move accepted into shared ownership so it survives the callback.
-          auto sock = std::make_shared<std::unique_ptr<TCPClientSocket>>(
-              std::move(accepted));
+          auto sock = std::make_shared<std::unique_ptr<TCPClientSocket>>(std::move(accepted));
 
           auto do_read = std::make_shared<std::function<void()>>();
-          *do_read = [do_read, &transfer_done, &data_match,
-                       sock,
-                       recv_base, recv_offset,
-                       ref_base, kTransferSize]() {
-            auto* accepted = sock->get();
+          *do_read = [do_read, &transfer_done, &data_match, sock, recv_base, recv_offset, ref_base, kTransferSize]() {
+            auto *accepted = sock->get();
             std::size_t remaining = kTransferSize - *recv_offset;
             if (remaining == 0) {
-              data_match.store(
-                  std::memcmp(ref_base->data(), recv_base->data(),
-                              kTransferSize) == 0);
+              data_match.store(std::memcmp(ref_base->data(), recv_base->data(), kTransferSize) == 0);
               (*sock)->Close();
               transfer_done.Signal();
               return;
@@ -217,31 +216,29 @@ TEST_F(TcpSocketTest, AsyncStreamTransfer) {
             // create a temporary buffer and memcpy to the right spot.
             auto read_buf = MakeRefCounted<IOBufferWithSize>(remaining);
             accepted->ReadAsync(
-                read_buf, remaining,
-                [recv_offset, recv_base, do_read, read_buf](bool s, std::size_t n) {
+                read_buf, remaining, [recv_offset, recv_base, do_read, read_buf](bool s, std::size_t n) {
                   EXPECT_TRUE(s);
                   EXPECT_GT(n, 0u);
                   // Copy received data to the correct position.
-                  std::memcpy(recv_base->data() + *recv_offset,
-                              read_buf->data(), n);
+                  std::memcpy(recv_base->data() + *recv_offset, read_buf->data(), n);
                   *recv_offset += n;
                   (*do_read)();
                 });
           };
           (*do_read)();
         },
-        io_runner_, {});
+        io_runner_,
+        {});
     ASSERT_TRUE(ok);
 
     client->Connect(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
         [client, ref_base, port, kTransferSize](bool connected_ok) {
           ASSERT_TRUE(connected_ok);
-          client->WriteAsync(ref_base, kTransferSize,
-                             [kTransferSize](bool s, std::size_t n) {
-                               EXPECT_TRUE(s);
-                               EXPECT_EQ(n, kTransferSize);
-                             });
+          client->WriteAsync(ref_base, kTransferSize, [kTransferSize](bool s, std::size_t n) {
+            EXPECT_TRUE(s);
+            EXPECT_EQ(n, kTransferSize);
+          });
         },
         io_runner_);
   });
@@ -266,8 +263,7 @@ TEST_F(TcpSocketTest, ConnectionRefused) {
 
   auto client = std::make_shared<TCPClientSocket>();
 
-  io_runner_->PostTask(FROM_HERE, [client, port, &connect_done,
-                                    &connect_result, this]() {
+  io_runner_->PostTask(FROM_HERE, [client, port, &connect_done, &connect_result, this]() {
     client->Connect(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
         [client, &connect_done, &connect_result](bool ok) {
@@ -278,8 +274,7 @@ TEST_F(TcpSocketTest, ConnectionRefused) {
   });
 
   ASSERT_TRUE(connect_done.TimedWait(std::chrono::seconds(5)));
-  EXPECT_FALSE(connect_result.load())
-      << "Connect to dead port should report failure";
+  EXPECT_FALSE(connect_result.load()) << "Connect to dead port should report failure";
 }
 
 // ===========================================================================
@@ -295,12 +290,13 @@ TEST_F(TcpSocketTest, ServerDestructionWhilePending) {
 
   io_runner_->PostTask(FROM_HERE, [&]() {
     auto server = std::make_unique<TCPServerSocket>();
-    bool ok = server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
-        [](bool /*success*/, std::unique_ptr<TCPClientSocket> /*client*/) {
-          ADD_FAILURE() << "Accept callback should not fire after destruction";
-        },
-        io_runner_, {});
+    bool ok = server->Listen(IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+                             1,
+                             [](bool /*success*/, std::unique_ptr<TCPClientSocket> /*client*/) {
+                               ADD_FAILURE() << "Accept callback should not fire after destruction";
+                             },
+                             io_runner_,
+                             {});
     ASSERT_TRUE(ok);
     server_created.Signal();
 
@@ -328,51 +324,48 @@ TEST_F(TcpSocketTest, ExplicitShutdownWrite) {
   auto client = std::make_shared<TCPClientSocket>();
 
   io_runner_->PostTask(FROM_HERE, [&, this, port]() {
-    bool ok = server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
-        [&](bool success,
-            std::unique_ptr<TCPClientSocket> accepted) mutable {
-          ASSERT_TRUE(success);
-          auto sock = std::make_shared<std::unique_ptr<TCPClientSocket>>(
-              std::move(accepted));
+    bool ok = server->Listen(IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+                             1,
+                             [&](bool success, std::unique_ptr<TCPClientSocket> accepted) mutable {
+                               ASSERT_TRUE(success);
+                               auto sock = std::make_shared<std::unique_ptr<TCPClientSocket>>(std::move(accepted));
 
-          // Keep reading until EOF  --  proof that ShutdownWrite sent FIN.
-          auto buf = MakeRefCounted<IOBufferWithSize>(64);
-          auto do_read = std::make_shared<std::function<void()>>();
-          *do_read = [&, sock, buf, do_read]() {
-            (*sock)->ReadAsync(
-                buf, 64,
-                [&, do_read](bool s, std::size_t n) {
-                  if (!s || n == 0) {
-                    server_saw_eof.store(true);
-                    eof_detected.Signal();
-                    return;
-                  }
-                  (*do_read)();
-                });
-          };
-          (*do_read)();
-        },
-        io_runner_, {});
+                               // Keep reading until EOF  --  proof that ShutdownWrite sent FIN.
+                               auto buf = MakeRefCounted<IOBufferWithSize>(64);
+                               auto do_read = std::make_shared<std::function<void()>>();
+                               *do_read = [&, sock, buf, do_read]() {
+                                 (*sock)->ReadAsync(buf, 64, [&, do_read](bool s, std::size_t n) {
+                                   if (!s || n == 0) {
+                                     server_saw_eof.store(true);
+                                     eof_detected.Signal();
+                                     return;
+                                   }
+                                   (*do_read)();
+                                 });
+                               };
+                               (*do_read)();
+                             },
+                             io_runner_,
+                             {});
     ASSERT_TRUE(ok);
 
     auto send_buf = MakeRefCounted<IOBufferWithSize>(64);
-    for (int i = 0; i < 64; ++i) send_buf->data()[i] = 'A';
+    for (int i = 0; i < 64; ++i)
+      send_buf->data()[i] = 'A';
 
     client->Connect(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
         [&, send_buf](bool connected) {
           ASSERT_TRUE(connected);
           client->WriteAsync(send_buf, 64, [&](bool, std::size_t) {
-            client->ShutdownWrite();  // Send FIN, read stays open.
+            client->ShutdownWrite(); // Send FIN, read stays open.
           });
         },
         io_runner_);
   });
 
   ASSERT_TRUE(eof_detected.TimedWait(std::chrono::seconds(5)));
-  EXPECT_TRUE(server_saw_eof.load())
-      << "Server should detect EOF after client ShutdownWrite";
+  EXPECT_TRUE(server_saw_eof.load()) << "Server should detect EOF after client ShutdownWrite";
 }
 
 // ===========================================================================
@@ -388,14 +381,14 @@ TEST_F(TcpSocketTest, OrphanedDestruction) {
   auto server = std::make_shared<TCPServerSocket>();
 
   io_runner_->PostTask(FROM_HERE, [&, this, port]() {
-    bool ok = server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
-        [&accepted](bool /*success*/,
-                     std::unique_ptr<TCPClientSocket> /*client*/) {
-          // Just signal acceptance  --  client will be orphaned.
-          accepted.Signal();
-        },
-        io_runner_, {});
+    bool ok = server->Listen(IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+                             1,
+                             [&accepted](bool /*success*/, std::unique_ptr<TCPClientSocket> /*client*/) {
+                               // Just signal acceptance  --  client will be orphaned.
+                               accepted.Signal();
+                             },
+                             io_runner_,
+                             {});
     ASSERT_TRUE(ok);
 
     auto client = std::make_shared<TCPClientSocket>();
@@ -433,7 +426,7 @@ TEST_F(TcpSocketTest, OrphanedDestruction) {
 TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
   const uint16_t port = FindFreePort();
   ASSERT_NE(port, 0);
-  constexpr std::size_t kTransferSize = 1024 * 1024;  // 1 MB
+  constexpr std::size_t kTransferSize = 1024 * 1024; // 1 MB
 
   WaitableEvent transfer_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> all_data_received{false};
@@ -448,15 +441,13 @@ TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
     auto recv_offset = std::make_shared<std::size_t>(0);
 
     bool ok = server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
-        [&, recv_buf, recv_offset](
-            bool success,
-            std::unique_ptr<TCPClientSocket> accepted) mutable {
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+        1,
+        [&, recv_buf, recv_offset](bool success, std::unique_ptr<TCPClientSocket> accepted) mutable {
           ASSERT_TRUE(success);
           ASSERT_NE(accepted, nullptr);
 
-          auto sock = std::make_shared<std::unique_ptr<TCPClientSocket>>(
-              std::move(accepted));
+          auto sock = std::make_shared<std::unique_ptr<TCPClientSocket>>(std::move(accepted));
 
           auto do_read = std::make_shared<std::function<void()>>();
           *do_read = [&, sock, recv_buf, recv_offset, do_read]() {
@@ -467,9 +458,7 @@ TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
             std::size_t chunk = remaining > 0 ? remaining : 64;
             auto read_buf = MakeRefCounted<IOBufferWithSize>(chunk);
             (*sock)->ReadAsync(
-                read_buf, chunk,
-                [&, sock, recv_buf, recv_offset, do_read, read_buf](
-                    bool s, std::size_t n) {
+                read_buf, chunk, [&, sock, recv_buf, recv_offset, do_read, read_buf](bool s, std::size_t n) {
                   if (!s || n == 0) {
                     // EOF  --  orphan finished flushing and sent FIN.
                     eof_received.store(true);
@@ -478,9 +467,7 @@ TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
                       // known pattern (i & 0xFF).
                       bool match = true;
                       for (std::size_t i = 0; i < kTransferSize; ++i) {
-                        if (static_cast<unsigned char>(
-                                recv_buf->data()[i]) !=
-                            static_cast<unsigned char>(i & 0xFF)) {
+                        if (static_cast<unsigned char>(recv_buf->data()[i]) != static_cast<unsigned char>(i & 0xFF)) {
                           match = false;
                           break;
                         }
@@ -491,15 +478,15 @@ TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
                     transfer_done.Signal();
                     return;
                   }
-                  std::memcpy(recv_buf->data() + *recv_offset,
-                              read_buf->data(), n);
+                  std::memcpy(recv_buf->data() + *recv_offset, read_buf->data(), n);
                   *recv_offset += n;
                   (*do_read)();
                 });
           };
           (*do_read)();
         },
-        io_runner_, {});
+        io_runner_,
+        {});
     ASSERT_TRUE(ok);
 
     // ---- client side: write 1 MB then destroy immediately ----
@@ -514,12 +501,11 @@ TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
           ASSERT_TRUE(connected);
           // Post a large write  --  the kernel send buffer is much smaller
           // than 1 MB, so the write will not complete synchronously.
-          client->WriteAsync(send_buf, kTransferSize,
-                             [](bool, std::size_t) {
-                               // User callback may fire normally if the
-                               // write happened to complete before the
-                               // subsequent reset().  Both paths are valid.
-                             });
+          client->WriteAsync(send_buf, kTransferSize, [](bool, std::size_t) {
+            // User callback may fire normally if the
+            // write happened to complete before the
+            // subsequent reset().  Both paths are valid.
+          });
           // Destroy the socket shell immediately.  If the write is still
           // in-flight the orphaned Impl takes over, flushes buffered data,
           // sends FIN, and drains the socket in background.
@@ -529,11 +515,9 @@ TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
   });
 
   ASSERT_TRUE(transfer_done.TimedWait(std::chrono::seconds(5)));
-  EXPECT_TRUE(eof_received.load())
-      << "Server should detect EOF  --  orphaned Impl must send FIN";
-  EXPECT_TRUE(all_data_received.load())
-      << "Server must receive all " << kTransferSize
-      << " bytes with the correct pattern  --  orphan must flush data";
+  EXPECT_TRUE(eof_received.load()) << "Server should detect EOF  --  orphaned Impl must send FIN";
+  EXPECT_TRUE(all_data_received.load()) << "Server must receive all " << kTransferSize
+                                        << " bytes with the correct pattern  --  orphan must flush data";
 }
 
 // ===========================================================================
@@ -550,8 +534,7 @@ TEST_F(TcpSocketTest, MultiReactorRoundRobin) {
   // ---- create 4 worker IO threads ----
   std::vector<std::unique_ptr<Thread>> workers;
   for (int i = 0; i < 4; ++i) {
-    auto t = std::make_unique<Thread>(
-        "tcp-worker-" + std::to_string(i));
+    auto t = std::make_unique<Thread>("tcp-worker-" + std::to_string(i));
     Thread::Options opts;
     opts.message_pump_type = MessagePumpType::IO;
     ASSERT_TRUE(t->StartWithOptions(opts));
@@ -560,7 +543,7 @@ TEST_F(TcpSocketTest, MultiReactorRoundRobin) {
 
   const uint16_t port = FindFreePort();
   ASSERT_NE(port, 0);
-  constexpr int kNumConnections = 8;  // 2 per worker
+  constexpr int kNumConnections = 8; // 2 per worker
 
   std::atomic<int> accepted{0};
   WaitableEvent all_accepted(WaitableEvent::ResetPolicy::kAutomatic, false);
@@ -573,8 +556,7 @@ TEST_F(TcpSocketTest, MultiReactorRoundRobin) {
     bool ok = server->Listen(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
         kNumConnections,
-        [&](bool success,
-            std::unique_ptr<TCPClientSocket> client) {
+        [&](bool success, std::unique_ptr<TCPClientSocket> client) {
           ASSERT_TRUE(success);
           ASSERT_NE(client, nullptr);
           // The client socket is already bound to a worker IO thread.
@@ -585,9 +567,7 @@ TEST_F(TcpSocketTest, MultiReactorRoundRobin) {
         },
         io_runner_,
         // Round-robin across the 4 worker threads.
-        [&]() -> scoped_refptr<TaskRunner> {
-          return workers[next_worker++ % workers.size()]->GetTaskRunner();
-        });
+        [&]() -> scoped_refptr<TaskRunner> { return workers[next_worker++ % workers.size()]->GetTaskRunner(); });
     ASSERT_TRUE(ok);
   });
 
@@ -609,11 +589,10 @@ TEST_F(TcpSocketTest, MultiReactorRoundRobin) {
   }
 
   ASSERT_TRUE(all_accepted.TimedWait(std::chrono::seconds(5)));
-  EXPECT_EQ(accepted.load(), kNumConnections)
-      << "All " << kNumConnections << " connections should be accepted";
+  EXPECT_EQ(accepted.load(), kNumConnections) << "All " << kNumConnections << " connections should be accepted";
 
   // ---- tear down workers ----
-  for (auto& w : workers)
+  for (auto &w : workers)
     w->Stop();
 }
 
@@ -639,27 +618,26 @@ TEST_F(TcpSocketTest, WriteChainNoStackOverflow) {
   auto server = std::make_shared<TCPServerSocket>();
 
   io_runner_->PostTask(FROM_HERE, [&, this, port]() {
-    bool ok = server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
-        [&](bool success,
-            std::unique_ptr<TCPClientSocket> accepted) mutable {
-          ASSERT_TRUE(success);
-          auto sock = std::make_shared<std::unique_ptr<TCPClientSocket>>(
-              std::move(accepted));
+    bool ok = server->Listen(IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+                             1,
+                             [&](bool success, std::unique_ptr<TCPClientSocket> accepted) mutable {
+                               ASSERT_TRUE(success);
+                               auto sock = std::make_shared<std::unique_ptr<TCPClientSocket>>(std::move(accepted));
 
-          auto do_read = std::make_shared<std::function<void()>>();
-          *do_read = [&, sock, do_read]() {
-            auto buf = nei::MakeRefCounted<nei::IOBufferWithSize>(64);
-            (*sock)->ReadAsync(buf, 64,
-                [&, do_read](bool s, std::size_t n) {
-                  if (!s || n == 0) return;
-                  server_read_count.fetch_add(1);
-                  (*do_read)();
-                });
-          };
-          (*do_read)();
-        },
-        io_runner_, {});
+                               auto do_read = std::make_shared<std::function<void()>>();
+                               *do_read = [&, sock, do_read]() {
+                                 auto buf = nei::MakeRefCounted<nei::IOBufferWithSize>(64);
+                                 (*sock)->ReadAsync(buf, 64, [&, do_read](bool s, std::size_t n) {
+                                   if (!s || n == 0)
+                                     return;
+                                   server_read_count.fetch_add(1);
+                                   (*do_read)();
+                                 });
+                               };
+                               (*do_read)();
+                             },
+                             io_runner_,
+                             {});
     ASSERT_TRUE(ok);
 
     // ---- client: chain of 1000 small writes ----
@@ -671,22 +649,22 @@ TEST_F(TcpSocketTest, WriteChainNoStackOverflow) {
     *do_write = [&, client, depth, remaining, do_write]() {
       int d = depth->fetch_add(1) + 1;
       int prev = max_depth.load();
-      while (d > prev && !max_depth.compare_exchange_weak(prev, d)) {}
+      while (d > prev && !max_depth.compare_exchange_weak(prev, d)) {
+      }
 
       auto buf = nei::MakeRefCounted<nei::IOBufferWithSize>(1);
       buf->data()[0] = 'X';
-      client->WriteAsync(buf, 1,
-          [&, depth, remaining, do_write, client](bool ok, std::size_t) {
-            depth->fetch_sub(1);
-            ASSERT_TRUE(ok);
-            write_count.fetch_add(1);
-            if (remaining->fetch_sub(1) > 1) {
-              (*do_write)();
-            } else {
-              client->Close();
-              chain_done.Signal();
-            }
-          });
+      client->WriteAsync(buf, 1, [&, depth, remaining, do_write, client](bool ok, std::size_t) {
+        depth->fetch_sub(1);
+        ASSERT_TRUE(ok);
+        write_count.fetch_add(1);
+        if (remaining->fetch_sub(1) > 1) {
+          (*do_write)();
+        } else {
+          client->Close();
+          chain_done.Signal();
+        }
+      });
     };
 
     // Connect first, then start the write chain from the connect callback.
@@ -701,13 +679,11 @@ TEST_F(TcpSocketTest, WriteChainNoStackOverflow) {
 
   ASSERT_TRUE(chain_done.TimedWait(std::chrono::seconds(5)));
 
-  EXPECT_EQ(write_count.load(), kChainLength)
-      << "All " << kChainLength << " writes must complete";
-  EXPECT_LE(max_depth.load(), 2)
-      << "Max recursion depth should be ≤2 (async dispatch), "
-         "was " << max_depth.load() << "  --  possible synchronous re-entrancy";
-  EXPECT_GT(server_read_count.load(), 0)
-      << "Server should have read at least some data";
+  EXPECT_EQ(write_count.load(), kChainLength) << "All " << kChainLength << " writes must complete";
+  EXPECT_LE(max_depth.load(), 2) << "Max recursion depth should be ≤2 (async dispatch), "
+                                    "was "
+                                 << max_depth.load() << "  --  possible synchronous re-entrancy";
+  EXPECT_GT(server_read_count.load(), 0) << "Server should have read at least some data";
 }
 
 // ===========================================================================
@@ -736,21 +712,16 @@ TEST_F(TcpSocketTest, ConnectFailureCallbackRespectsOrphan) {
     auto client = std::make_shared<TCPClientSocket>();
     client->Connect(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
-        [&callback_fired](bool /*success*/) {
-          callback_fired.store(true, std::memory_order_relaxed);
-        },
+        [&callback_fired](bool /*success*/) { callback_fired.store(true, std::memory_order_relaxed); },
         io_runner_);
 
     // Orphan immediately — on loopback the connect may have already
     // failed synchronously and the callback posted.  The orphaned_ guard
     // in posted callbacks must handle either case without crashing.
-    client.reset();  // → Orphan()
+    client.reset(); // → Orphan()
 
     // Allow time for any in-flight callback to be dispatched.
-    io_runner_->PostDelayedTask(
-        FROM_HERE,
-        BindOnce([&done]() { done.Signal(); }),
-        TimeDelta::FromSeconds(4));
+    io_runner_->PostDelayedTask(FROM_HERE, BindOnce([&done]() { done.Signal(); }), TimeDelta::FromSeconds(4));
   });
 
   ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
@@ -780,7 +751,8 @@ TEST_F(TcpSocketTest, OrphanedWhileConnectInFlight) {
   auto server = std::make_shared<TCPServerSocket>();
   io_runner_->PostTask(FROM_HERE, [this, server, port, &server_ready]() {
     ASSERT_TRUE(server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+        1,
         [](bool, std::unique_ptr<TCPClientSocket>) {},
         io_runner_));
     server_ready.Signal();
@@ -802,11 +774,9 @@ TEST_F(TcpSocketTest, OrphanedWhileConnectInFlight) {
     // Orphan immediately — the connect is in-flight (IOCP pending /
     // epoll EINPROGRESS).  The self-protector in OnIOCompleted must
     // keep the Impl alive through orphaned_ handling.
-    client.reset();  // ~TCPClientSocket → Orphan()
+    client.reset(); // ~TCPClientSocket → Orphan()
 
-    io_runner_->PostTask(FROM_HERE, [&orphan_done]() {
-      orphan_done.Signal();
-    });
+    io_runner_->PostTask(FROM_HERE, [&orphan_done]() { orphan_done.Signal(); });
   });
 
   ASSERT_TRUE(orphan_done.TimedWait(std::chrono::seconds(5)));
@@ -840,9 +810,7 @@ TEST_F(TcpSocketTest, ConnectAndListenWithIPv6Loopback) {
     IPEndPoint local(IPAddress::FromIPv6(ipv6_loopback), 0);
 
     auto server = std::make_shared<TCPServerSocket>();
-    if (server->Listen(local, 1,
-                       [](bool, std::unique_ptr<TCPClientSocket>) {},
-                       io_runner_)) {
+    if (server->Listen(local, 1, [](bool, std::unique_ptr<TCPClientSocket>) {}, io_runner_)) {
       ipv6_works.store(true, std::memory_order_relaxed);
     }
     server->Shutdown();
@@ -864,9 +832,7 @@ TEST_F(TcpSocketTest, ConnectAndListenWithIPv6Loopback) {
   // cycle after the test completes.
   std::shared_ptr<TCPServerSocket> server;
 
-  io_runner_->PostTask(FROM_HERE,
-      [this, &accepted_done, &connected_done, &accepted, &connected,
-       &server]() {
+  io_runner_->PostTask(FROM_HERE, [this, &accepted_done, &connected_done, &accepted, &connected, &server]() {
     uint8_t ipv6_loopback[16] = {};
     ipv6_loopback[15] = 1;
 
@@ -875,12 +841,13 @@ TEST_F(TcpSocketTest, ConnectAndListenWithIPv6Loopback) {
 
     server = std::make_shared<TCPServerSocket>();
     ASSERT_TRUE(server->Listen(
-        bind_addr, 1,
-        [&accepted, &accepted_done, server](bool ok,
-                                     std::unique_ptr<TCPClientSocket> client) {
+        bind_addr,
+        1,
+        [&accepted, &accepted_done, server](bool ok, std::unique_ptr<TCPClientSocket> client) {
           accepted.store(ok, std::memory_order_relaxed);
           accepted_done.Signal();
-          if (client) client->Close();
+          if (client)
+            client->Close();
         },
         io_runner_));
 
@@ -925,18 +892,20 @@ TEST_F(TcpSocketTest, ServerDoesNotCrashUnderFdPressure) {
   auto server = std::make_shared<TCPServerSocket>();
 
   io_runner_->PostTask(FROM_HERE, [&]() {
-    bool ok = server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 512,
-        [&](bool success, std::unique_ptr<TCPClientSocket> client) {
-          if (success) {
-            accepted.fetch_add(1);
-            client->Close();
-          } else {
-            server_fatal.store(true);
-          }
-        },
-        io_runner_, {});
-    if (!ok) server_fatal.store(true);
+    bool ok = server->Listen(IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+                             512,
+                             [&](bool success, std::unique_ptr<TCPClientSocket> client) {
+                               if (success) {
+                                 accepted.fetch_add(1);
+                                 client->Close();
+                               } else {
+                                 server_fatal.store(true);
+                               }
+                             },
+                             io_runner_,
+                             {});
+    if (!ok)
+      server_fatal.store(true);
     server_ready.Signal();
   });
 
@@ -964,14 +933,13 @@ TEST_F(TcpSocketTest, ServerDoesNotCrashUnderFdPressure) {
   ASSERT_TRUE(all_done.TimedWait(std::chrono::seconds(10)));
 
   int accepted_count = accepted.load();
-  EXPECT_GE(accepted_count, kClients - 5)
-      << "Server accepted " << accepted_count << " out of " << kClients
-      << " clients.  Accept loop may be blocking or too slow.";
+  EXPECT_GE(accepted_count, kClients - 5) << "Server accepted " << accepted_count << " out of " << kClients
+                                          << " clients.  Accept loop may be blocking or too slow.";
   EXPECT_FALSE(server_fatal.load());
 
   server->Close();
 }
-#endif  // !_WIN32
+#endif // !_WIN32
 
 // =============================================================================
 // Extreme lifecycle tests — server close while AcceptEx pending (UAF safety)
@@ -998,10 +966,9 @@ TEST_F(TcpSocketTest, ServerCloseWhileAcceptExPending) {
   auto server = std::make_shared<TCPServerSocket>();
   srv_runner->PostTask(FROM_HERE, [&]() {
     ASSERT_TRUE(server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
-        [&accept_fired](bool, std::unique_ptr<TCPClientSocket>) {
-          accept_fired.store(true);
-        },
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+        1,
+        [&accept_fired](bool, std::unique_ptr<TCPClientSocket>) { accept_fired.store(true); },
         srv_runner));
     server_ready.Signal();
   });
@@ -1041,21 +1008,23 @@ TEST_F(TcpSocketTest, ClientOrphanDrainReadEOF) {
   auto server = std::make_shared<TCPServerSocket>();
 
   io_runner_->PostTask(FROM_HERE, [&, this, port]() {
-    ASSERT_TRUE(server->Listen(
-        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), 1,
-        [&](bool ok, std::unique_ptr<TCPClientSocket> client) {
-          if (ok)
-            accepted_client = std::move(client);
-          client_accepted.Signal();
-        },
-        io_runner_, {}));
+    ASSERT_TRUE(server->Listen(IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+                               1,
+                               [&](bool ok, std::unique_ptr<TCPClientSocket> client) {
+                                 if (ok)
+                                   accepted_client = std::move(client);
+                                 client_accepted.Signal();
+                               },
+                               io_runner_,
+                               {}));
 
     // Client connects on the same IO thread.
     auto client = std::make_shared<TCPClientSocket>();
     client->Connect(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
         [client](bool ok) {
-          if (!ok) return;
+          if (!ok)
+            return;
           // Post a pending read so Orphan() has a callback to cancel.
           auto buf = MakeRefCounted<IOBufferWithSize>(64);
           client->ReadAsync(buf, 64, [](bool, size_t) {});
@@ -1072,9 +1041,7 @@ TEST_F(TcpSocketTest, ClientOrphanDrainReadEOF) {
     ASSERT_TRUE(drain.TimedWait(std::chrono::seconds(5)));
 
     // Orphan the accepted client — triggers ShutdownWrite + StartOrphanDrain.
-    io_runner_->PostTask(FROM_HERE, [&]() {
-      accepted_client.reset();
-    });
+    io_runner_->PostTask(FROM_HERE, [&]() { accepted_client.reset(); });
 
     // Flush to let Orphan drain complete.
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -1087,5 +1054,5 @@ TEST_F(TcpSocketTest, ClientOrphanDrainReadEOF) {
   ASSERT_TRUE(cleanup.TimedWait(std::chrono::seconds(5)));
 }
 
-}  // namespace
-}  // namespace nei::net
+} // namespace
+} // namespace nei::net

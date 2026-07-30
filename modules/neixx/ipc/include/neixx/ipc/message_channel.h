@@ -60,7 +60,7 @@ class TaskRunner;
 // any further callbacks from firing (via WeakPtr invalidation).
 // ---------------------------------------------------------------------------
 class NEI_API MessageChannel final {
- public:
+public:
   // A single complete message frame (8-byte header already stripped).
   // The payload is allocated from IOBufferPool  --  no std::vector or new.
   using Message = scoped_refptr<IOBufferWithSize>;
@@ -84,19 +84,18 @@ class NEI_API MessageChannel final {
   // Both runners must be non-null.  The streams must outlive this object.
   MessageChannel(scoped_refptr<TaskRunner> io_task_runner,
                  scoped_refptr<TaskRunner> client_task_runner,
-                 AsyncInputStream* read_stream,
-                 AsyncOutputStream* write_stream);
+                 AsyncInputStream *read_stream,
+                 AsyncOutputStream *write_stream);
   ~MessageChannel();
 
-  MessageChannel(const MessageChannel&) = delete;
-  MessageChannel& operator=(const MessageChannel&) = delete;
+  MessageChannel(const MessageChannel &) = delete;
+  MessageChannel &operator=(const MessageChannel &) = delete;
 
   // Begin receiving messages.  Must be called at most once.
   // |on_message|  --  invoked for each complete frame on |client_task_runner|.
   // |on_error|    --  invoked once on unrecoverable error or graceful close
   //                on |client_task_runner|.
-  void StartReading(MessageReceivedCallback on_message,
-                    ErrorCallback on_error);
+  void StartReading(MessageReceivedCallback on_message, ErrorCallback on_error);
 
   // Enqueue a message for asynchronous transmission.  The payload is
   // framed with [4-byte LE length][4-byte LE magic] and written to the
@@ -111,11 +110,11 @@ class NEI_API MessageChannel final {
   // on |client_task_runner|.
   void Close();
 
- private:
+private:
   class Impl;
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_IPC_MESSAGE_CHANNEL_H_
+#endif // NEIXX_IPC_MESSAGE_CHANNEL_H_

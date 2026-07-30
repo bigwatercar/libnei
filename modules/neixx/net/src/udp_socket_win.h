@@ -50,61 +50,51 @@ struct UdpOverlappedContext;
 //   5. When pending_io_count_ reaches 0, DoCloseCleanup() is called, which
 //      closes the socket and calls ReleaseSelfHoldIfNeeded().
 //
-class UDPSocket::Impl final
-    : public RefCountedThreadSafe<Impl>,
-      public MessagePumpForIO::CompletionWatcher {
- public:
+class UDPSocket::Impl final : public RefCountedThreadSafe<Impl>, public MessagePumpForIO::CompletionWatcher {
+public:
   Impl();
   ~Impl();
 
-  bool Bind(const IPEndPoint& local_addr,
-            scoped_refptr<TaskRunner> io_runner);
-  void SendTo(scoped_refptr<IOBuffer> buf,
-              std::size_t buf_len,
-              const IPEndPoint& dest,
-              UDPSocket::SendToCallback callback);
-  void RecvFrom(scoped_refptr<IOBuffer> buf,
-                std::size_t buf_len,
-                UDPSocket::RecvFromCallback callback);
+  bool Bind(const IPEndPoint &local_addr, scoped_refptr<TaskRunner> io_runner);
+  void
+  SendTo(scoped_refptr<IOBuffer> buf, std::size_t buf_len, const IPEndPoint &dest, UDPSocket::SendToCallback callback);
+  void RecvFrom(scoped_refptr<IOBuffer> buf, std::size_t buf_len, UDPSocket::RecvFromCallback callback);
   void Close();
   bool SetBroadcast(bool active);
-  bool JoinGroup(const IPAddress& group_address);
-  bool LeaveGroup(const IPAddress& group_address);
-  bool GetLocalAddress(IPEndPoint* out) const;
+  bool JoinGroup(const IPAddress &group_address);
+  bool LeaveGroup(const IPAddress &group_address);
+  bool GetLocalAddress(IPEndPoint *out) const;
   bool SetSendBufferSize(int32_t size);
   bool SetReceiveBufferSize(int32_t size);
   void Orphan();
 
- private:
+private:
   // ---- Helpers ---------------------------------------------------------
-  bool DoBind(const IPEndPoint& local_addr);
+  bool DoBind(const IPEndPoint &local_addr);
   void DoSendTo(scoped_refptr<IOBuffer> buf,
                 std::size_t buf_len,
-                const IPEndPoint& dest,
+                const IPEndPoint &dest,
                 UDPSocket::SendToCallback callback);
-  void DoRecvFrom(scoped_refptr<IOBuffer> buf,
-                  std::size_t buf_len,
-                  UDPSocket::RecvFromCallback callback);
+  void DoRecvFrom(scoped_refptr<IOBuffer> buf, std::size_t buf_len, UDPSocket::RecvFromCallback callback);
   void DoCloseCleanup();
   void DoOrphanCleanup();
   void ReleaseSelfHoldIfNeeded();
-  bool EndPointToSockAddr(const IPEndPoint& ep,
-                          struct sockaddr_storage* out, int* out_len);
-  IPEndPoint SockAddrToIPEndPoint(const struct sockaddr_storage& sa,
-                                  int sa_len) const;
+  bool EndPointToSockAddr(const IPEndPoint &ep, struct sockaddr_storage *out, int *out_len);
+  IPEndPoint SockAddrToIPEndPoint(const struct sockaddr_storage &sa, int sa_len) const;
   void RegisterWithPump();
   void EnsurePumpRegistered();
-  void PostSendToResult(UDPSocket::SendToCallback cb,
-                        bool success, int bytes);
-  void PostRecvFromResult(UDPSocket::RecvFromCallback cb,
-                          bool success, int bytes,
-                          const IPEndPoint& peer);
+  void PostSendToResult(UDPSocket::SendToCallback cb, bool success, int bytes);
+  void PostRecvFromResult(UDPSocket::RecvFromCallback cb, bool success, int bytes, const IPEndPoint &peer);
 
   // ---- CompletionWatcher ------------------------------------------------
-  void OnFileCanReadWithoutBlocking(NativeIOHandle) override {}
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {}
+  void OnFileCanReadWithoutBlocking(NativeIOHandle) override {
+  }
+
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {
+  }
+
   void OnIOCompleted(NativeIOHandle handle,
-                     void* overlapped_context,
+                     void *overlapped_context,
                      std::uint32_t bytes_transferred,
                      std::uint32_t error_code) override;
 
@@ -161,7 +151,7 @@ struct UdpOverlappedContext {
   scoped_refptr<UDPSocket::Impl> self_ref;
 };
 
-}  // namespace nei::net
+} // namespace nei::net
 
-#endif  // _WIN32
-#endif  // NEIXX_NET_UDP_SOCKET_WIN_H_
+#endif // _WIN32
+#endif // NEIXX_NET_UDP_SOCKET_WIN_H_

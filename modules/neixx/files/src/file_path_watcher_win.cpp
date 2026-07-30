@@ -13,12 +13,12 @@ namespace nei {
 // ===========================================================================
 
 DirWatchContext::~DirWatchContext() {
-  if (dir_handle_ != nullptr) ::CloseHandle(dir_handle_);
+  if (dir_handle_ != nullptr)
+    ::CloseHandle(dir_handle_);
 }
 
-scoped_refptr<DirWatchContext> DirWatchContext::Create(
-    HANDLE dir_handle, bool recursive, CompletionFn on_completion) {
-  auto* raw = new DirWatchContext();
+scoped_refptr<DirWatchContext> DirWatchContext::Create(HANDLE dir_handle, bool recursive, CompletionFn on_completion) {
+  auto *raw = new DirWatchContext();
   raw->dir_handle_ = dir_handle;
   raw->recursive_ = recursive;
   raw->on_completion_ = std::move(on_completion);
@@ -39,20 +39,26 @@ void DirWatchContext::Cancel() {
 }
 
 void DirWatchContext::OnIOCompleted(NativeIOHandle /*handle*/,
-                                     void* /*overlapped_context*/,
-                                     std::uint32_t bytes_transferred,
-                                     std::uint32_t error_code) {
+                                    void * /*overlapped_context*/,
+                                    std::uint32_t bytes_transferred,
+                                    std::uint32_t error_code) {
   io_pending_ = false;
 
   // ERROR_OPERATION_ABORTED — final completion after CancelIo.
   // Release the self-pin so this object can be freed.
   if (error_code == ERROR_OPERATION_ABORTED) {
-    if (is_pinned_) { is_pinned_ = false; Release(); }
+    if (is_pinned_) {
+      is_pinned_ = false;
+      Release();
+    }
     return;
   }
 
   if (error_code != ERROR_SUCCESS) {
-    if (is_pinned_) { is_pinned_ = false; Release(); }
+    if (is_pinned_) {
+      is_pinned_ = false;
+      Release();
+    }
     return;
   }
 
@@ -62,30 +68,41 @@ void DirWatchContext::OnIOCompleted(NativeIOHandle /*handle*/,
 
   // Re-issue the read to continue monitoring.
   if (!IssueReadDirectoryChanges()) {
-    if (is_pinned_) { is_pinned_ = false; Release(); }
+    if (is_pinned_) {
+      is_pinned_ = false;
+      Release();
+    }
   }
 }
 
 bool DirWatchContext::IssueReadDirectoryChanges() {
-  if (dir_handle_ == nullptr) return false;
+  if (dir_handle_ == nullptr)
+    return false;
 
   ZeroMemory(&overlapped_, sizeof(overlapped_));
 
   // Pin |this| for the duration of the asynchronous I/O.
-  if (!is_pinned_) { AddRef(); is_pinned_ = true; }
+  if (!is_pinned_) {
+    AddRef();
+    is_pinned_ = true;
+  }
 
-  BOOL ok = ::ReadDirectoryChangesW(
-      dir_handle_,
-      notify_buf_.data(),
-      static_cast<DWORD>(notify_buf_.size()),
-      recursive_ ? TRUE : FALSE,
-      FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
-          FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_SIZE |
-          FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_CREATION,
-      nullptr, &overlapped_, nullptr);
+  BOOL ok = ::ReadDirectoryChangesW(dir_handle_,
+                                    notify_buf_.data(),
+                                    static_cast<DWORD>(notify_buf_.size()),
+                                    recursive_ ? TRUE : FALSE,
+                                    FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME
+                                        | FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_SIZE
+                                        | FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_CREATION,
+                                    nullptr,
+                                    &overlapped_,
+                                    nullptr);
 
   if (!ok && ::GetLastError() != ERROR_IO_PENDING) {
-    if (is_pinned_) { is_pinned_ = false; Release(); }
+    if (is_pinned_) {
+      is_pinned_ = false;
+      Release();
+    }
     return false;
   }
 
@@ -98,8 +115,8 @@ bool DirWatchContext::IssueReadDirectoryChanges() {
 // ===========================================================================
 
 FilePathWatcher::Impl::Impl(scoped_refptr<TaskRunner> task_runner)
-    : task_runner_(std::move(task_runner)),
-      weak_factory_(this, FROM_HERE) {
+    : task_runner_(std::move(task_runner))
+    , weak_factory_(this, FROM_HERE) {
   DCHECK(task_runner_ != nullptr);
 }
 
@@ -107,34 +124,32 @@ FilePathWatcher::Impl::~Impl() {
   Cancel();
 }
 
-bool FilePathWatcher::Impl::Watch(const std::string& path,
-                                  bool recursive,
-                                  Callback callback) {
+bool FilePathWatcher::Impl::Watch(const std::string &path, bool recursive, Callback callback) {
   Cancel();
 
-  if (path.empty() || !callback) return false;
+  if (path.empty() || !callback)
+    return false;
 
   std::u16string wide_utf16 = UTF8ToUTF16(path);
-  std::wstring wide_path(reinterpret_cast<const wchar_t*>(wide_utf16.data()),
-                         wide_utf16.size());
+  std::wstring wide_path(reinterpret_cast<const wchar_t *>(wide_utf16.data()), wide_utf16.size());
 
-  HANDLE hDir = ::CreateFileW(
-      wide_path.c_str(),
-      FILE_LIST_DIRECTORY,
-      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-      nullptr, OPEN_EXISTING,
-      FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
-      nullptr);
+  HANDLE hDir = ::CreateFileW(wide_path.c_str(),
+                              FILE_LIST_DIRECTORY,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              nullptr,
+                              OPEN_EXISTING,
+                              FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+                              nullptr);
 
-  if (hDir == INVALID_HANDLE_VALUE) return false;
+  if (hDir == INVALID_HANDLE_VALUE)
+    return false;
 
   // Create the ref-counted I/O context.  The context owns the OVERLAPPED +
   // buffer and is the pump's CompletionWatcher, so it outlives any residual
   // IOCP completions after Cancel() releases our scoped_refptr.
   auto weak = weak_factory_.GetWeakPtr(FROM_HERE);
-  ctx_ = DirWatchContext::Create(
-      hDir, recursive,
-      [weak = std::move(weak)](std::uint32_t bytes, std::uint32_t /*error*/) {
+  ctx_ =
+      DirWatchContext::Create(hDir, recursive, [weak = std::move(weak)](std::uint32_t bytes, std::uint32_t /*error*/) {
         if (weak) {
           weak->OnDirIOCompleted(bytes, 0);
         }
@@ -146,12 +161,10 @@ bool FilePathWatcher::Impl::Watch(const std::string& path,
   }
 
   // Register with the IO pump.  ctx_.get() is the CompletionWatcher.
-  MessagePumpForIO* pump = MessagePumpForIO::Current();
-  if (!pump ||
-      !controller_.StartWatching(
-          pump, reinterpret_cast<NativeIOHandle>(hDir),
-          MessagePumpForIO::FdWatchController::Mode::READ,
-          ctx_.get())) {
+  MessagePumpForIO *pump = MessagePumpForIO::Current();
+  if (!pump
+      || !controller_.StartWatching(
+          pump, reinterpret_cast<NativeIOHandle>(hDir), MessagePumpForIO::FdWatchController::Mode::READ, ctx_.get())) {
     ctx_->Cancel();
     controller_.StopWatching();
     ctx_.reset();
@@ -166,14 +179,16 @@ bool FilePathWatcher::Impl::Watch(const std::string& path,
 }
 
 void FilePathWatcher::Impl::Cancel() {
-  if (!watching_) return;
+  if (!watching_)
+    return;
   watching_ = false;
 
   callback_ = nullptr;
 
   // CancelI/O and release our strong reference.  DirWatchContext stays
   // alive via its self-hold until the final IOCP completion drains.
-  if (ctx_) ctx_->Cancel();
+  if (ctx_)
+    ctx_->Cancel();
 
   controller_.StopWatching();
   ctx_.reset();
@@ -181,50 +196,49 @@ void FilePathWatcher::Impl::Cancel() {
   recursive_ = false;
 }
 
-void FilePathWatcher::Impl::OnDirIOCompleted(
-    std::uint32_t bytes_transferred, std::uint32_t /*error_code*/) {
-  if (!watching_ || !ctx_) return;
+void FilePathWatcher::Impl::OnDirIOCompleted(std::uint32_t bytes_transferred, std::uint32_t /*error_code*/) {
+  if (!watching_ || !ctx_)
+    return;
 
-  const std::uint8_t* buf = ctx_->notify_buf().data();
-  const std::uint8_t* end = buf + bytes_transferred;
+  const std::uint8_t *buf = ctx_->notify_buf().data();
+  const std::uint8_t *end = buf + bytes_transferred;
 
   while (buf + offsetof(FILE_NOTIFY_INFORMATION, FileName) <= end) {
-    const auto* info =
-        reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(buf);
+    const auto *info = reinterpret_cast<const FILE_NOTIFY_INFORMATION *>(buf);
 
     if (info->FileNameLength > 0) {
-      std::wstring wname(info->FileName,
-                         info->FileNameLength / sizeof(wchar_t));
-      std::string relative = UTF16ToUTF8(std::u16string_view(
-          reinterpret_cast<const char16_t*>(wname.data()), wname.size()));
+      std::wstring wname(info->FileName, info->FileNameLength / sizeof(wchar_t));
+      std::string relative =
+          UTF16ToUTF8(std::u16string_view(reinterpret_cast<const char16_t *>(wname.data()), wname.size()));
 
       FilePathWatcher::ChangeType change_type = MapFileAction(info->Action);
       DeliverChange(relative, change_type);
     }
 
-    if (info->NextEntryOffset == 0) break;
+    if (info->NextEntryOffset == 0)
+      break;
     buf += info->NextEntryOffset;
   }
 }
 
 FilePathWatcher::ChangeType FilePathWatcher::Impl::MapFileAction(DWORD action) {
   switch (action) {
-    case FILE_ACTION_ADDED:
-    case FILE_ACTION_RENAMED_NEW_NAME:
-      return FilePathWatcher::ChangeType::kCreated;
-    case FILE_ACTION_REMOVED:
-    case FILE_ACTION_RENAMED_OLD_NAME:
-      return FilePathWatcher::ChangeType::kDeleted;
-    case FILE_ACTION_MODIFIED:
-      return FilePathWatcher::ChangeType::kModified;
-    default:
-      return FilePathWatcher::ChangeType::kModified;
+  case FILE_ACTION_ADDED:
+  case FILE_ACTION_RENAMED_NEW_NAME:
+    return FilePathWatcher::ChangeType::kCreated;
+  case FILE_ACTION_REMOVED:
+  case FILE_ACTION_RENAMED_OLD_NAME:
+    return FilePathWatcher::ChangeType::kDeleted;
+  case FILE_ACTION_MODIFIED:
+    return FilePathWatcher::ChangeType::kModified;
+  default:
+    return FilePathWatcher::ChangeType::kModified;
   }
 }
 
-void FilePathWatcher::Impl::DeliverChange(const std::string& relative_path,
-                                          ChangeType type) {
-  if (!callback_) return;
+void FilePathWatcher::Impl::DeliverChange(const std::string &relative_path, ChangeType type) {
+  if (!callback_)
+    return;
 
   if (task_runner_->RunsTasksInCurrentSequence()) {
     callback_.Run(relative_path, type);
@@ -236,15 +250,14 @@ void FilePathWatcher::Impl::DeliverChange(const std::string& relative_path,
     Callback cb = callback_;
     std::string path_copy = relative_path;
     auto weak = weak_factory_.GetWeakPtr(FROM_HERE);
-    task_runner_->PostTask(
-        FROM_HERE,
-        [weak = std::move(weak), cb = std::move(cb), path_copy, type]() {
-          if (!weak || !weak->watching_ || !weak->callback_) return;
-          weak->callback_.Run(path_copy, type);
-        });
+    task_runner_->PostTask(FROM_HERE, [weak = std::move(weak), cb = std::move(cb), path_copy, type]() {
+      if (!weak || !weak->watching_ || !weak->callback_)
+        return;
+      weak->callback_.Run(path_copy, type);
+    });
   }
 }
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // defined(_WIN32)
+#endif // defined(_WIN32)

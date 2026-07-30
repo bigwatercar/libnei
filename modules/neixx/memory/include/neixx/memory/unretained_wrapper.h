@@ -8,7 +8,8 @@ namespace nei {
 template <typename T>
 class NEI_API UnretainedWrapper final {
 public:
-  explicit UnretainedWrapper(T *ptr) : ptr_(ptr) {
+  explicit UnretainedWrapper(T *ptr)
+      : ptr_(ptr) {
   }
 
   T *get() const {

@@ -29,14 +29,13 @@ namespace nei::net {
 // TCPServerSocket::Impl (POSIX: accept4 + epoll)
 // =============================================================================
 
-class TCPServerSocket::Impl final
-    : public RefCountedThreadSafe<Impl>,
-      public MessagePumpForIO::Watcher {
- public:
+class TCPServerSocket::Impl final : public RefCountedThreadSafe<Impl>, public MessagePumpForIO::Watcher {
+public:
   Impl();
   ~Impl();
 
-  bool Listen(const IPEndPoint& addr, int backlog,
+  bool Listen(const IPEndPoint &addr,
+              int backlog,
               TCPServerSocket::AcceptCallback callback,
               scoped_refptr<TaskRunner> acceptor_runner,
               TCPServerSocket::RunnerSelector worker_selector);
@@ -47,16 +46,16 @@ class TCPServerSocket::Impl final
   // listening, and self-holds until in-flight I/O completes.
   void Orphan();
 
- private:
+private:
   // MessagePumpForIO::Watcher
   void OnFileCanReadWithoutBlocking(NativeIOHandle /*handle*/) override;
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) override {}
 
-  bool EndPointToSockAddr(const IPEndPoint& ep,
-                          ::sockaddr_storage* out,
-                          ::socklen_t* out_len);
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) override {
+  }
 
-  int CreateListenSocket(const IPEndPoint& addr, int backlog);
+  bool EndPointToSockAddr(const IPEndPoint &ep, ::sockaddr_storage *out, ::socklen_t *out_len);
+
+  int CreateListenSocket(const IPEndPoint &addr, int backlog);
 
   int listen_fd_ = -1;
 
@@ -97,7 +96,7 @@ class TCPServerSocket::Impl final
   WeakPtrFactory<Impl> weak_factory_;
 };
 
-}  // namespace nei::net
+} // namespace nei::net
 
-#endif  // !_WIN32
-#endif  // NEIXX_NET_TCP_SERVER_SOCKET_POSIX_H_
+#endif // !_WIN32
+#endif // NEIXX_NET_TCP_SERVER_SOCKET_POSIX_H_

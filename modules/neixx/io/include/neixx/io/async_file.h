@@ -19,11 +19,10 @@ class IOBuffer;
 class TaskRunner;
 
 class NEI_API AsyncFile {
- public:
+public:
   // AsyncFile is a byte-stream abstraction. It intentionally does not expose
   // a text/binary file mode; any text handling belongs in a higher layer.
-  static std::unique_ptr<AsyncFile> Create(
-      scoped_refptr<TaskRunner> io_task_runner);
+  static std::unique_ptr<AsyncFile> Create(scoped_refptr<TaskRunner> io_task_runner);
 
   enum class OpenMode {
     kReadOnly,
@@ -74,16 +73,14 @@ class NEI_API AsyncFile {
     ErrorCode code = ErrorCode::kOk;
     std::uint32_t native_code = 0;
 
-    bool ok() const { return code == ErrorCode::kOk; }
+    bool ok() const {
+      return code == ErrorCode::kOk;
+    }
   };
 
   using OpenCallback = std::function<void(bool success, Error error)>;
-  using ReadCallback =
-      std::function<void(bool success, std::size_t bytes_read,
-                         Error error)>;
-  using WriteCallback =
-      std::function<void(bool success, std::size_t bytes_written,
-                         Error error)>;
+  using ReadCallback = std::function<void(bool success, std::size_t bytes_read, Error error)>;
+  using WriteCallback = std::function<void(bool success, std::size_t bytes_written, Error error)>;
   // Fire-once callback after the close sequence fully drains.
   // Called on the IO thread when the underlying handle is closed and
   // all in-flight operations have been delivered their final error.
@@ -91,35 +88,34 @@ class NEI_API AsyncFile {
 
   virtual ~AsyncFile() = default;
 
-  virtual void OpenAsync(const std::string& path,
+  virtual void OpenAsync(const std::string &path,
                          OpenMode mode,
                          OpenDisposition disposition,
-                         const scoped_refptr<TaskRunner>& background_runner,
+                         const scoped_refptr<TaskRunner> &background_runner,
                          OpenCallback callback) = 0;
 
   // Convenience overload accepting std::filesystem::path.
   // Converts to UTF-8 string and delegates to the virtual method.
   // The reinterpret_cast handles C++20 char8_t: path::u8string() returns
   // std::u8string in C++20 vs std::string in C++17.
-  void OpenAsync(const std::filesystem::path& path,
+  void OpenAsync(const std::filesystem::path &path,
                  OpenMode mode,
                  OpenDisposition disposition,
-                 const scoped_refptr<TaskRunner>& background_runner,
+                 const scoped_refptr<TaskRunner> &background_runner,
                  OpenCallback callback) {
     auto u8 = path.u8string();
-    OpenAsync(std::string(reinterpret_cast<const char*>(u8.data()), u8.size()),
-              mode, disposition, background_runner, std::move(callback));
+    OpenAsync(std::string(reinterpret_cast<const char *>(u8.data()), u8.size()),
+              mode,
+              disposition,
+              background_runner,
+              std::move(callback));
   }
 
-  virtual void ReadAsync(scoped_refptr<IOBuffer> buf,
-                         std::size_t bytes_to_read,
-                         std::uint64_t offset,
-                         ReadCallback callback) = 0;
+  virtual void
+  ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t bytes_to_read, std::uint64_t offset, ReadCallback callback) = 0;
 
-  virtual void WriteAsync(scoped_refptr<IOBuffer> buf,
-                          std::size_t bytes_to_write,
-                          std::uint64_t offset,
-                          WriteCallback callback) = 0;
+  virtual void
+  WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t bytes_to_write, std::uint64_t offset, WriteCallback callback) = 0;
 
   // Initiate the close sequence.  The callback fires exactly once on
   // the IO thread after the handle is closed and all in-flight I/O
@@ -130,6 +126,6 @@ class NEI_API AsyncFile {
   virtual bool is_open() const = 0;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_IO_ASYNC_FILE_H_
+#endif // NEIXX_IO_ASYNC_FILE_H_

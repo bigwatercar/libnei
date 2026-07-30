@@ -76,13 +76,13 @@ TEST(UtfStringConversionsTest, SystemCodepageRoundTripASCII) {
 #if defined(_WIN32)
 TEST(UtfStringConversionsTest, SystemCodepageToUTF16ChineseGBK) {
   // U+4E2D (中) = GBK: D6 D0,  U+6587 (文) = GBK: CE C4
-  const char gbk[] = "\xD6\xD0\xCE\xC4";  // "中文" in GBK/CP936
+  const char gbk[] = "\xD6\xD0\xCE\xC4"; // "中文" in GBK/CP936
   const std::string mbcs(gbk, sizeof(gbk) - 1);
 
   const std::u16string result = nei::SystemCodepageToUTF16(mbcs);
   ASSERT_EQ(result.size(), 2u);
-  EXPECT_EQ(result[0], static_cast<char16_t>(0x4E2D));  // 中
-  EXPECT_EQ(result[1], static_cast<char16_t>(0x6587));  // 文
+  EXPECT_EQ(result[0], static_cast<char16_t>(0x4E2D)); // 中
+  EXPECT_EQ(result[1], static_cast<char16_t>(0x6587)); // 文
 }
 
 TEST(UtfStringConversionsTest, SystemCodepageRoundTripChineseGBK) {
@@ -91,7 +91,7 @@ TEST(UtfStringConversionsTest, SystemCodepageRoundTripChineseGBK) {
   const std::string mbcs(gbk, sizeof(gbk) - 1);
 
   const std::string utf8 = nei::SystemCodepageToUTF8(mbcs);
-  EXPECT_EQ(utf8, "\xE4\xB8\xAD\xE6\x96\x87");  // "中文" in UTF-8
+  EXPECT_EQ(utf8, "\xE4\xB8\xAD\xE6\x96\x87"); // "中文" in UTF-8
 
   const std::string back = nei::UTF8ToSystemCodepage(utf8);
   EXPECT_EQ(back, mbcs);
@@ -106,4 +106,4 @@ TEST(UtfStringConversionsTest, SystemCodepageToUTF8InvalidSequence) {
   // Must not crash; any result (including empty) is acceptable.
   SUCCEED();
 }
-#endif  // _WIN32
+#endif // _WIN32

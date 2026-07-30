@@ -19,11 +19,12 @@ namespace {
 /// A minimal SimpleThread that sets an atomic flag and optionally blocks
 /// until a caller-provided event is signaled.
 class SignalThread : public SimpleThread {
- public:
-  SignalThread(const std::string& name,
-               std::atomic<bool>* ran,
-               WaitableEvent* block_until = nullptr)
-      : SimpleThread(name), ran_(ran), block_until_(block_until) {}
+public:
+  SignalThread(const std::string &name, std::atomic<bool> *ran, WaitableEvent *block_until = nullptr)
+      : SimpleThread(name)
+      , ran_(ran)
+      , block_until_(block_until) {
+  }
 
   void Run() override {
     if (block_until_) {
@@ -32,17 +33,18 @@ class SignalThread : public SimpleThread {
     ran_->store(true, std::memory_order_release);
   }
 
- private:
-  std::atomic<bool>* ran_;
-  WaitableEvent* block_until_;
+private:
+  std::atomic<bool> *ran_;
+  WaitableEvent *block_until_;
 };
 
 /// A SimpleThread that records its own PlatformThreadId from inside Run().
 class IdRecordingThread : public SimpleThread {
- public:
-  IdRecordingThread(const std::string& name,
-                    std::atomic<PlatformThread::PlatformThreadId>* captured_id)
-      : SimpleThread(name), captured_id_(captured_id) {}
+public:
+  IdRecordingThread(const std::string &name, std::atomic<PlatformThread::PlatformThreadId> *captured_id)
+      : SimpleThread(name)
+      , captured_id_(captured_id) {
+  }
 
   void Run() override {
     captured_id_->store(PlatformThread::CurrentId(), std::memory_order_release);
@@ -50,22 +52,24 @@ class IdRecordingThread : public SimpleThread {
     PlatformThread::Sleep(TimeDelta::FromMilliseconds(5));
   }
 
- private:
-  std::atomic<PlatformThread::PlatformThreadId>* captured_id_;
+private:
+  std::atomic<PlatformThread::PlatformThreadId> *captured_id_;
 };
 
 /// A SimpleThread subclass that accepts a custom Options struct.
 class OptionThread : public SimpleThread {
- public:
-  OptionThread(const std::string& name, std::atomic<bool>* ran)
-      : SimpleThread(name), ran_(ran) {}
+public:
+  OptionThread(const std::string &name, std::atomic<bool> *ran)
+      : SimpleThread(name)
+      , ran_(ran) {
+  }
 
   void Run() override {
     ran_->store(true, std::memory_order_release);
   }
 
- private:
-  std::atomic<bool>* ran_;
+private:
+  std::atomic<bool> *ran_;
 };
 
 // =========================================================================
@@ -127,7 +131,7 @@ TEST(SimpleThreadTest, HasBeenJoinedTracksLifecycle) {
 
   EXPECT_FALSE(thread.HasBeenJoined());
   thread.Start();
-  EXPECT_FALSE(thread.HasBeenJoined());  // still running
+  EXPECT_FALSE(thread.HasBeenJoined()); // still running
   thread.Join();
   EXPECT_TRUE(thread.HasBeenJoined());
 }
@@ -153,19 +157,17 @@ TEST(SimpleThreadTest, MultipleInstancesRunConcurrently) {
   std::vector<std::atomic<bool>> flags(kThreadCount);
 
   for (int i = 0; i < kThreadCount; ++i) {
-    auto t = std::make_unique<SignalThread>(
-        "test-concurrent-" + std::to_string(i), &flags[i]);
+    auto t = std::make_unique<SignalThread>("test-concurrent-" + std::to_string(i), &flags[i]);
     t->Start();
     threads.push_back(std::move(t));
   }
 
-  for (auto& t : threads) {
+  for (auto &t : threads) {
     t->Join();
   }
 
   for (int i = 0; i < kThreadCount; ++i) {
-    EXPECT_TRUE(flags[i].load(std::memory_order_acquire))
-        << "Thread " << i << " did not run.";
+    EXPECT_TRUE(flags[i].load(std::memory_order_acquire)) << "Thread " << i << " did not run.";
   }
 }
 
@@ -201,5 +203,5 @@ TEST(SimpleThreadTest, JoinReturnsPromptlyAfterRunExits) {
   EXPECT_TRUE(ran.load(std::memory_order_acquire));
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

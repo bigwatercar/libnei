@@ -18,8 +18,7 @@ class CommandLine;
 
 struct ElevatedProcessOptions {
   bool inherit_console = false;
-  TimeDelta wait_timeout =
-      TimeDelta::FromMicroseconds(std::numeric_limits<long long>::max());
+  TimeDelta wait_timeout = TimeDelta::FromMicroseconds(std::numeric_limits<long long>::max());
 };
 
 /// Options for ShellExecute.
@@ -39,11 +38,9 @@ struct NEI_API ShellExecuteOptions {
 };
 
 class NEI_API ProcessUtil {
- public:
+public:
   /// Launches a child process with elevation (admin/sudo).
-  static ProcessExitInfo LaunchProcessElevated(
-      const CommandLine& command_line,
-      const ElevatedProcessOptions& options);
+  static ProcessExitInfo LaunchProcessElevated(const CommandLine &command_line, const ElevatedProcessOptions &options);
 
   /// Simple process launch  --  no IO thread, no callbacks, no async pipes.
   ///
@@ -61,10 +58,9 @@ class NEI_API ProcessUtil {
   /// @param wait_timeout  If not Max(), wait up to this duration for the
   ///                      child to exit.  Max() = fire-and-forget.
   /// @return ProcessExitInfo describing the result.
-  static ProcessExitInfo Launch(
-      const CommandLine& command_line,
-      const ProcessLaunchOptions& options = ProcessLaunchOptions{},
-      TimeDelta wait_timeout = TimeDelta::Max());
+  static ProcessExitInfo Launch(const CommandLine &command_line,
+                                const ProcessLaunchOptions &options = ProcessLaunchOptions{},
+                                TimeDelta wait_timeout = TimeDelta::Max());
 
   /// Open a file, document, or URL using the OS shell's default handler.
   ///
@@ -78,11 +74,9 @@ class NEI_API ProcessUtil {
   /// @param options      Operation verb, parameters, working directory,
   ///                     and window visibility.
   /// @return kRunning on success, kFailedToStart if the shell call fails.
-  static ProcessExitInfo ShellExecute(
-      const std::string& path_or_url,
-      const ShellExecuteOptions& options = {});
+  static ProcessExitInfo ShellExecute(const std::string &path_or_url, const ShellExecuteOptions &options = {});
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_PROCESS_PROCESS_UTIL_H_
+#endif // NEIXX_PROCESS_PROCESS_UTIL_H_

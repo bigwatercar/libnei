@@ -22,23 +22,23 @@ using OnTaskPostedCallback = std::function<void()>;
 using OnTaskEnqueuedCallback = std::function<void(TaskShutdownBehavior)>;
 
 class NEI_API TaskQueue final {
- public:
+public:
   class Impl;
 
-  explicit TaskQueue(const TaskTraits& traits = TaskTraits());
+  explicit TaskQueue(const TaskTraits &traits = TaskTraits());
   ~TaskQueue();
 
-  TaskQueue(const TaskQueue&) = delete;
-  TaskQueue& operator=(const TaskQueue&) = delete;
-  TaskQueue(TaskQueue&&) = delete;
-  TaskQueue& operator=(TaskQueue&&) = delete;
+  TaskQueue(const TaskQueue &) = delete;
+  TaskQueue &operator=(const TaskQueue &) = delete;
+  TaskQueue(TaskQueue &&) = delete;
+  TaskQueue &operator=(TaskQueue &&) = delete;
 
   bool PushImmediateTask(Task task);
   bool PushDelayedTask(Task task);
-  bool TakeImmediateTask(Task* task);
-  std::size_t TakeImmediateTasks(Task* tasks, std::size_t max_tasks);
-  bool TakeReadyDelayedTask(const TimeTicks& now, Task* task);
-  std::size_t PromoteReadyDelayedTasks(const TimeTicks& now);
+  bool TakeImmediateTask(Task *task);
+  std::size_t TakeImmediateTasks(Task *tasks, std::size_t max_tasks);
+  bool TakeReadyDelayedTask(const TimeTicks &now, Task *task);
+  std::size_t PromoteReadyDelayedTasks(const TimeTicks &now);
 
   bool HasImmediateWork() const;
   bool HasDelayedWork() const;
@@ -47,8 +47,8 @@ class NEI_API TaskQueue final {
   void Shutdown();
   void CancelNonShutdownBlockingTasksLocked();
   bool is_shutdown() const;
-  const SequenceToken& sequence_token() const;
-  const TaskTraits& traits() const;
+  const SequenceToken &sequence_token() const;
+  const TaskTraits &traits() const;
 
   WeakPtr<TaskQueue> GetWeakPtr();
   void SetOnTaskPostedCallback(OnTaskPostedCallback callback);
@@ -74,9 +74,9 @@ class NEI_API TaskQueue final {
   /// Returned by WillRunTask().  Drives heap management in
   /// PooledTaskSource, directly mirroring TaskSource::RunStatus.
   enum class RunStatus {
-    kDisallowed,           // Cannot run (shutdown or max concurrency)
-    kAllowedNotSaturated,  // Can run; queue should stay in ready heap
-    kAllowedSaturated,     // Can run; queue should be removed from heap
+    kDisallowed,          // Cannot run (shutdown or max concurrency)
+    kAllowedNotSaturated, // Can run; queue should stay in ready heap
+    kAllowedSaturated,    // Can run; queue should be removed from heap
   };
 
   /// Atomically reserves a worker execution slot.
@@ -103,7 +103,7 @@ class NEI_API TaskQueue final {
   /// reserved slots.
   size_t GetRemainingParallelism() const;
 
- private:
+private:
   /// Maximum workers that may simultaneously hold a slot on a single
   /// parallel queue.  Mirrors Chromium's kMaxWorkersPerJob (=256)
   /// used as the default upper bound in GetMaxConcurrency().
@@ -113,11 +113,11 @@ class NEI_API TaskQueue final {
   NEI_SUPPRESS_MSC_WARNING_END
 };
 
-}  // namespace internal
+} // namespace internal
 
 template <>
 struct WeakPtrThreadSafe<internal::TaskQueue> : std::true_type {};
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_TASK_INTERNAL_TASK_QUEUE_H_
+#endif // NEIXX_TASK_INTERNAL_TASK_QUEUE_H_

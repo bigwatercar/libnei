@@ -13,49 +13,66 @@ struct JobHandle::Impl {
 };
 
 JobHandle::JobHandle() = default;
+
 JobHandle::~JobHandle() {
   if (impl_ && !impl_->detached && impl_->source)
     impl_->source->Join(true);
 }
-JobHandle::JobHandle(JobHandle&&) noexcept = default;
-JobHandle& JobHandle::operator=(JobHandle&&) noexcept = default;
+
+JobHandle::JobHandle(JobHandle &&) noexcept = default;
+JobHandle &JobHandle::operator=(JobHandle &&) noexcept = default;
 
 void JobHandle::Join() {
-  if (impl_ && impl_->source) impl_->source->Join(true);
+  if (impl_ && impl_->source)
+    impl_->source->Join(true);
 }
+
 void JobHandle::Cancel() {
-  if (impl_ && impl_->source) impl_->source->Cancel();
+  if (impl_ && impl_->source)
+    impl_->source->Cancel();
 }
+
 void JobHandle::CancelAndSync() {
-  if (impl_ && impl_->source) { impl_->source->Cancel(); impl_->source->Join(true); }
+  if (impl_ && impl_->source) {
+    impl_->source->Cancel();
+    impl_->source->Join(true);
+  }
 }
+
 bool JobHandle::IsCompleted() const {
   return impl_ && impl_->source ? impl_->source->is_completed() : true;
 }
+
 void JobHandle::NotifyConcurrencyIncrease(std::int32_t c) {
-  if (impl_ && impl_->source) impl_->source->NotifyConcurrencyIncrease(c);
+  if (impl_ && impl_->source)
+    impl_->source->NotifyConcurrencyIncrease(c);
 }
+
 void JobHandle::UpdatePriority(TaskPriority p) {
-  if (impl_ && impl_->source) impl_->source->UpdatePriority(p);
+  if (impl_ && impl_->source)
+    impl_->source->UpdatePriority(p);
 }
+
 void JobHandle::Detach() {
-  if (impl_) impl_->detached = true;
+  if (impl_)
+    impl_->detached = true;
 }
 
 // static
-JobHandle JobHandle::PostJob(const Location& from_here, TaskTraits traits,
-    RepeatingCallback<void(JobDelegate*)> task,
-    MaxConcurrencyCallback max_concurrency_cb, int initial_workers) {
+JobHandle JobHandle::PostJob(const Location &from_here,
+                             TaskTraits traits,
+                             RepeatingCallback<void(JobDelegate *)> task,
+                             MaxConcurrencyCallback max_concurrency_cb,
+                             int initial_workers) {
   (void)from_here;
   (void)traits;
-  DCHECK(task); DCHECK(max_concurrency_cb);
+  DCHECK(task);
+  DCHECK(max_concurrency_cb);
   scoped_refptr<internal::JobTaskSource> source(
-      new internal::JobTaskSource(
-          std::move(task), std::move(max_concurrency_cb), initial_workers));
-  ThreadPoolInstance* pool = ThreadPoolInstance::Get();
+      new internal::JobTaskSource(std::move(task), std::move(max_concurrency_cb), initial_workers));
+  ThreadPoolInstance *pool = ThreadPoolInstance::Get();
   DCHECK(pool);
-  static scoped_refptr<TaskRunner> cached_runner =
-      pool->CreateParallelTaskRunner(TaskTraits());
+  static scoped_refptr<TaskRunner> cached_runner = pool->CreateParallelTaskRunner(TaskTraits());
   source->SetRunner(cached_runner);
   source->PostInitialWorkers(initial_workers);
   JobHandle handle;
@@ -63,4 +80,4 @@ JobHandle JobHandle::PostJob(const Location& from_here, TaskTraits traits,
   return handle;
 }
 
-}  // namespace nei
+} // namespace nei

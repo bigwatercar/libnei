@@ -80,30 +80,30 @@ NEI_API int nei_is_running_on_wsl(void);
 #include <string>
 
 inline std::string nei_get_os_name() {
-    char buf[128];
-    int len = ::nei_get_os_name(buf, sizeof(buf));
-    if (len < 0) {
-        return {};
-    }
-    return std::string(buf, static_cast<size_t>(len));
+  char buf[128];
+  int len = ::nei_get_os_name(buf, sizeof(buf));
+  if (len < 0) {
+    return {};
+  }
+  return std::string(buf, static_cast<size_t>(len));
 }
 
 inline std::string nei_get_os_version() {
-    char buf[128];
-    int len = ::nei_get_os_version(buf, sizeof(buf));
-    if (len < 0) {
-        return {};
-    }
-    return std::string(buf, static_cast<size_t>(len));
+  char buf[128];
+  int len = ::nei_get_os_version(buf, sizeof(buf));
+  if (len < 0) {
+    return {};
+  }
+  return std::string(buf, static_cast<size_t>(len));
 }
 
 inline std::string nei_get_kernel_version() {
-    char buf[128];
-    int len = ::nei_get_kernel_version(buf, sizeof(buf));
-    if (len < 0) {
-        return {};
-    }
-    return std::string(buf, static_cast<size_t>(len));
+  char buf[128];
+  int len = ::nei_get_kernel_version(buf, sizeof(buf));
+  if (len < 0) {
+    return {};
+  }
+  return std::string(buf, static_cast<size_t>(len));
 }
 
 #endif

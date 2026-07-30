@@ -61,12 +61,12 @@ NEI_API int nei_get_cpu_arch(char *buf, size_t size);
  * @brief Convenience wrapper that returns the CPU architecture as a std::string.
  */
 inline std::string nei_get_cpu_arch() {
-    char buf[64];
-    int len = ::nei_get_cpu_arch(buf, sizeof(buf));
-    if (len < 0) {
-        return {};
-    }
-    return std::string(buf, static_cast<size_t>(len));
+  char buf[64];
+  int len = ::nei_get_cpu_arch(buf, sizeof(buf));
+  if (len < 0) {
+    return {};
+  }
+  return std::string(buf, static_cast<size_t>(len));
 }
 
 #endif

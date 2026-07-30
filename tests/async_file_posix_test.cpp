@@ -24,22 +24,27 @@
 #include <neixx/threading/platform_thread.h>
 #include <neixx/threading/thread.h>
 #if __cplusplus >= 202002L
-namespace { inline std::string PathToUTF8(const std::filesystem::path& p) { auto u = p.u8string(); return {reinterpret_cast<const char*>(u.data()), u.size()}; } }
+namespace {
+inline std::string PathToUTF8(const std::filesystem::path &p) {
+  auto u = p.u8string();
+  return {reinterpret_cast<const char *>(u.data()), u.size()};
+}
+} // namespace
 #else
-namespace { inline std::string PathToUTF8(const std::filesystem::path& p) { return p.u8string(); } }
+namespace {
+inline std::string PathToUTF8(const std::filesystem::path &p) {
+  return p.u8string();
+}
+} // namespace
 #endif
-
-
 
 namespace nei {
 namespace {
 
-std::filesystem::path MakeTempFilePath(const char* name_hint) {
-  const auto ticks =
-      std::chrono::high_resolution_clock::now().time_since_epoch().count();
+std::filesystem::path MakeTempFilePath(const char *name_hint) {
+  const auto ticks = std::chrono::high_resolution_clock::now().time_since_epoch().count();
   std::filesystem::path p = std::filesystem::temp_directory_path();
-  p /= std::string("nei_async_file_posix_") + name_hint + "_" +
-       std::to_string(static_cast<long long>(ticks)) + ".bin";
+  p /= std::string("nei_async_file_posix_") + name_hint + "_" + std::to_string(static_cast<long long>(ticks)) + ".bin";
   return p;
 }
 
@@ -51,7 +56,7 @@ std::vector<std::uint8_t> MakePayload(std::size_t size, std::uint8_t salt) {
   return data;
 }
 
-bool IssueWrite(const std::shared_ptr<AsyncFilePosix>& file,
+bool IssueWrite(const std::shared_ptr<AsyncFilePosix> &file,
                 std::uint64_t offset,
                 std::vector<std::uint8_t> data,
                 AsyncFile::WriteCallback callback) {
@@ -66,22 +71,19 @@ bool IssueWrite(const std::shared_ptr<AsyncFilePosix>& file,
   return true;
 }
 
-bool IssueRead(
-    const std::shared_ptr<AsyncFilePosix>& file,
-    std::uint64_t offset,
-    std::size_t bytes_to_read,
-    std::function<void(bool success,
-                       std::vector<std::uint8_t>&& data,
-                       AsyncFile::Error error)> callback) {
+bool IssueRead(const std::shared_ptr<AsyncFilePosix> &file,
+               std::uint64_t offset,
+               std::size_t bytes_to_read,
+               std::function<void(bool success, std::vector<std::uint8_t> &&data, AsyncFile::Error error)> callback) {
   if (!file || !callback) {
     return false;
   }
   scoped_refptr<IOBuffer> buf(new IOBufferWithSize(bytes_to_read));
   file->ReadAsync(
-      buf, bytes_to_read, offset,
-      [buf, callback = std::move(callback)](bool success,
-                                            std::size_t bytes_read,
-                                            AsyncFile::Error error) mutable {
+      buf,
+      bytes_to_read,
+      offset,
+      [buf, callback = std::move(callback)](bool success, std::size_t bytes_read, AsyncFile::Error error) mutable {
         std::vector<std::uint8_t> out;
         if (bytes_read > 0) {
           out.resize(bytes_read);
@@ -93,7 +95,7 @@ bool IssueRead(
 }
 
 class AsyncFilePosixTest : public testing::Test {
- protected:
+protected:
   void SetUp() override {
     Thread::Options io_options;
     io_options.message_pump_type = MessagePumpType::IO;
@@ -110,13 +112,13 @@ class AsyncFilePosixTest : public testing::Test {
     background_thread_.Stop();
     io_thread_.Stop();
 
-    for (const auto& path : cleanup_files_) {
+    for (const auto &path : cleanup_files_) {
       std::error_code ec;
       (void)std::filesystem::remove(path, ec);
     }
   }
 
-  std::filesystem::path NewTempPath(const char* hint) {
+  std::filesystem::path NewTempPath(const char *hint) {
     std::filesystem::path path = MakeTempFilePath(hint);
     cleanup_files_.push_back(path);
     return path;
@@ -145,8 +147,10 @@ TEST_F(AsyncFilePosixTest, OpenFailureRollsBackAndAllowsRetry) {
   std::atomic<bool> second_ok{false};
   AsyncFile::ErrorCode first_error = AsyncFile::ErrorCode::kOk;
 
-  file->OpenAsync(missing_path.string(), AsyncFile::OpenMode::kReadOnly,
-                  AsyncFile::OpenDisposition::kOpenExisting, bg_runner_,
+  file->OpenAsync(missing_path.string(),
+                  AsyncFile::OpenMode::kReadOnly,
+                  AsyncFile::OpenDisposition::kOpenExisting,
+                  bg_runner_,
                   [&](bool success, AsyncFile::Error error) {
                     first_ok.store(!success, std::memory_order_release);
                     first_error = error.code;
@@ -158,11 +162,12 @@ TEST_F(AsyncFilePosixTest, OpenFailureRollsBackAndAllowsRetry) {
   EXPECT_EQ(first_error, AsyncFile::ErrorCode::kNotFound);
   EXPECT_FALSE(file->is_open());
 
-  file->OpenAsync(missing_path.string(), AsyncFile::OpenMode::kReadWrite,
-                  AsyncFile::OpenDisposition::kCreateAlways, bg_runner_,
+  file->OpenAsync(missing_path.string(),
+                  AsyncFile::OpenMode::kReadWrite,
+                  AsyncFile::OpenDisposition::kCreateAlways,
+                  bg_runner_,
                   [&](bool success, AsyncFile::Error error) {
-                    second_ok.store(success && error.ok(),
-                                    std::memory_order_release);
+                    second_ok.store(success && error.ok(), std::memory_order_release);
                     second_open_done.Signal();
                   });
 
@@ -170,7 +175,8 @@ TEST_F(AsyncFilePosixTest, OpenFailureRollsBackAndAllowsRetry) {
   EXPECT_TRUE(second_ok.load(std::memory_order_acquire));
   EXPECT_TRUE(file->is_open());
 
-  file->CloseAsync([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->CloseAsync([&]() { close_barrier.Signal(); });
+  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 }
 
 TEST_F(AsyncFilePosixTest, PositionalConcurrentWritesAndReadbackAreStable) {
@@ -188,8 +194,7 @@ TEST_F(AsyncFilePosixTest, PositionalConcurrentWritesAndReadbackAreStable) {
   std::atomic<bool> read_ok{false};
   std::atomic<std::size_t> first_bad_write_bytes{0};
   std::atomic<std::uint32_t> first_bad_write_native{0};
-  std::atomic<int> first_bad_write_code{
-      static_cast<int>(AsyncFile::ErrorCode::kOk)};
+  std::atomic<int> first_bad_write_code{static_cast<int>(AsyncFile::ErrorCode::kOk)};
   std::vector<std::uint8_t> read_back;
 
   const std::vector<std::uint8_t> payload_a = MakePayload(64 * 1024, 11);
@@ -197,11 +202,12 @@ TEST_F(AsyncFilePosixTest, PositionalConcurrentWritesAndReadbackAreStable) {
   const std::int64_t offset_a = 0;
   const std::int64_t offset_b = 256 * 1024;
 
-  file->OpenAsync(path.string(), AsyncFile::OpenMode::kReadWrite,
-                  AsyncFile::OpenDisposition::kCreateAlways, bg_runner_,
+  file->OpenAsync(path.string(),
+                  AsyncFile::OpenMode::kReadWrite,
+                  AsyncFile::OpenDisposition::kCreateAlways,
+                  bg_runner_,
                   [&](bool success, AsyncFile::Error error) {
-                    open_ok.store(success && error.ok(),
-                                  std::memory_order_release);
+                    open_ok.store(success && error.ok(), std::memory_order_release);
                     open_done.Signal();
                   });
   ASSERT_TRUE(open_done.TimedWait(std::chrono::seconds(10)));
@@ -210,16 +216,11 @@ TEST_F(AsyncFilePosixTest, PositionalConcurrentWritesAndReadbackAreStable) {
   auto launch_write = [&](std::int64_t offset, std::vector<std::uint8_t> payload) {
     const std::size_t expect_bytes = payload.size();
     const bool accepted = IssueWrite(
-      file,
-        offset, std::move(payload),
-        [&](bool success, std::size_t bytes_written, AsyncFile::Error error) {
+        file, offset, std::move(payload), [&](bool success, std::size_t bytes_written, AsyncFile::Error error) {
           if (!success || !error.ok() || bytes_written != expect_bytes) {
-            first_bad_write_bytes.store(bytes_written,
-                                        std::memory_order_release);
-            first_bad_write_native.store(error.native_code,
-                                         std::memory_order_release);
-            first_bad_write_code.store(static_cast<int>(error.code),
-                                       std::memory_order_release);
+            first_bad_write_bytes.store(bytes_written, std::memory_order_release);
+            first_bad_write_native.store(error.native_code, std::memory_order_release);
+            first_bad_write_code.store(static_cast<int>(error.code), std::memory_order_release);
             write_ok.store(false, std::memory_order_release);
           }
           if (pending_writes.fetch_sub(1, std::memory_order_acq_rel) == 1) {
@@ -242,17 +243,13 @@ TEST_F(AsyncFilePosixTest, PositionalConcurrentWritesAndReadbackAreStable) {
 
   ASSERT_TRUE(write_done.TimedWait(std::chrono::seconds(15)));
   ASSERT_TRUE(write_ok.load(std::memory_order_acquire))
-      << "bad write callback: bytes="
-      << first_bad_write_bytes.load(std::memory_order_acquire)
+      << "bad write callback: bytes=" << first_bad_write_bytes.load(std::memory_order_acquire)
       << " code=" << first_bad_write_code.load(std::memory_order_acquire)
-      << " native="
-      << first_bad_write_native.load(std::memory_order_acquire);
+      << " native=" << first_bad_write_native.load(std::memory_order_acquire);
 
   const std::size_t read_size = static_cast<std::size_t>(offset_b) + payload_b.size();
-    const bool read_accepted = IssueRead(
-      file,
-      0, read_size,
-      [&](bool success, std::vector<std::uint8_t>&& data, AsyncFile::Error error) {
+  const bool read_accepted =
+      IssueRead(file, 0, read_size, [&](bool success, std::vector<std::uint8_t> &&data, AsyncFile::Error error) {
         read_ok.store(success && error.ok(), std::memory_order_release);
         read_back = std::move(data);
         read_done.Signal();
@@ -266,10 +263,11 @@ TEST_F(AsyncFilePosixTest, PositionalConcurrentWritesAndReadbackAreStable) {
   for (std::size_t i = payload_a.size(); i < static_cast<std::size_t>(offset_b); ++i) {
     ASSERT_EQ(read_back[i], 0u);
   }
-  ASSERT_TRUE(std::equal(payload_b.begin(), payload_b.end(),
-                         read_back.begin() + static_cast<std::ptrdiff_t>(offset_b)));
+  ASSERT_TRUE(
+      std::equal(payload_b.begin(), payload_b.end(), read_back.begin() + static_cast<std::ptrdiff_t>(offset_b)));
 
-  file->CloseAsync([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->CloseAsync([&]() { close_barrier.Signal(); });
+  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 }
 
 TEST_F(AsyncFilePosixTest, AppendModeAppendsIgnoringCallerOffset) {
@@ -293,56 +291,49 @@ TEST_F(AsyncFilePosixTest, AppendModeAppendsIgnoringCallerOffset) {
   const std::vector<std::uint8_t> payload2 = MakePayload(32 * 1024, 7);
   std::vector<std::uint8_t> all_data;
 
-  file->OpenAsync(path.string(), AsyncFile::OpenMode::kAppend,
-                  AsyncFile::OpenDisposition::kCreateAlways, bg_runner_,
+  file->OpenAsync(path.string(),
+                  AsyncFile::OpenMode::kAppend,
+                  AsyncFile::OpenDisposition::kCreateAlways,
+                  bg_runner_,
                   [&](bool success, AsyncFile::Error error) {
-                    open_ok.store(success && error.ok(),
-                                  std::memory_order_release);
+                    open_ok.store(success && error.ok(), std::memory_order_release);
                     open_done.Signal();
                   });
   ASSERT_TRUE(open_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(open_ok.load(std::memory_order_acquire));
 
-  ASSERT_TRUE(IssueWrite(
-      file,
-      0, payload1,
-      [&](bool success, std::size_t bytes_written, AsyncFile::Error error) {
-        write1_ok.store(success && error.ok() && bytes_written == payload1.size(),
-                        std::memory_order_release);
-        write1_done.Signal();
-      }));
+  ASSERT_TRUE(IssueWrite(file, 0, payload1, [&](bool success, std::size_t bytes_written, AsyncFile::Error error) {
+    write1_ok.store(success && error.ok() && bytes_written == payload1.size(), std::memory_order_release);
+    write1_done.Signal();
+  }));
   ASSERT_TRUE(write1_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(write1_ok.load(std::memory_order_acquire));
 
-  ASSERT_TRUE(IssueWrite(
-      file,
-      0, payload2,
-      [&](bool success, std::size_t bytes_written, AsyncFile::Error error) {
-        write2_ok.store(success && error.ok() && bytes_written == payload2.size(),
-                        std::memory_order_release);
-        write2_done.Signal();
-      }));
+  ASSERT_TRUE(IssueWrite(file, 0, payload2, [&](bool success, std::size_t bytes_written, AsyncFile::Error error) {
+    write2_ok.store(success && error.ok() && bytes_written == payload2.size(), std::memory_order_release);
+    write2_done.Signal();
+  }));
   ASSERT_TRUE(write2_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(write2_ok.load(std::memory_order_acquire));
 
-  file->CloseAsync([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->CloseAsync([&]() { close_barrier.Signal(); });
+  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 
   auto reader = std::make_shared<AsyncFilePosix>(io_runner_);
-  reader->OpenAsync(path.string(), AsyncFile::OpenMode::kReadOnly,
-                    AsyncFile::OpenDisposition::kOpenExisting, bg_runner_,
+  reader->OpenAsync(path.string(),
+                    AsyncFile::OpenMode::kReadOnly,
+                    AsyncFile::OpenDisposition::kOpenExisting,
+                    bg_runner_,
                     [&](bool success, AsyncFile::Error error) {
-                      read_open_ok.store(success && error.ok(),
-                                         std::memory_order_release);
+                      read_open_ok.store(success && error.ok(), std::memory_order_release);
                       read_open_done.Signal();
                     });
   ASSERT_TRUE(read_open_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(read_open_ok.load(std::memory_order_acquire));
 
   const std::size_t total_size = payload1.size() + payload2.size();
-  ASSERT_TRUE(IssueRead(
-      reader,
-      0, total_size,
-      [&](bool success, std::vector<std::uint8_t>&& data, AsyncFile::Error error) {
+  ASSERT_TRUE(
+      IssueRead(reader, 0, total_size, [&](bool success, std::vector<std::uint8_t> &&data, AsyncFile::Error error) {
         read_ok.store(success && error.ok(), std::memory_order_release);
         all_data = std::move(data);
         read_done.Signal();
@@ -351,8 +342,8 @@ TEST_F(AsyncFilePosixTest, AppendModeAppendsIgnoringCallerOffset) {
   ASSERT_TRUE(read_ok.load(std::memory_order_acquire));
   ASSERT_EQ(all_data.size(), total_size);
   ASSERT_TRUE(std::equal(payload1.begin(), payload1.end(), all_data.begin()));
-  ASSERT_TRUE(std::equal(payload2.begin(), payload2.end(),
-                         all_data.begin() + static_cast<std::ptrdiff_t>(payload1.size())));
+  ASSERT_TRUE(
+      std::equal(payload2.begin(), payload2.end(), all_data.begin() + static_cast<std::ptrdiff_t>(payload1.size())));
 }
 
 TEST_F(AsyncFilePosixTest, ReadPastEndReturnsPartialDataAsSuccess) {
@@ -370,31 +361,26 @@ TEST_F(AsyncFilePosixTest, ReadPastEndReturnsPartialDataAsSuccess) {
   std::atomic<bool> read_ok{false};
   std::vector<std::uint8_t> out;
 
-  file->OpenAsync(path.string(), AsyncFile::OpenMode::kReadWrite,
-                  AsyncFile::OpenDisposition::kCreateAlways, bg_runner_,
+  file->OpenAsync(path.string(),
+                  AsyncFile::OpenMode::kReadWrite,
+                  AsyncFile::OpenDisposition::kCreateAlways,
+                  bg_runner_,
                   [&](bool success, AsyncFile::Error error) {
-                    open_ok.store(success && error.ok(),
-                                  std::memory_order_release);
+                    open_ok.store(success && error.ok(), std::memory_order_release);
                     open_done.Signal();
                   });
   ASSERT_TRUE(open_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(open_ok.load(std::memory_order_acquire));
 
-  ASSERT_TRUE(IssueWrite(
-      file,
-      0, payload,
-      [&](bool success, std::size_t bytes_written, AsyncFile::Error error) {
-        write_ok.store(success && error.ok() && bytes_written == payload.size(),
-                       std::memory_order_release);
-        write_done.Signal();
-      }));
+  ASSERT_TRUE(IssueWrite(file, 0, payload, [&](bool success, std::size_t bytes_written, AsyncFile::Error error) {
+    write_ok.store(success && error.ok() && bytes_written == payload.size(), std::memory_order_release);
+    write_done.Signal();
+  }));
   ASSERT_TRUE(write_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(write_ok.load(std::memory_order_acquire));
 
   ASSERT_TRUE(IssueRead(
-      file,
-      0, payload.size() * 4,
-      [&](bool success, std::vector<std::uint8_t>&& data, AsyncFile::Error error) {
+      file, 0, payload.size() * 4, [&](bool success, std::vector<std::uint8_t> &&data, AsyncFile::Error error) {
         read_ok.store(success && error.ok(), std::memory_order_release);
         out = std::move(data);
         read_done.Signal();
@@ -403,7 +389,8 @@ TEST_F(AsyncFilePosixTest, ReadPastEndReturnsPartialDataAsSuccess) {
   ASSERT_TRUE(read_ok.load(std::memory_order_acquire));
   ASSERT_EQ(out, payload);
 
-  file->CloseAsync([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->CloseAsync([&]() { close_barrier.Signal(); });
+  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 }
 
 TEST_F(AsyncFilePosixTest, LargeOffsetRandomAccessBeyond2GBWorks) {
@@ -423,31 +410,27 @@ TEST_F(AsyncFilePosixTest, LargeOffsetRandomAccessBeyond2GBWorks) {
   const std::vector<std::uint8_t> payload = MakePayload(256, 55);
   std::vector<std::uint8_t> out;
 
-  file->OpenAsync(path.string(), AsyncFile::OpenMode::kReadWrite,
-                  AsyncFile::OpenDisposition::kCreateAlways, bg_runner_,
+  file->OpenAsync(path.string(),
+                  AsyncFile::OpenMode::kReadWrite,
+                  AsyncFile::OpenDisposition::kCreateAlways,
+                  bg_runner_,
                   [&](bool success, AsyncFile::Error error) {
-                    open_ok.store(success && error.ok(),
-                                  std::memory_order_release);
+                    open_ok.store(success && error.ok(), std::memory_order_release);
                     open_done.Signal();
                   });
   ASSERT_TRUE(open_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(open_ok.load(std::memory_order_acquire));
 
-  ASSERT_TRUE(IssueWrite(
-      file,
-      large_offset, payload,
-      [&](bool success, std::size_t bytes_written, AsyncFile::Error error) {
-        write_ok.store(success && error.ok() && bytes_written == payload.size(),
-                       std::memory_order_release);
+  ASSERT_TRUE(
+      IssueWrite(file, large_offset, payload, [&](bool success, std::size_t bytes_written, AsyncFile::Error error) {
+        write_ok.store(success && error.ok() && bytes_written == payload.size(), std::memory_order_release);
         write_done.Signal();
       }));
   ASSERT_TRUE(write_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(write_ok.load(std::memory_order_acquire));
 
   ASSERT_TRUE(IssueRead(
-      file,
-      large_offset, payload.size(),
-      [&](bool success, std::vector<std::uint8_t>&& data, AsyncFile::Error error) {
+      file, large_offset, payload.size(), [&](bool success, std::vector<std::uint8_t> &&data, AsyncFile::Error error) {
         read_ok.store(success && error.ok(), std::memory_order_release);
         out = std::move(data);
         read_done.Signal();
@@ -456,7 +439,8 @@ TEST_F(AsyncFilePosixTest, LargeOffsetRandomAccessBeyond2GBWorks) {
   ASSERT_TRUE(read_ok.load(std::memory_order_acquire));
   ASSERT_EQ(out, payload);
 
-  file->CloseAsync([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->CloseAsync([&]() { close_barrier.Signal(); });
+  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 }
 
 TEST_F(AsyncFilePosixStressTest, HighConcurrencyMixedReadWriteChain) {
@@ -476,11 +460,12 @@ TEST_F(AsyncFilePosixStressTest, HighConcurrencyMixedReadWriteChain) {
   const int total_ops = kProducerThreads * kOpsPerProducer;
   remaining_reads.store(total_ops, std::memory_order_release);
 
-  file->OpenAsync(path.string(), AsyncFile::OpenMode::kReadWrite,
-                  AsyncFile::OpenDisposition::kCreateAlways, bg_runner_,
+  file->OpenAsync(path.string(),
+                  AsyncFile::OpenMode::kReadWrite,
+                  AsyncFile::OpenDisposition::kCreateAlways,
+                  bg_runner_,
                   [&](bool success, AsyncFile::Error error) {
-                    open_ok.store(success && error.ok(),
-                                  std::memory_order_release);
+                    open_ok.store(success && error.ok(), std::memory_order_release);
                     open_done.Signal();
                   });
   ASSERT_TRUE(open_done.TimedWait(std::chrono::seconds(10)));
@@ -489,48 +474,45 @@ TEST_F(AsyncFilePosixStressTest, HighConcurrencyMixedReadWriteChain) {
   auto producer = [&](int producer_idx) {
     for (int i = 0; i < kOpsPerProducer; ++i) {
       const int op_idx = producer_idx * kOpsPerProducer + i;
-      const std::int64_t offset =
-          static_cast<std::int64_t>(op_idx) * static_cast<std::int64_t>(kBlockSize);
-      std::vector<std::uint8_t> payload =
-          MakePayload(kBlockSize, static_cast<std::uint8_t>(op_idx & 0xFF));
+      const std::int64_t offset = static_cast<std::int64_t>(op_idx) * static_cast<std::int64_t>(kBlockSize);
+      std::vector<std::uint8_t> payload = MakePayload(kBlockSize, static_cast<std::uint8_t>(op_idx & 0xFF));
 
-        const bool write_accepted = IssueWrite(
-          file,
-          offset, payload,
-          [&, file, offset, payload = std::move(payload)](bool write_success,
-                                                          std::size_t bytes_written,
-                                                          AsyncFile::Error write_error) mutable {
-            (void)bytes_written;
-            (void)write_error;
-            if (!write_success) {
-              if (remaining_reads.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                all_done.Signal();
-              }
-              return;
-            }
+      const bool write_accepted =
+          IssueWrite(file,
+                     offset,
+                     payload,
+                     [&, file, offset, payload = std::move(payload)](
+                         bool write_success, std::size_t bytes_written, AsyncFile::Error write_error) mutable {
+                       (void)bytes_written;
+                       (void)write_error;
+                       if (!write_success) {
+                         if (remaining_reads.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                           all_done.Signal();
+                         }
+                         return;
+                       }
 
-            const bool read_accepted = IssueRead(
-              file,
-                offset, payload.size(),
-                [&, payload = std::move(payload)](bool read_success,
-                                                 std::vector<std::uint8_t>&& data,
-                                                 AsyncFile::Error read_error) mutable {
-                  (void)read_success;
-                  (void)data;
-                  (void)read_error;
-                  (void)payload;
-                  if (remaining_reads.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                    all_done.Signal();
-                  }
-                });
-            if (!read_accepted &&
-                remaining_reads.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-              all_done.Signal();
-            }
-          });
+                       const bool read_accepted =
+                           IssueRead(file,
+                                     offset,
+                                     payload.size(),
+                                     [&, payload = std::move(payload)](bool read_success,
+                                                                       std::vector<std::uint8_t> &&data,
+                                                                       AsyncFile::Error read_error) mutable {
+                                       (void)read_success;
+                                       (void)data;
+                                       (void)read_error;
+                                       (void)payload;
+                                       if (remaining_reads.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                                         all_done.Signal();
+                                       }
+                                     });
+                       if (!read_accepted && remaining_reads.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                         all_done.Signal();
+                       }
+                     });
 
-      if (!write_accepted &&
-          remaining_reads.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      if (!write_accepted && remaining_reads.fetch_sub(1, std::memory_order_acq_rel) == 1) {
         all_done.Signal();
       }
     }
@@ -541,13 +523,14 @@ TEST_F(AsyncFilePosixStressTest, HighConcurrencyMixedReadWriteChain) {
   for (int i = 0; i < kProducerThreads; ++i) {
     producers.emplace_back(producer, i);
   }
-  for (auto& t : producers) {
+  for (auto &t : producers) {
     t.join();
   }
 
   ASSERT_TRUE(all_done.TimedWait(std::chrono::seconds(60)));
 
-  file->CloseAsync([&]() { close_barrier.Signal(); });  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->CloseAsync([&]() { close_barrier.Signal(); });
+  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 }
 
 TEST_F(AsyncFilePosixStressTest, CloseRaceCancelsInFlightOperationsWithoutHang) {
@@ -565,8 +548,7 @@ TEST_F(AsyncFilePosixStressTest, CloseRaceCancelsInFlightOperationsWithoutHang) 
   std::atomic<int> callback_ops{0};
   std::atomic<bool> bad_outcome{false};
   std::atomic<std::uint32_t> first_bad_native{0};
-  std::atomic<int> first_bad_code{
-      static_cast<int>(AsyncFile::ErrorCode::kOk)};
+  std::atomic<int> first_bad_code{static_cast<int>(AsyncFile::ErrorCode::kOk)};
 
   // This case is intended to verify close-race liveness/callback completion,
   // not sustained throughput. Keep the workload moderate so Debug-on-WSL over
@@ -576,18 +558,18 @@ TEST_F(AsyncFilePosixStressTest, CloseRaceCancelsInFlightOperationsWithoutHang) 
   constexpr std::size_t kIoSize = 16 * 1024;
 
   auto maybe_signal_done = [&]() {
-    if (done_submitting.load(std::memory_order_acquire) &&
-        callback_ops.load(std::memory_order_acquire) ==
-            accepted_ops.load(std::memory_order_acquire)) {
+    if (done_submitting.load(std::memory_order_acquire)
+        && callback_ops.load(std::memory_order_acquire) == accepted_ops.load(std::memory_order_acquire)) {
       callbacks_done.Signal();
     }
   };
 
-  file->OpenAsync(path.string(), AsyncFile::OpenMode::kReadWrite,
-                  AsyncFile::OpenDisposition::kCreateAlways, bg_runner_,
+  file->OpenAsync(path.string(),
+                  AsyncFile::OpenMode::kReadWrite,
+                  AsyncFile::OpenDisposition::kCreateAlways,
+                  bg_runner_,
                   [&](bool success, AsyncFile::Error error) {
-                    open_ok.store(success && error.ok(),
-                                  std::memory_order_release);
+                    open_ok.store(success && error.ok(), std::memory_order_release);
                     open_done.Signal();
                   });
   ASSERT_TRUE(open_done.TimedWait(std::chrono::seconds(10)));
@@ -596,25 +578,19 @@ TEST_F(AsyncFilePosixStressTest, CloseRaceCancelsInFlightOperationsWithoutHang) 
   auto producer = [&](int producer_idx) {
     for (int i = 0; i < kOpsPerProducer; ++i) {
       const std::int64_t offset =
-          static_cast<std::int64_t>((producer_idx * kOpsPerProducer + i) *
-                                    static_cast<int>(kIoSize));
+          static_cast<std::int64_t>((producer_idx * kOpsPerProducer + i) * static_cast<int>(kIoSize));
 
       if (((producer_idx + i) & 1) == 0) {
         std::vector<std::uint8_t> payload =
             MakePayload(kIoSize, static_cast<std::uint8_t>((producer_idx * 17 + i) & 0xFF));
         const bool accepted = IssueWrite(
-          file,
-            offset, std::move(payload),
-            [&](bool success, std::size_t bytes_written, AsyncFile::Error error) {
+            file, offset, std::move(payload), [&](bool success, std::size_t bytes_written, AsyncFile::Error error) {
               (void)bytes_written;
-              if (!success &&
-                  error.code != AsyncFile::ErrorCode::kCanceled &&
-                  error.code != AsyncFile::ErrorCode::kBadFileDescriptor &&
-                  error.code != AsyncFile::ErrorCode::kIoError) {
-                first_bad_native.store(error.native_code,
-                                       std::memory_order_release);
-                first_bad_code.store(static_cast<int>(error.code),
-                                     std::memory_order_release);
+              if (!success && error.code != AsyncFile::ErrorCode::kCanceled
+                  && error.code != AsyncFile::ErrorCode::kBadFileDescriptor
+                  && error.code != AsyncFile::ErrorCode::kIoError) {
+                first_bad_native.store(error.native_code, std::memory_order_release);
+                first_bad_code.store(static_cast<int>(error.code), std::memory_order_release);
                 bad_outcome.store(true, std::memory_order_release);
               }
               callback_ops.fetch_add(1, std::memory_order_acq_rel);
@@ -625,19 +601,13 @@ TEST_F(AsyncFilePosixStressTest, CloseRaceCancelsInFlightOperationsWithoutHang) 
         }
       } else {
         const bool accepted = IssueRead(
-          file,
-            offset, kIoSize,
-            [&](bool success, std::vector<std::uint8_t>&& data,
-                AsyncFile::Error error) {
+            file, offset, kIoSize, [&](bool success, std::vector<std::uint8_t> &&data, AsyncFile::Error error) {
               (void)data;
-              if (!success &&
-                  error.code != AsyncFile::ErrorCode::kCanceled &&
-                  error.code != AsyncFile::ErrorCode::kBadFileDescriptor &&
-                  error.code != AsyncFile::ErrorCode::kIoError) {
-                first_bad_native.store(error.native_code,
-                                       std::memory_order_release);
-                first_bad_code.store(static_cast<int>(error.code),
-                                     std::memory_order_release);
+              if (!success && error.code != AsyncFile::ErrorCode::kCanceled
+                  && error.code != AsyncFile::ErrorCode::kBadFileDescriptor
+                  && error.code != AsyncFile::ErrorCode::kIoError) {
+                first_bad_native.store(error.native_code, std::memory_order_release);
+                first_bad_code.store(static_cast<int>(error.code), std::memory_order_release);
                 bad_outcome.store(true, std::memory_order_release);
               }
               callback_ops.fetch_add(1, std::memory_order_acq_rel);
@@ -661,7 +631,7 @@ TEST_F(AsyncFilePosixStressTest, CloseRaceCancelsInFlightOperationsWithoutHang) 
     file->CloseAsync([&]() { close_issued.Signal(); });
   });
 
-  for (auto& t : producers) {
+  for (auto &t : producers) {
     t.join();
   }
   done_submitting.store(true, std::memory_order_release);
@@ -678,17 +648,15 @@ TEST_F(AsyncFilePosixStressTest, CloseRaceCancelsInFlightOperationsWithoutHang) 
       << " callback_ops=" << callback_ops.load(std::memory_order_acquire)
       << " bad_outcome=" << bad_outcome.load(std::memory_order_acquire)
       << " first_bad_code=" << first_bad_code.load(std::memory_order_acquire)
-      << " first_bad_native="
-      << first_bad_native.load(std::memory_order_acquire);
+      << " first_bad_native=" << first_bad_native.load(std::memory_order_acquire);
 
   // Load both atomics once to avoid a TOCTOU window between the two
   // loads where a late callback could increment callback_ops.
   int final_callbacks = callback_ops.load(std::memory_order_acquire);
-  int final_accepted  = accepted_ops.load(std::memory_order_acquire);
+  int final_accepted = accepted_ops.load(std::memory_order_acquire);
   EXPECT_EQ(final_callbacks, final_accepted);
   EXPECT_FALSE(bad_outcome.load(std::memory_order_acquire))
-      << "unexpected error code="
-      << first_bad_code.load(std::memory_order_acquire)
+      << "unexpected error code=" << first_bad_code.load(std::memory_order_acquire)
       << " native=" << first_bad_native.load(std::memory_order_acquire);
 
   io_runner_->PostTask(FROM_HERE, [&]() { close_barrier.Signal(); });
@@ -715,100 +683,90 @@ TEST_F(AsyncFilePosixStressTest, CallbacksAlwaysFireOnIoThread) {
   std::atomic<bool> callback_inline_violation{false};
   std::atomic<PlatformThread::PlatformThreadId> io_tid{0};
 
-  io_runner_->PostTask(
-      FROM_HERE,
-      [&, path_str, payload]() mutable {
-        io_tid.store(PlatformThread::CurrentId(), std::memory_order_release);
+  io_runner_->PostTask(FROM_HERE, [&, path_str, payload]() mutable {
+    io_tid.store(PlatformThread::CurrentId(), std::memory_order_release);
 
-        auto file = std::make_shared<AsyncFilePosix>(io_runner_);
+    auto file = std::make_shared<AsyncFilePosix>(io_runner_);
 
-        auto open_called = std::make_shared<std::atomic<bool>>(false);
-        file->OpenAsync(
-            path_str, AsyncFile::OpenMode::kReadWrite,
-            AsyncFile::OpenDisposition::kCreateAlways, bg_runner_,
-            [&, file, payload, open_called](bool open_success,
-                                            AsyncFile::Error open_error) mutable {
-              open_called->store(true, std::memory_order_release);
-              if (PlatformThread::CurrentId() !=
-                  io_tid.load(std::memory_order_acquire)) {
-                callback_on_io_thread.store(false, std::memory_order_release);
-              }
-              if (!open_success || !open_error.ok()) {
-                ok.store(false, std::memory_order_release);
-                file->CloseAsync([&]() { done.Signal(); });
-                return;
-              }
+    auto open_called = std::make_shared<std::atomic<bool>>(false);
+    file->OpenAsync(path_str,
+                    AsyncFile::OpenMode::kReadWrite,
+                    AsyncFile::OpenDisposition::kCreateAlways,
+                    bg_runner_,
+                    [&, file, payload, open_called](bool open_success, AsyncFile::Error open_error) mutable {
+                      open_called->store(true, std::memory_order_release);
+                      if (PlatformThread::CurrentId() != io_tid.load(std::memory_order_acquire)) {
+                        callback_on_io_thread.store(false, std::memory_order_release);
+                      }
+                      if (!open_success || !open_error.ok()) {
+                        ok.store(false, std::memory_order_release);
+                        file->CloseAsync([&]() { done.Signal(); });
+                        return;
+                      }
 
-              auto write_called = std::make_shared<std::atomic<bool>>(false);
-                const bool write_accepted = IssueWrite(
-                  file,
-                  0, payload,
-                  [&, file, payload, write_called](
-                      bool write_success, std::size_t bytes_written,
-                      AsyncFile::Error write_error) mutable {
-                    write_called->store(true, std::memory_order_release);
-                    if (PlatformThread::CurrentId() !=
-                        io_tid.load(std::memory_order_acquire)) {
-                      callback_on_io_thread.store(false,
-                                                  std::memory_order_release);
-                    }
-                    if (!write_success || !write_error.ok() ||
-                        bytes_written != payload.size()) {
-                      ok.store(false, std::memory_order_release);
-                      file->CloseAsync([&]() { done.Signal(); });
-                      return;
-                    }
+                      auto write_called = std::make_shared<std::atomic<bool>>(false);
+                      const bool write_accepted = IssueWrite(
+                          file,
+                          0,
+                          payload,
+                          [&, file, payload, write_called](
+                              bool write_success, std::size_t bytes_written, AsyncFile::Error write_error) mutable {
+                            write_called->store(true, std::memory_order_release);
+                            if (PlatformThread::CurrentId() != io_tid.load(std::memory_order_acquire)) {
+                              callback_on_io_thread.store(false, std::memory_order_release);
+                            }
+                            if (!write_success || !write_error.ok() || bytes_written != payload.size()) {
+                              ok.store(false, std::memory_order_release);
+                              file->CloseAsync([&]() { done.Signal(); });
+                              return;
+                            }
 
-                    auto read_called = std::make_shared<std::atomic<bool>>(false);
-                    const bool read_accepted = IssueRead(
-                      file,
-                        0, payload.size(),
-                        [&, file, payload, read_called](
-                            bool read_success,
-                            std::vector<std::uint8_t>&& data,
-                            AsyncFile::Error read_error) mutable {
-                          read_called->store(true, std::memory_order_release);
-                          if (PlatformThread::CurrentId() !=
-                              io_tid.load(std::memory_order_acquire)) {
-                            callback_on_io_thread.store(
-                                false, std::memory_order_release);
-                          }
-                          if (!read_success || !read_error.ok() ||
-                              data != payload) {
-                            ok.store(false, std::memory_order_release);
-                          }
-                          file->CloseAsync([&]() { done.Signal(); });
-                        });
+                            auto read_called = std::make_shared<std::atomic<bool>>(false);
+                            const bool read_accepted =
+                                IssueRead(file,
+                                          0,
+                                          payload.size(),
+                                          [&, file, payload, read_called](bool read_success,
+                                                                          std::vector<std::uint8_t> &&data,
+                                                                          AsyncFile::Error read_error) mutable {
+                                            read_called->store(true, std::memory_order_release);
+                                            if (PlatformThread::CurrentId() != io_tid.load(std::memory_order_acquire)) {
+                                              callback_on_io_thread.store(false, std::memory_order_release);
+                                            }
+                                            if (!read_success || !read_error.ok() || data != payload) {
+                                              ok.store(false, std::memory_order_release);
+                                            }
+                                            file->CloseAsync([&]() { done.Signal(); });
+                                          });
 
-                    if (!read_accepted) {
-                      ok.store(false, std::memory_order_release);
-                      file->CloseAsync([&]() { done.Signal(); });
-                      return;
-                    }
-                    // With PostReadCallback the read callback must not fire
-                    // inline; it is always delivered as a fresh io task.
-                    if (read_called->load(std::memory_order_acquire)) {
-                      callback_inline_violation.store(true,
-                                                      std::memory_order_release);
-                    }
-                  });
+                            if (!read_accepted) {
+                              ok.store(false, std::memory_order_release);
+                              file->CloseAsync([&]() { done.Signal(); });
+                              return;
+                            }
+                            // With PostReadCallback the read callback must not fire
+                            // inline; it is always delivered as a fresh io task.
+                            if (read_called->load(std::memory_order_acquire)) {
+                              callback_inline_violation.store(true, std::memory_order_release);
+                            }
+                          });
 
-              if (!write_accepted) {
-                ok.store(false, std::memory_order_release);
-                file->CloseAsync([&]() { done.Signal(); });
-                return;
-              }
-              // Write callback must not fire inline.
-              if (write_called->load(std::memory_order_acquire)) {
-                callback_inline_violation.store(true, std::memory_order_release);
-              }
-            });
+                      if (!write_accepted) {
+                        ok.store(false, std::memory_order_release);
+                        file->CloseAsync([&]() { done.Signal(); });
+                        return;
+                      }
+                      // Write callback must not fire inline.
+                      if (write_called->load(std::memory_order_acquire)) {
+                        callback_inline_violation.store(true, std::memory_order_release);
+                      }
+                    });
 
-        // Open callback must not fire inline.
-        if (open_called->load(std::memory_order_acquire)) {
-          callback_inline_violation.store(true, std::memory_order_release);
-        }
-      });
+    // Open callback must not fire inline.
+    if (open_called->load(std::memory_order_acquire)) {
+      callback_inline_violation.store(true, std::memory_order_release);
+    }
+  });
 
   ASSERT_TRUE(done.TimedWait(std::chrono::seconds(30)));
 
@@ -829,11 +787,12 @@ TEST_F(AsyncFilePosixTest, RaiiDestructionDoesNotHangAndDataIsFlushed) {
 
     WaitableEvent open_done(WaitableEvent::ResetPolicy::kAutomatic, false);
     std::atomic<bool> open_ok{false};
-    file->OpenAsync(path_utf8, AsyncFile::OpenMode::kReadWrite,
-                    AsyncFile::OpenDisposition::kCreateAlways, bg_runner_,
+    file->OpenAsync(path_utf8,
+                    AsyncFile::OpenMode::kReadWrite,
+                    AsyncFile::OpenDisposition::kCreateAlways,
+                    bg_runner_,
                     [&](bool success, AsyncFile::Error error) {
-                      open_ok.store(success && error.ok(),
-                                    std::memory_order_release);
+                      open_ok.store(success && error.ok(), std::memory_order_release);
                       open_done.Signal();
                     });
     ASSERT_TRUE(open_done.TimedWait(std::chrono::seconds(10)));
@@ -843,13 +802,10 @@ TEST_F(AsyncFilePosixTest, RaiiDestructionDoesNotHangAndDataIsFlushed) {
     std::atomic<bool> write_ok{false};
     auto buf = MakeRefCounted<IOBufferWithSize>(payload.size());
     std::memcpy(buf->data(), payload.data(), payload.size());
-    const bool accepted = IssueWrite(
-        file, 0, payload,
-        [&](bool success, std::size_t wrote, AsyncFile::Error error) {
-          write_ok.store(success && error.ok() && wrote == payload.size(),
-                         std::memory_order_release);
-          write_done.Signal();
-        });
+    const bool accepted = IssueWrite(file, 0, payload, [&](bool success, std::size_t wrote, AsyncFile::Error error) {
+      write_ok.store(success && error.ok() && wrote == payload.size(), std::memory_order_release);
+      write_done.Signal();
+    });
     ASSERT_TRUE(accepted);
     ASSERT_TRUE(write_done.TimedWait(std::chrono::seconds(10)));
     ASSERT_TRUE(write_ok.load(std::memory_order_acquire));
@@ -870,23 +826,22 @@ TEST_F(AsyncFilePosixTest, RaiiDestructionDoesNotHangAndDataIsFlushed) {
   std::atomic<bool> read_open_ok{false};
   std::atomic<bool> read_ok{false};
 
-  reader->OpenAsync(path_utf8, AsyncFile::OpenMode::kReadOnly,
-                    AsyncFile::OpenDisposition::kOpenExisting, bg_runner_,
+  reader->OpenAsync(path_utf8,
+                    AsyncFile::OpenMode::kReadOnly,
+                    AsyncFile::OpenDisposition::kOpenExisting,
+                    bg_runner_,
                     [&](bool success, AsyncFile::Error error) {
-                      read_open_ok.store(success && error.ok(),
-                                         std::memory_order_release);
+                      read_open_ok.store(success && error.ok(), std::memory_order_release);
                       read_open_done.Signal();
                     });
   ASSERT_TRUE(read_open_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(read_open_ok.load(std::memory_order_acquire));
 
   auto rbuf = scoped_refptr<IOBuffer>(new IOBufferWithSize(payload.size()));
-  reader->ReadAsync(rbuf, payload.size(), 0,
-                    [&](bool success, std::size_t n, AsyncFile::Error error) {
-                      read_ok.store(success && error.ok() && n == payload.size(),
-                                    std::memory_order_release);
-                      read_done.Signal();
-                    });
+  reader->ReadAsync(rbuf, payload.size(), 0, [&](bool success, std::size_t n, AsyncFile::Error error) {
+    read_ok.store(success && error.ok() && n == payload.size(), std::memory_order_release);
+    read_done.Signal();
+  });
   ASSERT_TRUE(read_done.TimedWait(std::chrono::seconds(10)));
   ASSERT_TRUE(read_ok.load(std::memory_order_acquire));
 
@@ -898,7 +853,7 @@ TEST_F(AsyncFilePosixTest, RaiiDestructionDoesNotHangAndDataIsFlushed) {
   ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei
 
-#endif  // !defined(_WIN32)
+#endif // !defined(_WIN32)

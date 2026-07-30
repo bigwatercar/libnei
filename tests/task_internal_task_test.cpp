@@ -8,7 +8,7 @@ namespace internal {
 
 namespace {
 
-Task MakeTask(const TimeTicks& delayed_run_time,
+Task MakeTask(const TimeTicks &delayed_run_time,
               std::int64_t sequence_num,
               SequenceToken sequence_token = SequenceToken()) {
   return Task{
@@ -21,7 +21,7 @@ Task MakeTask(const TimeTicks& delayed_run_time,
   };
 }
 
-}  // namespace
+} // namespace
 
 TEST(TaskInternalTest, OperatorGreaterUsesDelayedRunTimeFirst) {
   const Task lhs = MakeTask(TimeTicks::Now() + TimeDelta::FromMilliseconds(20), 1);
@@ -49,5 +49,5 @@ TEST(TaskInternalTest, OperatorGreaterIgnoresOtherFields) {
   EXPECT_FALSE(rhs > lhs);
 }
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei

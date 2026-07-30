@@ -17,31 +17,31 @@
 namespace nei {
 
 class NEI_API ThreadLocalStorage final {
- public:
+public:
 #if defined(_WIN32)
-  using TLSDestructorFunc = void(NTAPI*)(void*);
+  using TLSDestructorFunc = void(NTAPI *)(void *);
 #else
-  using TLSDestructorFunc = void (*)(void*);
+  using TLSDestructorFunc = void (*)(void *);
 #endif
 
   class NEI_API Slot final {
-   public:
+  public:
     Slot();
     explicit Slot(TLSDestructorFunc destructor);
     ~Slot();
 
-    Slot(const Slot&) = delete;
-    Slot& operator=(const Slot&) = delete;
-    Slot(Slot&&) noexcept;
-    Slot& operator=(Slot&&) noexcept;
+    Slot(const Slot &) = delete;
+    Slot &operator=(const Slot &) = delete;
+    Slot(Slot &&) noexcept;
+    Slot &operator=(Slot &&) noexcept;
 
     bool Initialize(TLSDestructorFunc destructor = nullptr);
     bool initialized() const;
 
-    void* Get() const;
-    void Set(void* value);
+    void *Get() const;
+    void Set(void *value);
 
-   private:
+  private:
     class Impl;
     NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
     std::unique_ptr<Impl> impl_;
@@ -51,6 +51,6 @@ class NEI_API ThreadLocalStorage final {
   ThreadLocalStorage() = delete;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_THREADING_THREAD_LOCAL_STORAGE_H_
+#endif // NEIXX_THREADING_THREAD_LOCAL_STORAGE_H_

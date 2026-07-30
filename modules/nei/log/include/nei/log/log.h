@@ -860,7 +860,8 @@ NEI_API int nei_log_rollback_unpublished_slot_for_test(uint64_t reserved_pos);
   nei_llog_literal(config_handle, level, __FILE__, __LINE__, NEI_FUNC, message, length)
 
 /**
- * @brief Conditionally log a level-based message with a pre-formatted literal string to a specific config (convenience macro)
+ * @brief Conditionally log a level-based message with a pre-formatted literal string to a specific config (convenience
+ * macro)
  * @param condition Expression evaluated once; log is emitted when non-zero
  * @param config_handle @ref nei_log_config_handle_t target config handle
  * @param level @ref nei_log_level_e value
@@ -954,7 +955,7 @@ NEI_API int nei_log_rollback_unpublished_slot_for_test(uint64_t reserved_pos);
  * @param message       Pre-formatted message bytes
  * @param length        Message length in bytes
  */
-#define NEI_LLOG_LITERAL(config_handle, level, file, line, func, message, length)                                       \
+#define NEI_LLOG_LITERAL(config_handle, level, file, line, func, message, length)                                      \
   nei_llog_literal(config_handle, level, file, line, func, message, length)
 
 /**
@@ -967,7 +968,7 @@ NEI_API int nei_log_rollback_unpublished_slot_for_test(uint64_t reserved_pos);
  * @param message       Pre-formatted message bytes
  * @param length        Message length in bytes
  */
-#define NEI_VLOG_LITERAL(config_handle, verbose, file, line, func, message, length)                                     \
+#define NEI_VLOG_LITERAL(config_handle, verbose, file, line, func, message, length)                                    \
   nei_vlog_literal(config_handle, verbose, file, line, func, message, length)
 
 /** @} */ /* end of nei_log_macros_raw */
@@ -1082,9 +1083,9 @@ NEI_API int nei_log_rollback_unpublished_slot_for_test(uint64_t reserved_pos);
   ((void)(config_handle), (void)(level), (void)(file), (void)(line), (void)(func))
 #define NEI_VLOG(config_handle, verbose, file, line, func, fmt, ...)                                                   \
   ((void)(config_handle), (void)(verbose), (void)(file), (void)(line), (void)(func))
-#define NEI_LLOG_LITERAL(config_handle, level, file, line, func, message, length)                                       \
+#define NEI_LLOG_LITERAL(config_handle, level, file, line, func, message, length)                                      \
   ((void)(config_handle), (void)(level), (void)(file), (void)(line), (void)(func), (void)(message), (void)(length))
-#define NEI_VLOG_LITERAL(config_handle, verbose, file, line, func, message, length)                                     \
+#define NEI_VLOG_LITERAL(config_handle, verbose, file, line, func, message, length)                                    \
   ((void)(config_handle), (void)(verbose), (void)(file), (void)(line), (void)(func), (void)(message), (void)(length))
 #define NEI_LOG_TRACE(fmt, ...) NEI_LOG(NEI_L_TRACE, fmt, ##__VA_ARGS__)
 #define NEI_LOG_TRACE_IF(condition, fmt, ...) ((void)(condition))

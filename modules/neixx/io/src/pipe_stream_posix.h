@@ -21,41 +21,38 @@
 namespace nei {
 namespace pipe_detail {
 
-constexpr std::size_t kMaxBytesPerDrain = 64 * 1024;  // 64 KiB
+constexpr std::size_t kMaxBytesPerDrain = 64 * 1024; // 64 KiB
 
 template <typename Callback>
-void PostError(const scoped_refptr<TaskRunner>& runner, Callback&& cb) {
-  if (!cb) return;
+void PostError(const scoped_refptr<TaskRunner> &runner, Callback &&cb) {
+  if (!cb)
+    return;
   if (runner) {
-    BindPostTask(runner,
-                 BindOnce([](Callback c) { c(false, 0u); },
-                          std::forward<Callback>(cb)))
-        .Run();
+    BindPostTask(runner, BindOnce([](Callback c) { c(false, 0u); }, std::forward<Callback>(cb))).Run();
   } else {
     cb(false, 0u);
   }
 }
 
 template <typename Callback>
-void PostResult(const scoped_refptr<TaskRunner>& runner,
-                Callback&& cb,
-                bool success,
-                std::size_t bytes) {
-  if (!cb) return;
+void PostResult(const scoped_refptr<TaskRunner> &runner, Callback &&cb, bool success, std::size_t bytes) {
+  if (!cb)
+    return;
   if (runner) {
-    BindPostTask(runner,
-                 BindOnce([](Callback c, bool s, std::size_t n) { c(s, n); },
-                          std::forward<Callback>(cb), success, bytes))
+    BindPostTask(
+        runner,
+        BindOnce([](Callback c, bool s, std::size_t n) { c(s, n); }, std::forward<Callback>(cb), success, bytes))
         .Run();
   } else {
     cb(success, bytes);
   }
 }
 
-}  // namespace pipe_detail
+} // namespace pipe_detail
 
 template <>
 struct WeakPtrThreadSafe<PipeInputStream::Impl> : std::true_type {};
+
 template <>
 struct WeakPtrThreadSafe<PipeOutputStream::Impl> : std::true_type {};
 
@@ -64,26 +61,28 @@ struct WeakPtrThreadSafe<PipeOutputStream::Impl> : std::true_type {};
 // ===========================================================================
 
 class PipeInputStream::Impl final : public MessagePumpForIO::Watcher {
- public:
+public:
   explicit Impl(scoped_refptr<TaskRunner> io_task_runner);
   ~Impl() override;
 
   bool BindPlatformHandle(PlatformHandle handle);
 
-  void ReadAsync(scoped_refptr<IOBuffer> buf,
-                 std::size_t buf_len,
-                 IOReadCallback callback);
+  void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback);
 
   void Close();
 
   void OnFileCanReadWithoutBlocking(NativeIOHandle /*handle*/) override;
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) override {}
+
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) override {
+  }
 
   void ShutdownAndSelfDestruct();
 
-  scoped_refptr<TaskRunner> io_task_runner() const { return io_task_runner_; }
+  scoped_refptr<TaskRunner> io_task_runner() const {
+    return io_task_runner_;
+  }
 
- private:
+private:
   void DrainRead();
   void DeliverReadResult(bool success, std::size_t bytes);
 
@@ -107,26 +106,28 @@ class PipeInputStream::Impl final : public MessagePumpForIO::Watcher {
 // ===========================================================================
 
 class PipeOutputStream::Impl final : public MessagePumpForIO::Watcher {
- public:
+public:
   explicit Impl(scoped_refptr<TaskRunner> io_task_runner);
   ~Impl() override;
 
   bool BindPlatformHandle(PlatformHandle handle);
 
-  void WriteAsync(scoped_refptr<IOBuffer> buf,
-                  std::size_t buf_len,
-                  IOWriteCallback callback);
+  void WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOWriteCallback callback);
 
   void Close();
 
   void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) override;
-  void OnFileCanReadWithoutBlocking(NativeIOHandle /*handle*/) override {}
+
+  void OnFileCanReadWithoutBlocking(NativeIOHandle /*handle*/) override {
+  }
 
   void ShutdownAndSelfDestruct();
 
-  scoped_refptr<TaskRunner> io_task_runner() const { return io_task_runner_; }
+  scoped_refptr<TaskRunner> io_task_runner() const {
+    return io_task_runner_;
+  }
 
- private:
+private:
   void DrainWrite();
   void DeliverWriteResult(bool success, std::size_t bytes);
   void StartNextQueuedWrite();
@@ -154,7 +155,7 @@ class PipeOutputStream::Impl final : public MessagePumpForIO::Watcher {
   WeakPtrFactory<Impl> weak_factory_;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // !defined(_WIN32)
-#endif  // NEIXX_IO_PIPE_STREAM_POSIX_H_
+#endif // !defined(_WIN32)
+#endif // NEIXX_IO_PIPE_STREAM_POSIX_H_

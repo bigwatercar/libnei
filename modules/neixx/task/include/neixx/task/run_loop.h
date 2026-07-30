@@ -20,17 +20,17 @@ class SequenceManager;
 //       FROM_HERE, loop.QuitClosure());
 //   loop.Run();
 class NEI_API RunLoop final {
- public:
+public:
   // Constructs a RunLoop bound to the SequenceManager on the current thread.
   // If no SequenceManager is bound to the current thread, this constructor
   // will trigger a DCHECK failure.
   RunLoop();
   ~RunLoop();
 
-  RunLoop(const RunLoop&) = delete;
-  RunLoop& operator=(const RunLoop&) = delete;
-  RunLoop(RunLoop&&) = delete;
-  RunLoop& operator=(RunLoop&&) = delete;
+  RunLoop(const RunLoop &) = delete;
+  RunLoop &operator=(const RunLoop &) = delete;
+  RunLoop(RunLoop &&) = delete;
+  RunLoop &operator=(RunLoop &&) = delete;
 
   // Runs the message loop on the current thread.
   //
@@ -68,11 +68,11 @@ class NEI_API RunLoop final {
   // innermost Run() safely.
   OnceClosure QuitClosure();
 
- private:
-  SequenceManager* sequence_manager_;
+private:
+  SequenceManager *sequence_manager_;
   bool is_running_ = false;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_TASK_RUN_LOOP_H_
+#endif // NEIXX_TASK_RUN_LOOP_H_

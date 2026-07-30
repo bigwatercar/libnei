@@ -19,19 +19,22 @@ namespace nei {
 // ===========================================================================
 
 PipeInputStream::Impl::Impl(scoped_refptr<TaskRunner> io_task_runner)
-    : io_task_runner_(std::move(io_task_runner)),
-      weak_factory_(this, FROM_HERE) {
+    : io_task_runner_(std::move(io_task_runner))
+    , weak_factory_(this, FROM_HERE) {
   DCHECK(io_task_runner_ != nullptr);
 }
 
 PipeInputStream::Impl::~Impl() = default;
 
 bool PipeInputStream::Impl::BindPlatformHandle(PlatformHandle handle) {
-  if (!handle.is_valid()) return false;
-  if (fd_ >= 0) return false;
+  if (!handle.is_valid())
+    return false;
+  if (fd_ >= 0)
+    return false;
 
   fd_ = handle.ReleaseAsFd();
-  if (fd_ < 0) return false;
+  if (fd_ < 0)
+    return false;
 
   int flags = fcntl(fd_, F_GETFL, 0);
   if (flags == -1) {
@@ -51,9 +54,7 @@ bool PipeInputStream::Impl::BindPlatformHandle(PlatformHandle handle) {
   return true;
 }
 
-void PipeInputStream::Impl::ReadAsync(scoped_refptr<IOBuffer> buf,
-                                       std::size_t buf_len,
-                                       IOReadCallback callback) {
+void PipeInputStream::Impl::ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback) {
   TRACE_EVENT0("nei.pipe_stream", "ReadAsync");
   if (closed_ || fd_ < 0) {
     pipe_detail::PostError(io_task_runner_, std::move(callback));
@@ -70,18 +71,21 @@ void PipeInputStream::Impl::ReadAsync(scoped_refptr<IOBuffer> buf,
   bytes_read_ = 0;
   read_in_flight_ = true;
 
-  MessagePumpForIO* pump = MessagePumpForIO::Current();
+  MessagePumpForIO *pump = MessagePumpForIO::Current();
   if (pump && !controller_.is_watching()) {
-    controller_.StartWatching(
-        pump, fd_, MessagePumpForIO::FdWatchController::Mode::READ, this,
-        /*oneshot=*/true);
+    controller_.StartWatching(pump,
+                              fd_,
+                              MessagePumpForIO::FdWatchController::Mode::READ,
+                              this,
+                              /*oneshot=*/true);
   }
 
   DrainRead();
 }
 
 void PipeInputStream::Impl::Close() {
-  if (closed_) return;
+  if (closed_)
+    return;
   closed_ = true;
   controller_.StopWatching();
 
@@ -98,10 +102,10 @@ void PipeInputStream::Impl::Close() {
   }
 }
 
-void PipeInputStream::Impl::OnFileCanReadWithoutBlocking(
-    NativeIOHandle handle) {
+void PipeInputStream::Impl::OnFileCanReadWithoutBlocking(NativeIOHandle handle) {
   TRACE_EVENT0("nei.pipe_stream", "OnFileCanRead");
-  if (closed_ || handle != fd_ || !read_in_flight_) return;
+  if (closed_ || handle != fd_ || !read_in_flight_)
+    return;
   called_from_pump_ = true;
   DrainRead();
   called_from_pump_ = false;
@@ -120,24 +124,24 @@ void PipeInputStream::Impl::DrainRead() {
     if (bytes_this_cycle >= pipe_detail::kMaxBytesPerDrain) {
       // Re-arm the oneshot watch so the pump fires again when more data
       // arrives, then post a continuation to resume draining.
-      MessagePumpForIO* pump = MessagePumpForIO::Current();
+      MessagePumpForIO *pump = MessagePumpForIO::Current();
       if (pump) {
-        controller_.StartWatching(
-            pump, fd_, MessagePumpForIO::FdWatchController::Mode::READ, this,
-            /*oneshot=*/true);
+        controller_.StartWatching(pump,
+                                  fd_,
+                                  MessagePumpForIO::FdWatchController::Mode::READ,
+                                  this,
+                                  /*oneshot=*/true);
       }
       auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-      io_task_runner_->PostTask(FROM_HERE,
-                                BindOnce([weak_this]() {
-                                  if (!weak_this) return;
+      io_task_runner_->PostTask(FROM_HERE, BindOnce([weak_this]() {
+                                  if (!weak_this)
+                                    return;
                                   weak_this->DrainRead();
                                 }));
       return;
     }
 
-    const ssize_t n = read(fd_,
-                           pending_buf_->data() + bytes_read_,
-                           pending_len_ - bytes_read_);
+    const ssize_t n = read(fd_, pending_buf_->data() + bytes_read_, pending_len_ - bytes_read_);
     if (n > 0) {
       bytes_this_cycle += static_cast<std::size_t>(n);
       bytes_read_ += static_cast<std::size_t>(n);
@@ -154,11 +158,13 @@ void PipeInputStream::Impl::DrainRead() {
         DeliverReadResult(true, bytes_read_);
       } else {
         // EPOLLONESHOT auto-disabled the fd; re-arm before returning.
-        MessagePumpForIO* pump = MessagePumpForIO::Current();
+        MessagePumpForIO *pump = MessagePumpForIO::Current();
         if (pump) {
-          controller_.StartWatching(
-              pump, fd_, MessagePumpForIO::FdWatchController::Mode::READ, this,
-              /*oneshot=*/true);
+          controller_.StartWatching(pump,
+                                    fd_,
+                                    MessagePumpForIO::FdWatchController::Mode::READ,
+                                    this,
+                                    /*oneshot=*/true);
         }
       }
       return;
@@ -168,18 +174,19 @@ void PipeInputStream::Impl::DrainRead() {
     return;
   }
 
-  if (bytes_read_ >= pending_len_) DeliverReadResult(true, bytes_read_);
+  if (bytes_read_ >= pending_len_)
+    DeliverReadResult(true, bytes_read_);
 }
 
-void PipeInputStream::Impl::DeliverReadResult(bool success,
-                                               std::size_t bytes) {
+void PipeInputStream::Impl::DeliverReadResult(bool success, std::size_t bytes) {
   read_in_flight_ = false;
   IOReadCallback cb = std::move(pending_cb_);
   pending_buf_.reset();
   controller_.StopWatching();
   if (called_from_pump_) {
     TRACE_EVENT_INSTANT("nei.pipe_stream", "ReadDeliverDirect");
-    if (cb) cb(success, bytes);
+    if (cb)
+      cb(success, bytes);
   } else {
     TRACE_EVENT_INSTANT("nei.pipe_stream", "ReadDeliverPostTask");
     pipe_detail::PostResult(io_task_runner_, std::move(cb), success, bytes);
@@ -191,19 +198,22 @@ void PipeInputStream::Impl::DeliverReadResult(bool success,
 // ===========================================================================
 
 PipeOutputStream::Impl::Impl(scoped_refptr<TaskRunner> io_task_runner)
-    : io_task_runner_(std::move(io_task_runner)),
-      weak_factory_(this, FROM_HERE) {
+    : io_task_runner_(std::move(io_task_runner))
+    , weak_factory_(this, FROM_HERE) {
   DCHECK(io_task_runner_ != nullptr);
 }
 
 PipeOutputStream::Impl::~Impl() = default;
 
 bool PipeOutputStream::Impl::BindPlatformHandle(PlatformHandle handle) {
-  if (!handle.is_valid()) return false;
-  if (fd_ >= 0) return false;
+  if (!handle.is_valid())
+    return false;
+  if (fd_ >= 0)
+    return false;
 
   fd_ = handle.ReleaseAsFd();
-  if (fd_ < 0) return false;
+  if (fd_ < 0)
+    return false;
 
   int flags = fcntl(fd_, F_GETFL, 0);
   if (flags == -1) {
@@ -223,17 +233,14 @@ bool PipeOutputStream::Impl::BindPlatformHandle(PlatformHandle handle) {
   return true;
 }
 
-void PipeOutputStream::Impl::WriteAsync(scoped_refptr<IOBuffer> buf,
-                                         std::size_t buf_len,
-                                         IOWriteCallback callback) {
+void PipeOutputStream::Impl::WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOWriteCallback callback) {
   TRACE_EVENT0("nei.pipe_stream", "WriteAsync");
   if (closed_ || fd_ < 0) {
     pipe_detail::PostError(io_task_runner_, std::move(callback));
     return;
   }
   if (write_in_flight_) {
-    write_queue_.push_back(
-        PendingWrite{std::move(buf), buf_len, std::move(callback)});
+    write_queue_.push_back(PendingWrite{std::move(buf), buf_len, std::move(callback)});
     return;
   }
 
@@ -243,11 +250,13 @@ void PipeOutputStream::Impl::WriteAsync(scoped_refptr<IOBuffer> buf,
   bytes_written_ = 0;
   write_in_flight_ = true;
 
-  MessagePumpForIO* pump = MessagePumpForIO::Current();
+  MessagePumpForIO *pump = MessagePumpForIO::Current();
   if (pump && !controller_.is_watching()) {
-    controller_.StartWatching(
-        pump, fd_, MessagePumpForIO::FdWatchController::Mode::WRITE, this,
-        /*oneshot=*/true);
+    controller_.StartWatching(pump,
+                              fd_,
+                              MessagePumpForIO::FdWatchController::Mode::WRITE,
+                              this,
+                              /*oneshot=*/true);
   }
 
   DrainWrite();
@@ -255,7 +264,8 @@ void PipeOutputStream::Impl::WriteAsync(scoped_refptr<IOBuffer> buf,
 
 void PipeOutputStream::Impl::Close() {
   TRACE_EVENT0("nei.pipe_stream", "WriteClose");
-  if (closed_) return;
+  if (closed_)
+    return;
   closed_ = true;
   controller_.StopWatching();
 
@@ -265,7 +275,7 @@ void PipeOutputStream::Impl::Close() {
   }
 
   while (!write_queue_.empty()) {
-    auto& front = write_queue_.front();
+    auto &front = write_queue_.front();
     if (front.callback)
       pipe_detail::PostError(io_task_runner_, std::move(front.callback));
     write_queue_.pop_front();
@@ -279,10 +289,10 @@ void PipeOutputStream::Impl::Close() {
   }
 }
 
-void PipeOutputStream::Impl::OnFileCanWriteWithoutBlocking(
-    NativeIOHandle handle) {
+void PipeOutputStream::Impl::OnFileCanWriteWithoutBlocking(NativeIOHandle handle) {
   TRACE_EVENT0("nei.pipe_stream", "OnFileCanWrite");
-  if (closed_ || handle != fd_ || !write_in_flight_) return;
+  if (closed_ || handle != fd_ || !write_in_flight_)
+    return;
   called_from_pump_ = true;
   DrainWrite();
   called_from_pump_ = false;
@@ -302,24 +312,24 @@ void PipeOutputStream::Impl::DrainWrite() {
     if (bytes_this_cycle >= pipe_detail::kMaxBytesPerDrain) {
       // Re-arm the oneshot watch before yielding so the pump can wake us
       // when the fd becomes writable again.
-      MessagePumpForIO* pump = MessagePumpForIO::Current();
+      MessagePumpForIO *pump = MessagePumpForIO::Current();
       if (pump) {
-        controller_.StartWatching(
-            pump, fd_, MessagePumpForIO::FdWatchController::Mode::WRITE, this,
-            /*oneshot=*/true);
+        controller_.StartWatching(pump,
+                                  fd_,
+                                  MessagePumpForIO::FdWatchController::Mode::WRITE,
+                                  this,
+                                  /*oneshot=*/true);
       }
       auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-      io_task_runner_->PostTask(FROM_HERE,
-                                BindOnce([weak_this]() {
-                                  if (!weak_this) return;
+      io_task_runner_->PostTask(FROM_HERE, BindOnce([weak_this]() {
+                                  if (!weak_this)
+                                    return;
                                   weak_this->DrainWrite();
                                 }));
       return;
     }
 
-    const ssize_t n = write(fd_,
-                            pending_buf_->data() + bytes_written_,
-                            pending_len_ - bytes_written_);
+    const ssize_t n = write(fd_, pending_buf_->data() + bytes_written_, pending_len_ - bytes_written_);
     if (n > 0) {
       bytes_this_cycle += static_cast<std::size_t>(n);
       bytes_written_ += static_cast<std::size_t>(n);
@@ -331,11 +341,13 @@ void PipeOutputStream::Impl::DrainWrite() {
         DeliverWriteResult(true, bytes_written_);
       } else {
         // EPOLLONESHOT auto-disabled the fd; re-arm before returning.
-        MessagePumpForIO* pump = MessagePumpForIO::Current();
+        MessagePumpForIO *pump = MessagePumpForIO::Current();
         if (pump) {
-          controller_.StartWatching(
-              pump, fd_, MessagePumpForIO::FdWatchController::Mode::WRITE, this,
-              /*oneshot=*/true);
+          controller_.StartWatching(pump,
+                                    fd_,
+                                    MessagePumpForIO::FdWatchController::Mode::WRITE,
+                                    this,
+                                    /*oneshot=*/true);
         }
       }
       return;
@@ -349,14 +361,14 @@ void PipeOutputStream::Impl::DrainWrite() {
     DeliverWriteResult(true, bytes_written_);
 }
 
-void PipeOutputStream::Impl::DeliverWriteResult(bool success,
-                                                 std::size_t bytes) {
+void PipeOutputStream::Impl::DeliverWriteResult(bool success, std::size_t bytes) {
   write_in_flight_ = false;
   IOWriteCallback cb = std::move(pending_cb_);
   pending_buf_.reset();
   if (called_from_pump_) {
     TRACE_EVENT_INSTANT("nei.pipe_stream", "WriteDeliverDirect");
-    if (cb) cb(success, bytes);
+    if (cb)
+      cb(success, bytes);
   } else {
     TRACE_EVENT_INSTANT("nei.pipe_stream", "WriteDeliverPostTask");
     pipe_detail::PostResult(io_task_runner_, std::move(cb), success, bytes);
@@ -365,7 +377,8 @@ void PipeOutputStream::Impl::DeliverWriteResult(bool success,
 }
 
 void PipeOutputStream::Impl::StartNextQueuedWrite() {
-  if (closed_ || write_in_flight_) return;
+  if (closed_ || write_in_flight_)
+    return;
   if (write_queue_.empty()) {
     controller_.StopWatching();
     return;
@@ -380,16 +393,18 @@ void PipeOutputStream::Impl::StartNextQueuedWrite() {
 
   // Re-arm the oneshot watch for the newly dequeued write before draining,
   // because EPOLLONESHOT auto-disabled the fd after the previous operation.
-  MessagePumpForIO* pump = MessagePumpForIO::Current();
+  MessagePumpForIO *pump = MessagePumpForIO::Current();
   if (pump) {
-    controller_.StartWatching(
-        pump, fd_, MessagePumpForIO::FdWatchController::Mode::WRITE, this,
-        /*oneshot=*/true);
+    controller_.StartWatching(pump,
+                              fd_,
+                              MessagePumpForIO::FdWatchController::Mode::WRITE,
+                              this,
+                              /*oneshot=*/true);
   }
 
   DrainWrite();
 }
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // !defined(_WIN32)
+#endif // !defined(_WIN32)

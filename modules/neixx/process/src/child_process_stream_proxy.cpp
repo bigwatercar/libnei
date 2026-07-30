@@ -15,7 +15,7 @@ struct WeakPtrThreadSafe<internal::AsyncInputStreamProxy> : std::true_type {};
 
 template <>
 struct WeakPtrThreadSafe<internal::AsyncOutputStreamProxy> : std::true_type {};
-}  // namespace nei
+} // namespace nei
 
 namespace nei {
 namespace internal {
@@ -57,8 +57,7 @@ AsyncInputStreamProxy::~AsyncInputStreamProxy() {
   Close();
 }
 
-void AsyncInputStreamProxy::Bind(AsyncInputStream* target,
-                                 scoped_refptr<TaskRunner> io_task_runner) {
+void AsyncInputStreamProxy::Bind(AsyncInputStream *target, scoped_refptr<TaskRunner> io_task_runner) {
   // Precondition: called from the IO thread, before any ReadAsync.
   DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
   DCHECK(target != nullptr);
@@ -70,15 +69,14 @@ void AsyncInputStreamProxy::Bind(AsyncInputStream* target,
 }
 
 void AsyncInputStreamProxy::ResetBinding() {
-  // Precondition: called from the IO thread, after process exit signalled.  DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);  DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
+  // Precondition: called from the IO thread, after process exit signalled.
+  // DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);  DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
   target_.store(nullptr, std::memory_order_release);
   io_task_runner_.reset();
   target_task_runner_.reset();
 }
 
-void AsyncInputStreamProxy::ReadAsync(scoped_refptr<IOBuffer> buf,
-                                      std::size_t buf_len,
-                                      IOReadCallback callback) {
+void AsyncInputStreamProxy::ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback) {
   // Fast-path reject: proxy already closed or unbound.
   if (closed_.load(std::memory_order_acquire)) {
     if (callback) {
@@ -90,7 +88,7 @@ void AsyncInputStreamProxy::ReadAsync(scoped_refptr<IOBuffer> buf,
   // Snapshot target and runners at call time.  All subsequent IO thread
   // access goes through captured values only - proxy members are NOT touched
   // from the IO thread.
-  AsyncInputStream* raw_target = target_.load(std::memory_order_acquire);
+  AsyncInputStream *raw_target = target_.load(std::memory_order_acquire);
   scoped_refptr<TaskRunner> io_runner = io_task_runner_;
   scoped_refptr<TaskRunner> target_runner = target_task_runner_;
 
@@ -118,15 +116,13 @@ void AsyncInputStreamProxy::ReadAsync(scoped_refptr<IOBuffer> buf,
   //   callback      - moved; ownership transferred through the two lambdas.
   io_runner->PostTask(
       FROM_HERE,
-      [raw_target, buf, buf_len, io_runner, target_runner, weak_self,
-       callback = std::move(callback)]() mutable {
+      [raw_target, buf, buf_len, io_runner, target_runner, weak_self, callback = std::move(callback)]() mutable {
         // -- Step 2: IO thread ----------------------------------------------
         // Call the real pipe/file stream.  buf->data() is the DMA region.
         raw_target->ReadAsync(
-            buf, buf_len,
-            [target_runner, weak_self, buf,
-             callback = std::move(callback)](bool ok,
-                                             std::size_t bytes) mutable {
+            buf,
+            buf_len,
+            [target_runner, weak_self, buf, callback = std::move(callback)](bool ok, std::size_t bytes) mutable {
               // -- Step 3: IO completion -----------------------------------
               // Trampoline result back to the caller's sequence.
               //
@@ -135,36 +131,33 @@ void AsyncInputStreamProxy::ReadAsync(scoped_refptr<IOBuffer> buf,
               //     so buf->data()[0..bytes) is valid when callback runs.
               //   - target_runner outlives this lambda (scoped_refptr).
               //   - WeakPtr::operator bool() is atomic; no mutex required.
-              target_runner->PostTask(
-                  FROM_HERE,
-                  [weak_self, buf, ok, bytes,
-                   callback = std::move(callback)]() mutable {
-                    // -- Step 4: caller's sequence --------------------------
-                    if (!weak_self) {
-                      // Proxy was closed between IO submission and delivery.
-                      return;
-                    }
+              target_runner->PostTask(FROM_HERE, [weak_self, buf, ok, bytes, callback = std::move(callback)]() mutable {
+                // -- Step 4: caller's sequence --------------------------
+                if (!weak_self) {
+                  // Proxy was closed between IO submission and delivery.
+                  return;
+                }
 
-                    // Invoke the user callback.  Callers that need virtual
-                    // slice semantics may wrap buf in a DrainableIOBuffer:
-                    //
-                    //   auto drain = MakeRefCounted<DrainableIOBuffer>(
-                    //       scoped_refptr<IOBuffer>(buf.get()), bytes);
-                    //   while (drain->BytesRemaining() > 0) {
-                    //     process(drain->data(), chunk);
-                    //     drain->DidConsume(chunk);
-                    //   }
-                    if (callback) {
-                      callback(ok, bytes);
-                    }
-                  });
+                // Invoke the user callback.  Callers that need virtual
+                // slice semantics may wrap buf in a DrainableIOBuffer:
+                //
+                //   auto drain = MakeRefCounted<DrainableIOBuffer>(
+                //       scoped_refptr<IOBuffer>(buf.get()), bytes);
+                //   while (drain->BytesRemaining() > 0) {
+                //     process(drain->data(), chunk);
+                //     drain->DidConsume(chunk);
+                //   }
+                if (callback) {
+                  callback(ok, bytes);
+                }
+              });
             });
       });
 }
 
 void AsyncInputStreamProxy::Close() {
   if (closed_.exchange(true, std::memory_order_acq_rel)) {
-    return;  // Already closed.
+    return; // Already closed.
   }
 
   // Invalidate all WeakPtrs so any in-flight Step-4 trampoline tasks that
@@ -179,7 +172,7 @@ void AsyncInputStreamProxy::Close() {
     return;
   }
 
-  AsyncInputStream* raw_target = target_.load(std::memory_order_acquire);
+  AsyncInputStream *raw_target = target_.load(std::memory_order_acquire);
   target_.store(nullptr, std::memory_order_release);
 
   if (raw_target != nullptr) {
@@ -205,8 +198,7 @@ AsyncOutputStreamProxy::~AsyncOutputStreamProxy() {
   Close();
 }
 
-void AsyncOutputStreamProxy::Bind(AsyncOutputStream* target,
-                                  scoped_refptr<TaskRunner> runner) {
+void AsyncOutputStreamProxy::Bind(AsyncOutputStream *target, scoped_refptr<TaskRunner> runner) {
   DCHECK(target != nullptr);
   DCHECK(runner.get() != nullptr);
 
@@ -220,9 +212,7 @@ void AsyncOutputStreamProxy::ResetBinding() {
   io_task_runner_.reset();
 }
 
-void AsyncOutputStreamProxy::WriteAsync(scoped_refptr<IOBuffer> buf,
-                                        std::size_t buf_len,
-                                        IOWriteCallback callback) {
+void AsyncOutputStreamProxy::WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOWriteCallback callback) {
   if (closed_.load(std::memory_order_acquire)) {
     if (callback) {
       callback(false, 0u);
@@ -230,7 +220,7 @@ void AsyncOutputStreamProxy::WriteAsync(scoped_refptr<IOBuffer> buf,
     return;
   }
 
-  AsyncOutputStream* raw_target = target_.load(std::memory_order_acquire);
+  AsyncOutputStream *raw_target = target_.load(std::memory_order_acquire);
   scoped_refptr<TaskRunner> io_runner = io_task_runner_;
 
   if (raw_target == nullptr || io_runner.get() == nullptr) {
@@ -243,18 +233,15 @@ void AsyncOutputStreamProxy::WriteAsync(scoped_refptr<IOBuffer> buf,
   // Post to IO thread.  buf is captured by scoped_refptr so the storage
   // region buf->data()[0..buf_len) remains pinned for the OVERLAPPED write
   // or POSIX writev call inside the target stream.
-  io_runner->PostTask(
-      FROM_HERE,
-      [raw_target, buf, buf_len,
-       callback = std::move(callback)]() mutable {
-        if (raw_target == nullptr) {
-          if (callback) {
-            callback(false, 0u);
-          }
-          return;
-        }
-        raw_target->WriteAsync(buf, buf_len, std::move(callback));
-      });
+  io_runner->PostTask(FROM_HERE, [raw_target, buf, buf_len, callback = std::move(callback)]() mutable {
+    if (raw_target == nullptr) {
+      if (callback) {
+        callback(false, 0u);
+      }
+      return;
+    }
+    raw_target->WriteAsync(buf, buf_len, std::move(callback));
+  });
 }
 
 void AsyncOutputStreamProxy::Close() {
@@ -263,7 +250,7 @@ void AsyncOutputStreamProxy::Close() {
   }
 
   scoped_refptr<TaskRunner> io_runner = io_task_runner_;
-  AsyncOutputStream* raw_target = target_.load(std::memory_order_acquire);
+  AsyncOutputStream *raw_target = target_.load(std::memory_order_acquire);
   target_.store(nullptr, std::memory_order_release);
 
   if (raw_target != nullptr && io_runner.get() != nullptr) {
@@ -271,5 +258,5 @@ void AsyncOutputStreamProxy::Close() {
   }
 }
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei

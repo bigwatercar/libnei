@@ -34,8 +34,7 @@ static std::string GetHomeDir() {
 // DefaultProvider  --  platform path resolution (macOS)
 // =============================================================================
 
-bool PathService::Impl::DefaultProvider(int key,
-                                        std::filesystem::path *result) {
+bool PathService::Impl::DefaultProvider(int key, std::filesystem::path *result) {
   DCHECK(result != nullptr);
   if (result == nullptr) {
     return false;
@@ -60,7 +59,7 @@ bool PathService::Impl::DefaultProvider(int key,
   case PathKeys::DIR_EXE: {
     /* Round 1: probe with a PATH_MAX-sized buffer. */
     std::string buf(PATH_MAX, '\0');
-    uint32_t    size = static_cast<uint32_t>(buf.size());
+    uint32_t size = static_cast<uint32_t>(buf.size());
     if (_NSGetExecutablePath(&buf[0], &size) != 0) {
       /* Round 2: buffer was too small; size now holds the required length. */
       buf.resize(size);
@@ -71,9 +70,8 @@ bool PathService::Impl::DefaultProvider(int key,
     }
     /* Trim trailing NULs and resolve symlinks. */
     buf.resize(std::strlen(buf.c_str()));
-    std::error_code              ec;
-    const std::filesystem::path exe_path =
-        std::filesystem::canonical(std::filesystem::path(buf), ec);
+    std::error_code ec;
+    const std::filesystem::path exe_path = std::filesystem::canonical(std::filesystem::path(buf), ec);
     DCHECK(!ec);
     if (ec) {
       return false;
@@ -103,8 +101,7 @@ bool PathService::Impl::DefaultProvider(int key,
   // DIR_USER_DATA
   // -----------------------------------------------------------------------
   case PathKeys::DIR_USER_DATA: {
-    *result =
-        std::filesystem::path(GetHomeDir()) / "Library" / "Application Support";
+    *result = std::filesystem::path(GetHomeDir()) / "Library" / "Application Support";
     return true;
   }
 
@@ -159,6 +156,6 @@ bool PathService::Impl::DefaultProvider(int key,
   }
 }
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // __APPLE__
+#endif // __APPLE__

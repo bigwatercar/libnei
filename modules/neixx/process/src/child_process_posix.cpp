@@ -39,7 +39,7 @@
 namespace nei {
 namespace {
 
-std::mutex& SigPipeMutex() {
+std::mutex &SigPipeMutex() {
   static std::mutex mutex;
   return mutex;
 }
@@ -64,7 +64,7 @@ struct ControlPipeEnds {
   int child_write_end = -1;
 };
 
-bool CreatePipeEnds(bool child_reads, PipeEnds* out) {
+bool CreatePipeEnds(bool child_reads, PipeEnds *out) {
   int fds[2] = {-1, -1};
   if (pipe2(fds, O_NONBLOCK | O_CLOEXEC) != 0) {
     return false;
@@ -80,7 +80,7 @@ bool CreatePipeEnds(bool child_reads, PipeEnds* out) {
   return true;
 }
 
-bool CreateControlPipeEnds(ControlPipeEnds* out) {
+bool CreateControlPipeEnds(ControlPipeEnds *out) {
   int fds[2] = {-1, -1};
   if (pipe2(fds, O_NONBLOCK | O_CLOEXEC) != 0) {
     return false;
@@ -97,18 +97,18 @@ bool CreateControlPipeEnds(ControlPipeEnds* out) {
   return true;
 }
 
-void CloseFd(int* fd) {
+void CloseFd(int *fd) {
   if (*fd >= 0) {
     (void)close(*fd);
     *fd = -1;
   }
 }
 
-std::vector<std::string> BuildExecArgv(const CommandLine& command_line) {
+std::vector<std::string> BuildExecArgv(const CommandLine &command_line) {
   std::vector<std::string> argv_utf8;
-  const auto& argv_u16 = command_line.argv();
+  const auto &argv_u16 = command_line.argv();
   argv_utf8.reserve(argv_u16.size());
-  for (const auto& token : argv_u16) {
+  for (const auto &token : argv_u16) {
     argv_utf8.push_back(UTF16ToUTF8(token));
   }
   if (!argv_utf8.empty()) {
@@ -129,13 +129,10 @@ rlim_t ToRlimOrMax(int64_t value) {
 }
 
 bool IsCrashSignal(int sig) {
-  return sig == SIGSEGV || sig == SIGFPE || sig == SIGBUS ||
-         sig == SIGILL || sig == SIGABRT;
+  return sig == SIGSEGV || sig == SIGFPE || sig == SIGBUS || sig == SIGILL || sig == SIGABRT;
 }
 
-void RestoreEnvVar(const char* name,
-                   bool had_original,
-                   const std::string& original_value) {
+void RestoreEnvVar(const char *name, bool had_original, const std::string &original_value) {
   if (had_original) {
     (void)setenv(name, original_value.c_str(), 1);
   } else {
@@ -155,17 +152,19 @@ ProcessState ClassifySignaledTermination(int sig, int requested_signal) {
 }
 
 class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
- public:
-  explicit PosixChildProcessCore(ChildProcessListener* listener,
-                                 scoped_refptr<TaskRunner> io_runner)
-      : listener_(listener), io_runner_(std::move(io_runner)) {}
+public:
+  explicit PosixChildProcessCore(ChildProcessListener *listener, scoped_refptr<TaskRunner> io_runner)
+      : listener_(listener)
+      , io_runner_(std::move(io_runner)) {
+  }
 
- private:
+private:
   DECLARE_SEQUENCE_CHECKER(io_sequence_checker_);
 
- public:
-
-  ~PosixChildProcessCore() { Cleanup(); }
+public:
+  ~PosixChildProcessCore() {
+    Cleanup();
+  }
 
   bool Terminate(int /*exit_code*/, bool force) {
     const int signal_value = force ? SIGKILL : SIGTERM;
@@ -173,10 +172,8 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     int pidfd = -1;
     {
       std::lock_guard<std::mutex> lock(state_lock_);
-      if (state_ == ProcessState::kExited ||
-          state_ == ProcessState::kCrashed ||
-          state_ == ProcessState::kTimedOutHung ||
-          state_ == ProcessState::kFailedToStart) {
+      if (state_ == ProcessState::kExited || state_ == ProcessState::kCrashed || state_ == ProcessState::kTimedOutHung
+          || state_ == ProcessState::kFailedToStart) {
         return false;
       }
       pid = pid_;
@@ -208,8 +205,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     return false;
   }
 
-  bool Launch(const CommandLine& command_line,
-              const ProcessLaunchOptions& options) {
+  bool Launch(const CommandLine &command_line, const ProcessLaunchOptions &options) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
     {
       std::lock_guard<std::mutex> lock(state_lock_);
@@ -224,7 +220,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 
     IgnoreSigPipeGlobalOnce();
 
-    MessagePumpForIO* pump = MessagePumpForIO::Current();
+    MessagePumpForIO *pump = MessagePumpForIO::Current();
     if (pump == nullptr) {
       NotifyLaunchFailed();
       return false;
@@ -234,23 +230,20 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     PipeEnds stdout_pipe;
     PipeEnds stderr_pipe;
     ControlPipeEnds control_pipe;
-    const bool enable_control_guard = !options.heartbeat_timeout.is_max() &&
-                      options.heartbeat_timeout.InMilliseconds() > 0;
+    const bool enable_control_guard =
+        !options.heartbeat_timeout.is_max() && options.heartbeat_timeout.InMilliseconds() > 0;
 
-    if (options.stdin_config.type == StdIOType::PIPE &&
-        !CreatePipeEnds(/*child_reads=*/true, &stdin_pipe)) {
+    if (options.stdin_config.type == StdIOType::PIPE && !CreatePipeEnds(/*child_reads=*/true, &stdin_pipe)) {
       NotifyLaunchFailed();
       return false;
     }
-    if (options.stdout_config.type == StdIOType::PIPE &&
-        !CreatePipeEnds(/*child_reads=*/false, &stdout_pipe)) {
+    if (options.stdout_config.type == StdIOType::PIPE && !CreatePipeEnds(/*child_reads=*/false, &stdout_pipe)) {
       CloseFd(&stdin_pipe.parent_end);
       CloseFd(&stdin_pipe.child_end);
       NotifyLaunchFailed();
       return false;
     }
-    if (options.stderr_config.type == StdIOType::PIPE &&
-        !CreatePipeEnds(/*child_reads=*/false, &stderr_pipe)) {
+    if (options.stderr_config.type == StdIOType::PIPE && !CreatePipeEnds(/*child_reads=*/false, &stderr_pipe)) {
       CloseFd(&stdin_pipe.parent_end);
       CloseFd(&stdin_pipe.child_end);
       CloseFd(&stdout_pipe.parent_end);
@@ -283,9 +276,9 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       return false;
     }
 
-    std::vector<char*> argv_exec;
+    std::vector<char *> argv_exec;
     argv_exec.reserve(argv_utf8.size() + 1);
-    for (std::string& token : argv_utf8) {
+    for (std::string &token : argv_utf8) {
       argv_exec.push_back(token.data());
     }
     argv_exec.push_back(nullptr);
@@ -296,17 +289,16 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     std::string original_control_env;
     bool had_original_control_env = false;
     if (enable_control_guard) {
-      const char* old = getenv("NEI_CONTROL_PIPE_FD");
+      const char *old = getenv("NEI_CONTROL_PIPE_FD");
       if (old != nullptr) {
         had_original_control_env = true;
         original_control_env = old;
       }
 
       char control_fd_buf[64] = {0};
-      const int n = std::snprintf(control_fd_buf, sizeof(control_fd_buf), "%d",
-                                  control_pipe.child_write_end);
-      if (n <= 0 || static_cast<std::size_t>(n) >= sizeof(control_fd_buf) ||
-          setenv("NEI_CONTROL_PIPE_FD", control_fd_buf, 1) != 0) {
+      const int n = std::snprintf(control_fd_buf, sizeof(control_fd_buf), "%d", control_pipe.child_write_end);
+      if (n <= 0 || static_cast<std::size_t>(n) >= sizeof(control_fd_buf)
+          || setenv("NEI_CONTROL_PIPE_FD", control_fd_buf, 1) != 0) {
         CloseFd(&stdin_pipe.parent_end);
         CloseFd(&stdin_pipe.child_end);
         CloseFd(&stdout_pipe.parent_end);
@@ -323,8 +315,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     pid_t child_pid = fork();
     if (child_pid < 0) {
       if (enable_control_guard) {
-        RestoreEnvVar("NEI_CONTROL_PIPE_FD", had_original_control_env,
-                      original_control_env);
+        RestoreEnvVar("NEI_CONTROL_PIPE_FD", had_original_control_env, original_control_env);
       }
       CloseFd(&stdin_pipe.parent_end);
       CloseFd(&stdin_pipe.child_end);
@@ -337,7 +328,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     }
 
     if (child_pid == 0) {
-      const ResourceLimits& limits = options.resource_limits;
+      const ResourceLimits &limits = options.resource_limits;
 
       if (limits.kill_on_parent_death) {
         if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0) {
@@ -366,31 +357,30 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       int devnull_in = -1;
       int devnull_out = -1;
 
-      auto BindStdFd = [&](int std_fd, const StdIOConfig& cfg,
-                           const PipeEnds& pipe, bool is_input) {
+      auto BindStdFd = [&](int std_fd, const StdIOConfig &cfg, const PipeEnds &pipe, bool is_input) {
         int source_fd = -1;
         switch (cfg.type) {
-          case StdIOType::INHERIT:
-            return true;
-          case StdIOType::NULL_IO:
-            if (is_input) {
-              if (devnull_in < 0) {
-                devnull_in = open("/dev/null", O_RDONLY);
-              }
-              source_fd = devnull_in;
-            } else {
-              if (devnull_out < 0) {
-                devnull_out = open("/dev/null", O_WRONLY);
-              }
-              source_fd = devnull_out;
+        case StdIOType::INHERIT:
+          return true;
+        case StdIOType::NULL_IO:
+          if (is_input) {
+            if (devnull_in < 0) {
+              devnull_in = open("/dev/null", O_RDONLY);
             }
-            break;
-          case StdIOType::PIPE:
-            source_fd = pipe.child_end;
-            break;
-          case StdIOType::REDIRECT:
-            source_fd = static_cast<int>(cfg.target_handle);
-            break;
+            source_fd = devnull_in;
+          } else {
+            if (devnull_out < 0) {
+              devnull_out = open("/dev/null", O_WRONLY);
+            }
+            source_fd = devnull_out;
+          }
+          break;
+        case StdIOType::PIPE:
+          source_fd = pipe.child_end;
+          break;
+        case StdIOType::REDIRECT:
+          source_fd = static_cast<int>(cfg.target_handle);
+          break;
         }
 
         if (source_fd < 0) {
@@ -399,12 +389,9 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
         return dup2(source_fd, std_fd) >= 0;
       };
 
-      const bool stdin_ok = BindStdFd(STDIN_FILENO, options.stdin_config,
-                                      stdin_pipe, /*is_input=*/true);
-      const bool stdout_ok = BindStdFd(STDOUT_FILENO, options.stdout_config,
-                                       stdout_pipe, /*is_input=*/false);
-      const bool stderr_ok = BindStdFd(STDERR_FILENO, options.stderr_config,
-                                       stderr_pipe, /*is_input=*/false);
+      const bool stdin_ok = BindStdFd(STDIN_FILENO, options.stdin_config, stdin_pipe, /*is_input=*/true);
+      const bool stdout_ok = BindStdFd(STDOUT_FILENO, options.stdout_config, stdout_pipe, /*is_input=*/false);
+      const bool stderr_ok = BindStdFd(STDERR_FILENO, options.stderr_config, stderr_pipe, /*is_input=*/false);
 
       CloseFd(&stdin_pipe.parent_end);
       CloseFd(&stdin_pipe.child_end);
@@ -436,8 +423,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     }
 
     if (enable_control_guard) {
-      RestoreEnvVar("NEI_CONTROL_PIPE_FD", had_original_control_env,
-                    original_control_env);
+      RestoreEnvVar("NEI_CONTROL_PIPE_FD", had_original_control_env, original_control_env);
     }
 
     {
@@ -454,8 +440,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 
     if (options.stdin_config.type == StdIOType::PIPE) {
       auto stream = std::make_unique<PipeOutputStream>(io_runner_);
-      stream->BindPlatformHandle(
-          PlatformHandle::FromNativeHandle(stdin_pipe.parent_end));
+      stream->BindPlatformHandle(PlatformHandle::FromNativeHandle(stdin_pipe.parent_end));
       stdin_stream_ = std::move(stream);
     } else {
       CloseFd(&stdin_pipe.parent_end);
@@ -463,8 +448,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 
     if (options.stdout_config.type == StdIOType::PIPE) {
       auto stream = std::make_unique<PipeInputStream>(io_runner_);
-      stream->BindPlatformHandle(
-          PlatformHandle::FromNativeHandle(stdout_pipe.parent_end));
+      stream->BindPlatformHandle(PlatformHandle::FromNativeHandle(stdout_pipe.parent_end));
       stdout_stream_ = std::move(stream);
     } else {
       CloseFd(&stdout_pipe.parent_end);
@@ -472,8 +456,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 
     if (options.stderr_config.type == StdIOType::PIPE) {
       auto stream = std::make_unique<PipeInputStream>(io_runner_);
-      stream->BindPlatformHandle(
-          PlatformHandle::FromNativeHandle(stderr_pipe.parent_end));
+      stream->BindPlatformHandle(PlatformHandle::FromNativeHandle(stderr_pipe.parent_end));
       stderr_stream_ = std::move(stream);
     } else {
       CloseFd(&stderr_pipe.parent_end);
@@ -495,7 +478,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       pidfd_ = -1;
     }
 #endif
-    ChildProcessListener* launch_failed_listener = nullptr;
+    ChildProcessListener *launch_failed_listener = nullptr;
     bool pidfd_open_failed = false;
     {
       std::lock_guard<std::mutex> lock(state_lock_);
@@ -536,10 +519,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
       std::lock_guard<std::mutex> lock(state_lock_);
       pidfd_for_watch = pidfd_;
     }
-    if (!pid_controller_.StartWatching(
-            pump, pidfd_for_watch,
-            MessagePumpForIO::FdWatchController::Mode::READ,
-            this)) {
+    if (!pid_controller_.StartWatching(pump, pidfd_for_watch, MessagePumpForIO::FdWatchController::Mode::READ, this)) {
       NotifyLaunchFailed();
       Cleanup();
       return false;
@@ -551,11 +531,9 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
         std::lock_guard<std::mutex> lock(state_lock_);
         control_fd_snapshot = control_fd_;
       }
-      if (control_fd_snapshot < 0 ||
-          !control_controller_.StartWatching(
-              pump, control_fd_snapshot,
-              MessagePumpForIO::FdWatchController::Mode::READ,
-              this)) {
+      if (control_fd_snapshot < 0
+          || !control_controller_.StartWatching(
+              pump, control_fd_snapshot, MessagePumpForIO::FdWatchController::Mode::READ, this)) {
         NotifyLaunchFailed();
         Cleanup();
         return false;
@@ -587,9 +565,17 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     return true;
   }
 
-  AsyncInputStream* stdout_stream() const { return stdout_stream_.get(); }
-  AsyncInputStream* stderr_stream() const { return stderr_stream_.get(); }
-  AsyncOutputStream* stdin_stream() const { return stdin_stream_.get(); }
+  AsyncInputStream *stdout_stream() const {
+    return stdout_stream_.get();
+  }
+
+  AsyncInputStream *stderr_stream() const {
+    return stderr_stream_.get();
+  }
+
+  AsyncOutputStream *stdin_stream() const {
+    return stdin_stream_.get();
+  }
 
   void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override {
     int pidfd_snapshot = -1;
@@ -612,9 +598,10 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     HandlePidReadable();
   }
 
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) override {}
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) override {
+  }
 
- private:
+private:
   void NotifyLaunchFailed() {
     {
       std::lock_guard<std::mutex> lock(state_lock_);
@@ -626,14 +613,13 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
   }
 
   void HandlePidReadable() {
-    ChildProcessListener* listener = nullptr;
+    ChildProcessListener *listener = nullptr;
     int pidfd_to_close = -1;
     ProcessExitInfo info;
 
     {
       std::lock_guard<std::mutex> lock(state_lock_);
-      if (state_ != ProcessState::kRunning || pidfd_ < 0 ||
-          terminated_notified_) {
+      if (state_ != ProcessState::kRunning || pidfd_ < 0 || terminated_notified_) {
         return;
       }
 
@@ -646,8 +632,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 #if defined(P_PIDFD)
       siginfo_t si;
       std::memset(&si, 0, sizeof(si));
-      if (waitid(P_PIDFD, static_cast<id_t>(pidfd_snapshot), &si,
-                 WEXITED | WNOHANG) != 0) {
+      if (waitid(P_PIDFD, static_cast<id_t>(pidfd_snapshot), &si, WEXITED | WNOHANG) != 0) {
         return;
       }
       if (si.si_pid == 0) {
@@ -744,8 +729,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     int control_fd_to_close = -1;
     {
       std::lock_guard<std::mutex> lock(state_lock_);
-      if (!terminated_notified_ && state_ == ProcessState::kRunning &&
-          heartbeat_enabled_) {
+      if (!terminated_notified_ && state_ == ProcessState::kRunning && heartbeat_enabled_) {
         should_force_kill = true;
       }
       control_fd_to_close = control_fd_;
@@ -769,39 +753,40 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
     if (!heartbeat_enabled_ || origin_runner_.get() == nullptr) {
       return;
     }
-    origin_runner_->PostDelayedTask(FROM_HERE, [this, generation]() {
-      if (generation != heartbeat_generation_) {
-        return;
-      }
+    origin_runner_->PostDelayedTask(
+        FROM_HERE,
+        [this, generation]() {
+          if (generation != heartbeat_generation_) {
+            return;
+          }
 
-      bool should_kill = false;
-      {
-        std::lock_guard<std::mutex> lock(state_lock_);
-        if (state_ != ProcessState::kRunning) {
-          return;
-        }
-        const TimeTicks now = TimeTicks::Now();
-        if ((now - last_heartbeat_time_).InMilliseconds() >=
-            heartbeat_timeout_.InMilliseconds()) {
-          state_ = ProcessState::kTimedOutHung;
-          should_kill = true;
-        }
-      }
+          bool should_kill = false;
+          {
+            std::lock_guard<std::mutex> lock(state_lock_);
+            if (state_ != ProcessState::kRunning) {
+              return;
+            }
+            const TimeTicks now = TimeTicks::Now();
+            if ((now - last_heartbeat_time_).InMilliseconds() >= heartbeat_timeout_.InMilliseconds()) {
+              state_ = ProcessState::kTimedOutHung;
+              should_kill = true;
+            }
+          }
 
-      if (should_kill) {
-        (void)Terminate(0xDEAD, true);
-        return;
-      }
-      ScheduleHeartbeatCheck(generation);
-    }, heartbeat_timeout_);
+          if (should_kill) {
+            (void)Terminate(0xDEAD, true);
+            return;
+          }
+          ScheduleHeartbeatCheck(generation);
+        },
+        heartbeat_timeout_);
   }
 
   void Cleanup() {
     bool should_kill = false;
     {
       std::lock_guard<std::mutex> lock(state_lock_);
-      should_kill = state_ == ProcessState::kRunning &&
-                    options_.kill_on_destruction;
+      should_kill = state_ == ProcessState::kRunning && options_.kill_on_destruction;
     }
     if (should_kill) {
       (void)Terminate(-1, true);
@@ -834,7 +819,7 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
   }
 
   mutable std::mutex state_lock_;
-  ChildProcessListener* listener_ = nullptr;
+  ChildProcessListener *listener_ = nullptr;
   ProcessState state_ = ProcessState::kNotStarted;
   bool terminated_notified_ = false;
   ProcessLaunchOptions options_;
@@ -856,12 +841,11 @@ class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
   scoped_refptr<TaskRunner> io_runner_;
 };
 
-}  // namespace
+} // namespace
 
-class ChildProcessPlatformImpl final
-    : public ChildProcess::Impl,
-      public internal::ChildProcessImplBase<ChildProcessPlatformImpl> {
- public:
+class ChildProcessPlatformImpl final : public ChildProcess::Impl,
+                                       public internal::ChildProcessImplBase<ChildProcessPlatformImpl> {
+public:
   explicit ChildProcessPlatformImpl(scoped_refptr<ProcessService> process_service)
       : Base(std::move(process_service)) {
     // PlatformImpl is constructed on the caller's thread, but all
@@ -870,10 +854,11 @@ class ChildProcessPlatformImpl final
     DETACH_FROM_SEQUENCE(io_sequence_checker_);
   }
 
-  ~ChildProcessPlatformImpl() override { Base::Shutdown(); }
+  ~ChildProcessPlatformImpl() override {
+    Base::Shutdown();
+  }
 
-  bool Launch(const CommandLine& command_line,
-              const ProcessLaunchOptions& options) override {
+  bool Launch(const CommandLine &command_line, const ProcessLaunchOptions &options) override {
     return Base::Launch(command_line, options);
   }
 
@@ -881,25 +866,25 @@ class ChildProcessPlatformImpl final
     return Base::Terminate(exit_code, force);
   }
 
-  void SetExternalListener(ChildProcessListener* listener) override {
+  void SetExternalListener(ChildProcessListener *listener) override {
     Base::SetExternalListener(listener);
   }
 
-  AsyncInputStream* GetStdoutStream() const override {
+  AsyncInputStream *GetStdoutStream() const override {
     return Base::GetStdoutStream();
   }
 
-  AsyncInputStream* GetStderrStream() const override {
+  AsyncInputStream *GetStderrStream() const override {
     return Base::GetStderrStream();
   }
 
-  AsyncOutputStream* GetStdinStream() const override {
+  AsyncOutputStream *GetStdinStream() const override {
     return Base::GetStdinStream();
   }
 
-  bool LaunchOnIoThread(const CommandLine& command_line,
-                       const ProcessLaunchOptions& options,
-                       const scoped_refptr<TaskRunner>& io_runner) {
+  bool LaunchOnIoThread(const CommandLine &command_line,
+                        const ProcessLaunchOptions &options,
+                        const scoped_refptr<TaskRunner> &io_runner) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
     stdout_proxy_->ResetBinding();
     stderr_proxy_->ResetBinding();
@@ -932,17 +917,16 @@ class ChildProcessPlatformImpl final
     core_.reset();
   }
 
- private:
+private:
   DECLARE_SEQUENCE_CHECKER(io_sequence_checker_);
   using Base = internal::ChildProcessImplBase<ChildProcessPlatformImpl>;
   std::unique_ptr<PosixChildProcessCore> core_;
 };
 
-std::unique_ptr<ChildProcess::Impl> CreatePlatformImpl(
-    scoped_refptr<ProcessService> process_service) {
+std::unique_ptr<ChildProcess::Impl> CreatePlatformImpl(scoped_refptr<ProcessService> process_service) {
   return std::make_unique<ChildProcessPlatformImpl>(std::move(process_service));
 }
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // !defined(_WIN32)
+#endif // !defined(_WIN32)

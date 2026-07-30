@@ -25,11 +25,11 @@
 namespace nei {
 namespace {
 
-std::vector<std::string> BuildArgvUtf8(const CommandLine& command_line) {
+std::vector<std::string> BuildArgvUtf8(const CommandLine &command_line) {
   std::vector<std::string> argv_utf8;
-  const auto& argv_u16 = command_line.argv();
+  const auto &argv_u16 = command_line.argv();
   argv_utf8.reserve(argv_u16.size());
-  for (const auto& token : argv_u16) {
+  for (const auto &token : argv_u16) {
     argv_utf8.push_back(UTF16ToUTF8(token));
   }
   if (!argv_utf8.empty()) {
@@ -44,8 +44,7 @@ std::vector<std::string> BuildArgvUtf8(const CommandLine& command_line) {
 
 ProcessExitInfo WaitWithTimeout(pid_t pid, TimeDelta timeout) {
   ProcessExitInfo info;
-  const bool no_timeout = timeout.InMicroseconds() >=
-                          TimeDelta::FromDays(36500).InMicroseconds();
+  const bool no_timeout = timeout.InMicroseconds() >= TimeDelta::FromDays(36500).InMicroseconds();
 
   if (no_timeout) {
     int status = 0;
@@ -93,11 +92,10 @@ ProcessExitInfo WaitWithTimeout(pid_t pid, TimeDelta timeout) {
   return info;
 }
 
-}  // namespace
+} // namespace
 
-ProcessExitInfo ProcessUtil::LaunchProcessElevated(
-    const CommandLine& command_line,
-    const ElevatedProcessOptions& options) {
+ProcessExitInfo ProcessUtil::LaunchProcessElevated(const CommandLine &command_line,
+                                                   const ElevatedProcessOptions &options) {
   std::vector<std::string> argv_utf8 = BuildArgvUtf8(command_line);
   ProcessExitInfo info;
   if (argv_utf8.empty()) {
@@ -126,9 +124,9 @@ ProcessExitInfo ProcessUtil::LaunchProcessElevated(
       }
     }
 
-    std::vector<char*> argv_exec;
+    std::vector<char *> argv_exec;
     argv_exec.reserve(elevated.size() + 1);
-    for (std::string& token : elevated) {
+    for (std::string &token : elevated) {
       argv_exec.push_back(token.data());
     }
     argv_exec.push_back(nullptr);
@@ -137,7 +135,7 @@ ProcessExitInfo ProcessUtil::LaunchProcessElevated(
 
     elevated[0] = "sudo";
     argv_exec.clear();
-    for (std::string& token : elevated) {
+    for (std::string &token : elevated) {
       argv_exec.push_back(token.data());
     }
     argv_exec.push_back(nullptr);
@@ -148,8 +146,8 @@ ProcessExitInfo ProcessUtil::LaunchProcessElevated(
   return WaitWithTimeout(pid, options.wait_timeout);
 }
 
-void ApplyLimitsAndRedirect(const ProcessLaunchOptions& options) {
-  const ResourceLimits& limits = options.resource_limits;
+void ApplyLimitsAndRedirect(const ProcessLaunchOptions &options) {
+  const ResourceLimits &limits = options.resource_limits;
 
   if (limits.kill_on_parent_death) {
     (void)prctl(PR_SET_PDEATHSIG, SIGKILL);
@@ -167,48 +165,44 @@ void ApplyLimitsAndRedirect(const ProcessLaunchOptions& options) {
     (void)setrlimit(RLIMIT_NOFILE, &rl);
   }
 
-  auto RedirectFd = [](int target_fd, const StdIOConfig& cfg, bool is_input) {
+  auto RedirectFd = [](int target_fd, const StdIOConfig &cfg, bool is_input) {
     int source_fd = -1;
     switch (cfg.type) {
-      case StdIOType::INHERIT:
-        return;
-      case StdIOType::NULL_IO: {
-        int devnull = open("/dev/null",
-                           is_input ? O_RDONLY : O_WRONLY);
-        if (devnull >= 0) {
-          (void)dup2(devnull, target_fd);
-          (void)close(devnull);
-        }
-        return;
+    case StdIOType::INHERIT:
+      return;
+    case StdIOType::NULL_IO: {
+      int devnull = open("/dev/null", is_input ? O_RDONLY : O_WRONLY);
+      if (devnull >= 0) {
+        (void)dup2(devnull, target_fd);
+        (void)close(devnull);
       }
-      case StdIOType::PIPE:
-        // Pipe type is not supported in fire-and-forget mode;
-        // fall through to NULL_IO.
-        source_fd = open("/dev/null",
-                         is_input ? O_RDONLY : O_WRONLY);
-        if (source_fd >= 0) {
-          (void)dup2(source_fd, target_fd);
-          (void)close(source_fd);
-        }
-        return;
-      case StdIOType::REDIRECT:
-        source_fd = static_cast<int>(cfg.target_handle);
-        if (source_fd >= 0) {
-          (void)dup2(source_fd, target_fd);
-        }
-        return;
+      return;
+    }
+    case StdIOType::PIPE:
+      // Pipe type is not supported in fire-and-forget mode;
+      // fall through to NULL_IO.
+      source_fd = open("/dev/null", is_input ? O_RDONLY : O_WRONLY);
+      if (source_fd >= 0) {
+        (void)dup2(source_fd, target_fd);
+        (void)close(source_fd);
+      }
+      return;
+    case StdIOType::REDIRECT:
+      source_fd = static_cast<int>(cfg.target_handle);
+      if (source_fd >= 0) {
+        (void)dup2(source_fd, target_fd);
+      }
+      return;
     }
   };
 
-  RedirectFd(STDIN_FILENO,  options.stdin_config,  /*is_input=*/true);
+  RedirectFd(STDIN_FILENO, options.stdin_config, /*is_input=*/true);
   RedirectFd(STDOUT_FILENO, options.stdout_config, /*is_input=*/false);
   RedirectFd(STDERR_FILENO, options.stderr_config, /*is_input=*/false);
 }
 
-ProcessExitInfo ProcessUtil::Launch(
-    const CommandLine& command_line,
-    const ProcessLaunchOptions& options,
-    TimeDelta wait_timeout) {
+ProcessExitInfo
+ProcessUtil::Launch(const CommandLine &command_line, const ProcessLaunchOptions &options, TimeDelta wait_timeout) {
   ProcessExitInfo info;
   std::vector<std::string> argv_utf8 = BuildArgvUtf8(command_line);
   if (argv_utf8.empty()) {
@@ -216,8 +210,7 @@ ProcessExitInfo ProcessUtil::Launch(
     return info;
   }
 
-  const bool no_timeout = wait_timeout.InMicroseconds() >=
-                          TimeDelta::FromDays(36500).InMicroseconds();
+  const bool no_timeout = wait_timeout.InMicroseconds() >= TimeDelta::FromDays(36500).InMicroseconds();
 
   if (no_timeout) {
     // Fire-and-forget: double-fork to avoid zombie processes.
@@ -238,9 +231,9 @@ ProcessExitInfo ProcessUtil::Launch(
         // Grandchild: exec the target.
         ApplyLimitsAndRedirect(options);
 
-        std::vector<char*> argv_exec;
+        std::vector<char *> argv_exec;
         argv_exec.reserve(argv_utf8.size() + 1);
-        for (std::string& token : argv_utf8) {
+        for (std::string &token : argv_utf8) {
           argv_exec.push_back(token.data());
         }
         argv_exec.push_back(nullptr);
@@ -252,7 +245,8 @@ ProcessExitInfo ProcessUtil::Launch(
     }
     // Parent: reap the intermediate child.
     int status = 0;
-    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+    }
     info.state = ProcessState::kRunning;
     return info;
   }
@@ -266,9 +260,9 @@ ProcessExitInfo ProcessUtil::Launch(
   if (pid == 0) {
     ApplyLimitsAndRedirect(options);
 
-    std::vector<char*> argv_exec;
+    std::vector<char *> argv_exec;
     argv_exec.reserve(argv_utf8.size() + 1);
-    for (std::string& token : argv_utf8) {
+    for (std::string &token : argv_utf8) {
       argv_exec.push_back(token.data());
     }
     argv_exec.push_back(nullptr);
@@ -279,10 +273,8 @@ ProcessExitInfo ProcessUtil::Launch(
   return WaitWithTimeout(pid, wait_timeout);
 }
 
-ProcessExitInfo ProcessUtil::ShellExecute(
-    const std::string& path_or_url,
-    const ShellExecuteOptions& options) {
-  (void)options;  // POSIX openers don't support operation/parameters natively.
+ProcessExitInfo ProcessUtil::ShellExecute(const std::string &path_or_url, const ShellExecuteOptions &options) {
+  (void)options; // POSIX openers don't support operation/parameters natively.
 
   pid_t pid = fork();
   if (pid < 0) {
@@ -300,7 +292,7 @@ ProcessExitInfo ProcessUtil::ShellExecute(
     }
 
     // Try common openers in order.
-    const char* path = path_or_url.c_str();
+    const char *path = path_or_url.c_str();
     execlp("xdg-open", "xdg-open", path, nullptr);
     // macOS fallback.
     execlp("open", "open", path, nullptr);
@@ -313,10 +305,11 @@ ProcessExitInfo ProcessUtil::ShellExecute(
 
   // Reap the intermediate child (the actual opener forks and detaches).
   int status = 0;
-  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
   return {ProcessState::kRunning, -1};
 }
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // !defined(_WIN32)
+#endif // !defined(_WIN32)

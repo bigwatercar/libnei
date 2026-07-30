@@ -44,54 +44,48 @@ static inline int _nei_log_is_digit_char(char c) {
 }
 
 #if defined(_WIN32)
-#  define _NEI_LOG_THREAD_YIELD() SwitchToThread()
+#define _NEI_LOG_THREAD_YIELD() SwitchToThread()
 #else
-#  define _NEI_LOG_THREAD_YIELD() sched_yield()
+#define _NEI_LOG_THREAD_YIELD() sched_yield()
 #endif
 
 /* ── Atomic primitive helpers (C99 / platform-specific) ──────────────────── *
  * These wrap the minimal operations needed by the lock-free MPSC ring buffer.
  * Windows: Interlocked* intrinsics.  POSIX: GCC/Clang __atomic builtins.    */
 #if defined(_WIN32)
-typedef volatile LONG     _nei_log_atomic32_t;
+typedef volatile LONG _nei_log_atomic32_t;
 typedef volatile LONGLONG _nei_log_atomic64_t;
 /** Acquire-load a 32-bit value (uses CAS(p,0,0) for acquire semantics). */
-#  define _NEI_LOG_ATOMIC_LOAD32(p) \
-      ((uint32_t)InterlockedCompareExchange((volatile LONG *)(p), 0L, 0L))
+#define _NEI_LOG_ATOMIC_LOAD32(p) ((uint32_t)InterlockedCompareExchange((volatile LONG *)(p), 0L, 0L))
 /** Release-store a 32-bit value (full barrier via InterlockedExchange). */
-#  define _NEI_LOG_ATOMIC_STORE32(p, v) \
-      (void)InterlockedExchange((volatile LONG *)(p), (LONG)(v))
+#define _NEI_LOG_ATOMIC_STORE32(p, v) (void)InterlockedExchange((volatile LONG *)(p), (LONG)(v))
 /** Acquire-load a 64-bit value. */
-#  define _NEI_LOG_ATOMIC_LOAD64(p) \
-      ((uint64_t)InterlockedCompareExchange64((volatile LONGLONG *)(p), 0LL, 0LL))
+#define _NEI_LOG_ATOMIC_LOAD64(p) ((uint64_t)InterlockedCompareExchange64((volatile LONGLONG *)(p), 0LL, 0LL))
 /** Release-store a 64-bit value. */
-#  define _NEI_LOG_ATOMIC_STORE64(p, v) \
-      (void)InterlockedExchange64((volatile LONGLONG *)(p), (LONGLONG)(v))
+#define _NEI_LOG_ATOMIC_STORE64(p, v) (void)InterlockedExchange64((volatile LONGLONG *)(p), (LONGLONG)(v))
 /** Atomic compare-and-swap; returns non-zero on success. */
-#  define _NEI_LOG_ATOMIC_CAS64(p, expected, desired) \
-  (InterlockedCompareExchange64((volatile LONGLONG *)(p), (LONGLONG)(desired), (LONGLONG)(expected)) == (LONGLONG)(expected))
+#define _NEI_LOG_ATOMIC_CAS64(p, expected, desired)                                                                    \
+  (InterlockedCompareExchange64((volatile LONGLONG *)(p), (LONGLONG)(desired), (LONGLONG)(expected))                   \
+   == (LONGLONG)(expected))
 /** Atomic fetch-and-add (returns old value, full barrier). */
-#  define _NEI_LOG_ATOMIC_FETCH_ADD32(p, v) \
-  ((uint32_t)InterlockedExchangeAdd((volatile LONG *)(p), (LONG)(v)))
-#  define _NEI_LOG_ATOMIC_FETCH_SUB32(p, v) \
-  ((uint32_t)InterlockedExchangeAdd((volatile LONG *)(p), -(LONG)(v)))
-#  define _NEI_LOG_ATOMIC_FETCH_ADD64(p, v) \
-      ((uint64_t)InterlockedExchangeAdd64((volatile LONGLONG *)(p), (LONGLONG)(v)))
+#define _NEI_LOG_ATOMIC_FETCH_ADD32(p, v) ((uint32_t)InterlockedExchangeAdd((volatile LONG *)(p), (LONG)(v)))
+#define _NEI_LOG_ATOMIC_FETCH_SUB32(p, v) ((uint32_t)InterlockedExchangeAdd((volatile LONG *)(p), -(LONG)(v)))
+#define _NEI_LOG_ATOMIC_FETCH_ADD64(p, v) ((uint64_t)InterlockedExchangeAdd64((volatile LONGLONG *)(p), (LONGLONG)(v)))
 /** Yield CPU hint inside a spin loop. */
-#  define _NEI_LOG_CPU_YIELD() YieldProcessor()
+#define _NEI_LOG_CPU_YIELD() YieldProcessor()
 #else
 typedef volatile uint32_t _nei_log_atomic32_t;
 typedef volatile uint64_t _nei_log_atomic64_t;
-#  define _NEI_LOG_ATOMIC_LOAD32(p)          __atomic_load_n((p),  __ATOMIC_ACQUIRE)
-#  define _NEI_LOG_ATOMIC_STORE32(p, v)      __atomic_store_n((p), (v), __ATOMIC_RELEASE)
-#  define _NEI_LOG_ATOMIC_FETCH_ADD32(p, v)  __atomic_fetch_add((p), (v), __ATOMIC_ACQ_REL)
-#  define _NEI_LOG_ATOMIC_FETCH_SUB32(p, v)  __atomic_fetch_sub((p), (v), __ATOMIC_ACQ_REL)
-#  define _NEI_LOG_ATOMIC_LOAD64(p)          __atomic_load_n((p),  __ATOMIC_ACQUIRE)
-#  define _NEI_LOG_ATOMIC_STORE64(p, v)      __atomic_store_n((p), (v), __ATOMIC_RELEASE)
-#  define _NEI_LOG_ATOMIC_CAS64(p, expected, desired) \
+#define _NEI_LOG_ATOMIC_LOAD32(p) __atomic_load_n((p), __ATOMIC_ACQUIRE)
+#define _NEI_LOG_ATOMIC_STORE32(p, v) __atomic_store_n((p), (v), __ATOMIC_RELEASE)
+#define _NEI_LOG_ATOMIC_FETCH_ADD32(p, v) __atomic_fetch_add((p), (v), __ATOMIC_ACQ_REL)
+#define _NEI_LOG_ATOMIC_FETCH_SUB32(p, v) __atomic_fetch_sub((p), (v), __ATOMIC_ACQ_REL)
+#define _NEI_LOG_ATOMIC_LOAD64(p) __atomic_load_n((p), __ATOMIC_ACQUIRE)
+#define _NEI_LOG_ATOMIC_STORE64(p, v) __atomic_store_n((p), (v), __ATOMIC_RELEASE)
+#define _NEI_LOG_ATOMIC_CAS64(p, expected, desired)                                                                    \
   __atomic_compare_exchange_n((p), &(expected), (desired), 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)
-#  define _NEI_LOG_ATOMIC_FETCH_ADD64(p, v)  __atomic_fetch_add((p), (v), __ATOMIC_ACQ_REL)
-#  define _NEI_LOG_CPU_YIELD()               sched_yield()
+#define _NEI_LOG_ATOMIC_FETCH_ADD64(p, v) __atomic_fetch_add((p), (v), __ATOMIC_ACQ_REL)
+#define _NEI_LOG_CPU_YIELD() sched_yield()
 #endif
 /* ─────────────────────────────────────────────────────────────────────────── */
 
@@ -108,7 +102,7 @@ typedef volatile uint64_t _nei_log_atomic64_t;
  *  directly in the event header (avoids dangling DLL/SO pointers). */
 #define _NEI_LOG_MAX_FILE_COPY 128U
 #define _NEI_LOG_MAX_FUNC_COPY 160U
-#define _NEI_LOG_MAX_FMT_COPY  112U
+#define _NEI_LOG_MAX_FMT_COPY 112U
 
 /** Number of fixed slots in the MPSC ring buffer.  Each slot holds one full
  *  serialized event (up to _NEI_LOG_EVENT_BUFFER_SIZE bytes).
@@ -189,9 +183,9 @@ typedef struct _nei_log_event_header_st {
  */
 typedef struct {
   _nei_log_atomic32_t state;         /**< 0 = empty; 1 = committed. */
-  uint32_t            size;          /**< Valid byte count in @ref data. */
+  uint32_t size;                     /**< Valid byte count in @ref data. */
   _nei_log_atomic64_t published_seq; /**< Absolute sequence + 1 once this reservation is fully published. */
-  uint8_t             data[_NEI_LOG_EVENT_BUFFER_SIZE];
+  uint8_t data[_NEI_LOG_EVENT_BUFFER_SIZE];
 } nei_log_ring_slot_st;
 
 /**
@@ -203,9 +197,9 @@ typedef struct {
  */
 typedef struct {
   nei_log_ring_slot_st slots[_NEI_LOG_RING_SLOTS];
-  _nei_log_atomic64_t  write_pos;    /**< Next slot to reserve (producers). */
-  _nei_log_atomic64_t  committed_pos; /**< One-past-last contiguous fully published reservation. */
-  _nei_log_atomic64_t  consumer_pos; /**< Next slot to consume (consumer + flush readers). */
+  _nei_log_atomic64_t write_pos;     /**< Next slot to reserve (producers). */
+  _nei_log_atomic64_t committed_pos; /**< One-past-last contiguous fully published reservation. */
+  _nei_log_atomic64_t consumer_pos;  /**< Next slot to consume (consumer + flush readers). */
 } nei_log_ring_st;
 
 typedef struct _nei_log_runtime_st {
@@ -347,7 +341,8 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
 /* From log_sink.c */
 void _nei_log_default_file_llog(const nei_log_sink_st *sink, nei_log_level_e level, const char *message, size_t length);
 void _nei_log_default_file_vlog(const nei_log_sink_st *sink, int verbose, const char *message, size_t length);
-void _nei_log_emit_message(const nei_log_config_st *config, int32_t level, int32_t verbose, const char *message, size_t length);
+void _nei_log_emit_message(
+    const nei_log_config_st *config, int32_t level, int32_t verbose, const char *message, size_t length);
 
 /* From log_serialize.c */
 uint64_t _nei_log_now_ns(void);

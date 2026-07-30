@@ -19,11 +19,9 @@ namespace nei {
 // ---------------------------------------------------------------------------
 // Helper: resolve a KNOWNFOLDERID to a std::filesystem::path.
 // ---------------------------------------------------------------------------
-static bool GetKnownFolder(const KNOWNFOLDERID &folderId,
-                           std::filesystem::path *result) {
+static bool GetKnownFolder(const KNOWNFOLDERID &folderId, std::filesystem::path *result) {
   PWSTR raw = nullptr;
-  const HRESULT hr =
-      SHGetKnownFolderPath(folderId, KF_FLAG_DEFAULT, nullptr, &raw);
+  const HRESULT hr = SHGetKnownFolderPath(folderId, KF_FLAG_DEFAULT, nullptr, &raw);
   if (FAILED(hr)) {
     DCHECK(false);
     return false;
@@ -38,8 +36,7 @@ static bool GetKnownFolder(const KNOWNFOLDERID &folderId,
 // DefaultProvider  --  platform path resolution (Windows)
 // =============================================================================
 
-bool PathService::Impl::DefaultProvider(int key,
-                                        std::filesystem::path *result) {
+bool PathService::Impl::DefaultProvider(int key, std::filesystem::path *result) {
   DCHECK(result != nullptr);
   if (result == nullptr) {
     return false;
@@ -157,6 +154,6 @@ bool PathService::Impl::DefaultProvider(int key,
   }
 }
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // _WIN32
+#endif // _WIN32

@@ -29,7 +29,7 @@ namespace nei {
 ///   opts.thread_type = nei::ThreadType::BACKGROUND;
 ///   thread.StartWithOptions(opts);
 class NEI_API Thread final : public PlatformThread::Delegate {
- public:
+public:
   /// Configuration for a Thread's physical properties and message loop type.
   struct Options {
     /// Selects the MessagePump implementation driving this thread's RunLoop.
@@ -44,13 +44,13 @@ class NEI_API Thread final : public PlatformThread::Delegate {
     ThreadType thread_type = ThreadType::DEFAULT;
   };
 
-  explicit Thread(const std::string& name = std::string());
+  explicit Thread(const std::string &name = std::string());
   ~Thread() override;
 
-  Thread(const Thread&) = delete;
-  Thread& operator=(const Thread&) = delete;
-  Thread(Thread&&) = delete;
-  Thread& operator=(Thread&&) = delete;
+  Thread(const Thread &) = delete;
+  Thread &operator=(const Thread &) = delete;
+  Thread(Thread &&) = delete;
+  Thread &operator=(Thread &&) = delete;
 
   /// Starts with default options (MessagePumpType::DEFAULT, system stack,
   /// ThreadType::DEFAULT).
@@ -58,7 +58,7 @@ class NEI_API Thread final : public PlatformThread::Delegate {
 
   /// Starts with explicit options. May only be called once; returns false if
   /// the thread is already running.
-  bool StartWithOptions(const Options& options);
+  bool StartWithOptions(const Options &options);
 
   void Stop();
 
@@ -66,13 +66,13 @@ class NEI_API Thread final : public PlatformThread::Delegate {
   bool IsRunning() const;
   PlatformThread::PlatformThreadId GetThreadId() const;
 
- private:
+private:
   void ThreadMain() override;
 
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::string name_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
-  Options options_;      ///< Written by Start/StartWithOptions, read by ThreadMain.
+  Options options_; ///< Written by Start/StartWithOptions, read by ThreadMain.
   mutable Lock lock_;
   PlatformThread::Handle handle_;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
@@ -80,13 +80,13 @@ class NEI_API Thread final : public PlatformThread::Delegate {
   NEI_SUPPRESS_MSC_WARNING_4251_END
   // Non-owning pointer to a WaitableEvent on the call stack of
   // StartWithOptions().  Must only be read/written under |lock_|.
-  WaitableEvent* start_event_ = nullptr;
+  WaitableEvent *start_event_ = nullptr;
   bool started_ = false;
   bool running_ = false;
   bool start_succeeded_ = false;
   PlatformThread::PlatformThreadId thread_id_ = 0;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_THREADING_THREAD_H_
+#endif // NEIXX_THREADING_THREAD_H_

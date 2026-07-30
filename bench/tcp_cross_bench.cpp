@@ -61,17 +61,24 @@ using Clock = std::chrono::high_resolution_clock;
 // IO worker threads
 // ---------------------------------------------------------------------------
 class IoThread {
- public:
-  explicit IoThread(const std::string& name) {
+public:
+  explicit IoThread(const std::string &name) {
     nei::Thread::Options opts;
     opts.message_pump_type = nei::MessagePumpType::IO;
     thread_ = std::make_unique<nei::Thread>(name);
     thread_->StartWithOptions(opts);
     runner_ = thread_->GetTaskRunner();
   }
-  ~IoThread() { thread_->Stop(); }
-  nei::scoped_refptr<nei::TaskRunner> runner() const { return runner_; }
- private:
+
+  ~IoThread() {
+    thread_->Stop();
+  }
+
+  nei::scoped_refptr<nei::TaskRunner> runner() const {
+    return runner_;
+  }
+
+private:
   std::unique_ptr<nei::Thread> thread_;
   nei::scoped_refptr<nei::TaskRunner> runner_;
 };
@@ -125,13 +132,13 @@ void RunServer(uint16_t port, bool hold) {
         acc_thread.runner(),
         std::move(selector));
     ready.Signal();
-    if (!ok) std::cerr << "FATAL: server Listen() failed" << std::endl;
+    if (!ok)
+      std::cerr << "FATAL: server Listen() failed" << std::endl;
   });
 
   ready.Wait();
-  std::cout << "[server] listening on 0.0.0.0:" << port
-            << "  (workers=" << kWorkers << ", hold=" << (hold ? "yes" : "no")
-            << ")" << std::endl;
+  std::cout << "[server] listening on 0.0.0.0:" << port << "  (workers=" << kWorkers
+            << ", hold=" << (hold ? "yes" : "no") << ")" << std::endl;
 
   if (hold) {
     std::cout << "[server] HOLD mode: accepted connections are NOT closed.\n"
@@ -145,18 +152,15 @@ void RunServer(uint16_t port, bool hold) {
   while (true) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     int64_t cur = accepted.load();
-    int64_t f   = failed.load();
+    int64_t f = failed.load();
     size_t held = 0;
     {
       std::lock_guard<std::mutex> lock(held_mutex);
       held = held_socks.size();
     }
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                       Clock::now() - t_start).count();
-    std::cout << "[server] accepted=" << cur
-              << "  rate=" << (cur * 1000 / std::max<int64_t>(elapsed, 1))
-              << "/s  failed=" << f
-              << "  held=" << held;
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - t_start).count();
+    std::cout << "[server] accepted=" << cur << "  rate=" << (cur * 1000 / std::max<int64_t>(elapsed, 1))
+              << "/s  failed=" << f << "  held=" << held;
     if (prev == cur && elapsed > 5000 && cur > 0)
       std::cout << "  (drained)";
     std::cout << std::endl;
@@ -167,7 +171,7 @@ void RunServer(uint16_t port, bool hold) {
 // ---------------------------------------------------------------------------
 // Client
 // ---------------------------------------------------------------------------
-void RunClient(const std::string& host, uint16_t port, int total_conn) {
+void RunClient(const std::string &host, uint16_t port, int total_conn) {
   nei::net::IPAddress addr = nei::net::IPAddress::FromString(host);
   if (addr.IsUnspecified()) {
     std::cerr << "ERROR: invalid host '" << host << "'" << std::endl;
@@ -181,8 +185,8 @@ void RunClient(const std::string& host, uint16_t port, int total_conn) {
   std::atomic<int> done{0};
   std::atomic<int> fail{0};
 
-  std::cout << "[client] connecting to " << host << ":" << port
-            << "  total=" << total_conn << "  batch=" << kBatch << std::endl;
+  std::cout << "[client] connecting to " << host << ":" << port << "  total=" << total_conn << "  batch=" << kBatch
+            << std::endl;
 
   auto t0 = Clock::now();
 
@@ -190,16 +194,16 @@ void RunClient(const std::string& host, uint16_t port, int total_conn) {
   while (launched < total_conn) {
     int n = std::min(kBatch, total_conn - launched);
     auto batch_rem = std::make_shared<std::atomic<int>>(n);
-    nei::WaitableEvent batch_done(
-        nei::WaitableEvent::ResetPolicy::kAutomatic, false);
+    nei::WaitableEvent batch_done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
 
     for (int i = 0; i < n; ++i) {
       auto client = std::make_shared<nei::net::TCPClientSocket>();
       client->Connect(
           nei::net::IPEndPoint(addr, port),
           [client, &done, &fail, total_conn, batch_rem, &batch_done](bool ok) {
-            if (!ok) fail.fetch_add(1);
-            client->Close();  // Explicit close before shared_ptr release.
+            if (!ok)
+              fail.fetch_add(1);
+            client->Close(); // Explicit close before shared_ptr release.
             if (done.fetch_add(1) + 1 >= total_conn) {
               // last connection — no extra signal needed beyond batch_done
             }
@@ -230,7 +234,7 @@ void RunClient(const std::string& host, uint16_t port, int total_conn) {
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
-void PrintUsage(const char* prog) {
+void PrintUsage(const char *prog) {
   std::cerr << "Usage:\n"
             << "  Server:  " << prog << " --server  --port <N>  [--hold]\n"
             << "  Client:  " << prog << " --client  --host <IP>  --port <N>  --conn <N>\n"
@@ -255,9 +259,9 @@ void PrintUsage(const char* prog) {
             << "       NOTE: Windows firewall may need to allow inbound port.\n";
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   nei::AtExitManager at_exit;
 
   bool server_mode = false;

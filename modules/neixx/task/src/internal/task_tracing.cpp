@@ -18,7 +18,7 @@ std::atomic<std::int64_t> g_total_queue_delay_us{0};
 std::atomic<std::int64_t> g_max_queue_delay_us{0};
 std::atomic<bool> g_task_tracing_enabled{true};
 
-}  // namespace
+} // namespace
 
 bool IsTaskTracingEnabled() {
   return g_task_tracing_enabled.load(std::memory_order_relaxed);
@@ -42,7 +42,7 @@ void RecordTaskPosted() {
   g_posted_tasks.fetch_add(1, std::memory_order_relaxed);
 }
 
-void RecordTaskExecutionStarted(const Task& task) {
+void RecordTaskExecutionStarted(const Task &task) {
   if (!IsTaskTracingEnabled()) {
     return;
   }
@@ -58,12 +58,11 @@ void RecordTaskExecutionStarted(const Task& task) {
 
   std::int64_t current_max = g_max_queue_delay_us.load(std::memory_order_relaxed);
   while (queue_delay_us > current_max
-         && !g_max_queue_delay_us.compare_exchange_weak(
-             current_max, queue_delay_us, std::memory_order_relaxed)) {
+         && !g_max_queue_delay_us.compare_exchange_weak(current_max, queue_delay_us, std::memory_order_relaxed)) {
   }
 }
 
-void RecordTaskExecutionStarted(const Task& task, TimeTicks batch_now) {
+void RecordTaskExecutionStarted(const Task &task, TimeTicks batch_now) {
   if (!IsTaskTracingEnabled()) {
     return;
   }
@@ -79,8 +78,7 @@ void RecordTaskExecutionStarted(const Task& task, TimeTicks batch_now) {
 
   std::int64_t current_max = g_max_queue_delay_us.load(std::memory_order_relaxed);
   while (queue_delay_us > current_max
-         && !g_max_queue_delay_us.compare_exchange_weak(
-             current_max, queue_delay_us, std::memory_order_relaxed)) {
+         && !g_max_queue_delay_us.compare_exchange_weak(current_max, queue_delay_us, std::memory_order_relaxed)) {
   }
 }
 
@@ -104,8 +102,7 @@ TaskTracingStats GetTaskTracingStatsForTesting() {
   stats.posted_tasks = g_posted_tasks.load(std::memory_order_relaxed);
   stats.started_tasks = g_started_tasks.load(std::memory_order_relaxed);
   stats.completed_tasks = g_completed_tasks.load(std::memory_order_relaxed);
-  stats.cancelled_before_run_tasks =
-      g_cancelled_before_run_tasks.load(std::memory_order_relaxed);
+  stats.cancelled_before_run_tasks = g_cancelled_before_run_tasks.load(std::memory_order_relaxed);
   stats.total_queue_delay_us = g_total_queue_delay_us.load(std::memory_order_relaxed);
   stats.max_queue_delay_us = g_max_queue_delay_us.load(std::memory_order_relaxed);
   return stats;
@@ -121,5 +118,5 @@ void ResetTaskTracingStatsForTesting() {
   g_max_queue_delay_us.store(0, std::memory_order_relaxed);
 }
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei

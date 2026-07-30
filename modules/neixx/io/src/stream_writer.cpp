@@ -18,13 +18,11 @@ void PostWriteResult(scoped_refptr<TaskRunner> runner,
                      bool success,
                      std::size_t bytes_written) {
   if (runner) {
-    runner->PostTask(
-        FROM_HERE,
-        [callback = std::move(callback), success, bytes_written]() mutable {
-          if (callback) {
-            callback(success, bytes_written);
-          }
-        });
+    runner->PostTask(FROM_HERE, [callback = std::move(callback), success, bytes_written]() mutable {
+      if (callback) {
+        callback(success, bytes_written);
+      }
+    });
     return;
   }
   if (callback) {
@@ -32,11 +30,11 @@ void PostWriteResult(scoped_refptr<TaskRunner> runner,
   }
 }
 
-}  // namespace
+} // namespace
 
-StreamWriter::StreamWriter(AsyncOutputStream* stream)
-    : stream_(stream),
-      target_task_runner_(ThreadTaskRunnerHandle::Get()) {
+StreamWriter::StreamWriter(AsyncOutputStream *stream)
+    : stream_(stream)
+    , target_task_runner_(ThreadTaskRunnerHandle::Get()) {
   DCHECK(stream_ != nullptr);
 }
 
@@ -44,8 +42,7 @@ StreamWriter::~StreamWriter() {
   weak_factory_.InvalidateWeakPtrs(FROM_HERE);
 }
 
-void StreamWriter::WriteString(std::string_view text,
-                               WriteCallback user_callback) {
+void StreamWriter::WriteString(std::string_view text, WriteCallback user_callback) {
   if (stream_ == nullptr) {
     PostWriteResult(target_task_runner_, std::move(user_callback), false, 0u);
     return;
@@ -57,8 +54,7 @@ void StreamWriter::WriteString(std::string_view text,
   }
 
   const std::size_t len = text.size();
-  scoped_refptr<IOBufferWithSize> sized_buffer =
-      IOBufferPool::GetInstance().AcquireBuffer(len);
+  scoped_refptr<IOBufferWithSize> sized_buffer = IOBufferPool::GetInstance().AcquireBuffer(len);
   std::memcpy(sized_buffer->data(), text.data(), len);
   scoped_refptr<IOBuffer> base_buffer(sized_buffer.get());
 
@@ -75,23 +71,17 @@ void StreamWriter::WriteString(std::string_view text,
   stream_->WriteAsync(
       std::move(base_buffer),
       len,
-      [weak_this,
-       target_runner,
-       sized_buffer,
-       user_callback = std::move(user_callback)](bool success,
-                                                 std::size_t bytes_written) mutable {
-        auto deliver = [weak_this,
-                        success,
-                        bytes_written,
-                        user_callback = std::move(user_callback),
-                        sized_buffer]() mutable {
-          if (!weak_this) {
-            return;
-          }
-          if (user_callback) {
-            user_callback(success, bytes_written);
-          }
-        };
+      [weak_this, target_runner, sized_buffer, user_callback = std::move(user_callback)](
+          bool success, std::size_t bytes_written) mutable {
+        auto deliver =
+            [weak_this, success, bytes_written, user_callback = std::move(user_callback), sized_buffer]() mutable {
+              if (!weak_this) {
+                return;
+              }
+              if (user_callback) {
+                user_callback(success, bytes_written);
+              }
+            };
 
         if (target_runner) {
           (void)target_runner->PostTask(FROM_HERE, std::move(deliver));
@@ -101,4 +91,4 @@ void StreamWriter::WriteString(std::string_view text,
       });
 }
 
-}  // namespace nei
+} // namespace nei

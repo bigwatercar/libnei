@@ -32,11 +32,11 @@ static std::string GetHomeDir() {
   }
 
   /* Thread-safe fallback via getpwuid_r. */
-  struct passwd  pwd_buf;
+  struct passwd pwd_buf;
   struct passwd *result = nullptr;
-  char           buf[4096];
-  if (getpwuid_r(getuid(), &pwd_buf, buf, sizeof(buf), &result) == 0 &&
-      result != nullptr && result->pw_dir != nullptr) {
+  char buf[4096];
+  if (getpwuid_r(getuid(), &pwd_buf, buf, sizeof(buf), &result) == 0 && result != nullptr
+      && result->pw_dir != nullptr) {
     return result->pw_dir;
   }
 
@@ -49,8 +49,7 @@ static std::string GetHomeDir() {
  *  Priority: environment variable -> @c $HOME/<fallback_subdir>.
  *  Returns an empty path only when the env var is explicitly set to an empty
  *  string (caller should treat this as "not available"). */
-static std::filesystem::path GetXdgUserDir(const char *env_var,
-                                           const char *fallback_subdir) {
+static std::filesystem::path GetXdgUserDir(const char *env_var, const char *fallback_subdir) {
   const char *env = getenv(env_var);
   if (env != nullptr && env[0] != '\0') {
     return std::filesystem::path(env);
@@ -66,8 +65,7 @@ static std::filesystem::path GetXdgUserDir(const char *env_var,
 // DefaultProvider  --  platform path resolution (Linux)
 // =============================================================================
 
-bool PathService::Impl::DefaultProvider(int key,
-                                        std::filesystem::path *result) {
+bool PathService::Impl::DefaultProvider(int key, std::filesystem::path *result) {
   DCHECK(result != nullptr);
   if (result == nullptr) {
     return false;
@@ -91,8 +89,7 @@ bool PathService::Impl::DefaultProvider(int key,
   case PathKeys::FILE_EXE:
   case PathKeys::DIR_EXE: {
     std::error_code ec;
-    const std::filesystem::path exe_path =
-        std::filesystem::read_symlink("/proc/self/exe", ec);
+    const std::filesystem::path exe_path = std::filesystem::read_symlink("/proc/self/exe", ec);
     DCHECK(!ec);
     if (ec) {
       return false;
@@ -181,6 +178,6 @@ bool PathService::Impl::DefaultProvider(int key,
   }
 }
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // __linux__
+#endif // __linux__

@@ -166,6 +166,6 @@ private:
   static std::unique_ptr<Impl> s_impl_;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_COMMON_PATH_SERVICE_H
+#endif // NEIXX_COMMON_PATH_SERVICE_H

@@ -58,7 +58,7 @@
 // DCHECK_ALWAYS_ON 支持 (与 thread_checker.h 保持一致)
 // ---------------------------------------------------------------------------
 #if defined(DCHECK_ALWAYS_ON) && !NEI_DCHECK_IS_ON
-#undef  NEI_DCHECK_IS_ON
+#undef NEI_DCHECK_IS_ON
 #define NEI_DCHECK_IS_ON 1
 #endif
 
@@ -90,13 +90,12 @@ namespace internal {
 //
 // 前提：sizeof(void*) >= sizeof(uint64_t)，即 64 位平台。
 // 若需 32 位支持，应回退到堆分配方案并添加 #ifdef 分支。
-static_assert(sizeof(void*) >= sizeof(uint64_t),
-              "SequenceChecker TLS zero-alloc storage requires 64-bit platform");
+static_assert(sizeof(void *) >= sizeof(uint64_t), "SequenceChecker TLS zero-alloc storage requires 64-bit platform");
 
 // 获取存储当前线程 SequenceToken 的 TLS Slot。
 // 使用函数级 static 保证线程安全的延迟初始化 (C++11 6.7/4)。
 // 注意：不再注册析构回调  --  --  Token 值直接编码在 void* 中，无需清理。
-inline ThreadLocalStorage::Slot& GetSequenceTokenTLSSlot() {
+inline ThreadLocalStorage::Slot &GetSequenceTokenTLSSlot() {
   static ThreadLocalStorage::Slot slot;
   return slot;
 }
@@ -104,11 +103,11 @@ inline ThreadLocalStorage::Slot& GetSequenceTokenTLSSlot() {
 // 获取当前线程正在执行的任务的 SequenceToken。
 // 若当前线程未在序列化上下文中运行，返回无效 token。
 inline SequenceToken GetCurrentSequenceToken() {
-  void* ptr = GetSequenceTokenTLSSlot().Get();
+  void *ptr = GetSequenceTokenTLSSlot().Get();
   if (ptr) {
     return SequenceToken(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ptr)));
   }
-  return SequenceToken();  // invalid
+  return SequenceToken(); // invalid
 }
 
 // 设置当前线程的 SequenceToken。传入 invalid token 以清除 TLS。
@@ -119,15 +118,15 @@ inline SequenceToken GetCurrentSequenceToken() {
 //    reinterpret_cast 直接嵌入 void* TLS 槽位，无 new/delete，无堆交互。
 //    在高频任务调度（每秒百万次派发）场景下不会触发系统堆分配器锁竞争。
 inline void SetCurrentSequenceToken(SequenceToken token) {
-  ThreadLocalStorage::Slot& slot = GetSequenceTokenTLSSlot();
+  ThreadLocalStorage::Slot &slot = GetSequenceTokenTLSSlot();
   if (token.is_valid()) {
-    slot.Set(reinterpret_cast<void*>(static_cast<uintptr_t>(token.value())));
+    slot.Set(reinterpret_cast<void *>(static_cast<uintptr_t>(token.value())));
   } else {
     slot.Set(nullptr);
   }
 }
 
-}  // namespace internal
+} // namespace internal
 
 // =============================================================================
 // SequenceChecker 类定义
@@ -136,21 +135,20 @@ inline void SetCurrentSequenceToken(SequenceToken token) {
 #if NEI_DCHECK_IS_ON
 
 class NEI_API SequenceChecker {
- public:
+public:
   SequenceChecker() {
     // 构造时立即绑定到当前的逻辑序列（若存在）和物理线程。
     const SequenceToken current_token = internal::GetCurrentSequenceToken();
-    sequence_state_.store(
-        current_token.is_valid() ? current_token.value() : kThreadFallbackState,
-        std::memory_order_relaxed);
+    sequence_state_.store(current_token.is_valid() ? current_token.value() : kThreadFallbackState,
+                          std::memory_order_relaxed);
     // thread_checker_ 始终在构造时绑定到当前物理线程，用作降级判据。
   }
 
   // 禁止拷贝/移动  --  --  checker 的生命周期与宿主对象严格绑定。
-  SequenceChecker(const SequenceChecker&) = delete;
-  SequenceChecker& operator=(const SequenceChecker&) = delete;
-  SequenceChecker(SequenceChecker&&) = delete;
-  SequenceChecker& operator=(SequenceChecker&&) = delete;
+  SequenceChecker(const SequenceChecker &) = delete;
+  SequenceChecker &operator=(const SequenceChecker &) = delete;
+  SequenceChecker(SequenceChecker &&) = delete;
+  SequenceChecker &operator=(SequenceChecker &&) = delete;
 
   // -----------------------------------------------------------------------
   // CalledOnValidSequence()  --  判断当前执行上下文是否为合法的逻辑序列。
@@ -172,13 +170,10 @@ class NEI_API SequenceChecker {
     // --- 处理 detached 状态（惰性绑定）---
     if (state == kDetachedState) {
       const SequenceToken current_token = internal::GetCurrentSequenceToken();
-      const uint64_t new_state = current_token.is_valid()
-                                     ? current_token.value()
-                                     : kThreadFallbackState;
+      const uint64_t new_state = current_token.is_valid() ? current_token.value() : kThreadFallbackState;
 
       // CAS 争抢绑定权：只有一个线程能成功将 kDetachedState 替换为 new_state
-      if (sequence_state_.compare_exchange_strong(state, new_state,
-                                                   std::memory_order_acq_rel)) {
+      if (sequence_state_.compare_exchange_strong(state, new_state, std::memory_order_acq_rel)) {
         // CAS 成功  --  --  当前线程获得绑定权
         thread_checker_.DetachFromThread();
         return true;
@@ -216,7 +211,7 @@ class NEI_API SequenceChecker {
     thread_checker_.DetachFromThread();
   }
 
- private:
+private:
   // =========================================================================
   // 单原子变量状态机编码
   // =========================================================================
@@ -236,35 +231,39 @@ class NEI_API SequenceChecker {
   //   - 单一 atomic 的 acquire/release/CAS 屏障天然保护了所有状态转换，
   //     无需额外的锁或非原子成员变量
   // =========================================================================
-  static constexpr uint64_t kDetachedState       = static_cast<uint64_t>(-1);
+  static constexpr uint64_t kDetachedState = static_cast<uint64_t>(-1);
   static constexpr uint64_t kThreadFallbackState = 0;
 
   // mutable: CalledOnValidSequence() 语义上是 const 查询，但惰性绑定
   // (Lazy Rebind) 需要 CAS 写入状态。单原子变量的 CAS 保证了多线程
   // 下的安全写入，无数据竞争。
   mutable std::atomic<uint64_t> sequence_state_{kDetachedState};
-  mutable ThreadChecker         thread_checker_;
+  mutable ThreadChecker thread_checker_;
 };
 
-#else  // !NEI_DCHECK_IS_ON
+#else // !NEI_DCHECK_IS_ON
 
 // --- Release 实现：完全空结构体，零开销 -------------------------------------
 class NEI_API SequenceChecker {
- public:
+public:
   constexpr SequenceChecker() = default;
 
-  SequenceChecker(const SequenceChecker&) = delete;
-  SequenceChecker& operator=(const SequenceChecker&) = delete;
-  SequenceChecker(SequenceChecker&&) = delete;
-  SequenceChecker& operator=(SequenceChecker&&) = delete;
+  SequenceChecker(const SequenceChecker &) = delete;
+  SequenceChecker &operator=(const SequenceChecker &) = delete;
+  SequenceChecker(SequenceChecker &&) = delete;
+  SequenceChecker &operator=(SequenceChecker &&) = delete;
 
-  constexpr bool CalledOnValidSequence() const { return true; }
-  void DetachFromSequence() {}
+  constexpr bool CalledOnValidSequence() const {
+    return true;
+  }
+
+  void DetachFromSequence() {
+  }
 };
 
-#endif  // NEI_DCHECK_IS_ON
+#endif // NEI_DCHECK_IS_ON
 
-}  // namespace nei
+} // namespace nei
 
 // =============================================================================
 // 配套宏定义
@@ -283,22 +282,21 @@ class NEI_API SequenceChecker {
 
 // 断言当前执行序列与 name 绑定的序列一致。
 // 用法：DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-#define DCHECK_CALLED_ON_VALID_SEQUENCE(name) \
-  DCHECK((name).CalledOnValidSequence())
+#define DCHECK_CALLED_ON_VALID_SEQUENCE(name) DCHECK((name).CalledOnValidSequence())
 
 // 解除 name 的序列绑定，允许下一次校验时惰性绑定到新序列。
 // 用法：DETACH_FROM_SEQUENCE(sequence_checker_);
 #define DETACH_FROM_SEQUENCE(name) (name).DetachFromSequence()
 
-#else  // !NEI_DCHECK_IS_ON
+#else // !NEI_DCHECK_IS_ON
 
 // Release 模式：完全零开销  --  --  不声明任何成员，不产生任何代码。
 // 注意：DECLARE_SEQUENCE_CHECKER 展开为空（不是 ((void)0)），
 // 因为它用于类成员声明，((void)0) 在 class body 中是非法的。
 #define DECLARE_SEQUENCE_CHECKER(name)
 #define DCHECK_CALLED_ON_VALID_SEQUENCE(name) ((void)0)
-#define DETACH_FROM_SEQUENCE(name)            ((void)0)
+#define DETACH_FROM_SEQUENCE(name) ((void)0)
 
-#endif  // NEI_DCHECK_IS_ON
+#endif // NEI_DCHECK_IS_ON
 
-#endif  // NEIXX_TASK_SEQUENCE_CHECKER_H_
+#endif // NEIXX_TASK_SEQUENCE_CHECKER_H_

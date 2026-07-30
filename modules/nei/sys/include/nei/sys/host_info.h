@@ -78,66 +78,64 @@ NEI_API int nei_get_temp_dir(char *buf, size_t size);
 #include <string>
 
 inline std::string nei_get_hostname() {
-    char buf[256];
-    int len = ::nei_get_hostname(buf, sizeof(buf));
-    if (len < 0) {
-        return {};
-    }
-    return std::string(buf, static_cast<size_t>(len));
+  char buf[256];
+  int len = ::nei_get_hostname(buf, sizeof(buf));
+  if (len < 0) {
+    return {};
+  }
+  return std::string(buf, static_cast<size_t>(len));
 }
 
 inline std::string nei_get_username() {
-    char buf[256];
-    int len = ::nei_get_username(buf, sizeof(buf));
-    if (len < 0) {
-        return {};
-    }
-    return std::string(buf, static_cast<size_t>(len));
+  char buf[256];
+  int len = ::nei_get_username(buf, sizeof(buf));
+  if (len < 0) {
+    return {};
+  }
+  return std::string(buf, static_cast<size_t>(len));
 }
 
 inline std::string nei_get_home_dir() {
-    char buf[4096];
-    int len = ::nei_get_home_dir(buf, sizeof(buf));
-    if (len < 0) {
-        return {};
-    }
-    return std::string(buf, static_cast<size_t>(len));
+  char buf[4096];
+  int len = ::nei_get_home_dir(buf, sizeof(buf));
+  if (len < 0) {
+    return {};
+  }
+  return std::string(buf, static_cast<size_t>(len));
 }
 
 inline std::filesystem::path nei_get_home_dir_path() {
-    char buf[4096];
-    int len = ::nei_get_home_dir(buf, sizeof(buf));
-    if (len < 0) {
-        return {};
-    }
+  char buf[4096];
+  int len = ::nei_get_home_dir(buf, sizeof(buf));
+  if (len < 0) {
+    return {};
+  }
 #if __cplusplus >= 202002L
-    return std::filesystem::path(
-        std::u8string(reinterpret_cast<const char8_t*>(buf), static_cast<size_t>(len)));
+  return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(buf), static_cast<size_t>(len)));
 #else
-    return std::filesystem::u8path(std::string(buf, static_cast<size_t>(len)));
+  return std::filesystem::u8path(std::string(buf, static_cast<size_t>(len)));
 #endif
 }
 
 inline std::string nei_get_temp_dir() {
-    char buf[4096];
-    int len = ::nei_get_temp_dir(buf, sizeof(buf));
-    if (len < 0) {
-        return {};
-    }
-    return std::string(buf, static_cast<size_t>(len));
+  char buf[4096];
+  int len = ::nei_get_temp_dir(buf, sizeof(buf));
+  if (len < 0) {
+    return {};
+  }
+  return std::string(buf, static_cast<size_t>(len));
 }
 
 inline std::filesystem::path nei_get_temp_dir_path() {
-    char buf[4096];
-    int len = ::nei_get_temp_dir(buf, sizeof(buf));
-    if (len < 0) {
-        return {};
-    }
+  char buf[4096];
+  int len = ::nei_get_temp_dir(buf, sizeof(buf));
+  if (len < 0) {
+    return {};
+  }
 #if __cplusplus >= 202002L
-    return std::filesystem::path(
-        std::u8string(reinterpret_cast<const char8_t*>(buf), static_cast<size_t>(len)));
+  return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(buf), static_cast<size_t>(len)));
 #else
-    return std::filesystem::u8path(std::string(buf, static_cast<size_t>(len)));
+  return std::filesystem::u8path(std::string(buf, static_cast<size_t>(len)));
 #endif
 }
 

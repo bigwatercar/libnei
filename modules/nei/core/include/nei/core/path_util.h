@@ -52,8 +52,7 @@ NEI_API int nei_path_is_absolute(const char *path);
  * @return Number of bytes written (excluding null), or required size
  *         if @p dst is too small.  Negative on error.
  */
-NEI_API int nei_path_join(char *dst, size_t size,
-                          const char *a, const char *b);
+NEI_API int nei_path_join(char *dst, size_t size, const char *a, const char *b);
 
 /**
  * @brief Extract the directory portion of @p path.

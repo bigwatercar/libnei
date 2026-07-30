@@ -36,7 +36,7 @@ struct PipePair {
   HANDLE child_handle = INVALID_HANDLE_VALUE;
 };
 
-void CloseHandleSafe(HANDLE* h) {
+void CloseHandleSafe(HANDLE *h) {
   if (*h != nullptr && *h != INVALID_HANDLE_VALUE) {
     (void)CloseHandle(*h);
     *h = INVALID_HANDLE_VALUE;
@@ -48,19 +48,17 @@ bool IsCrashExitCode(DWORD exit_code) {
   constexpr DWORD kStatusDataTypeMisalignment = 0xC0000002u;
   constexpr DWORD kStatusIllegalInstruction = 0xC000001Du;
   constexpr DWORD kStatusStackOverflow = 0xC00000FDu;
-  return exit_code == kStatusAccessViolation ||
-         exit_code == kStatusDataTypeMisalignment ||
-         exit_code == kStatusIllegalInstruction ||
-         exit_code == kStatusStackOverflow;
+  return exit_code == kStatusAccessViolation || exit_code == kStatusDataTypeMisalignment
+         || exit_code == kStatusIllegalInstruction || exit_code == kStatusStackOverflow;
 }
 
 std::vector<wchar_t> BuildEnvironmentBlockWithControlHandle(HANDLE handle) {
   std::vector<wchar_t> env_block;
   LPWCH env_strings = GetEnvironmentStringsW();
   if (env_strings != nullptr) {
-    const wchar_t* p = env_strings;
+    const wchar_t *p = env_strings;
     while (*p != L'\0') {
-      const wchar_t* start = p;
+      const wchar_t *start = p;
       while (*p != L'\0') {
         ++p;
       }
@@ -71,15 +69,14 @@ std::vector<wchar_t> BuildEnvironmentBlockWithControlHandle(HANDLE handle) {
   }
 
   const std::wstring key_prefix = L"NEI_CONTROL_PIPE_HANDLE=";
-  std::wstring entry = key_prefix +
-                       std::to_wstring(static_cast<unsigned long long>(
-                           reinterpret_cast<uintptr_t>(handle)));
+  std::wstring entry =
+      key_prefix + std::to_wstring(static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(handle)));
 
   // Remove any previous value to avoid duplicate keys in environment block.
   std::vector<wchar_t> filtered;
   size_t i = 0;
   while (i < env_block.size()) {
-    const wchar_t* item = &env_block[i];
+    const wchar_t *item = &env_block[i];
     const size_t len = wcslen(item);
     if (len > 0) {
       const std::wstring current(item, len);
@@ -100,20 +97,16 @@ std::wstring MakeUniquePipeName() {
   static std::atomic<unsigned long> sequence{1};
   const unsigned long value = sequence.fetch_add(1, std::memory_order_relaxed);
   const DWORD pid = GetCurrentProcessId();
-  return L"\\\\.\\pipe\\neixx_proc_" + std::to_wstring(pid) + L"_" +
-         std::to_wstring(value);
+  return L"\\\\.\\pipe\\neixx_proc_" + std::to_wstring(pid) + L"_" + std::to_wstring(value);
 }
 
-bool CreateOverlappedPipePair(bool child_reads, PipePair* pair) {
+bool CreateOverlappedPipePair(bool child_reads, PipePair *pair) {
   const std::wstring name = MakeUniquePipeName();
 
-  const DWORD open_mode =
-      (child_reads ? PIPE_ACCESS_OUTBOUND : PIPE_ACCESS_INBOUND) |
-      FILE_FLAG_OVERLAPPED;
+  const DWORD open_mode = (child_reads ? PIPE_ACCESS_OUTBOUND : PIPE_ACCESS_INBOUND) | FILE_FLAG_OVERLAPPED;
   const DWORD pipe_mode = PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT;
 
-  HANDLE server = CreateNamedPipeW(name.c_str(), open_mode, pipe_mode, 1,
-                                   64 * 1024, 64 * 1024, 0, nullptr);
+  HANDLE server = CreateNamedPipeW(name.c_str(), open_mode, pipe_mode, 1, 64 * 1024, 64 * 1024, 0, nullptr);
   if (server == INVALID_HANDLE_VALUE) {
     return false;
   }
@@ -123,8 +116,8 @@ bool CreateOverlappedPipePair(bool child_reads, PipePair* pair) {
   inherit_sa.bInheritHandle = TRUE;
 
   const DWORD child_access = child_reads ? GENERIC_READ : GENERIC_WRITE;
-  HANDLE client = CreateFileW(name.c_str(), child_access, 0, &inherit_sa,
-                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  HANDLE client =
+      CreateFileW(name.c_str(), child_access, 0, &inherit_sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (client == INVALID_HANDLE_VALUE) {
     CloseHandleSafe(&server);
     return false;
@@ -153,8 +146,7 @@ HANDLE DuplicateAsInheritable(HANDLE source) {
   }
 
   HANDLE duplicated = INVALID_HANDLE_VALUE;
-  if (!DuplicateHandle(GetCurrentProcess(), source, GetCurrentProcess(),
-                       &duplicated, 0, TRUE, DUPLICATE_SAME_ACCESS)) {
+  if (!DuplicateHandle(GetCurrentProcess(), source, GetCurrentProcess(), &duplicated, 0, TRUE, DUPLICATE_SAME_ACCESS)) {
     return INVALID_HANDLE_VALUE;
   }
   return duplicated;
@@ -165,35 +157,39 @@ HANDLE OpenNullDevice(bool for_input) {
   sa.nLength = sizeof(sa);
   sa.bInheritHandle = TRUE;
 
-  return CreateFileW(L"NUL", for_input ? GENERIC_READ : GENERIC_WRITE,
-                     FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING,
-                     FILE_ATTRIBUTE_NORMAL, nullptr);
+  return CreateFileW(L"NUL",
+                     for_input ? GENERIC_READ : GENERIC_WRITE,
+                     FILE_SHARE_READ | FILE_SHARE_WRITE,
+                     &sa,
+                     OPEN_EXISTING,
+                     FILE_ATTRIBUTE_NORMAL,
+                     nullptr);
 }
 
 class WinChildProcessCore final : public MessagePumpForIO::Watcher {
- public:
-  explicit WinChildProcessCore(ChildProcessListener* listener,
-                               scoped_refptr<TaskRunner> io_runner)
-      : listener_(listener),
-        io_runner_(std::move(io_runner)),
-        dispatch_state_(std::make_shared<DispatchState>()) {}
+public:
+  explicit WinChildProcessCore(ChildProcessListener *listener, scoped_refptr<TaskRunner> io_runner)
+      : listener_(listener)
+      , io_runner_(std::move(io_runner))
+      , dispatch_state_(std::make_shared<DispatchState>()) {
+  }
 
- private:
+private:
   DECLARE_SEQUENCE_CHECKER(io_sequence_checker_);
 
- public:
-
-  ~WinChildProcessCore() { Cleanup(); }
+public:
+  ~WinChildProcessCore() {
+    Cleanup();
+  }
 
   bool Terminate(int exit_code, bool force) {
     HANDLE process_handle = INVALID_HANDLE_VALUE;
     int process_id = -1;
     {
       std::lock_guard<std::mutex> lock(dispatch_state_->lock);
-      if (!dispatch_state_->alive ||
-          dispatch_state_->state == ProcessState::kExited ||
-          dispatch_state_->state == ProcessState::kCrashed ||
-          dispatch_state_->state == ProcessState::kFailedToStart) {
+      if (!dispatch_state_->alive || dispatch_state_->state == ProcessState::kExited
+          || dispatch_state_->state == ProcessState::kCrashed
+          || dispatch_state_->state == ProcessState::kFailedToStart) {
         return false;
       }
       process_handle = process_handle_;
@@ -205,23 +201,20 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     }
 
     if (force) {
-      return ::TerminateProcess(process_handle,
-                               static_cast<UINT>(exit_code)) != FALSE;
+      return ::TerminateProcess(process_handle, static_cast<UINT>(exit_code)) != FALSE;
     }
 
     if (process_id <= 0) {
       return false;
     }
-    return ::GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT,
-                                      static_cast<DWORD>(process_id)) != FALSE;
+    return ::GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, static_cast<DWORD>(process_id)) != FALSE;
   }
 
-  bool Launch(const CommandLine& command_line,
-              const ProcessLaunchOptions& options) {
+  bool Launch(const CommandLine &command_line, const ProcessLaunchOptions &options) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
     Cleanup();
 
-    MessagePumpForIO* pump = MessagePumpForIO::Current();
+    MessagePumpForIO *pump = MessagePumpForIO::Current();
     if (pump == nullptr) {
       NotifyLaunchFailed(listener_);
       return false;
@@ -252,32 +245,29 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     PipePair stdout_pipe;
     PipePair stderr_pipe;
     PipePair control_pipe;
-    const bool enable_control_guard = !options.heartbeat_timeout.is_max() &&
-                      options.heartbeat_timeout.InMilliseconds() > 0;
+    const bool enable_control_guard =
+        !options.heartbeat_timeout.is_max() && options.heartbeat_timeout.InMilliseconds() > 0;
 
     HANDLE child_stdin = INVALID_HANDLE_VALUE;
     HANDLE child_stdout = INVALID_HANDLE_VALUE;
     HANDLE child_stderr = INVALID_HANDLE_VALUE;
     HANDLE child_control_write = INVALID_HANDLE_VALUE;
 
-    if (!ResolveStdHandle(options.stdin_config, /*is_input=*/true, &stdin_pipe,
-                          &child_stdin)) {
+    if (!ResolveStdHandle(options.stdin_config, /*is_input=*/true, &stdin_pipe, &child_stdin)) {
       NotifyLaunchFailed(listener_);
       CleanupPipe(stdin_pipe);
       CleanupPipe(stdout_pipe);
       CleanupPipe(stderr_pipe);
       return false;
     }
-    if (!ResolveStdHandle(options.stdout_config, /*is_input=*/false,
-                          &stdout_pipe, &child_stdout)) {
+    if (!ResolveStdHandle(options.stdout_config, /*is_input=*/false, &stdout_pipe, &child_stdout)) {
       NotifyLaunchFailed(listener_);
       CleanupPipe(stdin_pipe);
       CleanupPipe(stdout_pipe);
       CleanupPipe(stderr_pipe);
       return false;
     }
-    if (!ResolveStdHandle(options.stderr_config, /*is_input=*/false,
-                          &stderr_pipe, &child_stderr)) {
+    if (!ResolveStdHandle(options.stderr_config, /*is_input=*/false, &stderr_pipe, &child_stderr)) {
       NotifyLaunchFailed(listener_);
       CleanupPipe(stdin_pipe);
       CleanupPipe(stdout_pipe);
@@ -295,10 +285,8 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
       }
       child_control_write = control_pipe.child_handle;
       // Explicitly enforce inheritance policy for control channel endpoints.
-      (void)SetHandleInformation(child_control_write, HANDLE_FLAG_INHERIT,
-                                 HANDLE_FLAG_INHERIT);
-      (void)SetHandleInformation(control_pipe.parent_handle,
-                                 HANDLE_FLAG_INHERIT, 0);
+      (void)SetHandleInformation(child_control_write, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+      (void)SetHandleInformation(control_pipe.parent_handle, HANDLE_FLAG_INHERIT, 0);
     }
 
     std::vector<HANDLE> inherit_handles;
@@ -319,10 +307,8 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     SIZE_T attr_list_size = 0;
     (void)InitializeProcThreadAttributeList(nullptr, 1, 0, &attr_list_size);
     std::vector<std::uint8_t> attr_buf(attr_list_size);
-    startup.lpAttributeList =
-        reinterpret_cast<PPROC_THREAD_ATTRIBUTE_LIST>(attr_buf.data());
-    if (!InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0,
-                                           &attr_list_size)) {
+    startup.lpAttributeList = reinterpret_cast<PPROC_THREAD_ATTRIBUTE_LIST>(attr_buf.data());
+    if (!InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &attr_list_size)) {
       NotifyLaunchFailed(listener_);
       CleanupPipe(stdin_pipe);
       CleanupPipe(stdout_pipe);
@@ -330,10 +316,13 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
       return false;
     }
 
-    if (!UpdateProcThreadAttribute(
-            startup.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-            inherit_handles.data(), inherit_handles.size() * sizeof(HANDLE),
-            nullptr, nullptr)) {
+    if (!UpdateProcThreadAttribute(startup.lpAttributeList,
+                                   0,
+                                   PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                   inherit_handles.data(),
+                                   inherit_handles.size() * sizeof(HANDLE),
+                                   nullptr,
+                                   nullptr)) {
       DeleteProcThreadAttributeList(startup.lpAttributeList);
       NotifyLaunchFailed(listener_);
       CleanupPipe(stdin_pipe);
@@ -345,8 +334,7 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     const std::u16string cmd_u16 = UTF8ToUTF16(command_line.GetCommandLineString());
     std::vector<wchar_t> cmdline;
     cmdline.reserve(cmd_u16.size() + 1);
-    static_assert(sizeof(char16_t) == sizeof(wchar_t),
-                  "Windows expects UTF-16 wchar_t");
+    static_assert(sizeof(char16_t) == sizeof(wchar_t), "Windows expects UTF-16 wchar_t");
     for (char16_t ch : cmd_u16) {
       cmdline.push_back(static_cast<wchar_t>(ch));
     }
@@ -369,13 +357,17 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     }
 
     PROCESS_INFORMATION pi{};
-    const DWORD creation_flags = EXTENDED_STARTUPINFO_PRESENT |
-                   CREATE_NEW_PROCESS_GROUP |
-                   CREATE_SUSPENDED;
-    const BOOL created = CreateProcessW(
-      nullptr, cmdline.data(), nullptr, nullptr, TRUE, creation_flags,
-      enable_control_guard ? env_block.data() : nullptr,
-        wdir.empty() ? nullptr : wdir.data(), &startup.StartupInfo, &pi);
+    const DWORD creation_flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED;
+    const BOOL created = CreateProcessW(nullptr,
+                                        cmdline.data(),
+                                        nullptr,
+                                        nullptr,
+                                        TRUE,
+                                        creation_flags,
+                                        enable_control_guard ? env_block.data() : nullptr,
+                                        wdir.empty() ? nullptr : wdir.data(),
+                                        &startup.StartupInfo,
+                                        &pi);
 
     DeleteProcThreadAttributeList(startup.lpAttributeList);
 
@@ -400,8 +392,7 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
       return false;
     }
 
-    if (job_handle_ != nullptr &&
-        !AssignProcessToJobObject(job_handle_, pi.hProcess)) {
+    if (job_handle_ != nullptr && !AssignProcessToJobObject(job_handle_, pi.hProcess)) {
       (void)TerminateProcess(pi.hProcess, static_cast<UINT>(0xFFFFFFFFu));
       (void)WaitForSingleObject(pi.hProcess, INFINITE);
       CloseHandleSafe(&pi.hThread);
@@ -443,25 +434,19 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
 
     if (options.stdin_config.type == StdIOType::PIPE) {
       auto stream = std::make_unique<PipeOutputStream>(io_runner_);
-      stream->BindPlatformHandle(
-          PlatformHandle::FromNativeHandle<DefaultHandleTraits>(
-              stdin_pipe.parent_handle));
+      stream->BindPlatformHandle(PlatformHandle::FromNativeHandle<DefaultHandleTraits>(stdin_pipe.parent_handle));
       stdin_pipe.parent_handle = INVALID_HANDLE_VALUE;
       stdin_stream_ = std::move(stream);
     }
     if (options.stdout_config.type == StdIOType::PIPE) {
       auto stream = std::make_unique<PipeInputStream>(io_runner_);
-      stream->BindPlatformHandle(
-          PlatformHandle::FromNativeHandle<DefaultHandleTraits>(
-              stdout_pipe.parent_handle));
+      stream->BindPlatformHandle(PlatformHandle::FromNativeHandle<DefaultHandleTraits>(stdout_pipe.parent_handle));
       stdout_pipe.parent_handle = INVALID_HANDLE_VALUE;
       stdout_stream_ = std::move(stream);
     }
     if (options.stderr_config.type == StdIOType::PIPE) {
       auto stream = std::make_unique<PipeInputStream>(io_runner_);
-      stream->BindPlatformHandle(
-          PlatformHandle::FromNativeHandle<DefaultHandleTraits>(
-              stderr_pipe.parent_handle));
+      stream->BindPlatformHandle(PlatformHandle::FromNativeHandle<DefaultHandleTraits>(stderr_pipe.parent_handle));
       stderr_pipe.parent_handle = INVALID_HANDLE_VALUE;
       stderr_stream_ = std::move(stream);
     }
@@ -490,10 +475,11 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
       control_overlapped_.hEvent = control_event_;
     }
 
-    if (heartbeat_enabled_ &&
-        !control_controller_.StartWatching(
-            pump, reinterpret_cast<NativeIOHandle>(control_event_),
-            MessagePumpForIO::FdWatchController::Mode::READ, this)) {
+    if (heartbeat_enabled_
+        && !control_controller_.StartWatching(pump,
+                                              reinterpret_cast<NativeIOHandle>(control_event_),
+                                              MessagePumpForIO::FdWatchController::Mode::READ,
+                                              this)) {
       NotifyLaunchFailed(listener_);
       Cleanup();
       return false;
@@ -509,9 +495,12 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
       ScheduleHeartbeatCheck(heartbeat_generation_);
     }
 
-    if (!RegisterWaitForSingleObject(&wait_handle_, process_handle_,
-                                     &WinChildProcessCore::OnProcessEventSignaled, this,
-                                     INFINITE, WT_EXECUTEONLYONCE)) {
+    if (!RegisterWaitForSingleObject(&wait_handle_,
+                                     process_handle_,
+                                     &WinChildProcessCore::OnProcessEventSignaled,
+                                     this,
+                                     INFINITE,
+                                     WT_EXECUTEONLYONCE)) {
       NotifyLaunchFailed(listener_);
       Cleanup();
       return false;
@@ -527,20 +516,25 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     return true;
   }
 
-  AsyncInputStream* stdout_stream() const { return stdout_stream_.get(); }
-  AsyncInputStream* stderr_stream() const { return stderr_stream_.get(); }
-  AsyncOutputStream* stdin_stream() const { return stdin_stream_.get(); }
+  AsyncInputStream *stdout_stream() const {
+    return stdout_stream_.get();
+  }
+
+  AsyncInputStream *stderr_stream() const {
+    return stderr_stream_.get();
+  }
+
+  AsyncOutputStream *stdin_stream() const {
+    return stdin_stream_.get();
+  }
 
   void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override {
     {
       std::lock_guard<std::mutex> lock(state_lock_);
-      if (control_handle_ == INVALID_HANDLE_VALUE ||
-          control_event_ == INVALID_HANDLE_VALUE ||
-          !dispatch_state_->alive || dispatch_state_->terminated_notified ||
-          dispatch_state_->state == ProcessState::kFailedToStart ||
-          dispatch_state_->state == ProcessState::kExited ||
-          dispatch_state_->state == ProcessState::kCrashed ||
-          dispatch_state_->state == ProcessState::kTimedOutHung) {
+      if (control_handle_ == INVALID_HANDLE_VALUE || control_event_ == INVALID_HANDLE_VALUE || !dispatch_state_->alive
+          || dispatch_state_->terminated_notified || dispatch_state_->state == ProcessState::kFailedToStart
+          || dispatch_state_->state == ProcessState::kExited || dispatch_state_->state == ProcessState::kCrashed
+          || dispatch_state_->state == ProcessState::kTimedOutHung) {
         return;
       }
     }
@@ -550,8 +544,7 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     }
 
     DWORD read_bytes = 0;
-    if (!GetOverlappedResult(control_handle_, &control_overlapped_,
-                             &read_bytes, FALSE)) {
+    if (!GetOverlappedResult(control_handle_, &control_overlapped_, &read_bytes, FALSE)) {
       const DWORD err = GetLastError();
       if (err == ERROR_IO_INCOMPLETE) {
         return;
@@ -569,24 +562,24 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     (void)IssueControlRead();
   }
 
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) override {}
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) override {
+  }
 
- private:
+private:
   struct DispatchState {
     std::mutex lock;
     bool alive = true;
     bool terminated_notified = false;
     ProcessState state = ProcessState::kNotStarted;
-    ChildProcessListener* listener = nullptr;
+    ChildProcessListener *listener = nullptr;
   };
 
   void Cleanup() {
     bool should_kill = false;
     {
       std::lock_guard<std::mutex> lock(state_lock_);
-      should_kill = dispatch_state_->alive &&
-                    dispatch_state_->state == ProcessState::kRunning &&
-                    options_.kill_on_destruction;
+      should_kill =
+          dispatch_state_->alive && dispatch_state_->state == ProcessState::kRunning && options_.kill_on_destruction;
     }
     if (should_kill) {
       (void)Terminate(static_cast<int>(0xC0000005), true);
@@ -625,10 +618,9 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     CloseHandleSafe(&job_handle_);
   }
 
-  bool CreateAndConfigureJob(const ProcessLaunchOptions& options) {
-    const ResourceLimits& limits = options.resource_limits;
-    const bool need_job = limits.kill_on_parent_death ||
-                          limits.max_virtual_memory > 0;
+  bool CreateAndConfigureJob(const ProcessLaunchOptions &options) {
+    const ResourceLimits &limits = options.resource_limits;
+    const bool need_job = limits.kill_on_parent_death || limits.max_virtual_memory > 0;
     if (!need_job) {
       CloseHandleSafe(&job_handle_);
       return true;
@@ -650,8 +642,7 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     }
     info.BasicLimitInformation.LimitFlags = limit_flags;
 
-    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
-                                 &info, sizeof(info))) {
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &info, sizeof(info))) {
       CloseHandleSafe(&job);
       return false;
     }
@@ -662,7 +653,7 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
   }
 
   static VOID CALLBACK OnProcessEventSignaled(PVOID context, BOOLEAN /*timeout*/) {
-    WinChildProcessCore* self = reinterpret_cast<WinChildProcessCore*>(context);
+    WinChildProcessCore *self = reinterpret_cast<WinChildProcessCore *>(context);
     if (self == nullptr) {
       return;
     }
@@ -672,10 +663,9 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     bool should_dispatch = false;
     {
       std::lock_guard<std::mutex> lock(self->state_lock_);
-      if (!self->dispatch_state_->alive ||
-          self->dispatch_state_->terminated_notified ||
-          self->dispatch_state_->state == ProcessState::kTimedOutHung ||
-          self->dispatch_state_->state == ProcessState::kFailedToStart) {
+      if (!self->dispatch_state_->alive || self->dispatch_state_->terminated_notified
+          || self->dispatch_state_->state == ProcessState::kTimedOutHung
+          || self->dispatch_state_->state == ProcessState::kFailedToStart) {
         return;
       }
 
@@ -688,8 +678,7 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
       }
 
       info.exit_code = static_cast<int>(exit_code);
-      info.state = IsCrashExitCode(exit_code) ? ProcessState::kCrashed
-                                              : ProcessState::kExited;
+      info.state = IsCrashExitCode(exit_code) ? ProcessState::kCrashed : ProcessState::kExited;
 
       self->dispatch_state_->state = info.state;
       runner = self->origin_runner_;
@@ -713,9 +702,8 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     DispatchTermination(state, info);
   }
 
-  static void DispatchTermination(const std::shared_ptr<DispatchState>& state,
-                                  const ProcessExitInfo& info) {
-    ChildProcessListener* listener = nullptr;
+  static void DispatchTermination(const std::shared_ptr<DispatchState> &state, const ProcessExitInfo &info) {
+    ChildProcessListener *listener = nullptr;
     {
       std::lock_guard<std::mutex> lock(state->lock);
       if (!state->alive || state->terminated_notified) {
@@ -734,47 +722,48 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     if (!heartbeat_enabled_ || origin_runner_.get() == nullptr) {
       return;
     }
-    origin_runner_->PostDelayedTask(FROM_HERE,
-      [this, generation]() {
-        if (generation != heartbeat_generation_) {
-          return;
-        }
-
-        bool should_kill = false;
-        {
-          std::lock_guard<std::mutex> lock(state_lock_);
-          if (!dispatch_state_->alive ||
-              dispatch_state_->state != ProcessState::kRunning ||
-              dispatch_state_->terminated_notified) {
+    origin_runner_->PostDelayedTask(
+        FROM_HERE,
+        [this, generation]() {
+          if (generation != heartbeat_generation_) {
             return;
           }
-          const TimeTicks now = TimeTicks::Now();
-          if ((now - last_heartbeat_time_).InMilliseconds() >=
-              heartbeat_timeout_.InMilliseconds()) {
-            dispatch_state_->state = ProcessState::kTimedOutHung;
-            should_kill = true;
-          }
-        }
-        if (should_kill) {
-          (void)Terminate(static_cast<int>(0xDEAD), true);
-          return;
-        }
 
-        ScheduleHeartbeatCheck(generation);
-      }, heartbeat_timeout_);
+          bool should_kill = false;
+          {
+            std::lock_guard<std::mutex> lock(state_lock_);
+            if (!dispatch_state_->alive || dispatch_state_->state != ProcessState::kRunning
+                || dispatch_state_->terminated_notified) {
+              return;
+            }
+            const TimeTicks now = TimeTicks::Now();
+            if ((now - last_heartbeat_time_).InMilliseconds() >= heartbeat_timeout_.InMilliseconds()) {
+              dispatch_state_->state = ProcessState::kTimedOutHung;
+              should_kill = true;
+            }
+          }
+          if (should_kill) {
+            (void)Terminate(static_cast<int>(0xDEAD), true);
+            return;
+          }
+
+          ScheduleHeartbeatCheck(generation);
+        },
+        heartbeat_timeout_);
   }
 
   bool IssueControlRead() {
-    if (control_handle_ == INVALID_HANDLE_VALUE ||
-        control_event_ == INVALID_HANDLE_VALUE) {
+    if (control_handle_ == INVALID_HANDLE_VALUE || control_event_ == INVALID_HANDLE_VALUE) {
       return false;
     }
 
     (void)ResetEvent(control_event_);
     DWORD read_bytes = 0;
-    const BOOL ok = ReadFile(control_handle_, control_read_buffer_.data(),
+    const BOOL ok = ReadFile(control_handle_,
+                             control_read_buffer_.data(),
                              static_cast<DWORD>(control_read_buffer_.size()),
-                             &read_bytes, &control_overlapped_);
+                             &read_bytes,
+                             &control_overlapped_);
     if (ok) {
       if (read_bytes == 0) {
         HandleControlPipeBreak();
@@ -798,8 +787,7 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
   void ProcessControlHeartbeatBytes(DWORD read_bytes) {
     std::lock_guard<std::mutex> lock(state_lock_);
     for (DWORD i = 0; i < read_bytes; ++i) {
-      heartbeat_shift_reg_ = (heartbeat_shift_reg_ << 8) |
-                             control_read_buffer_[i];
+      heartbeat_shift_reg_ = (heartbeat_shift_reg_ << 8) | control_read_buffer_[i];
       if (heartbeat_shift_reg_ == 0x42454154u) {
         last_heartbeat_time_ = TimeTicks::Now();
       }
@@ -810,9 +798,8 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     bool should_kill = false;
     {
       std::lock_guard<std::mutex> lock(state_lock_);
-      if (dispatch_state_->alive && !dispatch_state_->terminated_notified &&
-          dispatch_state_->state == ProcessState::kRunning &&
-          heartbeat_enabled_) {
+      if (dispatch_state_->alive && !dispatch_state_->terminated_notified
+          && dispatch_state_->state == ProcessState::kRunning && heartbeat_enabled_) {
         should_kill = true;
       }
     }
@@ -835,57 +822,52 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     heartbeat_shift_reg_ = 0;
   }
 
-  bool ResolveStdHandle(const StdIOConfig& cfg,
-                        bool is_input,
-                        PipePair* pipe,
-                        HANDLE* child_handle) {
+  bool ResolveStdHandle(const StdIOConfig &cfg, bool is_input, PipePair *pipe, HANDLE *child_handle) {
     switch (cfg.type) {
-      case StdIOType::INHERIT: {
-        HANDLE inherited = DuplicateAsInheritable(
-            GetStdHandle(is_input ? STD_INPUT_HANDLE : STD_OUTPUT_HANDLE));
-        if (inherited == INVALID_HANDLE_VALUE) {
-          return false;
-        }
-        pipe->child_handle = inherited;
-        *child_handle = inherited;
-        return true;
+    case StdIOType::INHERIT: {
+      HANDLE inherited = DuplicateAsInheritable(GetStdHandle(is_input ? STD_INPUT_HANDLE : STD_OUTPUT_HANDLE));
+      if (inherited == INVALID_HANDLE_VALUE) {
+        return false;
       }
-      case StdIOType::NULL_IO: {
-        HANDLE nul = OpenNullDevice(is_input);
-        if (nul == INVALID_HANDLE_VALUE) {
-          return false;
-        }
-        pipe->child_handle = nul;
-        *child_handle = nul;
-        return true;
+      pipe->child_handle = inherited;
+      *child_handle = inherited;
+      return true;
+    }
+    case StdIOType::NULL_IO: {
+      HANDLE nul = OpenNullDevice(is_input);
+      if (nul == INVALID_HANDLE_VALUE) {
+        return false;
       }
-      case StdIOType::REDIRECT: {
-        HANDLE redirected = DuplicateAsInheritable(
-            reinterpret_cast<HANDLE>(static_cast<uintptr_t>(cfg.target_handle)));
-        if (redirected == INVALID_HANDLE_VALUE) {
-          return false;
-        }
-        pipe->child_handle = redirected;
-        *child_handle = redirected;
-        return true;
+      pipe->child_handle = nul;
+      *child_handle = nul;
+      return true;
+    }
+    case StdIOType::REDIRECT: {
+      HANDLE redirected = DuplicateAsInheritable(reinterpret_cast<HANDLE>(static_cast<uintptr_t>(cfg.target_handle)));
+      if (redirected == INVALID_HANDLE_VALUE) {
+        return false;
       }
-      case StdIOType::PIPE: {
-        if (!CreateOverlappedPipePair(/*child_reads=*/is_input, pipe)) {
-          return false;
-        }
-        *child_handle = pipe->child_handle;
-        return true;
+      pipe->child_handle = redirected;
+      *child_handle = redirected;
+      return true;
+    }
+    case StdIOType::PIPE: {
+      if (!CreateOverlappedPipePair(/*child_reads=*/is_input, pipe)) {
+        return false;
       }
+      *child_handle = pipe->child_handle;
+      return true;
+    }
     }
     return false;
   }
 
-  void CleanupPipe(PipePair& pipe) {
+  void CleanupPipe(PipePair &pipe) {
     CloseHandleSafe(&pipe.parent_handle);
     CloseHandleSafe(&pipe.child_handle);
   }
 
-  void NotifyLaunchFailed(ChildProcessListener* listener) {
+  void NotifyLaunchFailed(ChildProcessListener *listener) {
     if (dispatch_state_) {
       std::lock_guard<std::mutex> lock(dispatch_state_->lock);
       dispatch_state_->state = ProcessState::kFailedToStart;
@@ -895,7 +877,7 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
     }
   }
 
-  ChildProcessListener* listener_ = nullptr;
+  ChildProcessListener *listener_ = nullptr;
   mutable std::mutex state_lock_;
   int process_id_ = -1;
   HANDLE process_handle_ = INVALID_HANDLE_VALUE;
@@ -921,12 +903,11 @@ class WinChildProcessCore final : public MessagePumpForIO::Watcher {
   scoped_refptr<TaskRunner> io_runner_;
 };
 
-}  // namespace
+} // namespace
 
-class ChildProcessPlatformImpl final
-    : public ChildProcess::Impl,
-      public internal::ChildProcessImplBase<ChildProcessPlatformImpl> {
- public:
+class ChildProcessPlatformImpl final : public ChildProcess::Impl,
+                                       public internal::ChildProcessImplBase<ChildProcessPlatformImpl> {
+public:
   explicit ChildProcessPlatformImpl(scoped_refptr<ProcessService> process_service)
       : Base(std::move(process_service)) {
     // PlatformImpl is constructed on the caller's thread, but all
@@ -935,10 +916,11 @@ class ChildProcessPlatformImpl final
     DETACH_FROM_SEQUENCE(io_sequence_checker_);
   }
 
-  ~ChildProcessPlatformImpl() override { Base::Shutdown(); }
+  ~ChildProcessPlatformImpl() override {
+    Base::Shutdown();
+  }
 
-  bool Launch(const CommandLine& command_line,
-              const ProcessLaunchOptions& options) override {
+  bool Launch(const CommandLine &command_line, const ProcessLaunchOptions &options) override {
     return Base::Launch(command_line, options);
   }
 
@@ -946,25 +928,25 @@ class ChildProcessPlatformImpl final
     return Base::Terminate(exit_code, force);
   }
 
-  void SetExternalListener(ChildProcessListener* listener) override {
+  void SetExternalListener(ChildProcessListener *listener) override {
     Base::SetExternalListener(listener);
   }
 
-  AsyncInputStream* GetStdoutStream() const override {
+  AsyncInputStream *GetStdoutStream() const override {
     return Base::GetStdoutStream();
   }
 
-  AsyncInputStream* GetStderrStream() const override {
+  AsyncInputStream *GetStderrStream() const override {
     return Base::GetStderrStream();
   }
 
-  AsyncOutputStream* GetStdinStream() const override {
+  AsyncOutputStream *GetStdinStream() const override {
     return Base::GetStdinStream();
   }
 
-  bool LaunchOnIoThread(const CommandLine& command_line,
-                       const ProcessLaunchOptions& options,
-                       const scoped_refptr<TaskRunner>& io_runner) {
+  bool LaunchOnIoThread(const CommandLine &command_line,
+                        const ProcessLaunchOptions &options,
+                        const scoped_refptr<TaskRunner> &io_runner) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
     stdout_proxy_->ResetBinding();
     stderr_proxy_->ResetBinding();
@@ -997,17 +979,16 @@ class ChildProcessPlatformImpl final
     core_.reset();
   }
 
- private:
+private:
   DECLARE_SEQUENCE_CHECKER(io_sequence_checker_);
   using Base = internal::ChildProcessImplBase<ChildProcessPlatformImpl>;
   std::unique_ptr<WinChildProcessCore> core_;
 };
 
-std::unique_ptr<ChildProcess::Impl> CreatePlatformImpl(
-    scoped_refptr<ProcessService> process_service) {
+std::unique_ptr<ChildProcess::Impl> CreatePlatformImpl(scoped_refptr<ProcessService> process_service) {
   return std::make_unique<ChildProcessPlatformImpl>(std::move(process_service));
 }
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // defined(_WIN32)
+#endif // defined(_WIN32)

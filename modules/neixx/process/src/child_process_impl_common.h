@@ -22,15 +22,15 @@ namespace internal {
 
 template <typename Derived>
 class ChildProcessImplBase : public ChildProcessListener {
- public:
+public:
   explicit ChildProcessImplBase(scoped_refptr<ProcessService> process_service)
-      : process_service_(std::move(process_service)),
-        stdout_proxy_(std::make_unique<AsyncInputStreamProxy>()),
-        stderr_proxy_(std::make_unique<AsyncInputStreamProxy>()),
-        stdin_proxy_(std::make_unique<AsyncOutputStreamProxy>()) {}
+      : process_service_(std::move(process_service))
+      , stdout_proxy_(std::make_unique<AsyncInputStreamProxy>())
+      , stderr_proxy_(std::make_unique<AsyncInputStreamProxy>())
+      , stdin_proxy_(std::make_unique<AsyncOutputStreamProxy>()) {
+  }
 
-  bool Launch(const CommandLine& command_line,
-              const ProcessLaunchOptions& options) {
+  bool Launch(const CommandLine &command_line, const ProcessLaunchOptions &options) {
     if (process_service_.get() == nullptr) {
       process_service_ = ProcessService::GetDefault();
     }
@@ -47,8 +47,7 @@ class ChildProcessImplBase : public ChildProcessListener {
 
     bool ok = false;
     auto launch_on_io = [this, io_runner, &command_line, options, &ok]() {
-      ok = static_cast<Derived*>(this)->LaunchOnIoThread(command_line, options,
-                                                        io_runner);
+      ok = static_cast<Derived *>(this)->LaunchOnIoThread(command_line, options, io_runner);
     };
 
     if (IsOnServiceThread(io_runner)) {
@@ -76,7 +75,7 @@ class ChildProcessImplBase : public ChildProcessListener {
 
     bool ok = false;
     auto terminate_on_io = [this, exit_code, force, &ok]() {
-      ok = static_cast<Derived*>(this)->TerminateOnIoThread(exit_code, force);
+      ok = static_cast<Derived *>(this)->TerminateOnIoThread(exit_code, force);
     };
 
     if (IsOnServiceThread(io_runner)) {
@@ -103,9 +102,7 @@ class ChildProcessImplBase : public ChildProcessListener {
       return;
     }
 
-    auto shutdown_on_io = [this]() {
-      static_cast<Derived*>(this)->ShutdownOnIoThread();
-    };
+    auto shutdown_on_io = [this]() { static_cast<Derived *>(this)->ShutdownOnIoThread(); };
 
     if (IsOnServiceThread(io_runner)) {
       shutdown_on_io();
@@ -124,66 +121,74 @@ class ChildProcessImplBase : public ChildProcessListener {
     done.Wait();
   }
 
-  void SetExternalListener(ChildProcessListener* listener) {
+  void SetExternalListener(ChildProcessListener *listener) {
     std::lock_guard<std::mutex> lock(listener_lock_);
     external_listener_ = listener;
   }
 
-  AsyncInputStream* GetStdoutStream() const { return stdout_proxy_.get(); }
-  AsyncInputStream* GetStderrStream() const { return stderr_proxy_.get(); }
-  AsyncOutputStream* GetStdinStream() const { return stdin_proxy_.get(); }
+  AsyncInputStream *GetStdoutStream() const {
+    return stdout_proxy_.get();
+  }
+
+  AsyncInputStream *GetStderrStream() const {
+    return stderr_proxy_.get();
+  }
+
+  AsyncOutputStream *GetStdinStream() const {
+    return stdin_proxy_.get();
+  }
 
   void OnProcessLaunchSucceeded(int pid) override {
-    ChildProcessListener* listener = GetExternalListener();
+    ChildProcessListener *listener = GetExternalListener();
     if (listener != nullptr) {
       listener->OnProcessLaunchSucceeded(pid);
     }
   }
 
   void OnProcessLaunchFailed() override {
-    ChildProcessListener* listener = GetExternalListener();
+    ChildProcessListener *listener = GetExternalListener();
     if (listener != nullptr) {
       listener->OnProcessLaunchFailed();
     }
   }
 
-  void OnProcessTerminated(const ProcessExitInfo& info) override {
-    ChildProcessListener* listener = GetExternalListener();
+  void OnProcessTerminated(const ProcessExitInfo &info) override {
+    ChildProcessListener *listener = GetExternalListener();
     if (listener != nullptr) {
       listener->OnProcessTerminated(info);
     }
   }
 
- protected:
+protected:
   scoped_refptr<ProcessService> process_service_;
   std::unique_ptr<AsyncInputStreamProxy> stdout_proxy_;
   std::unique_ptr<AsyncInputStreamProxy> stderr_proxy_;
   std::unique_ptr<AsyncOutputStreamProxy> stdin_proxy_;
 
- private:
-  bool IsOnServiceThread(const scoped_refptr<TaskRunner>& io_runner) const {
+private:
+  bool IsOnServiceThread(const scoped_refptr<TaskRunner> &io_runner) const {
     const scoped_refptr<TaskRunner> current_runner = ThreadTaskRunnerHandle::Get();
-    return process_service_->IsOnServiceThread() ||
-           (current_runner.get() != nullptr && current_runner.get() == io_runner.get());
+    return process_service_->IsOnServiceThread()
+           || (current_runner.get() != nullptr && current_runner.get() == io_runner.get());
   }
 
   void NotifyLaunchFailedOnCallerThread() {
-    ChildProcessListener* listener = GetExternalListener();
+    ChildProcessListener *listener = GetExternalListener();
     if (listener != nullptr) {
       listener->OnProcessLaunchFailed();
     }
   }
 
-  ChildProcessListener* GetExternalListener() {
+  ChildProcessListener *GetExternalListener() {
     std::lock_guard<std::mutex> lock(listener_lock_);
     return external_listener_;
   }
 
   mutable std::mutex listener_lock_;
-  ChildProcessListener* external_listener_ = nullptr;
+  ChildProcessListener *external_listener_ = nullptr;
 };
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei
 
-#endif  // NEIXX_PROCESS_CHILD_PROCESS_IMPL_COMMON_H_
+#endif // NEIXX_PROCESS_CHILD_PROCESS_IMPL_COMMON_H_

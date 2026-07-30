@@ -28,12 +28,12 @@
 namespace nei {
 namespace {
 
-constexpr int kMaxSlots = 256;  // Chromium uses the same limit.
+constexpr int kMaxSlots = 256; // Chromium uses the same limit.
 
 // Per-thread value storage allocated lazily and stashed in the single
 // global OS TLS slot.  Freed by OnThreadExit when the thread terminates.
 struct ThreadLocalVector {
-  std::vector<void*> values;
+  std::vector<void *> values;
 
   void EnsureIndex(size_t index) {
     if (index >= values.size()) {
@@ -47,9 +47,9 @@ struct ThreadLocalVector {
 // the entire lifetime of the process, even during DLL unload / static
 // destruction when worker threads may still be exiting.
 class TLSManager {
- public:
-  static TLSManager& Get() {
-    static TLSManager* instance = new TLSManager();
+public:
+  static TLSManager &Get() {
+    static TLSManager *instance = new TLSManager();
     return *instance;
   }
 
@@ -75,18 +75,16 @@ class TLSManager {
   }
 
   // Returns the per-thread vector (creating it on first access).
-  ThreadLocalVector* GetThreadVector() {
+  ThreadLocalVector *GetThreadVector() {
 #if defined(_WIN32)
-    ThreadLocalVector* vec =
-        static_cast<ThreadLocalVector*>(FlsGetValue(tls_index_));
+    ThreadLocalVector *vec = static_cast<ThreadLocalVector *>(FlsGetValue(tls_index_));
     if (!vec) {
       vec = new ThreadLocalVector();
       FlsSetValue(tls_index_, vec);
     }
     return vec;
 #else
-    ThreadLocalVector* vec =
-        static_cast<ThreadLocalVector*>(pthread_getspecific(tls_key_));
+    ThreadLocalVector *vec = static_cast<ThreadLocalVector *>(pthread_getspecific(tls_key_));
     if (!vec) {
       vec = new ThreadLocalVector();
       pthread_setspecific(tls_key_, vec);
@@ -95,7 +93,7 @@ class TLSManager {
 #endif
   }
 
- private:
+private:
   TLSManager() {
 #if defined(_WIN32)
     tls_index_ = FlsAlloc(&OnThreadExit);
@@ -114,23 +112,23 @@ class TLSManager {
   // Iterates the per-thread vector and calls each slot's destructor
   // (if one is registered) before freeing the vector.
 #if defined(_WIN32)
-  static void NTAPI OnThreadExit(void* value) {
+  static void NTAPI OnThreadExit(void *value) {
 #else
-  static void OnThreadExit(void* value) {
+  static void OnThreadExit(void *value) {
 #endif
-    ThreadLocalVector* vec = static_cast<ThreadLocalVector*>(value);
-    if (!vec) return;
+    ThreadLocalVector *vec = static_cast<ThreadLocalVector *>(value);
+    if (!vec)
+      return;
 
-    TLSManager& mgr = Get();
+    TLSManager &mgr = Get();
     const size_t size = vec->values.size();
     for (size_t i = 0; i < size; ++i) {
-      void* val = vec->values[i];
+      void *val = vec->values[i];
       if (val) {
         // Clear before calling the destructor so that re-entrant or
         // recursive TLS access during destruction does not re-trigger.
         vec->values[i] = nullptr;
-        ThreadLocalStorage::TLSDestructorFunc d =
-            mgr.slot_destructors_[i].load(std::memory_order_acquire);
+        ThreadLocalStorage::TLSDestructorFunc d = mgr.slot_destructors_[i].load(std::memory_order_acquire);
         if (d) {
           d(val);
         }
@@ -148,8 +146,7 @@ class TLSManager {
   // Release on write, acquire on read  --  sufficient because slot
   // allocation happens-before thread creation which happens-before
   // thread exit.
-  std::atomic<ThreadLocalStorage::TLSDestructorFunc>
-      slot_destructors_[kMaxSlots] = {};
+  std::atomic<ThreadLocalStorage::TLSDestructorFunc> slot_destructors_[kMaxSlots] = {};
 
 #if defined(_WIN32)
   DWORD tls_index_ = FLS_OUT_OF_INDEXES;
@@ -158,12 +155,12 @@ class TLSManager {
 #endif
 };
 
-}  // namespace
+} // namespace
 
 // Slot::Impl  --  thin wrapper holding a monotonic slot index into the
 // global TLSManager.  Get/Set delegate to the per-thread vector.
 class ThreadLocalStorage::Slot::Impl {
- public:
+public:
   Impl() = default;
 
   explicit Impl(TLSDestructorFunc destructor) {
@@ -176,38 +173,43 @@ class ThreadLocalStorage::Slot::Impl {
     }
   }
 
-  Impl(const Impl&) = delete;
-  Impl& operator=(const Impl&) = delete;
+  Impl(const Impl &) = delete;
+  Impl &operator=(const Impl &) = delete;
 
   bool Initialize(TLSDestructorFunc destructor) {
     if (index_ >= 0) {
-      return false;  // already initialized
+      return false; // already initialized
     }
     index_ = TLSManager::Get().AllocateSlot(destructor);
     return index_ >= 0;
   }
 
-  bool initialized() const { return index_ >= 0; }
+  bool initialized() const {
+    return index_ >= 0;
+  }
 
-  void* Get() const {
-    if (index_ < 0) return nullptr;
-    ThreadLocalVector* vec = TLSManager::Get().GetThreadVector();
+  void *Get() const {
+    if (index_ < 0)
+      return nullptr;
+    ThreadLocalVector *vec = TLSManager::Get().GetThreadVector();
     const size_t idx = static_cast<size_t>(index_);
     return idx < vec->values.size() ? vec->values[idx] : nullptr;
   }
 
-  void Set(void* value) {
-    if (index_ < 0) return;
-    ThreadLocalVector* vec = TLSManager::Get().GetThreadVector();
+  void Set(void *value) {
+    if (index_ < 0)
+      return;
+    ThreadLocalVector *vec = TLSManager::Get().GetThreadVector();
     vec->EnsureIndex(static_cast<size_t>(index_));
     vec->values[index_] = value;
   }
 
- private:
-  int index_ = -1;  // -1 = uninitialized
+private:
+  int index_ = -1; // -1 = uninitialized
 };
 
-ThreadLocalStorage::Slot::Slot() : impl_(std::make_unique<Impl>()) {
+ThreadLocalStorage::Slot::Slot()
+    : impl_(std::make_unique<Impl>()) {
 }
 
 ThreadLocalStorage::Slot::Slot(TLSDestructorFunc destructor)
@@ -216,9 +218,9 @@ ThreadLocalStorage::Slot::Slot(TLSDestructorFunc destructor)
 
 ThreadLocalStorage::Slot::~Slot() = default;
 
-ThreadLocalStorage::Slot::Slot(Slot&&) noexcept = default;
+ThreadLocalStorage::Slot::Slot(Slot &&) noexcept = default;
 
-ThreadLocalStorage::Slot& ThreadLocalStorage::Slot::operator=(Slot&&) noexcept = default;
+ThreadLocalStorage::Slot &ThreadLocalStorage::Slot::operator=(Slot &&) noexcept = default;
 
 bool ThreadLocalStorage::Slot::Initialize(TLSDestructorFunc destructor) {
   return impl_->Initialize(destructor);
@@ -228,12 +230,12 @@ bool ThreadLocalStorage::Slot::initialized() const {
   return impl_->initialized();
 }
 
-void* ThreadLocalStorage::Slot::Get() const {
+void *ThreadLocalStorage::Slot::Get() const {
   return impl_->Get();
 }
 
-void ThreadLocalStorage::Slot::Set(void* value) {
+void ThreadLocalStorage::Slot::Set(void *value) {
   impl_->Set(value);
 }
 
-}  // namespace nei
+} // namespace nei

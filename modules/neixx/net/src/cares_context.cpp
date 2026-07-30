@@ -16,9 +16,11 @@ namespace nei::net {
 // HostResolverOptions comparison (for std::map key ordering)
 // =============================================================================
 
-bool operator<(const HostResolverOptions& a, const HostResolverOptions& b) {
-  if (a.timeout_ms != b.timeout_ms) return a.timeout_ms < b.timeout_ms;
-  if (a.tries != b.tries) return a.tries < b.tries;
+bool operator<(const HostResolverOptions &a, const HostResolverOptions &b) {
+  if (a.timeout_ms != b.timeout_ms)
+    return a.timeout_ms < b.timeout_ms;
+  if (a.tries != b.tries)
+    return a.tries < b.tries;
   if (a.address_family != b.address_family)
     return a.address_family < b.address_family;
   if (a.rotate_servers != b.rotate_servers)
@@ -28,13 +30,10 @@ bool operator<(const HostResolverOptions& a, const HostResolverOptions& b) {
   return a.dns_servers < b.dns_servers;
 }
 
-bool operator==(const HostResolverOptions& a, const HostResolverOptions& b) {
-  return a.timeout_ms == b.timeout_ms &&
-         a.tries == b.tries &&
-         a.address_family == b.address_family &&
-         a.rotate_servers == b.rotate_servers &&
-         a.max_concurrent_queries == b.max_concurrent_queries &&
-         a.dns_servers == b.dns_servers;
+bool operator==(const HostResolverOptions &a, const HostResolverOptions &b) {
+  return a.timeout_ms == b.timeout_ms && a.tries == b.tries && a.address_family == b.address_family
+         && a.rotate_servers == b.rotate_servers && a.max_concurrent_queries == b.max_concurrent_queries
+         && a.dns_servers == b.dns_servers;
 }
 
 // =============================================================================
@@ -43,8 +42,7 @@ bool operator==(const HostResolverOptions& a, const HostResolverOptions& b) {
 
 namespace {
 
-void ApplyOptions(const HostResolverOptions& opts, struct ares_options& aopts,
-                  int& optmask) {
+void ApplyOptions(const HostResolverOptions &opts, struct ares_options &aopts, int &optmask) {
   std::memset(&aopts, 0, sizeof(aopts));
 
   // c-ares 1.34: use built-in Win32 event thread on Windows.
@@ -75,21 +73,22 @@ void ApplyOptions(const HostResolverOptions& opts, struct ares_options& aopts,
   // ares_addrinfo_hints.ai_family in the caller.
 }
 
-void ApplyServers(ares_channel_t* channel, const HostResolverOptions& opts) {
+void ApplyServers(ares_channel_t *channel, const HostResolverOptions &opts) {
   if (opts.dns_servers.empty()) {
     return;
   }
 
   std::string csv;
   for (std::size_t i = 0; i < opts.dns_servers.size(); ++i) {
-    if (i > 0) csv += ',';
+    if (i > 0)
+      csv += ',';
     csv += opts.dns_servers[i];
   }
 
   ares_set_servers_csv(channel, csv.c_str());
 }
 
-}  // namespace
+} // namespace
 
 // =============================================================================
 // CaresContext
@@ -105,14 +104,14 @@ CaresContext::~CaresContext() {
   Shutdown();
 }
 
-CaresContext* CaresContext::Get() {
+CaresContext *CaresContext::Get() {
   static CaresContext instance;
   return &instance;
 }
 
 void CaresContext::Shutdown() {
   AutoLock lock(lock_);
-  for (auto& [options, entry] : channels_) {
+  for (auto &[options, entry] : channels_) {
     if (entry->channel) {
       ares_destroy(entry->channel);
       entry->channel = nullptr;
@@ -122,14 +121,12 @@ void CaresContext::Shutdown() {
   ares_library_cleanup();
 }
 
-CaresContext::ChannelEntry* CaresContext::GetOrCreateChannel(
-    const HostResolverOptions& options) {
+CaresContext::ChannelEntry *CaresContext::GetOrCreateChannel(const HostResolverOptions &options) {
   AutoLock lock(lock_);
   return GetOrCreateChannelLocked(options);
 }
 
-CaresContext::ChannelEntry* CaresContext::GetOrCreateChannelLocked(
-    const HostResolverOptions& options) {
+CaresContext::ChannelEntry *CaresContext::GetOrCreateChannelLocked(const HostResolverOptions &options) {
 
   auto it = channels_.find(options);
   if (it != channels_.end()) {
@@ -153,16 +150,16 @@ CaresContext::ChannelEntry* CaresContext::GetOrCreateChannelLocked(
 
   ApplyServers(entry->channel, options);
 
-  ChannelEntry* raw = entry.get();
+  ChannelEntry *raw = entry.get();
   channels_.emplace(options, std::move(entry));
   return raw;
 }
 
-void CaresContext::Resolve(const std::string& host,
-                           const HostResolverOptions& options,
-                           const struct ares_addrinfo_hints* hints,
+void CaresContext::Resolve(const std::string &host,
+                           const HostResolverOptions &options,
+                           const struct ares_addrinfo_hints *hints,
                            ResolveCallback callback,
-                           void* arg,
+                           void *arg,
                            scoped_refptr<TaskRunner> target_runner) {
   // Acquire a raw pointer to the channel entry under lock.  ares_getaddrinfo
   // is async and must not be called under our mutex to avoid blocking
@@ -170,7 +167,7 @@ void CaresContext::Resolve(const std::string& host,
   // channels_ and is only destroyed by Shutdown() (which joins all in-flight
   // queries first), so the raw pointer remains valid for the duration of the
   // ares_getaddrinfo call.
-  ChannelEntry* entry = nullptr;
+  ChannelEntry *entry = nullptr;
   {
     AutoLock lock(lock_);
     entry = GetOrCreateChannelLocked(options);
@@ -181,15 +178,12 @@ void CaresContext::Resolve(const std::string& host,
     // thread is never blocked synchronously.  This keeps callback delivery
     // consistent with the success path (both are asynchronous).
     if (callback && target_runner) {
-      target_runner->PostTask(FROM_HERE, [callback, arg]() {
-        callback(arg, ARES_ENOMEM, 0, nullptr);
-      });
+      target_runner->PostTask(FROM_HERE, [callback, arg]() { callback(arg, ARES_ENOMEM, 0, nullptr); });
     }
     return;
   }
 
-  ares_getaddrinfo(entry->channel, host.c_str(), nullptr, hints,
-                  callback, arg);
+  ares_getaddrinfo(entry->channel, host.c_str(), nullptr, hints, callback, arg);
 }
 
-}  // namespace nei::net
+} // namespace nei::net

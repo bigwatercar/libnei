@@ -50,18 +50,17 @@ constexpr MayBlockTag MayBlock() {
 }
 
 class TaskTraits {
- public:
+public:
   constexpr TaskTraits() = default;
-  constexpr TaskTraits(const TaskTraits&) = default;
-  constexpr TaskTraits(TaskTraits&&) = default;
-  constexpr TaskTraits& operator=(const TaskTraits&) = default;
-  constexpr TaskTraits& operator=(TaskTraits&&) = default;
+  constexpr TaskTraits(const TaskTraits &) = default;
+  constexpr TaskTraits(TaskTraits &&) = default;
+  constexpr TaskTraits &operator=(const TaskTraits &) = default;
+  constexpr TaskTraits &operator=(TaskTraits &&) = default;
 
   template <typename... Args,
-            typename = std::enable_if_t<(sizeof...(Args) > 0) &&
-                                        (!std::disjunction_v<
-                                            std::is_same<std::decay_t<Args>, TaskTraits>...>)>>
-  explicit constexpr TaskTraits(Args&&... args) {
+            typename = std::enable_if_t<(sizeof...(Args) > 0)
+                                        && (!std::disjunction_v<std::is_same<std::decay_t<Args>, TaskTraits>...>)>>
+  explicit constexpr TaskTraits(Args &&...args) {
     (Apply(std::forward<Args>(args)), ...);
   }
 
@@ -92,7 +91,7 @@ class TaskTraits {
     may_block_ = may_block;
   }
 
- private:
+private:
   constexpr void Apply(TaskPriority priority) {
     priority_ = priority;
   }
@@ -110,9 +109,8 @@ class TaskTraits {
   }
 
   template <typename T>
-  constexpr void Apply(T&&) {
-    static_assert(!std::is_same_v<std::decay_t<T>, std::decay_t<T>>,
-                  "Unsupported TaskTraits argument.");
+  constexpr void Apply(T &&) {
+    static_assert(!std::is_same_v<std::decay_t<T>, std::decay_t<T>>, "Unsupported TaskTraits argument.");
   }
 
   TaskPriority priority_ = TaskPriority::USER_VISIBLE;
@@ -120,6 +118,6 @@ class TaskTraits {
   bool may_block_ = false;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_TASK_TASK_TRAITS_H_
+#endif // NEIXX_TASK_TASK_TRAITS_H_

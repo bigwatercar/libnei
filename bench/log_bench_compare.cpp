@@ -64,7 +64,8 @@ constexpr int kFileStrictSyncIters = 5'000;
 class ScopedEnvVar {
 public:
   ScopedEnvVar(const char *name, const char *value)
-      : name_(name), had_old_(false) {
+      : name_(name)
+      , had_old_(false) {
     if (name_ == nullptr || name_[0] == '\0') {
       return;
     }
@@ -120,14 +121,17 @@ bool ensure_out_dir(const std::string &out_dir) {
 #ifdef _WIN32
   /* out_dir is UTF-8; convert to UTF-16 for CreateDirectoryW. */
   const int wlen = MultiByteToWideChar(CP_UTF8, 0, out_dir.c_str(), -1, NULL, 0);
-  if (wlen <= 0) return false;
+  if (wlen <= 0)
+    return false;
   wchar_t *wdir = (wchar_t *)malloc((size_t)wlen * sizeof(wchar_t));
-  if (wdir == NULL) return false;
+  if (wdir == NULL)
+    return false;
   MultiByteToWideChar(CP_UTF8, 0, out_dir.c_str(), -1, wdir, wlen);
   const BOOL ok = CreateDirectoryW(wdir, NULL);
   const DWORD err = GetLastError();
   free(wdir);
-  if (ok || err == ERROR_ALREADY_EXISTS) return true;
+  if (ok || err == ERROR_ALREADY_EXISTS)
+    return true;
   return false;
 #else
   if (mkdir(out_dir.c_str(), 0755) == 0 || errno == EEXIST) {
@@ -169,8 +173,7 @@ void print_stats(const std::string &label, int iterations, int64_t micros, const
   std::cout << "  Average time per log: " << avg << " microseconds\n";
   std::cout << "  Logs per second: " << (1000000.0 / avg) << "\n";
   std::cout << "  Runtime stats: producer_spins=" << stats.producer_spin_loops
-            << ", flush_wait_loops=" << stats.flush_wait_loops
-            << ", consumer_wakeups=" << stats.consumer_wakeups
+            << ", flush_wait_loops=" << stats.flush_wait_loops << ", consumer_wakeups=" << stats.consumer_wakeups
             << ", ring_hwm=" << stats.ring_high_watermark << "\n\n";
 }
 
@@ -358,7 +361,7 @@ template <class F>
 NeiBenchResult time_nei_file_strict_sync_ms(F &&f, int iters, const char *path) {
   (void)std::remove(path);
   nei_log_default_file_sink_options_st opts = nei_log_default_file_sink_options();
-  opts.flush_interval    = 1U; /* fflush after every record */
+  opts.flush_interval = 1U;    /* fflush after every record */
   opts.write_batch_bytes = 0U; /* disable batch writing */
   nei_log_sink_st *fs = nei_log_create_default_file_sink(path, &opts);
   if (!fs) {
@@ -490,8 +493,7 @@ int64_t time_spdlog_file_strict_sync_ms(F &&f, int iters, const std::string &pat
 
 int main(int argc, char **argv) {
   if (argc < 2 || argv[1] == NULL || argv[1][0] == '\0') {
-    std::cerr << "Usage: " << ((argv != NULL && argv[0] != NULL) ? argv[0] : "log_bench_compare")
-              << " <output_dir>\n";
+    std::cerr << "Usage: " << ((argv != NULL && argv[0] != NULL) ? argv[0] : "log_bench_compare") << " <output_dir>\n";
     return 1;
   }
 
@@ -513,7 +515,8 @@ int main(int argc, char **argv) {
   std::cout << "Output dir: " << out_dir << "\n";
   std::cout << "Memory:     " << kMemoryIters << " iters; sink = atomic++ only; time includes flush.\n";
   std::cout << "File async: " << kFileIters << " iters; async + file sink; both sides delete old files before run.\n";
-  std::cout << "Per-call:   " << kFileSyncIters << " iters; async logger + flush request after each log on both sides.\n";
+  std::cout << "Per-call:   " << kFileSyncIters
+            << " iters; async logger + flush request after each log on both sides.\n";
   std::cout << "Strict:     " << kFileStrictSyncIters << " iters; per-call flush with strict sync semantics.\n";
   std::cout << "Fairness knobs: NEI log_thread_id forced OFF during benchmark.\n\n";
 
@@ -521,10 +524,10 @@ int main(int argc, char **argv) {
 
   {
     const auto result = time_nei_memory_ms(
-          [] {
-            nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", "test message %s", "test");
-          },
-          kMemoryIters);
+        [] {
+          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", "test message %s", "test");
+        },
+        kMemoryIters);
     print_stats("[NEI]  simple %s", kMemoryIters, result.micros, result.stats);
   }
 
@@ -536,29 +539,29 @@ int main(int argc, char **argv) {
 
   {
     const auto result = time_nei_memory_ms(
-          [] {
-            auto msg = fmt::format("test message {}", "test");
-            nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench",
-                             msg.data(), msg.size());
-          },
-          kMemoryIters);
+        [] {
+          auto msg = fmt::format("test message {}", "test");
+          nei_llog_literal(
+              NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", msg.data(), msg.size());
+        },
+        kMemoryIters);
     print_stats("[NEI]  {fmt} literal simple", kMemoryIters, result.micros, result.stats);
   }
 
   {
     const auto result = time_nei_memory_ms(
-                  [] {
-                    nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
-                             NEI_L_INFO,
-                             __FILE__,
-                             __LINE__,
-                             "bench",
-                             "number=%d, string=%s, float=%.2f",
-                             42,
-                             "hello",
-                             3.14);
-                  },
-                  kMemoryIters);
+        [] {
+          nei_llog(NEI_LOG_DEFAULT_CONFIG_HANDLE,
+                   NEI_L_INFO,
+                   __FILE__,
+                   __LINE__,
+                   "bench",
+                   "number=%d, string=%s, float=%.2f",
+                   42,
+                   "hello",
+                   3.14);
+        },
+        kMemoryIters);
     print_stats("[NEI]  multi printf", kMemoryIters, result.micros, result.stats);
   }
 
@@ -572,12 +575,12 @@ int main(int argc, char **argv) {
 
   {
     const auto result = time_nei_memory_ms(
-                  [] {
-                    auto msg = fmt::format("number={}, string={}, float={:.2f}", 42, "hello", 3.14);
-                    nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench",
-                                     msg.data(), msg.size());
-                  },
-                  kMemoryIters);
+        [] {
+          auto msg = fmt::format("number={}, string={}, float={:.2f}", 42, "hello", 3.14);
+          nei_llog_literal(
+              NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", msg.data(), msg.size());
+        },
+        kMemoryIters);
     print_stats("[NEI]  {fmt} literal multi", kMemoryIters, result.micros, result.stats);
   }
 
@@ -618,12 +621,12 @@ int main(int argc, char **argv) {
 
   {
     const auto result = time_nei_memory_ms(
-          [] {
-            static const char body[] = "info-only";
-            nei_llog_literal(
-                NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", body, sizeof(body) - 1U);
-          },
-          kMemoryIters);
+        [] {
+          static const char body[] = "info-only";
+          nei_llog_literal(
+              NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", body, sizeof(body) - 1U);
+        },
+        kMemoryIters);
     print_stats("[NEI]  llog_literal (opaque body)", kMemoryIters, result.micros, result.stats);
   }
 
@@ -634,12 +637,11 @@ int main(int argc, char **argv) {
 
   {
     const auto result = time_nei_memory_vlog_ms(
-                  [] {
-                    static const char body[] = "verbose-literal";
-                    nei_vlog_literal(
-                        NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "bench", body, sizeof(body) - 1U);
-                  },
-                  kMemoryIters);
+        [] {
+          static const char body[] = "verbose-literal";
+          nei_vlog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "bench", body, sizeof(body) - 1U);
+        },
+        kMemoryIters);
     print_stats("[NEI]  vlog_literal (opaque body)", kMemoryIters, result.micros, result.stats);
   }
 
@@ -712,8 +714,8 @@ int main(int argc, char **argv) {
     const auto result = time_nei_file_ms(
         [] {
           auto msg = fmt::format("number={}, string={}, float={:.2f}", 42, "hello", 3.14);
-          nei_llog_literal(NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench",
-                           msg.data(), msg.size());
+          nei_llog_literal(
+              NEI_LOG_DEFAULT_CONFIG_HANDLE, NEI_L_INFO, __FILE__, __LINE__, "bench", msg.data(), msg.size());
         },
         kFileIters,
         nei_fmt_multi.c_str());
@@ -778,7 +780,8 @@ int main(int argc, char **argv) {
     if (result.micros < 0) {
       std::cout << "[NEI] file autoflush simple: failed to create sink\n\n";
     } else {
-      print_stats("[NEI] file autoflush simple (1ms consumer flush timer)", kFileSyncIters, result.micros, result.stats);
+      print_stats(
+          "[NEI] file autoflush simple (1ms consumer flush timer)", kFileSyncIters, result.micros, result.stats);
       print_file_size(nei_simple_sync);
     }
   }
@@ -839,7 +842,8 @@ int main(int argc, char **argv) {
     if (result.micros < 0) {
       std::cout << "[NEI] file autoflush llog_literal: failed to create sink\n\n";
     } else {
-      print_stats("[NEI] file autoflush llog_literal (1ms consumer flush timer)", kFileSyncIters, result.micros, result.stats);
+      print_stats(
+          "[NEI] file autoflush llog_literal (1ms consumer flush timer)", kFileSyncIters, result.micros, result.stats);
       print_file_size(nei_lit_sync);
     }
   }
@@ -855,7 +859,8 @@ int main(int argc, char **argv) {
     if (result.micros < 0) {
       std::cout << "[NEI] file autoflush vlog_literal: failed to create sink\n\n";
     } else {
-      print_stats("[NEI] file autoflush vlog_literal (1ms consumer flush timer)", kFileSyncIters, result.micros, result.stats);
+      print_stats(
+          "[NEI] file autoflush vlog_literal (1ms consumer flush timer)", kFileSyncIters, result.micros, result.stats);
       print_file_size(nei_vlit_sync);
     }
   }

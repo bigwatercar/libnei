@@ -6,11 +6,11 @@
 namespace nei {
 
 scoped_refptr<TaskRunner> ThreadTaskRunnerHandle::Get() {
-  SequenceManager* sequence_manager = SequenceManager::Current();
+  SequenceManager *sequence_manager = SequenceManager::Current();
   if (sequence_manager == nullptr) {
     return nullptr;
   }
   return sequence_manager->GetDefaultTaskRunner();
 }
 
-}  // namespace nei
+} // namespace nei

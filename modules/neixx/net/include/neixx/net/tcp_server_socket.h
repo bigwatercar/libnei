@@ -44,12 +44,11 @@ class TCPClientSocket;
 // is ever invoked synchronously from Listen().
 //
 class NEI_API TCPServerSocket final {
- public:
+public:
   // |success| is true when a new connection was accepted.  |client| is
   // a fully-connected, non-blocking TCPClientSocket ready for async I/O.
   // On failure or shutdown, |success| is false and |client| is null.
-  using AcceptCallback =
-      std::function<void(bool success, std::unique_ptr<TCPClientSocket> client)>;
+  using AcceptCallback = std::function<void(bool success, std::unique_ptr<TCPClientSocket> client)>;
 
   // Called for each accepted connection to select which IO thread the
   // client socket will run on.  Return nullptr to use the server's own
@@ -59,14 +58,14 @@ class NEI_API TCPServerSocket final {
   TCPServerSocket();
   ~TCPServerSocket();
 
-  TCPServerSocket(const TCPServerSocket&) = delete;
-  TCPServerSocket& operator=(const TCPServerSocket&) = delete;
+  TCPServerSocket(const TCPServerSocket &) = delete;
+  TCPServerSocket &operator=(const TCPServerSocket &) = delete;
 
   // Starts listening on |addr|:|port| with the given |backlog|.
   // |callback| is invoked on |acceptor_runner| for each accepted connection.
   // |worker_selector| optionally assigns each client to a different IO thread.
   // Returns false if the socket could not be created or bound.
-  bool Listen(const IPEndPoint& addr,
+  bool Listen(const IPEndPoint &addr,
               int backlog,
               AcceptCallback callback,
               scoped_refptr<TaskRunner> acceptor_runner,
@@ -81,15 +80,15 @@ class NEI_API TCPServerSocket final {
   // is stopping.  In-flight accept4/AcceptEx operations complete quietly.
   void Shutdown();
 
- public:
+public:
   // Forward declaration for PIMPL.  Defined in src/.
   class Impl;
 
- private:
-  Impl* impl_ = nullptr;  // Raw pointer  --  lifetime managed by RefCountedThreadSafe
+private:
+  Impl *impl_ = nullptr; // Raw pointer  --  lifetime managed by RefCountedThreadSafe
 };
 
-}  // namespace net
-}  // namespace nei
+} // namespace net
+} // namespace nei
 
-#endif  // NEIXX_NET_TCP_SERVER_SOCKET_H_
+#endif // NEIXX_NET_TCP_SERVER_SOCKET_H_

@@ -20,26 +20,28 @@
 namespace nei {
 
 class FilePathWatcher::Impl final : public MessagePumpForIO::Watcher {
- public:
+public:
   explicit Impl(scoped_refptr<TaskRunner> task_runner);
   ~Impl() override;
 
-  bool Watch(const std::string& path, bool recursive,
-             FilePathWatcher::Callback callback);
+  bool Watch(const std::string &path, bool recursive, FilePathWatcher::Callback callback);
   void Cancel();
 
-  bool is_watching() const { return watching_; }
+  bool is_watching() const {
+    return watching_;
+  }
 
   // MessagePumpForIO::Watcher:
   void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override;
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {}
 
- private:
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {
+  }
+
+private:
   void DrainInotifyEvents();
-  bool AddWatchRecursive(const std::string& path);
+  bool AddWatchRecursive(const std::string &path);
 
-  void DeliverChange(const std::string& relative_path,
-                     FilePathWatcher::ChangeType type);
+  void DeliverChange(const std::string &relative_path, FilePathWatcher::ChangeType type);
 
   static FilePathWatcher::ChangeType MapInotifyMask(std::uint32_t mask);
 
@@ -62,10 +64,10 @@ class FilePathWatcher::Impl final : public MessagePumpForIO::Watcher {
   WeakPtrFactory<Impl> weak_factory_;
 };
 
-}  // namespace nei
+} // namespace nei
 
 template <>
 struct nei::WeakPtrThreadSafe<nei::FilePathWatcher::Impl> : std::true_type {};
 
-#endif  // !defined(_WIN32)
-#endif  // NEIXX_FILES_FILE_PATH_WATCHER_POSIX_H_
+#endif // !defined(_WIN32)
+#endif // NEIXX_FILES_FILE_PATH_WATCHER_POSIX_H_

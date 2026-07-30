@@ -54,47 +54,41 @@ bool RunChild(int read_fd, int write_fd) {
   nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> ok{false};
 
-  io_runner->PostTask(
-      FROM_HERE,
-      [io_runner, &done, &ok, read_fd, write_fd]() mutable {
-        auto input = std::make_shared<nei::PipeInputStream>(io_runner);
-        auto output = std::make_shared<nei::PipeOutputStream>(io_runner);
-        if (!input->BindPlatformHandle(nei::PlatformHandle::FromNativeHandle(read_fd)) ||
-            !output->BindPlatformHandle(nei::PlatformHandle::FromNativeHandle(write_fd))) {
-          done.Signal();
-          return;
-        }
+  io_runner->PostTask(FROM_HERE, [io_runner, &done, &ok, read_fd, write_fd]() mutable {
+    auto input = std::make_shared<nei::PipeInputStream>(io_runner);
+    auto output = std::make_shared<nei::PipeOutputStream>(io_runner);
+    if (!input->BindPlatformHandle(nei::PlatformHandle::FromNativeHandle(read_fd))
+        || !output->BindPlatformHandle(nei::PlatformHandle::FromNativeHandle(write_fd))) {
+      done.Signal();
+      return;
+    }
 
-        auto read_holder = AcquireBuffer(kBufferSize);
-        input->ReadAsync(
-            read_holder.buf, kBufferSize,
-            [io_runner, &done, &ok, read_holder, input, output](bool success,
-                                                                 std::size_t n) {
-              if (!success || n == 0) {
-                done.Signal();
-                return;
-              }
+    auto read_holder = AcquireBuffer(kBufferSize);
+    input->ReadAsync(
+        read_holder.buf, kBufferSize, [io_runner, &done, &ok, read_holder, input, output](bool success, std::size_t n) {
+          if (!success || n == 0) {
+            done.Signal();
+            return;
+          }
 
-              const std::string request(reinterpret_cast<const char*>(read_holder.buf->data()), n);
-              std::cout << "[child] received: " << request << std::endl;
-              if (request != "ping from parent") {
-                done.Signal();
-                return;
-              }
+          const std::string request(reinterpret_cast<const char *>(read_holder.buf->data()), n);
+          std::cout << "[child] received: " << request << std::endl;
+          if (request != "ping from parent") {
+            done.Signal();
+            return;
+          }
 
-              const std::string reply = "pong from child";
-              auto write_holder = AcquireBuffer(reply.size());
-              std::memcpy(write_holder.buf->data(), reply.data(), reply.size());
-              output->WriteAsync(
-                  write_holder.buf, reply.size(),
-                  [&done, &ok, write_holder, output](bool write_success,
-                                                     std::size_t written) {
-                    ok.store(write_success && written == 15,
-                             std::memory_order_release);
-                    done.Signal();
-                  });
-            });
-      });
+          const std::string reply = "pong from child";
+          auto write_holder = AcquireBuffer(reply.size());
+          std::memcpy(write_holder.buf->data(), reply.data(), reply.size());
+          output->WriteAsync(write_holder.buf,
+                             reply.size(),
+                             [&done, &ok, write_holder, output](bool write_success, std::size_t written) {
+                               ok.store(write_success && written == 15, std::memory_order_release);
+                               done.Signal();
+                             });
+        });
+  });
 
   const bool finished = done.TimedWait(std::chrono::seconds(10));
   io_thread.Stop();
@@ -117,46 +111,39 @@ bool RunParent(pid_t child_pid, int write_fd, int read_fd) {
   std::string response;
   std::atomic<bool> ok{false};
 
-  io_runner->PostTask(
-      FROM_HERE,
-      [io_runner, &done, &ok, &response, write_fd, read_fd]() mutable {
-        auto output = std::make_shared<nei::PipeOutputStream>(io_runner);
-        auto input = std::make_shared<nei::PipeInputStream>(io_runner);
-        if (!output->BindPlatformHandle(nei::PlatformHandle::FromNativeHandle(write_fd)) ||
-            !input->BindPlatformHandle(nei::PlatformHandle::FromNativeHandle(read_fd))) {
+  io_runner->PostTask(FROM_HERE, [io_runner, &done, &ok, &response, write_fd, read_fd]() mutable {
+    auto output = std::make_shared<nei::PipeOutputStream>(io_runner);
+    auto input = std::make_shared<nei::PipeInputStream>(io_runner);
+    if (!output->BindPlatformHandle(nei::PlatformHandle::FromNativeHandle(write_fd))
+        || !input->BindPlatformHandle(nei::PlatformHandle::FromNativeHandle(read_fd))) {
+      done.Signal();
+      return;
+    }
+
+    auto read_holder = AcquireBuffer(kBufferSize);
+    input->ReadAsync(
+        read_holder.buf, kBufferSize, [&done, &ok, &response, read_holder, input](bool success, std::size_t n) {
+          if (success && n > 0) {
+            response.assign(reinterpret_cast<const char *>(read_holder.buf->data()), n);
+            ok.store(response == "pong from child", std::memory_order_release);
+          }
           done.Signal();
-          return;
-        }
+        });
 
-        auto read_holder = AcquireBuffer(kBufferSize);
-        input->ReadAsync(
-            read_holder.buf, kBufferSize,
-            [&done, &ok, &response, read_holder, input](bool success,
-                                                        std::size_t n) {
-              if (success && n > 0) {
-                response.assign(reinterpret_cast<const char*>(read_holder.buf->data()), n);
-                ok.store(response == "pong from child",
-                         std::memory_order_release);
-              }
-              done.Signal();
-            });
-
-        const std::string request = "ping from parent";
-        auto write_holder = AcquireBuffer(request.size());
-        std::memcpy(write_holder.buf->data(), request.data(), request.size());
-        output->WriteAsync(write_holder.buf, request.size(),
-                           [write_holder, output](bool, std::size_t) {});
-      });
+    const std::string request = "ping from parent";
+    auto write_holder = AcquireBuffer(request.size());
+    std::memcpy(write_holder.buf->data(), request.data(), request.size());
+    output->WriteAsync(write_holder.buf, request.size(), [write_holder, output](bool, std::size_t) {});
+  });
 
   const bool finished = done.TimedWait(std::chrono::seconds(10));
   int status = 0;
   const pid_t waited = waitpid(child_pid, &status, 0);
   io_thread.Stop();
 
-  if (!finished || !ok.load(std::memory_order_acquire) || waited != child_pid ||
-      !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-    std::cerr << "[parent] Demo failed, response='" << response << "'"
-              << std::endl;
+  if (!finished || !ok.load(std::memory_order_acquire) || waited != child_pid || !WIFEXITED(status)
+      || WEXITSTATUS(status) != 0) {
+    std::cerr << "[parent] Demo failed, response='" << response << "'" << std::endl;
     return false;
   }
 
@@ -164,7 +151,7 @@ bool RunParent(pid_t child_pid, int write_fd, int read_fd) {
   return true;
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   nei::AtExitManager at_exit;
@@ -201,9 +188,8 @@ int main() {
     return 1;
   }
 
-  std::cout << "PipeStream POSIX cross-process demo completed successfully."
-            << std::endl;
+  std::cout << "PipeStream POSIX cross-process demo completed successfully." << std::endl;
   return 0;
 }
 
-#endif  // !defined(_WIN32)
+#endif // !defined(_WIN32)

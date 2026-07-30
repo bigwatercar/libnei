@@ -37,14 +37,14 @@ class TaskRunner;
 // contract).  Multiple concurrent reads return an error asynchronously.
 // ---------------------------------------------------------------------------
 class NEI_API PipeInputStream final : public AsyncInputStream {
- public:
+public:
   // |io_task_runner|  --  where all I/O state transitions and user callbacks
   //   execute.  Must be non-null.
   explicit PipeInputStream(scoped_refptr<TaskRunner> io_task_runner);
   ~PipeInputStream() override;
 
-  PipeInputStream(const PipeInputStream&) = delete;
-  PipeInputStream& operator=(const PipeInputStream&) = delete;
+  PipeInputStream(const PipeInputStream &) = delete;
+  PipeInputStream &operator=(const PipeInputStream &) = delete;
 
   // Attaches a platform handle to this stream.  The handle must not already
   // be bound.  Returns true on success; on failure the handle is closed and
@@ -53,13 +53,11 @@ class NEI_API PipeInputStream final : public AsyncInputStream {
 
   // ---- AsyncInputStream interface ---------------------------------------
 
-  void ReadAsync(scoped_refptr<IOBuffer> buf,
-                 std::size_t buf_len,
-                 IOReadCallback callback) override;
+  void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback) override;
 
   void Close() override;
 
- private:
+private:
   class Impl;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
@@ -77,31 +75,29 @@ class NEI_API PipeInputStream final : public AsyncInputStream {
 // Only one WriteAsync() may be in flight at a time.
 // ---------------------------------------------------------------------------
 class NEI_API PipeOutputStream final : public AsyncOutputStream {
- public:
+public:
   explicit PipeOutputStream(scoped_refptr<TaskRunner> io_task_runner);
   ~PipeOutputStream() override;
 
-  PipeOutputStream(const PipeOutputStream&) = delete;
-  PipeOutputStream& operator=(const PipeOutputStream&) = delete;
+  PipeOutputStream(const PipeOutputStream &) = delete;
+  PipeOutputStream &operator=(const PipeOutputStream &) = delete;
 
   // Attaches a platform handle.  See PipeInputStream::BindPlatformHandle.
   bool BindPlatformHandle(PlatformHandle handle);
 
   // ---- AsyncOutputStream interface --------------------------------------
 
-  void WriteAsync(scoped_refptr<IOBuffer> buf,
-                  std::size_t buf_len,
-                  IOWriteCallback callback) override;
+  void WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOWriteCallback callback) override;
 
   void Close() override;
 
- private:
+private:
   class Impl;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_IO_PIPE_STREAM_H_
+#endif // NEIXX_IO_PIPE_STREAM_H_

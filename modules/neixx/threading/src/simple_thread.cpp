@@ -13,9 +13,11 @@ struct StartBarrier {
   WaitableEvent event{WaitableEvent::ResetPolicy::kManual, false};
 };
 
-}  // namespace
+} // namespace
 
-SimpleThread::SimpleThread(const std::string& name) : name_(name) {}
+SimpleThread::SimpleThread(const std::string &name)
+    : name_(name) {
+}
 
 SimpleThread::~SimpleThread() {
   // Catch missing Join() in debug builds.  Let PlatformThread::Handle's
@@ -33,7 +35,7 @@ void SimpleThread::Start() {
   StartWithOptions(Options{});
 }
 
-void SimpleThread::StartWithOptions(const Options& options) {
+void SimpleThread::StartWithOptions(const Options &options) {
   StartBarrier barrier;
   {
     AutoLock lock(lock_);
@@ -48,8 +50,7 @@ void SimpleThread::StartWithOptions(const Options& options) {
     thread_id_ = 0;
   }
 
-  if (!PlatformThread::CreateWithType(options_.stack_size, this, &handle_,
-                                      options_.thread_type)) {
+  if (!PlatformThread::CreateWithType(options_.stack_size, this, &handle_, options_.thread_type)) {
     // OS thread creation failed.  Roll back state.
     AutoLock lock(lock_);
     start_event_ = nullptr;
@@ -80,8 +81,7 @@ void SimpleThread::Join() {
   }
 
   // Self-join is guaranteed to deadlock &mdash; let PlatformThread catch it.
-  DCHECK_NE_MSG(thread_id_, PlatformThread::CurrentId(),
-                "Self-join would cause deadlock");
+  DCHECK_NE_MSG(thread_id_, PlatformThread::CurrentId(), "Self-join would cause deadlock");
 
   (void)PlatformThread::Join(&handle_);
 
@@ -122,7 +122,7 @@ void SimpleThread::ThreadMain() {
   // options_ is visible here with happens-before through OS thread creation.
   PlatformThread::SetCurrentThreadType(options_.thread_type);
 
-  WaitableEvent* start_event = nullptr;
+  WaitableEvent *start_event = nullptr;
   {
     AutoLock lock(lock_);
     thread_id_ = PlatformThread::CurrentId();
@@ -139,4 +139,4 @@ void SimpleThread::ThreadMain() {
   Run();
 }
 
-}  // namespace nei
+} // namespace nei

@@ -264,7 +264,8 @@ static int _nei_log_is_simple_replay_fmt(const char *fmt) {
   return 1;
 }
 
-static void _nei_log_get_fmt_meta_cached(const char *fmt, int *out_has_percent, size_t *out_len, int *out_simple_replay) {
+static void
+_nei_log_get_fmt_meta_cached(const char *fmt, int *out_has_percent, size_t *out_len, int *out_simple_replay) {
   if (out_has_percent == NULL || out_len == NULL || out_simple_replay == NULL) {
     return;
   }
@@ -345,8 +346,8 @@ static int _nei_log_is_simple_spec(const char *spec) {
     return 0;
   }
   const char *p = spec + 1;
-  if (!_nei_log_is_flag_char(*p) && !_nei_log_is_digit_char(*p) && *p != '-' && *p != '+' && *p != ' ' &&
-      *p != '#' && *p != '0' && *p != '.' && *p != '*') {
+  if (!_nei_log_is_flag_char(*p) && !_nei_log_is_digit_char(*p) && *p != '-' && *p != '+' && *p != ' ' && *p != '#'
+      && *p != '0' && *p != '.' && *p != '*') {
     if (*p == 'l') {
       ++p;
       if (*p == 'l') {
@@ -366,12 +367,12 @@ static int _nei_log_is_simple_spec(const char *spec) {
 }
 
 static int _nei_log_append_from_spec(const char *spec,
-                                      uint8_t payload_type,
-                                      const uint8_t **cursor,
-                                      const uint8_t *end,
-                                      char *out,
-                                      size_t out_cap,
-                                      size_t *used) {
+                                     uint8_t payload_type,
+                                     const uint8_t **cursor,
+                                     const uint8_t *end,
+                                     char *out,
+                                     size_t out_cap,
+                                     size_t *used) {
   if (spec == NULL || spec[1] == '\0') {
     return -1;
   }
@@ -429,7 +430,11 @@ static int _nei_log_append_from_spec(const char *spec,
       return _nei_log_append_u64_decimal(out, out_cap, used, v);
     } else {
       char buf[32];
-      snprintf(buf, sizeof(buf), (conv_char == 'x') ? "%llx" : (conv_char == 'X') ? "%llX" : "%llo",
+      snprintf(buf,
+               sizeof(buf),
+               (conv_char == 'x')   ? "%llx"
+               : (conv_char == 'X') ? "%llX"
+                                    : "%llo",
                (unsigned long long)v);
       return _nei_log_append_cstr(out, out_cap, used, buf);
     }
@@ -639,12 +644,8 @@ static int _nei_log_build_runtime_conversion_spec(const char *scan,
   return 0;
 }
 
-static int _nei_log_format_simple_replay(const char *fmt,
-                                         const uint8_t **cursor,
-                                         const uint8_t *end,
-                                         char *out,
-                                         size_t out_cap,
-                                         size_t *used) {
+static int _nei_log_format_simple_replay(
+    const char *fmt, const uint8_t **cursor, const uint8_t *end, char *out, size_t out_cap, size_t *used) {
   const char *scan = fmt;
   if (fmt == NULL || cursor == NULL || *cursor == NULL || end == NULL || out == NULL || used == NULL) {
     return -1;
@@ -762,10 +763,12 @@ static const char *_nei_log_basename(const char *path) {
   return (slash > backslash) ? (slash + 1) : (backslash + 1);
 }
 
-static int _nei_log_append_location_block(
-    const nei_log_event_header_st *header, int short_path,
-    int location_without_function,
-    char *out, size_t out_cap, size_t *used) {
+static int _nei_log_append_location_block(const nei_log_event_header_st *header,
+                                          int short_path,
+                                          int location_without_function,
+                                          char *out,
+                                          size_t out_cap,
+                                          size_t *used) {
   if (header == NULL || out == NULL || used == NULL) {
     return -1;
   }
@@ -889,8 +892,7 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
         return -1;
       }
     }
-    if (log_location != 0 && log_location_after_message != 0
-        && (header->file[0] != '\0' || header->func[0] != '\0')) {
+    if (log_location != 0 && log_location_after_message != 0 && (header->file[0] != '\0' || header->func[0] != '\0')) {
       if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
         return -1;
       if (_nei_log_append_location_block(header, short_path, location_without_function, out, out_cap, &used) != 0)
@@ -909,7 +911,8 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
       if (fmt_len > 0U && _nei_log_append_nstr(out, out_cap, &used, fmt, fmt_len) != 0) {
         return -1;
       }
-      if (log_location != 0 && log_location_after_message != 0 && (header->file[0] != '\0' || header->func[0] != '\0')) {
+      if (log_location != 0 && log_location_after_message != 0
+          && (header->file[0] != '\0' || header->func[0] != '\0')) {
         if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
           return -1;
         if (_nei_log_append_location_block(header, short_path, location_without_function, out, out_cap, &used) != 0)
@@ -921,7 +924,8 @@ int _nei_log_format_event(const nei_log_event_header_st *header,
       if (_nei_log_format_simple_replay(fmt, &cursor, end, out, out_cap, &used) != 0) {
         return -1;
       }
-      if (log_location != 0 && log_location_after_message != 0 && (header->file[0] != '\0' || header->func[0] != '\0')) {
+      if (log_location != 0 && log_location_after_message != 0
+          && (header->file[0] != '\0' || header->func[0] != '\0')) {
         if (_nei_log_append_cstr(out, out_cap, &used, " - ") != 0)
           return -1;
         if (_nei_log_append_location_block(header, short_path, location_without_function, out, out_cap, &used) != 0)

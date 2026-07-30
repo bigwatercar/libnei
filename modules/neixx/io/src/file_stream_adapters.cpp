@@ -15,7 +15,7 @@
 namespace nei {
 template <>
 struct WeakPtrThreadSafe<FileInputStreamAdapter> : std::true_type {};
-}  // namespace nei
+} // namespace nei
 
 namespace nei {
 
@@ -23,18 +23,16 @@ namespace nei {
 // FileInputStreamAdapter implementation
 // ---------------------------------------------------------------------------
 
-FileInputStreamAdapter::FileInputStreamAdapter(AsyncFile* file,
-                                               std::uint64_t start_offset)
+FileInputStreamAdapter::FileInputStreamAdapter(AsyncFile *file, std::uint64_t start_offset)
     : FileInputStreamAdapter(file, ThreadTaskRunnerHandle::Get(), start_offset) {
 }
 
-FileInputStreamAdapter::FileInputStreamAdapter(
-    AsyncFile* file,
-    scoped_refptr<TaskRunner> target_task_runner,
-    std::uint64_t start_offset)
-    : file_(file),
-      position_(start_offset),
-      target_task_runner_(std::move(target_task_runner)) {
+FileInputStreamAdapter::FileInputStreamAdapter(AsyncFile *file,
+                                               scoped_refptr<TaskRunner> target_task_runner,
+                                               std::uint64_t start_offset)
+    : file_(file)
+    , position_(start_offset)
+    , target_task_runner_(std::move(target_task_runner)) {
   DCHECK(file_ != nullptr);
   DCHECK(target_task_runner_ != nullptr);
 }
@@ -46,23 +44,20 @@ FileInputStreamAdapter::~FileInputStreamAdapter() {
   weak_factory_.InvalidateWeakPtrs(FROM_HERE);
 }
 
-void FileInputStreamAdapter::ReadAsync(scoped_refptr<IOBuffer> buf,
-                                       std::size_t buf_len,
-                                       IOReadCallback callback) {
+void FileInputStreamAdapter::ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback) {
   auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
   if (!weak_this || !target_task_runner_) {
     return;
   }
 
   // Any-thread entrypoint: always marshal to target_task_runner_ first.
-  target_task_runner_->PostTask(
-      FROM_HERE,
-      [weak_this, buf = std::move(buf), buf_len, callback = std::move(callback)]() mutable {
-        if (!weak_this) {
-          return;
-        }
-        weak_this->ReadAsyncOnTarget(std::move(buf), buf_len, std::move(callback));
-      });
+  target_task_runner_->PostTask(FROM_HERE,
+                                [weak_this, buf = std::move(buf), buf_len, callback = std::move(callback)]() mutable {
+                                  if (!weak_this) {
+                                    return;
+                                  }
+                                  weak_this->ReadAsyncOnTarget(std::move(buf), buf_len, std::move(callback));
+                                });
 }
 
 void FileInputStreamAdapter::ReadAsyncOnTarget(scoped_refptr<IOBuffer> buf,
@@ -81,50 +76,51 @@ void FileInputStreamAdapter::ReadAsyncOnTarget(scoped_refptr<IOBuffer> buf,
   auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
   scoped_refptr<TaskRunner> target_runner = target_task_runner_;
 
-  file_->ReadAsync(
-      std::move(buf), buf_len, read_offset,
-      [weak_this, target_runner, user_callback = std::move(callback)](
-        bool success, std::size_t bytes_read, AsyncFile::Error error) mutable {
-        // This lambda runs on the backend thread (platform-specific I/O thread
-        // pool). Post the result back to the target sequence for safe state
-        // mutation and user callback delivery.
-        (void)error;  // error not used; propagate success flag instead.
-        auto deliver = [weak_this, success, bytes_read,
-                        user_callback = std::move(user_callback)]() mutable {
-          if (!weak_this) {
-            return;
-          }
+  file_->ReadAsync(std::move(buf),
+                   buf_len,
+                   read_offset,
+                   [weak_this, target_runner, user_callback = std::move(callback)](
+                       bool success, std::size_t bytes_read, AsyncFile::Error error) mutable {
+                     // This lambda runs on the backend thread (platform-specific I/O thread
+                     // pool). Post the result back to the target sequence for safe state
+                     // mutation and user callback delivery.
+                     (void)error; // error not used; propagate success flag instead.
+                     auto deliver =
+                         [weak_this, success, bytes_read, user_callback = std::move(user_callback)]() mutable {
+                           if (!weak_this) {
+                             return;
+                           }
 
-          if (weak_this->closed_) {
-            if (user_callback) {
-              user_callback(false, 0);
-            }
-            return;
-          }
+                           if (weak_this->closed_) {
+                             if (user_callback) {
+                               user_callback(false, 0);
+                             }
+                             return;
+                           }
 
-          bool result_success = success;
-          std::size_t result_bytes = bytes_read;
+                           bool result_success = success;
+                           std::size_t result_bytes = bytes_read;
 
-          // Advance read cursor only on successful completion. This executes on
-          // target sequence, so position_ is sequence-confined and race-free.
-          if (result_success && result_bytes > 0) {
-            weak_this->position_ += result_bytes;
-          } else {
-            result_success = false;
-            result_bytes = 0;
-          }
+                           // Advance read cursor only on successful completion. This executes on
+                           // target sequence, so position_ is sequence-confined and race-free.
+                           if (result_success && result_bytes > 0) {
+                             weak_this->position_ += result_bytes;
+                           } else {
+                             result_success = false;
+                             result_bytes = 0;
+                           }
 
-          if (user_callback) {
-            user_callback(result_success, result_bytes);
-          }
-        };
+                           if (user_callback) {
+                             user_callback(result_success, result_bytes);
+                           }
+                         };
 
-        if (target_runner) {
-          target_runner->PostTask(FROM_HERE, std::move(deliver));
-        } else {
-          deliver();
-        }
-      });
+                     if (target_runner) {
+                       target_runner->PostTask(FROM_HERE, std::move(deliver));
+                     } else {
+                       deliver();
+                     }
+                   });
 }
 
 void FileInputStreamAdapter::Close() {
@@ -154,18 +150,16 @@ void FileInputStreamAdapter::CloseOnTarget() {
 // FileOutputStreamAdapter implementation
 // ---------------------------------------------------------------------------
 
-FileOutputStreamAdapter::FileOutputStreamAdapter(AsyncFile* file,
-                                                 std::uint64_t start_offset)
+FileOutputStreamAdapter::FileOutputStreamAdapter(AsyncFile *file, std::uint64_t start_offset)
     : FileOutputStreamAdapter(file, ThreadTaskRunnerHandle::Get(), start_offset) {
 }
 
-FileOutputStreamAdapter::FileOutputStreamAdapter(
-    AsyncFile* file,
-    scoped_refptr<TaskRunner> target_task_runner,
-    std::uint64_t start_offset)
-    : file_(file),
-      position_(start_offset),
-      target_task_runner_(std::move(target_task_runner)) {
+FileOutputStreamAdapter::FileOutputStreamAdapter(AsyncFile *file,
+                                                 scoped_refptr<TaskRunner> target_task_runner,
+                                                 std::uint64_t start_offset)
+    : file_(file)
+    , position_(start_offset)
+    , target_task_runner_(std::move(target_task_runner)) {
   DCHECK(file_ != nullptr);
   DCHECK(target_task_runner_ != nullptr);
 }
@@ -187,11 +181,7 @@ void FileOutputStreamAdapter::WriteAsync(scoped_refptr<IOBuffer> buf,
 
   // Any-thread entrypoint: always marshal to target_task_runner_ first.
   target_task_runner_->PostTask(
-      FROM_HERE,
-      [weak_this,
-       buf = std::move(buf),
-       bytes_to_write,
-       callback = std::move(callback)]() mutable {
+      FROM_HERE, [weak_this, buf = std::move(buf), bytes_to_write, callback = std::move(callback)]() mutable {
         if (!weak_this) {
           return;
         }
@@ -233,38 +223,39 @@ void FileOutputStreamAdapter::WriteAsyncOnTarget(scoped_refptr<IOBuffer> buf,
   scoped_refptr<TaskRunner> target_runner = target_task_runner_;
 
   // Dispatch the physical I/O to the backend at the pre-reserved offset.
-  file_->WriteAsync(
-      std::move(buf), bytes_to_write, write_offset,
-      [weak_this, target_runner, user_callback = std::move(callback)](
-        bool success, std::size_t bytes_written, AsyncFile::Error error) mutable {
-        // This lambda runs on the backend thread (platform-specific I/O thread
-        // pool). Post the result back to the target sequence for user callback
-        // delivery.
-        (void)error;  // error not used; propagate success flag instead.
-        auto deliver = [weak_this, success, bytes_written,
-                        user_callback = std::move(user_callback)]() mutable {
-          if (!weak_this) {
-            return;
-          }
+  file_->WriteAsync(std::move(buf),
+                    bytes_to_write,
+                    write_offset,
+                    [weak_this, target_runner, user_callback = std::move(callback)](
+                        bool success, std::size_t bytes_written, AsyncFile::Error error) mutable {
+                      // This lambda runs on the backend thread (platform-specific I/O thread
+                      // pool). Post the result back to the target sequence for user callback
+                      // delivery.
+                      (void)error; // error not used; propagate success flag instead.
+                      auto deliver =
+                          [weak_this, success, bytes_written, user_callback = std::move(user_callback)]() mutable {
+                            if (!weak_this) {
+                              return;
+                            }
 
-          if (weak_this->closed_) {
-            if (user_callback) {
-              user_callback(false, 0);
-            }
-            return;
-          }
+                            if (weak_this->closed_) {
+                              if (user_callback) {
+                                user_callback(false, 0);
+                              }
+                              return;
+                            }
 
-          if (user_callback) {
-            user_callback(success, bytes_written);
-          }
-        };
+                            if (user_callback) {
+                              user_callback(success, bytes_written);
+                            }
+                          };
 
-        if (target_runner) {
-          target_runner->PostTask(FROM_HERE, std::move(deliver));
-        } else {
-          deliver();
-        }
-      });
+                      if (target_runner) {
+                        target_runner->PostTask(FROM_HERE, std::move(deliver));
+                      } else {
+                        deliver();
+                      }
+                    });
 }
 
 void FileOutputStreamAdapter::Close() {
@@ -290,4 +281,4 @@ void FileOutputStreamAdapter::CloseOnTarget() {
   }
 }
 
-}  // namespace nei
+} // namespace nei

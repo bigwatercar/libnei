@@ -22,44 +22,44 @@
 #define NEI_INTERNAL_CHECK_FAIL(kind, expr_text)                                                                       \
   do {                                                                                                                 \
     fprintf(stderr, "[FATAL:%s:%d] %s failed: (%s)\n", __FILE__, __LINE__, kind, expr_text);                           \
-    NEI_LOG_FATAL("%s failed: (%s)", kind, expr_text);                                                               \
+    NEI_LOG_FATAL("%s failed: (%s)", kind, expr_text);                                                                 \
     nei_log_flush();                                                                                                   \
     abort();                                                                                                           \
   } while (0)
 
 #define NEI_INTERNAL_CHECK_FAIL_MSG(kind, expr_text, msg)                                                              \
   do {                                                                                                                 \
-    fprintf(stderr, "[FATAL:%s:%d] %s failed: (%s)  --  %s\n", __FILE__, __LINE__, kind, expr_text, msg);                 \
+    fprintf(stderr, "[FATAL:%s:%d] %s failed: (%s)  --  %s\n", __FILE__, __LINE__, kind, expr_text, msg);              \
     NEI_LOG_FATAL("%s failed: (%s)  --  %s", kind, expr_text, msg);                                                    \
     nei_log_flush();                                                                                                   \
     abort();                                                                                                           \
   } while (0)
 
-#define CHECK(condition)                                                                                                \
+#define CHECK(condition)                                                                                               \
   do {                                                                                                                 \
     if (!(condition)) {                                                                                                \
-      NEI_INTERNAL_CHECK_FAIL("CHECK", #condition);                                                                  \
+      NEI_INTERNAL_CHECK_FAIL("CHECK", #condition);                                                                    \
     }                                                                                                                  \
   } while (0)
 
 #define CHECK_MSG(condition, msg)                                                                                      \
   do {                                                                                                                 \
     if (!(condition)) {                                                                                                \
-      NEI_INTERNAL_CHECK_FAIL_MSG("CHECK", #condition, msg);                                                         \
+      NEI_INTERNAL_CHECK_FAIL_MSG("CHECK", #condition, msg);                                                           \
     }                                                                                                                  \
   } while (0)
 
 #define CHECK_OP(kind, op, lhs, rhs)                                                                                   \
   do {                                                                                                                 \
-    if (!((lhs) op (rhs))) {                                                                                           \
-      NEI_INTERNAL_CHECK_FAIL(kind, #lhs " " #op " " #rhs);                                                        \
+    if (!((lhs)op(rhs))) {                                                                                             \
+      NEI_INTERNAL_CHECK_FAIL(kind, #lhs " " #op " " #rhs);                                                            \
     }                                                                                                                  \
   } while (0)
 
 #define CHECK_OP_MSG(kind, op, lhs, rhs, msg)                                                                          \
   do {                                                                                                                 \
-    if (!((lhs) op (rhs))) {                                                                                           \
-      NEI_INTERNAL_CHECK_FAIL_MSG(kind, #lhs " " #op " " #rhs, msg);                                               \
+    if (!((lhs)op(rhs))) {                                                                                             \
+      NEI_INTERNAL_CHECK_FAIL_MSG(kind, #lhs " " #op " " #rhs, msg);                                                   \
     }                                                                                                                  \
   } while (0)
 

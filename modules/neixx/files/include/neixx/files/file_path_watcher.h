@@ -39,18 +39,18 @@ namespace nei {
 //   - The callback is always invoked on that TaskRunner.
 // ---------------------------------------------------------------------------
 class NEI_API FilePathWatcher final {
- public:
+public:
   enum class ChangeType {
-    kCreated,   // A new file or subdirectory was created.
-    kDeleted,   // A file or subdirectory was deleted.
-    kModified,  // A file was modified (write, attributes, etc.).
-    kMoved,     // A file or directory was renamed (from or to).
+    kCreated,  // A new file or subdirectory was created.
+    kDeleted,  // A file or subdirectory was deleted.
+    kModified, // A file was modified (write, attributes, etc.).
+    kMoved,    // A file or directory was renamed (from or to).
   };
 
   // Callback signature: void(const std::string& relative_path, ChangeType type).
   // The callback may be invoked multiple times (once per detected change).
   // It is always invoked on the bound TaskRunner.
-  using Callback = RepeatingCallback<void(const std::string&, ChangeType)>;
+  using Callback = RepeatingCallback<void(const std::string &, ChangeType)>;
 
   // Constructs a watcher that dispatches callbacks on |task_runner|.
   // The task_runner must be backed by a MessagePumpForIO on platforms that
@@ -61,10 +61,10 @@ class NEI_API FilePathWatcher final {
 
   // Non-copyable, non-movable (internal PIMPL pointer stability required by
   // the pump watcher interfaces).
-  FilePathWatcher(const FilePathWatcher&) = delete;
-  FilePathWatcher& operator=(const FilePathWatcher&) = delete;
-  FilePathWatcher(FilePathWatcher&&) = delete;
-  FilePathWatcher& operator=(FilePathWatcher&&) = delete;
+  FilePathWatcher(const FilePathWatcher &) = delete;
+  FilePathWatcher &operator=(const FilePathWatcher &) = delete;
+  FilePathWatcher(FilePathWatcher &&) = delete;
+  FilePathWatcher &operator=(FilePathWatcher &&) = delete;
 
   // Begins watching |path| (UTF-8).  |recursive| controls whether
   // subdirectories are monitored.
@@ -76,19 +76,19 @@ class NEI_API FilePathWatcher final {
   // is detected, until Cancel() is called or the watcher is destroyed.
   // The callback is NOT moved-from after invocation — it persists for the
   // lifetime of the watch.
-  bool Watch(const std::string& path, bool recursive, Callback callback);
+  bool Watch(const std::string &path, bool recursive, Callback callback);
 
   // Stops watching.  Safe to call multiple times; if no watch is active this
   // is a no-op.  After Cancel() returns, no further callbacks will fire.
   void Cancel();
 
- private:
+private:
   class Impl;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_FILES_FILE_PATH_WATCHER_H_
+#endif // NEIXX_FILES_FILE_PATH_WATCHER_H_

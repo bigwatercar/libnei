@@ -13,13 +13,14 @@ namespace nei {
 
 // Test delegate that tracks callback invocations.
 class TrackingDelegate : public MessagePump::Delegate {
- public:
-  explicit TrackingDelegate(std::promise<void>* callbacks_observed = nullptr)
-      : do_work_calls_(0),
-        do_delayed_work_calls_(0),
-        do_idle_work_calls_(0),
-        should_quit_(false),
-        callbacks_observed_(callbacks_observed) {}
+public:
+  explicit TrackingDelegate(std::promise<void> *callbacks_observed = nullptr)
+      : do_work_calls_(0)
+      , do_delayed_work_calls_(0)
+      , do_idle_work_calls_(0)
+      , should_quit_(false)
+      , callbacks_observed_(callbacks_observed) {
+  }
 
   bool DoWork() override {
     do_work_calls_++;
@@ -32,7 +33,7 @@ class TrackingDelegate : public MessagePump::Delegate {
     return false;
   }
 
-  bool DoDelayedWork(NextWorkInfo* out) override {
+  bool DoDelayedWork(NextWorkInfo *out) override {
     do_delayed_work_calls_++;
     saw_do_delayed_work_.store(true, std::memory_order_relaxed);
     MaybeSignalCallbacksObserved();
@@ -51,17 +52,24 @@ class TrackingDelegate : public MessagePump::Delegate {
     should_quit_.store(quit, std::memory_order_release);
   }
 
-  int do_work_calls() const { return do_work_calls_; }
-  int do_delayed_work_calls() const { return do_delayed_work_calls_; }
-  int do_idle_work_calls() const { return do_idle_work_calls_; }
+  int do_work_calls() const {
+    return do_work_calls_;
+  }
 
- private:
+  int do_delayed_work_calls() const {
+    return do_delayed_work_calls_;
+  }
+
+  int do_idle_work_calls() const {
+    return do_idle_work_calls_;
+  }
+
+private:
   void MaybeSignalCallbacksObserved() {
     if (callbacks_observed_ == nullptr) {
       return;
     }
-    if (saw_do_work_.load(std::memory_order_relaxed)
-        && saw_do_delayed_work_.load(std::memory_order_relaxed)
+    if (saw_do_work_.load(std::memory_order_relaxed) && saw_do_delayed_work_.load(std::memory_order_relaxed)
         && !callbacks_reported_.exchange(true, std::memory_order_relaxed)) {
       callbacks_observed_->set_value();
     }
@@ -76,7 +84,7 @@ class TrackingDelegate : public MessagePump::Delegate {
   std::atomic<bool> saw_do_work_{false};
   std::atomic<bool> saw_do_delayed_work_{false};
   std::atomic<bool> callbacks_reported_{false};
-  std::promise<void>* callbacks_observed_;
+  std::promise<void> *callbacks_observed_;
 };
 
 // Basic test: create and destroy the pump.
@@ -93,12 +101,9 @@ TEST(MessagePumpDefaultTest, RunCallsDelegateCallbacks) {
   TrackingDelegate delegate(&callbacks_observed);
   auto pump = std::make_unique<MessagePumpDefault>();
 
-  std::thread pump_thread([&pump, &delegate]() {
-    pump->Run(&delegate);
-  });
+  std::thread pump_thread([&pump, &delegate]() { pump->Run(&delegate); });
 
-  EXPECT_EQ(callbacks_observed_future.wait_for(std::chrono::seconds(1)),
-            std::future_status::ready);
+  EXPECT_EQ(callbacks_observed_future.wait_for(std::chrono::seconds(1)), std::future_status::ready);
 
   delegate.set_should_quit(true);
   pump->Quit();
@@ -118,10 +123,12 @@ TEST(MessagePumpDefaultTest, ScheduleWorkWakesUp) {
 
   // Custom delegate that schedules work.
   class WorkSchedulingDelegate : public MessagePump::Delegate {
-   public:
-    explicit WorkSchedulingDelegate(MessagePumpDefault* pump,
-                                    std::atomic<bool>* executed)
-        : pump_(pump), executed_(executed), iteration_(0) {}
+  public:
+    explicit WorkSchedulingDelegate(MessagePumpDefault *pump, std::atomic<bool> *executed)
+        : pump_(pump)
+        , executed_(executed)
+        , iteration_(0) {
+    }
 
     bool DoWork() override {
       iteration_++;
@@ -137,23 +144,23 @@ TEST(MessagePumpDefaultTest, ScheduleWorkWakesUp) {
       return false;
     }
 
-    bool DoDelayedWork(NextWorkInfo* out) override {
+    bool DoDelayedWork(NextWorkInfo *out) override {
       out->next_run_time = NextWorkInfo::kNoScheduledRunTime;
       out->recent_now = TimeTicks::Now();
       return false;
     }
 
-    bool DoIdleWork() override { return false; }
+    bool DoIdleWork() override {
+      return false;
+    }
 
-   private:
-    MessagePumpDefault* pump_;
-    std::atomic<bool>* executed_;
+  private:
+    MessagePumpDefault *pump_;
+    std::atomic<bool> *executed_;
     int iteration_;
   } work_delegate(pump.get(), &work_executed);
 
-  std::thread pump_thread([&pump, &work_delegate]() {
-    pump->Run(&work_delegate);
-  });
+  std::thread pump_thread([&pump, &work_delegate]() { pump->Run(&work_delegate); });
 
   // Give pump time to execute work.
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -170,13 +177,18 @@ TEST(MessagePumpDefaultTest, ScheduleDelayedWorkDeadline) {
   TimeTicks deadline = TimeTicks::Now() + TimeDelta::FromMilliseconds(200);
 
   class DelayedWorkDelegate : public MessagePump::Delegate {
-   public:
-    explicit DelayedWorkDelegate(MessagePumpDefault* pump, TimeTicks deadline)
-        : pump_(pump), deadline_(deadline), iteration_(0) {}
+  public:
+    explicit DelayedWorkDelegate(MessagePumpDefault *pump, TimeTicks deadline)
+        : pump_(pump)
+        , deadline_(deadline)
+        , iteration_(0) {
+    }
 
-    bool DoWork() override { return false; }
+    bool DoWork() override {
+      return false;
+    }
 
-    bool DoDelayedWork(NextWorkInfo* out) override {
+    bool DoDelayedWork(NextWorkInfo *out) override {
       iteration_++;
       if (iteration_ == 1) {
         // First call: schedule delayed work.
@@ -188,19 +200,19 @@ TEST(MessagePumpDefaultTest, ScheduleDelayedWorkDeadline) {
       return false;
     }
 
-    bool DoIdleWork() override { return false; }
+    bool DoIdleWork() override {
+      return false;
+    }
 
-   private:
-    MessagePumpDefault* pump_;
+  private:
+    MessagePumpDefault *pump_;
     TimeTicks deadline_;
     int iteration_;
   } delayed_delegate(pump.get(), deadline);
 
   TimeTicks start_time = TimeTicks::Now();
 
-  std::thread pump_thread([&pump, &delayed_delegate]() {
-    pump->Run(&delayed_delegate);
-  });
+  std::thread pump_thread([&pump, &delayed_delegate]() { pump->Run(&delayed_delegate); });
 
   // Wait for delayed work deadline + some margin.
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -213,7 +225,7 @@ TEST(MessagePumpDefaultTest, ScheduleDelayedWorkDeadline) {
   // The pump should have waited at least until the deadline.
   // Allow 50ms tolerance for system scheduling variance.
   TimeDelta elapsed = end_time - start_time;
-  EXPECT_GE(elapsed.InMilliseconds(), 150);  // Deadline was 200ms, allow 50ms tolerance
+  EXPECT_GE(elapsed.InMilliseconds(), 150); // Deadline was 200ms, allow 50ms tolerance
 }
 
 // Quit() from an inner nested Run() must only exit the innermost frame.
@@ -225,9 +237,11 @@ TEST(MessagePumpDefaultTest, NestedRunQuitExitsOnlyInnermost) {
   auto outer_continued_future = outer_continued_promise.get_future();
 
   class InnerDelegate : public MessagePump::Delegate {
-   public:
-    InnerDelegate(MessagePumpDefault* pump, std::atomic<int>* inner_calls)
-        : pump_(pump), inner_calls_(inner_calls) {}
+  public:
+    InnerDelegate(MessagePumpDefault *pump, std::atomic<int> *inner_calls)
+        : pump_(pump)
+        , inner_calls_(inner_calls) {
+    }
 
     bool DoWork() override {
       inner_calls_->fetch_add(1);
@@ -235,29 +249,32 @@ TEST(MessagePumpDefaultTest, NestedRunQuitExitsOnlyInnermost) {
       return false;
     }
 
-    bool DoDelayedWork(NextWorkInfo* out) override {
+    bool DoDelayedWork(NextWorkInfo *out) override {
       out->next_run_time = NextWorkInfo::kNoScheduledRunTime;
       out->recent_now = TimeTicks::Now();
       return false;
     }
 
-    bool DoIdleWork() override { return false; }
+    bool DoIdleWork() override {
+      return false;
+    }
 
-   private:
-    MessagePumpDefault* pump_;
-    std::atomic<int>* inner_calls_;
+  private:
+    MessagePumpDefault *pump_;
+    std::atomic<int> *inner_calls_;
   };
 
   class OuterDelegate : public MessagePump::Delegate {
-   public:
-    OuterDelegate(MessagePumpDefault* pump,
-                  std::atomic<int>* outer_calls,
-                  std::atomic<int>* inner_calls,
-                  std::promise<void>* continued_promise)
-        : pump_(pump),
-          outer_calls_(outer_calls),
-          inner_calls_(inner_calls),
-          continued_promise_(continued_promise) {}
+  public:
+    OuterDelegate(MessagePumpDefault *pump,
+                  std::atomic<int> *outer_calls,
+                  std::atomic<int> *inner_calls,
+                  std::promise<void> *continued_promise)
+        : pump_(pump)
+        , outer_calls_(outer_calls)
+        , inner_calls_(inner_calls)
+        , continued_promise_(continued_promise) {
+    }
 
     bool DoWork() override {
       const int current = outer_calls_->fetch_add(1) + 1;
@@ -273,30 +290,28 @@ TEST(MessagePumpDefaultTest, NestedRunQuitExitsOnlyInnermost) {
       return false;
     }
 
-    bool DoDelayedWork(NextWorkInfo* out) override {
+    bool DoDelayedWork(NextWorkInfo *out) override {
       out->next_run_time = NextWorkInfo::kNoScheduledRunTime;
       out->recent_now = TimeTicks::Now();
       return false;
     }
 
-    bool DoIdleWork() override { return false; }
+    bool DoIdleWork() override {
+      return false;
+    }
 
-   private:
-    MessagePumpDefault* pump_;
-    std::atomic<int>* outer_calls_;
-    std::atomic<int>* inner_calls_;
-    std::promise<void>* continued_promise_;
-  } outer_delegate(pump.get(), &outer_work_calls, &inner_work_calls,
-                   &outer_continued_promise);
+  private:
+    MessagePumpDefault *pump_;
+    std::atomic<int> *outer_calls_;
+    std::atomic<int> *inner_calls_;
+    std::promise<void> *continued_promise_;
+  } outer_delegate(pump.get(), &outer_work_calls, &inner_work_calls, &outer_continued_promise);
 
-  std::thread pump_thread([&pump, &outer_delegate]() {
-    pump->Run(&outer_delegate);
-  });
+  std::thread pump_thread([&pump, &outer_delegate]() { pump->Run(&outer_delegate); });
 
   pump_thread.join();
 
-  EXPECT_EQ(outer_continued_future.wait_for(std::chrono::milliseconds(300)),
-            std::future_status::ready);
+  EXPECT_EQ(outer_continued_future.wait_for(std::chrono::milliseconds(300)), std::future_status::ready);
   EXPECT_EQ(inner_work_calls.load(), 1);
   EXPECT_GE(outer_work_calls.load(), 2);
 }
@@ -308,9 +323,11 @@ TEST(MessagePumpDefaultTest, NestedRunOuterDeadlinePreserved) {
   std::atomic<bool> outer_delayed_fired{false};
 
   class InnerDelegate : public MessagePump::Delegate {
-   public:
-    explicit InnerDelegate(MessagePumpDefault* pump)
-        : pump_(pump), done_(false) {}
+  public:
+    explicit InnerDelegate(MessagePumpDefault *pump)
+        : pump_(pump)
+        , done_(false) {
+    }
 
     bool DoWork() override {
       if (!done_) {
@@ -320,23 +337,28 @@ TEST(MessagePumpDefaultTest, NestedRunOuterDeadlinePreserved) {
       return false;
     }
 
-    bool DoDelayedWork(NextWorkInfo* out) override {
+    bool DoDelayedWork(NextWorkInfo *out) override {
       out->next_run_time = NextWorkInfo::kNoScheduledRunTime;
       out->recent_now = TimeTicks::Now();
       return false;
     }
 
-    bool DoIdleWork() override { return false; }
+    bool DoIdleWork() override {
+      return false;
+    }
 
-   private:
-    MessagePumpDefault* pump_;
+  private:
+    MessagePumpDefault *pump_;
     bool done_;
   };
 
   class OuterDelegate : public MessagePump::Delegate {
-   public:
-    OuterDelegate(MessagePumpDefault* pump, std::atomic<bool>* fired)
-        : pump_(pump), fired_(fired), iteration_(0) {}
+  public:
+    OuterDelegate(MessagePumpDefault *pump, std::atomic<bool> *fired)
+        : pump_(pump)
+        , fired_(fired)
+        , iteration_(0) {
+    }
 
     bool DoWork() override {
       ++iteration_;
@@ -349,7 +371,7 @@ TEST(MessagePumpDefaultTest, NestedRunOuterDeadlinePreserved) {
       return false;
     }
 
-    bool DoDelayedWork(NextWorkInfo* out) override {
+    bool DoDelayedWork(NextWorkInfo *out) override {
       fired_->store(true);
       out->next_run_time = NextWorkInfo::kNoScheduledRunTime;
       out->recent_now = TimeTicks::Now();
@@ -357,17 +379,17 @@ TEST(MessagePumpDefaultTest, NestedRunOuterDeadlinePreserved) {
       return false;
     }
 
-    bool DoIdleWork() override { return false; }
+    bool DoIdleWork() override {
+      return false;
+    }
 
-   private:
-    MessagePumpDefault* pump_;
-    std::atomic<bool>* fired_;
+  private:
+    MessagePumpDefault *pump_;
+    std::atomic<bool> *fired_;
     int iteration_;
   } outer_delegate(pump.get(), &outer_delayed_fired);
 
-  std::thread pump_thread([&pump, &outer_delegate]() {
-    pump->Run(&outer_delegate);
-  });
+  std::thread pump_thread([&pump, &outer_delegate]() { pump->Run(&outer_delegate); });
 
   // Safety timeout if delayed wake path regresses.
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -385,9 +407,11 @@ TEST(MessagePumpDefaultTest, ThreadAffinityProtection) {
   std::atomic<bool> pump_running(false);
 
   class ThreadAffinityDelegate : public MessagePump::Delegate {
-   public:
-    explicit ThreadAffinityDelegate(std::atomic<bool>* running)
-        : running_(running), iteration_(0) {}
+  public:
+    explicit ThreadAffinityDelegate(std::atomic<bool> *running)
+        : running_(running)
+        , iteration_(0) {
+    }
 
     bool DoWork() override {
       iteration_++;
@@ -397,22 +421,22 @@ TEST(MessagePumpDefaultTest, ThreadAffinityProtection) {
       return false;
     }
 
-    bool DoDelayedWork(NextWorkInfo* out) override {
+    bool DoDelayedWork(NextWorkInfo *out) override {
       out->next_run_time = NextWorkInfo::kNoScheduledRunTime;
       out->recent_now = TimeTicks::Now();
       return false;
     }
 
-    bool DoIdleWork() override { return false; }
+    bool DoIdleWork() override {
+      return false;
+    }
 
-   private:
-    std::atomic<bool>* running_;
+  private:
+    std::atomic<bool> *running_;
     int iteration_;
   } affinity_delegate(&pump_running);
 
-  std::thread pump_thread([&pump, &affinity_delegate]() {
-    pump->Run(&affinity_delegate);
-  });
+  std::thread pump_thread([&pump, &affinity_delegate]() { pump->Run(&affinity_delegate); });
 
   // Wait for pump to start running.
   while (!pump_running.load()) {
@@ -438,16 +462,17 @@ TEST(MessagePumpDefaultTest, SubMillisecondDelayDoeNotBusyLoop) {
   TimeTicks deadline;
 
   class SubMillisecondDelegate : public MessagePump::Delegate {
-   public:
-    explicit SubMillisecondDelegate(MessagePumpDefault* pump,
-                                     std::atomic<int>* delayed_count,
-                                     std::atomic<bool>* executed,
-                                     TimeTicks* out_deadline)
-        : pump_(pump),
-          delayed_count_(delayed_count),
-          executed_(executed),
-          out_deadline_(out_deadline),
-          iteration_(0) {}
+  public:
+    explicit SubMillisecondDelegate(MessagePumpDefault *pump,
+                                    std::atomic<int> *delayed_count,
+                                    std::atomic<bool> *executed,
+                                    TimeTicks *out_deadline)
+        : pump_(pump)
+        , delayed_count_(delayed_count)
+        , executed_(executed)
+        , out_deadline_(out_deadline)
+        , iteration_(0) {
+    }
 
     bool DoWork() override {
       iteration_++;
@@ -463,7 +488,7 @@ TEST(MessagePumpDefaultTest, SubMillisecondDelayDoeNotBusyLoop) {
       return false;
     }
 
-    bool DoDelayedWork(NextWorkInfo* out) override {
+    bool DoDelayedWork(NextWorkInfo *out) override {
       TimeTicks now = TimeTicks::Now();
       delayed_count_->fetch_add(1);
 
@@ -478,19 +503,19 @@ TEST(MessagePumpDefaultTest, SubMillisecondDelayDoeNotBusyLoop) {
       return false;
     }
 
-    bool DoIdleWork() override { return false; }
+    bool DoIdleWork() override {
+      return false;
+    }
 
-   private:
-    MessagePumpDefault* pump_;
-    std::atomic<int>* delayed_count_;
-    std::atomic<bool>* executed_;
-    TimeTicks* out_deadline_;
+  private:
+    MessagePumpDefault *pump_;
+    std::atomic<int> *delayed_count_;
+    std::atomic<bool> *executed_;
+    TimeTicks *out_deadline_;
     int iteration_;
   } sub_ms_delegate(pump.get(), &do_delayed_work_count, &delayed_work_executed, &deadline);
 
-  std::thread pump_thread([&pump, &sub_ms_delegate]() {
-    pump->Run(&sub_ms_delegate);
-  });
+  std::thread pump_thread([&pump, &sub_ms_delegate]() { pump->Run(&sub_ms_delegate); });
 
   // Safety timeout: if the pump busy-loops on the 500µs wait and DoDelayedWork
   // never fires, quit after 2 seconds.
@@ -506,8 +531,7 @@ TEST(MessagePumpDefaultTest, SubMillisecondDelayDoeNotBusyLoop) {
       << "Sub-millisecond deadline was not reached; possible busy-loop regression";
 
   // DoDelayedWork should have been called (not looping forever at 100% CPU).
-  EXPECT_GT(do_delayed_work_count.load(), 0)
-      << "DoDelayedWork was never called; possible infinite busy-loop";
+  EXPECT_GT(do_delayed_work_count.load(), 0) << "DoDelayedWork was never called; possible infinite busy-loop";
 }
 
-}  // namespace nei
+} // namespace nei

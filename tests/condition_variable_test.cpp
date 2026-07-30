@@ -49,8 +49,7 @@ TEST(ConditionVariableTest, SignalWakesSingleWaiter) {
   // Poll woke_count with a deadline instead of a fixed sleep — more
   // resilient under CI load where thread scheduling may lag.
   auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-  while (woke_count.load(std::memory_order_acquire) != 1 &&
-         std::chrono::steady_clock::now() < deadline) {
+  while (woke_count.load(std::memory_order_acquire) != 1 && std::chrono::steady_clock::now() < deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   EXPECT_EQ(woke_count.load(std::memory_order_acquire), 1);
@@ -120,8 +119,7 @@ TEST(ConditionVariableTest, TimedWaitReturnsAfterTimeoutWithoutSignal) {
     nei::AutoLock auto_lock(lock);
     cv.TimedWait(std::chrono::milliseconds(120));
   }
-  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - start);
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
 
   EXPECT_GE(elapsed.count(), 40);
 }

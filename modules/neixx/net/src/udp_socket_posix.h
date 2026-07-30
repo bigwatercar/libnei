@@ -43,56 +43,42 @@ namespace nei::net {
 //   4. StopWatching on both controllers, close(fd).
 //   5. ReleaseSelfHoldIfNeeded → physical destruction.
 //
-class UDPSocket::Impl final
-    : public RefCountedThreadSafe<Impl>,
-      public MessagePumpForIO::Watcher {
- public:
+class UDPSocket::Impl final : public RefCountedThreadSafe<Impl>, public MessagePumpForIO::Watcher {
+public:
   Impl();
   ~Impl();
 
-  bool Bind(const IPEndPoint& local_addr,
-            scoped_refptr<TaskRunner> io_runner);
-  void SendTo(scoped_refptr<IOBuffer> buf,
-              std::size_t buf_len,
-              const IPEndPoint& dest,
-              UDPSocket::SendToCallback callback);
-  void RecvFrom(scoped_refptr<IOBuffer> buf,
-                std::size_t buf_len,
-                UDPSocket::RecvFromCallback callback);
+  bool Bind(const IPEndPoint &local_addr, scoped_refptr<TaskRunner> io_runner);
+  void
+  SendTo(scoped_refptr<IOBuffer> buf, std::size_t buf_len, const IPEndPoint &dest, UDPSocket::SendToCallback callback);
+  void RecvFrom(scoped_refptr<IOBuffer> buf, std::size_t buf_len, UDPSocket::RecvFromCallback callback);
   void Close();
   bool SetBroadcast(bool active);
-  bool JoinGroup(const IPAddress& group_address);
-  bool LeaveGroup(const IPAddress& group_address);
-  bool GetLocalAddress(IPEndPoint* out) const;
+  bool JoinGroup(const IPAddress &group_address);
+  bool LeaveGroup(const IPAddress &group_address);
+  bool GetLocalAddress(IPEndPoint *out) const;
   bool SetSendBufferSize(int32_t size);
   bool SetReceiveBufferSize(int32_t size);
   void Orphan();
 
- private:
+private:
   // ---- Helpers ---------------------------------------------------------
-  bool DoBind(const IPEndPoint& local_addr);
+  bool DoBind(const IPEndPoint &local_addr);
   void DoSendTo(scoped_refptr<IOBuffer> buf,
                 std::size_t buf_len,
-                const IPEndPoint& dest,
+                const IPEndPoint &dest,
                 UDPSocket::SendToCallback callback);
-  void DoRecvFrom(scoped_refptr<IOBuffer> buf,
-                  std::size_t buf_len,
-                  UDPSocket::RecvFromCallback callback);
+  void DoRecvFrom(scoped_refptr<IOBuffer> buf, std::size_t buf_len, UDPSocket::RecvFromCallback callback);
   void DrainSendQueue();
   void DrainRecvQueue();
   void DoCloseCleanup();
   void DoOrphanCleanup();
   void ReleaseSelfHoldIfNeeded();
-  bool EndPointToSockAddr(const IPEndPoint& ep,
-                          ::sockaddr_storage* out, ::socklen_t* out_len);
-  IPEndPoint SockAddrToIPEndPoint(const struct ::sockaddr_storage& sa,
-                                  ::socklen_t sa_len) const;
+  bool EndPointToSockAddr(const IPEndPoint &ep, ::sockaddr_storage *out, ::socklen_t *out_len);
+  IPEndPoint SockAddrToIPEndPoint(const struct ::sockaddr_storage &sa, ::socklen_t sa_len) const;
 
-  void PostSendToResult(UDPSocket::SendToCallback cb,
-                        bool success, int bytes);
-  void PostRecvFromResult(UDPSocket::RecvFromCallback cb,
-                          bool success, int bytes,
-                          const IPEndPoint& peer);
+  void PostSendToResult(UDPSocket::SendToCallback cb, bool success, int bytes);
+  void PostRecvFromResult(UDPSocket::RecvFromCallback cb, bool success, int bytes, const IPEndPoint &peer);
 
   // ---- Watcher ---------------------------------------------------------
   void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override;
@@ -133,7 +119,7 @@ class UDPSocket::Impl final
   WeakPtrFactory<Impl> weak_factory_;
 };
 
-}  // namespace nei::net
+} // namespace nei::net
 
-#endif  // !_WIN32
-#endif  // NEIXX_NET_UDP_SOCKET_POSIX_H_
+#endif // !_WIN32
+#endif // NEIXX_NET_UDP_SOCKET_POSIX_H_

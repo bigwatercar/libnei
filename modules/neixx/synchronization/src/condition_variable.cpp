@@ -36,11 +36,12 @@ public:
 
   void Wait() {
 #if defined(_WIN32)
-    if (SleepConditionVariableCS(&condition_variable_, static_cast<CRITICAL_SECTION*>(user_lock_->GetImpl()), INFINITE) == 0) {
+    if (SleepConditionVariableCS(&condition_variable_, static_cast<CRITICAL_SECTION *>(user_lock_->GetImpl()), INFINITE)
+        == 0) {
       DCHECK(false);
     }
 #else
-    const int rv = pthread_cond_wait(&condition_variable_, static_cast<pthread_mutex_t*>(user_lock_->GetImpl()));
+    const int rv = pthread_cond_wait(&condition_variable_, static_cast<pthread_mutex_t *>(user_lock_->GetImpl()));
     DCHECK_EQ(rv, 0);
 #endif
   }
@@ -48,7 +49,8 @@ public:
   void TimedWait(std::chrono::milliseconds timeout) {
 #if defined(_WIN32)
     const DWORD timeout_ms = timeout.count() <= 0 ? 0 : static_cast<DWORD>(timeout.count());
-    (void)SleepConditionVariableCS(&condition_variable_, static_cast<CRITICAL_SECTION*>(user_lock_->GetImpl()), timeout_ms);
+    (void)SleepConditionVariableCS(
+        &condition_variable_, static_cast<CRITICAL_SECTION *>(user_lock_->GetImpl()), timeout_ms);
 #else
     using namespace std::chrono;
     const system_clock::time_point deadline = system_clock::now() + timeout;
@@ -59,7 +61,8 @@ public:
     ts.tv_sec = static_cast<time_t>(secs.time_since_epoch().count());
     ts.tv_nsec = static_cast<long>(nanos);
 
-    const int rv = pthread_cond_timedwait(&condition_variable_, static_cast<pthread_mutex_t*>(user_lock_->GetImpl()), &ts);
+    const int rv =
+        pthread_cond_timedwait(&condition_variable_, static_cast<pthread_mutex_t *>(user_lock_->GetImpl()), &ts);
     DCHECK(rv == 0 || rv == ETIMEDOUT);
 #endif
   }

@@ -16,7 +16,7 @@ struct mbedtls_ssl_config;
 // The Impl destructor is defined in ssl_context.cpp where the type is complete.
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable:4251)
+#pragma warning(disable : 4251)
 #endif
 
 namespace nei::net {
@@ -25,13 +25,13 @@ namespace nei::net {
 // PeerVerify — controls peer certificate verification strictness
 // =============================================================================
 enum class PeerVerify {
-  kNone,       // No peer certificate verification.
-  kOptional,   // Verify the certificate chain but allow the handshake to
-               // continue even if verification fails.  Useful for self-signed
-               // certificates in testing or internal networks.
-  kRequired,   // Require a valid certificate; handshake fails if the peer
-               // certificate cannot be verified.  Requires a CA chain
-               // (SetCAChain) and, for TLS 1.3, a hostname (SetHostname).
+  kNone,     // No peer certificate verification.
+  kOptional, // Verify the certificate chain but allow the handshake to
+             // continue even if verification fails.  Useful for self-signed
+             // certificates in testing or internal networks.
+  kRequired, // Require a valid certificate; handshake fails if the peer
+             // certificate cannot be verified.  Requires a CA chain
+             // (SetCAChain) and, for TLS 1.3, a hostname (SetHostname).
 };
 
 // =============================================================================
@@ -57,17 +57,17 @@ enum class PeerVerify {
 // mbedtls_ssl_config may be shared read-only across connections.
 //
 class NEI_API SSLContext {
- public:
+public:
   enum class Mode {
-    Server,  // Authenticates with certificate + private key.
-    Client,  // Verifies server certificate (requires CA chain).
+    Server, // Authenticates with certificate + private key.
+    Client, // Verifies server certificate (requires CA chain).
   };
 
   explicit SSLContext(Mode mode);
   ~SSLContext();
 
-  SSLContext(const SSLContext&) = delete;
-  SSLContext& operator=(const SSLContext&) = delete;
+  SSLContext(const SSLContext &) = delete;
+  SSLContext &operator=(const SSLContext &) = delete;
 
   // ---------------------------------------------------------------------------
   // Certificate & key management
@@ -75,13 +75,12 @@ class NEI_API SSLContext {
 
   // Loads a PEM-encoded X.509 certificate chain and private key.
   // Required for Mode::Server, optional for Mode::Client (mutual TLS).
-  bool SetCertificate(const std::string& cert_pem,
-                      const std::string& key_pem);
+  bool SetCertificate(const std::string &cert_pem, const std::string &key_pem);
 
   // Loads a PEM-encoded CA certificate (or chain) for verifying the
   // peer's certificate.  Required for Mode::Client (to verify the
   // server), optional for Mode::Server (mutual TLS client auth).
-  bool SetCAChain(const std::string& ca_pem);
+  bool SetCAChain(const std::string &ca_pem);
 
   // ---------------------------------------------------------------------------
   // Peer verification
@@ -94,7 +93,7 @@ class NEI_API SSLContext {
   // Sets the expected hostname for the peer's certificate (SNI + hostname
   // verification).  Required when PeerVerify::kRequired is used with
   // TLS 1.3.  Ignored for Mode::Server.
-  void SetHostname(const std::string& hostname);
+  void SetHostname(const std::string &hostname);
 
   // ---------------------------------------------------------------------------
   // ALPN (Application-Layer Protocol Negotiation)
@@ -104,23 +103,23 @@ class NEI_API SSLContext {
   // Each string must be a single protocol ID (e.g. "h2", "http/1.1").
   // The negotiated protocol is available post-handshake via the
   // TLSClientSocket.
-  void SetAlpnProtocols(const std::vector<std::string>& protocols);
+  void SetAlpnProtocols(const std::vector<std::string> &protocols);
 
   // ---------------------------------------------------------------------------
   // Internal accessors — for TLSClientSocket / TLSServerSocket Impl
   // ---------------------------------------------------------------------------
-  mbedtls_ssl_config* config();
-  const std::string& hostname() const;
+  mbedtls_ssl_config *config();
+  const std::string &hostname() const;
 
- private:
+private:
   class Impl;
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace nei::net
+} // namespace nei::net
 
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
 
-#endif  // NEIXX_NET_SSL_CONTEXT_H_
+#endif // NEIXX_NET_SSL_CONTEXT_H_

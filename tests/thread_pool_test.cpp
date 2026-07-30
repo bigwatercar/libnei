@@ -33,8 +33,7 @@ TEST(ThreadPoolTest, SequencedTaskRunnerSerializesExecution) {
     runner->PostTask(FROM_HERE, [&running, &max_running, &finished, &done]() {
       const int now_running = running.fetch_add(1) + 1;
       int snapshot = max_running.load();
-      while (now_running > snapshot &&
-             !max_running.compare_exchange_weak(snapshot, now_running)) {
+      while (now_running > snapshot && !max_running.compare_exchange_weak(snapshot, now_running)) {
       }
 
       PlatformThread::Sleep(TimeDelta::FromMilliseconds(5));
@@ -58,9 +57,7 @@ TEST(ThreadPoolTest, PostTaskWakesSleepingWorker) {
   ASSERT_TRUE(runner);
 
   WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-  runner->PostTask(FROM_HERE, [&done]() {
-    done.Signal();
-  });
+  runner->PostTask(FROM_HERE, [&done]() { done.Signal(); });
 
   ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
   pool.Shutdown();
@@ -98,18 +95,18 @@ TEST(ThreadPoolTest, DelayedTaskRunsWithoutImmediateKick) {
 
   WaitableEvent delayed_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> ran{false};
-  runner->PostDelayedTask(FROM_HERE,
-                          [&ran, &delayed_done]() {
-                            ran.store(true);
-                            delayed_done.Signal();
-                          },
-                          TimeDelta::FromMilliseconds(120));
+  runner->PostDelayedTask(
+      FROM_HERE,
+      [&ran, &delayed_done]() {
+        ran.store(true);
+        delayed_done.Signal();
+      },
+      TimeDelta::FromMilliseconds(120));
 
   ASSERT_TRUE(delayed_done.TimedWait(std::chrono::milliseconds(1500)));
   EXPECT_TRUE(ran.load());
 
-  const auto elapsed =
-      std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - start).count();
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - start).count();
   EXPECT_GE(elapsed, 80);
 
   pool.Shutdown();
@@ -134,8 +131,7 @@ TEST(ThreadPoolTest, EarlierDelayedTaskPreemptsTimerWait) {
   runner->PostDelayedTask(
       FROM_HERE,
       [&early_done, &early_elapsed_ms, &start]() {
-        early_elapsed_ms.store(
-            std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - start).count());
+        early_elapsed_ms.store(std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - start).count());
         early_done.Signal();
       },
       TimeDelta::FromMilliseconds(120));
@@ -162,23 +158,23 @@ TEST(ThreadPoolTest, DelayedPromotionRaceWithWorkerReenqueueDoesNotLoseTasks) {
   std::atomic<int> completed{0};
 
   for (int i = 0; i < kRounds; ++i) {
-    runner->PostTask(FROM_HERE,
-                     [&immediate_done, &completed, &all_done]() {
-                       PlatformThread::Sleep(TimeDelta::FromMilliseconds(2));
-                       immediate_done.fetch_add(1);
-                       if (completed.fetch_add(1) + 1 == kTotalTasks) {
-                         all_done.Signal();
-                       }
-                     });
+    runner->PostTask(FROM_HERE, [&immediate_done, &completed, &all_done]() {
+      PlatformThread::Sleep(TimeDelta::FromMilliseconds(2));
+      immediate_done.fetch_add(1);
+      if (completed.fetch_add(1) + 1 == kTotalTasks) {
+        all_done.Signal();
+      }
+    });
 
-    runner->PostDelayedTask(FROM_HERE,
-                            [&delayed_done, &completed, &all_done]() {
-                              delayed_done.fetch_add(1);
-                              if (completed.fetch_add(1) + 1 == kTotalTasks) {
-                                all_done.Signal();
-                              }
-                            },
-                            TimeDelta::FromMilliseconds(1));
+    runner->PostDelayedTask(
+        FROM_HERE,
+        [&delayed_done, &completed, &all_done]() {
+          delayed_done.fetch_add(1);
+          if (completed.fetch_add(1) + 1 == kTotalTasks) {
+            all_done.Signal();
+          }
+        },
+        TimeDelta::FromMilliseconds(1));
   }
 
   ASSERT_TRUE(all_done.TimedWait(std::chrono::milliseconds(8000)));
@@ -216,17 +212,16 @@ TEST(ThreadPoolTest, MultiRunnerMixedDelayedTasksAllComplete) {
     for (int i = 0; i < kRoundsPerRunner; ++i) {
       const int delay_ms = (i % 4 == 0) ? 1 : ((i % 4 == 1) ? 3 : ((i % 4 == 2) ? 6 : 10));
 
-      runner->PostTask(FROM_HERE,
-                       [runner_idx, i, &completed, &immediate_done, &per_runner_done, &all_done]() {
-                         if ((i % 5) == 0) {
-                           PlatformThread::Sleep(TimeDelta::FromMilliseconds(1));
-                         }
-                         immediate_done.fetch_add(1);
-                         per_runner_done[runner_idx].fetch_add(1);
-                         if (completed.fetch_add(1) + 1 == kTotalTasks) {
-                           all_done.Signal();
-                         }
-                       });
+      runner->PostTask(FROM_HERE, [runner_idx, i, &completed, &immediate_done, &per_runner_done, &all_done]() {
+        if ((i % 5) == 0) {
+          PlatformThread::Sleep(TimeDelta::FromMilliseconds(1));
+        }
+        immediate_done.fetch_add(1);
+        per_runner_done[runner_idx].fetch_add(1);
+        if (completed.fetch_add(1) + 1 == kTotalTasks) {
+          all_done.Signal();
+        }
+      });
 
       runner->PostDelayedTask(
           FROM_HERE,
@@ -261,11 +256,7 @@ TEST(ThreadPoolTest, TracingCapturesQueueingDelayAndExecutionCounts) {
 
   WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
 
-  runner->PostDelayedTask(FROM_HERE,
-                          [&done]() {
-                            done.Signal();
-                          },
-                          TimeDelta::FromMilliseconds(80));
+  runner->PostDelayedTask(FROM_HERE, [&done]() { done.Signal(); }, TimeDelta::FromMilliseconds(80));
 
   ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(3000)));
 
@@ -334,10 +325,8 @@ TEST(ThreadPoolTest, BlockShutdownTaskPhysicallyBlocksShutdownUntilFinished) {
   std::atomic<bool> task_finished{false};
   std::atomic<bool> shutdown_returned{false};
 
-  ASSERT_TRUE(runner->PostTaskWithTraits(
-      FROM_HERE,
-      block_shutdown_traits,
-      [&task_started, &task_can_finish, &task_finished]() {
+  ASSERT_TRUE(
+      runner->PostTaskWithTraits(FROM_HERE, block_shutdown_traits, [&task_started, &task_can_finish, &task_finished]() {
         task_started.Signal();
         task_can_finish.Wait();
         task_finished.store(true, std::memory_order_relaxed);
@@ -382,9 +371,7 @@ TEST(ThreadPoolTest, ShutdownDropsQueuedNonBlockingTasksButKeepsBlockShutdownTas
   std::atomic<int> continue_executed{0};
 
   ASSERT_TRUE(runner->PostTaskWithTraits(
-      FROM_HERE,
-      block_shutdown_traits,
-      [&block_task_started, &block_task_can_finish, &block_executed]() {
+      FROM_HERE, block_shutdown_traits, [&block_task_started, &block_task_can_finish, &block_executed]() {
         block_executed.fetch_add(1, std::memory_order_relaxed);
         block_task_started.Signal();
         block_task_can_finish.Wait();
@@ -392,12 +379,9 @@ TEST(ThreadPoolTest, ShutdownDropsQueuedNonBlockingTasksButKeepsBlockShutdownTas
 
   constexpr int kQueuedContinuableTasks = 6;
   for (int i = 0; i < kQueuedContinuableTasks; ++i) {
-    ASSERT_TRUE(runner->PostTaskWithTraits(
-        FROM_HERE,
-        continue_traits,
-        [&continue_executed]() {
-          continue_executed.fetch_add(1, std::memory_order_relaxed);
-        }));
+    ASSERT_TRUE(runner->PostTaskWithTraits(FROM_HERE, continue_traits, [&continue_executed]() {
+      continue_executed.fetch_add(1, std::memory_order_relaxed);
+    }));
   }
 
   std::atomic<bool> shutdown_returned{false};
@@ -426,7 +410,7 @@ TEST(ThreadPoolTest, TaskObserverReceivesCallbacksWithPostedFrom) {
     std::atomic<int> completed{0};
     std::atomic<bool> had_posted_from{false};
 
-    void OnTaskStarted(const ObservedTask& task, TimeDelta) override {
+    void OnTaskStarted(const ObservedTask &task, TimeDelta) override {
       started.fetch_add(1, std::memory_order_relaxed);
       if (!task.posted_from.is_null()) {
         had_posted_from.store(true, std::memory_order_relaxed);
@@ -434,7 +418,8 @@ TEST(ThreadPoolTest, TaskObserverReceivesCallbacksWithPostedFrom) {
         (void)loc;
       }
     }
-    void OnTaskCompleted(const ObservedTask&, TimeDelta) override {
+
+    void OnTaskCompleted(const ObservedTask &, TimeDelta) override {
       completed.fetch_add(1, std::memory_order_relaxed);
     }
   };
@@ -468,8 +453,8 @@ TEST(ThreadPoolTest, LocationToStringIsUnknownForDefault) {
   EXPECT_EQ(Location{}.ToString(), "unknown");
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei
 
 // ============================================================================
 // ThreadPoolInstance (global singleton) tests
@@ -482,11 +467,12 @@ namespace {
 // in the instance suite. Uses a GTest environment so we don't pollute the
 // regular ThreadPool tests.
 class ThreadPoolInstanceTest : public ::testing::Test {
- protected:
+protected:
   void SetUp() override {
     ThreadPoolInstance::ResetForTesting();
     ThreadPoolInstance::CreateAndStartWithDefaultParams();
   }
+
   void TearDown() override {
     ThreadPoolInstance::ResetForTesting();
   }
@@ -515,8 +501,7 @@ TEST(ThreadPoolTest, MayBlockTasksAllCompleteWithCompensation) {
   // compensation workers.
   ThreadPool pool({2});
   const TaskTraits may_block_traits(MayBlock());
-  scoped_refptr<TaskRunner> runner =
-      pool.CreateSequencedTaskRunner(may_block_traits);
+  scoped_refptr<TaskRunner> runner = pool.CreateSequencedTaskRunner(may_block_traits);
   ASSERT_TRUE(runner);
 
   constexpr int kTaskCount = 6;
@@ -659,8 +644,7 @@ TEST(ThreadPoolTest, ParallelRunnerAllowsParallelExecution) {
     runner->PostTask(FROM_HERE, [&running, &max_running, &completed, &done]() {
       const int now_running = running.fetch_add(1) + 1;
       int snapshot = max_running.load();
-      while (now_running > snapshot &&
-             !max_running.compare_exchange_weak(snapshot, now_running)) {
+      while (now_running > snapshot && !max_running.compare_exchange_weak(snapshot, now_running)) {
       }
 
       // Sleep briefly to increase the chance of overlapping with other tasks.
@@ -700,5 +684,5 @@ TEST(ThreadPoolTest, FlushForTestingDrainsAllQueuedWork) {
   pool.Shutdown();
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

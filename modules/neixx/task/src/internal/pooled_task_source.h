@@ -20,37 +20,37 @@ namespace internal {
 // Global ready source used by ThreadPool workers. The source guarantees that a
 // TaskQueue is handed out to at most one worker at a time.
 class PooledTaskSource final {
- public:
+public:
   PooledTaskSource();
   ~PooledTaskSource();
 
-  PooledTaskSource(const PooledTaskSource&) = delete;
-  PooledTaskSource& operator=(const PooledTaskSource&) = delete;
-  PooledTaskSource(PooledTaskSource&&) = delete;
-  PooledTaskSource& operator=(PooledTaskSource&&) = delete;
+  PooledTaskSource(const PooledTaskSource &) = delete;
+  PooledTaskSource &operator=(const PooledTaskSource &) = delete;
+  PooledTaskSource(PooledTaskSource &&) = delete;
+  PooledTaskSource &operator=(PooledTaskSource &&) = delete;
 
   /// Blocks until a queue is available or Shutdown() is called.
-  TaskQueue* GetNextTaskQueue();
+  TaskQueue *GetNextTaskQueue();
 
   /// Blocks until a queue is available, Shutdown() is called, or |timeout|
   /// elapses.  On timeout, sets |timed_out| = true and returns nullptr.
   /// |timeout| <= 0 behaves identically to GetNextTaskQueue() (no timeout).
-  TaskQueue* GetNextTaskQueueTimed(TimeDelta timeout, bool& timed_out);
+  TaskQueue *GetNextTaskQueueTimed(TimeDelta timeout, bool &timed_out);
 
   // Registers a queue into internal state table.
-  void RegisterTaskQueue(TaskQueue* queue);
+  void RegisterTaskQueue(TaskQueue *queue);
 
   // Re-enqueues queue into the global ready heap. Returns true if the queue was
   // actually inserted into heap in this call.
-  bool ReEnqueueTaskQueue(TaskQueue* queue);
+  bool ReEnqueueTaskQueue(TaskQueue *queue);
 
   // Atomically (w.r.t PooledTaskSource state) promotes ready delayed tasks and
   // attempts to re-enqueue queue into ready heap.
-  bool PromoteAndReEnqueueTaskQueue(TaskQueue* queue, const TimeTicks& now);
+  bool PromoteAndReEnqueueTaskQueue(TaskQueue *queue, const TimeTicks &now);
 
   // Marks queue execution complete. If new work arrived while queue was in
   // flight, queue is pushed back automatically.
-  void OnTaskQueueProcessed(TaskQueue* queue);
+  void OnTaskQueueProcessed(TaskQueue *queue);
 
   void Shutdown();
 
@@ -67,7 +67,7 @@ class PooledTaskSource final {
   // negative around shutdown.
   std::int64_t GetTotalTaskCount() const;
 
- private:
+private:
   struct QueueState {
     bool queued = false;
     bool in_flight = false;
@@ -75,13 +75,13 @@ class PooledTaskSource final {
   };
 
   struct QueueEntry {
-    TaskQueue* queue = nullptr;
+    TaskQueue *queue = nullptr;
     TaskPriority priority = TaskPriority::USER_VISIBLE;
     std::uint64_t order = 0;
   };
 
   struct QueueEntryLess {
-    bool operator()(const QueueEntry& lhs, const QueueEntry& rhs) const {
+    bool operator()(const QueueEntry &lhs, const QueueEntry &rhs) const {
       if (lhs.priority != rhs.priority) {
         return static_cast<int>(lhs.priority) < static_cast<int>(rhs.priority);
       }
@@ -90,20 +90,20 @@ class PooledTaskSource final {
     }
   };
 
-  bool EnqueueLocked(TaskQueue* queue, std::size_t shard_index);
+  bool EnqueueLocked(TaskQueue *queue, std::size_t shard_index);
 
   // Must be called AFTER releasing the shard lock to avoid the
   // signal-under-lock anti-pattern (hurry-up-and-wait).
   void NotifyWorkAvailable();
 
-  std::size_t GetShardIndex(TaskQueue* queue) const;
+  std::size_t GetShardIndex(TaskQueue *queue) const;
 
   static constexpr std::size_t kShardCount = 4;
 
   struct Shard {
     Lock lock;
     std::priority_queue<QueueEntry, std::vector<QueueEntry>, QueueEntryLess> heap;
-    std::unordered_map<TaskQueue*, QueueState> states;
+    std::unordered_map<TaskQueue *, QueueState> states;
   };
 
   Shard shards_[kShardCount];
@@ -118,7 +118,7 @@ class PooledTaskSource final {
   std::atomic<std::int64_t> total_task_count_{0};
 };
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei
 
-#endif  // NEIXX_TASK_INTERNAL_POOLED_TASK_SOURCE_H_
+#endif // NEIXX_TASK_INTERNAL_POOLED_TASK_SOURCE_H_

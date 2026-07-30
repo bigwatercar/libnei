@@ -22,12 +22,10 @@
 namespace nei {
 namespace {
 
-ThreadLocalStorage::Slot& GetCurrentPumpSlot() {
+ThreadLocalStorage::Slot &GetCurrentPumpSlot() {
   static ThreadLocalStorage::Slot slot;
   static std::once_flag once;
-  std::call_once(once, []() {
-    (void)slot.Initialize();
-  });
+  std::call_once(once, []() { (void)slot.Initialize(); });
   return slot;
 }
 
@@ -38,10 +36,8 @@ std::atomic<std::uint64_t> g_do_work_calls{0};
 std::atomic<std::uint64_t> g_do_work_consumed{0};
 std::atomic<std::uint64_t> g_wake_dispatches{0};
 
-int ComputeWaitTimeoutMs(const MessagePump::Delegate::NextWorkInfo& next_work_info,
-                         const TimeTicks& delayed_run_time) {
-  const TimeTicks now = !next_work_info.recent_now.is_null() ? next_work_info.recent_now
-                                                             : TimeTicks::Now();
+int ComputeWaitTimeoutMs(const MessagePump::Delegate::NextWorkInfo &next_work_info, const TimeTicks &delayed_run_time) {
+  const TimeTicks now = !next_work_info.recent_now.is_null() ? next_work_info.recent_now : TimeTicks::Now();
   if (delayed_run_time <= now) {
     return 0;
   }
@@ -54,13 +50,13 @@ int ComputeWaitTimeoutMs(const MessagePump::Delegate::NextWorkInfo& next_work_in
   return static_cast<int>(wait_ms);
 }
 
-}  // namespace
+} // namespace
 
 class MessagePumpForIOState {
- public:
+public:
   struct WatchRecord {
     NativeIOHandle handle = NativeIOHandle{};
-    MessagePumpForIO::Watcher* watcher = nullptr;
+    MessagePumpForIO::Watcher *watcher = nullptr;
     MessagePumpForIO::FdWatchController::Mode mode = MessagePumpForIO::FdWatchController::Mode::READ;
   };
 
@@ -121,7 +117,7 @@ class MessagePumpForIOState {
     WakePump();
   }
 
-  void ScheduleDelayedWork(const TimeTicks& delayed_run_time) {
+  void ScheduleDelayedWork(const TimeTicks &delayed_run_time) {
     bool should_wake = false;
     {
       AutoLock lock(state_lock_);
@@ -136,7 +132,7 @@ class MessagePumpForIOState {
     }
   }
 
-  void UpdateDelayedWorkFromDelegate(const MessagePump::Delegate::NextWorkInfo& next_work_info) {
+  void UpdateDelayedWorkFromDelegate(const MessagePump::Delegate::NextWorkInfo &next_work_info) {
     AutoLock lock(state_lock_);
     if (next_work_info.next_run_time == MessagePump::Delegate::NextWorkInfo::kNoScheduledRunTime) {
       return;
@@ -147,7 +143,7 @@ class MessagePumpForIOState {
     }
   }
 
-  bool GetDelayedRunTime(TimeTicks* delayed_run_time) const {
+  bool GetDelayedRunTime(TimeTicks *delayed_run_time) const {
     AutoLock lock(state_lock_);
     if (!has_delayed_run_time_) {
       return false;
@@ -163,7 +159,7 @@ class MessagePumpForIOState {
     }
   }
 
-  bool DrainPendingWakeups(MessagePump::Delegate* delegate) {
+  bool DrainPendingWakeups(MessagePump::Delegate *delegate) {
     // Pass should_run_task=false: only drain residual IOCP wake packets.
     // Do not invoke delegate->DoWork() here to avoid recursive wake loops.
     bool drained_any = false;
@@ -173,7 +169,7 @@ class MessagePumpForIOState {
     return drained_any;
   }
 
-  bool WaitAndDispatch(MessagePump::Delegate* delegate, int timeout_ms) {
+  bool WaitAndDispatch(MessagePump::Delegate *delegate, int timeout_ms) {
     return DispatchOneBatch(delegate, timeout_ms);
   }
 
@@ -191,10 +187,10 @@ class MessagePumpForIOState {
     return out;
   }
 
-  bool RegisterWatch(MessagePumpForIO::FdWatchController* controller,
+  bool RegisterWatch(MessagePumpForIO::FdWatchController *controller,
                      NativeIOHandle handle,
                      MessagePumpForIO::FdWatchController::Mode mode,
-                     MessagePumpForIO::Watcher* watcher) {
+                     MessagePumpForIO::Watcher *watcher) {
     if (controller == nullptr || watcher == nullptr || iocp_ == nullptr) {
       return false;
     }
@@ -213,7 +209,7 @@ class MessagePumpForIOState {
     AutoLock lock(state_lock_);
     watches_[watch_id] = WatchRecord{handle, watcher, mode};
 
-    controller->pump_ = nullptr;  // set by owner after success
+    controller->pump_ = nullptr; // set by owner after success
     controller->handle_ = handle;
     controller->watcher_ = watcher;
     controller->mode_ = mode;
@@ -229,7 +225,7 @@ class MessagePumpForIOState {
     watches_.erase(watch_id);
   }
 
- private:
+private:
   void WakePump() {
     if (iocp_ == nullptr) {
       return;
@@ -237,8 +233,7 @@ class MessagePumpForIOState {
     (void)::PostQueuedCompletionStatus(iocp_, 0, kScheduleWorkCompletionKey, nullptr);
   }
 
-  bool DispatchOneBatch(MessagePump::Delegate* delegate, int timeout_ms,
-                        bool should_run_task = true) {
+  bool DispatchOneBatch(MessagePump::Delegate *delegate, int timeout_ms, bool should_run_task = true) {
     if (iocp_ == nullptr) {
       return false;
     }
@@ -249,9 +244,9 @@ class MessagePumpForIOState {
     for (std::size_t i = 0; i < kMaxCompletionBatch; ++i) {
       DWORD bytes_transferred = 0;
       ULONG_PTR completion_key = 0;
-      OVERLAPPED* overlapped = nullptr;
-      const BOOL ok = ::GetQueuedCompletionStatus(iocp_, &bytes_transferred, &completion_key,
-                                                  &overlapped, wait_timeout);
+      OVERLAPPED *overlapped = nullptr;
+      const BOOL ok =
+          ::GetQueuedCompletionStatus(iocp_, &bytes_transferred, &completion_key, &overlapped, wait_timeout);
       wait_timeout = 0;
       if (!ok) {
         const DWORD error = ::GetLastError();
@@ -288,23 +283,21 @@ class MessagePumpForIOState {
       }
 
       if (overlapped != nullptr) {
-        auto* completion_watcher = record.watcher->AsCompletionWatcher();
+        auto *completion_watcher = record.watcher->AsCompletionWatcher();
         if (completion_watcher != nullptr) {
           const std::uint32_t error_code =
-              ok ? static_cast<std::uint32_t>(ERROR_SUCCESS)
-                 : static_cast<std::uint32_t>(::GetLastError());
+              ok ? static_cast<std::uint32_t>(ERROR_SUCCESS) : static_cast<std::uint32_t>(::GetLastError());
           completion_watcher->OnIOCompleted(
-              record.handle, overlapped,
-              static_cast<std::uint32_t>(bytes_transferred), error_code);
+              record.handle, overlapped, static_cast<std::uint32_t>(bytes_transferred), error_code);
           any_event = true;
           continue;
         }
       }
 
-      const bool can_read = record.mode == MessagePumpForIO::FdWatchController::Mode::READ ||
-                            record.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE;
-      const bool can_write = record.mode == MessagePumpForIO::FdWatchController::Mode::WRITE ||
-                             record.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE;
+      const bool can_read = record.mode == MessagePumpForIO::FdWatchController::Mode::READ
+                            || record.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE;
+      const bool can_write = record.mode == MessagePumpForIO::FdWatchController::Mode::WRITE
+                             || record.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE;
       if (can_read) {
         record.watcher->OnFileCanReadWithoutBlocking(record.handle);
       }
@@ -341,10 +334,10 @@ MessagePumpForIO::FdWatchController::~FdWatchController() {
   StopWatching();
 }
 
-bool MessagePumpForIO::FdWatchController::StartWatching(MessagePumpForIO* pump,
+bool MessagePumpForIO::FdWatchController::StartWatching(MessagePumpForIO *pump,
                                                         NativeIOHandle handle,
                                                         MessagePumpForIO::FdWatchController::Mode mode,
-                                                        MessagePumpForIO::Watcher* watcher,
+                                                        MessagePumpForIO::Watcher *watcher,
                                                         bool /*oneshot*/) {
   if (pump == nullptr || watcher == nullptr || pump->impl_ == nullptr) {
     return false;
@@ -396,22 +389,24 @@ bool MessagePumpForIO::FdWatchController::is_watching() const {
   return watch_id_ != 0;
 }
 
-MessagePumpForIO::MessagePumpForIO() : impl_(std::make_shared<MessagePumpForIOState>()) {}
+MessagePumpForIO::MessagePumpForIO()
+    : impl_(std::make_shared<MessagePumpForIOState>()) {
+}
 
 MessagePumpForIO::~MessagePumpForIO() {
   Quit();
 }
 
-MessagePumpForIO* MessagePumpForIO::Current() {
-  return reinterpret_cast<MessagePumpForIO*>(GetCurrentPumpSlot().Get());
+MessagePumpForIO *MessagePumpForIO::Current() {
+  return reinterpret_cast<MessagePumpForIO *>(GetCurrentPumpSlot().Get());
 }
 
-void MessagePumpForIO::Run(Delegate* delegate) {
+void MessagePumpForIO::Run(Delegate *delegate) {
   if (delegate == nullptr || impl_ == nullptr) {
     return;
   }
 
-  MessagePumpForIO* previous = Current();
+  MessagePumpForIO *previous = Current();
   GetCurrentPumpSlot().Set(this);
 
   const PlatformThread::PlatformThreadId current_thread_id = PlatformThread::CurrentId();
@@ -463,8 +458,7 @@ void MessagePumpForIO::Run(Delegate* delegate) {
       continue;
     }
 
-    const TimeTicks now = !next_work_info.recent_now.is_null() ? next_work_info.recent_now
-                                                                : TimeTicks::Now();
+    const TimeTicks now = !next_work_info.recent_now.is_null() ? next_work_info.recent_now : TimeTicks::Now();
     if (delayed_run_time <= now) {
       impl_->ClearExpiredDelayedRunTime(now);
       continue;
@@ -506,12 +500,12 @@ void MessagePumpForIO::ScheduleWork() {
   }
 }
 
-void MessagePumpForIO::ScheduleDelayedWork(const TimeTicks& delayed_run_time) {
+void MessagePumpForIO::ScheduleDelayedWork(const TimeTicks &delayed_run_time) {
   if (impl_ != nullptr) {
     impl_->ScheduleDelayedWork(delayed_run_time);
   }
 }
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // defined(_WIN32)
+#endif // defined(_WIN32)

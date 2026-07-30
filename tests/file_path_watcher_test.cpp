@@ -52,13 +52,13 @@ std::string CreateTempDir() {
   return std::string(dir_path);
 #else
   char tmpl[] = "/tmp/libnei_fpw_test_XXXXXX";
-  char* dir_path = mkdtemp(tmpl);
+  char *dir_path = mkdtemp(tmpl);
   EXPECT_NE(dir_path, nullptr);
   return std::string(dir_path);
 #endif
 }
 
-void RemoveTempDir(const std::string& path) {
+void RemoveTempDir(const std::string &path) {
 #if defined(_WIN32)
   std::string cmd = "rmdir /s /q \"" + path + "\" >nul 2>&1";
   (void)std::system(cmd.c_str());
@@ -68,7 +68,7 @@ void RemoveTempDir(const std::string& path) {
 #endif
 }
 
-void CreateEmptyFile(const std::string& path) {
+void CreateEmptyFile(const std::string &path) {
   std::ofstream ofs(path, std::ios::binary);
   ofs.close();
 }
@@ -77,10 +77,12 @@ void SleepMs(int ms) {
   std::this_thread::sleep_for(milliseconds(ms));
 }
 
-void DestroyWatcherOnIO(scoped_refptr<TaskRunner> io_runner,
-                        std::unique_ptr<FilePathWatcher>& watcher) {
+void DestroyWatcherOnIO(scoped_refptr<TaskRunner> io_runner, std::unique_ptr<FilePathWatcher> &watcher) {
   WaitableEvent done(WaitableEvent::ResetPolicy::kManual);
-  io_runner->PostTask(FROM_HERE, [&]() { watcher.reset(); done.Signal(); });
+  io_runner->PostTask(FROM_HERE, [&]() {
+    watcher.reset();
+    done.Signal();
+  });
   done.TimedWait(milliseconds(5000));
 }
 
@@ -89,7 +91,7 @@ void DestroyWatcherOnIO(scoped_refptr<TaskRunner> io_runner,
 // ===========================================================================
 
 class FilePathWatcherTest : public ::testing::Test {
- protected:
+protected:
   void SetUp() override {
     temp_dir_ = CreateTempDir();
     ASSERT_FALSE(temp_dir_.empty());
@@ -108,7 +110,9 @@ class FilePathWatcherTest : public ::testing::Test {
     }
   }
 
-  scoped_refptr<TaskRunner> io_runner() const { return io_runner_; }
+  scoped_refptr<TaskRunner> io_runner() const {
+    return io_runner_;
+  }
 
   std::string temp_dir_;
   Thread io_thread_{"fpw_io_thread"};
@@ -125,12 +129,10 @@ TEST_F(FilePathWatcherTest, DetectFileCreation) {
   FilePathWatcher::ChangeType detected_type = FilePathWatcher::ChangeType::kModified;
 
   io_runner()->PostTask(FROM_HERE, [&]() {
-    bool ok = watcher->Watch(
-        temp_dir_, false,
-        [&](const std::string&, FilePathWatcher::ChangeType type) {
-          detected_type = type;
-          done.Signal();
-        });
+    bool ok = watcher->Watch(temp_dir_, false, [&](const std::string &, FilePathWatcher::ChangeType type) {
+      detected_type = type;
+      done.Signal();
+    });
     ASSERT_TRUE(ok);
   });
 
@@ -152,12 +154,10 @@ TEST_F(FilePathWatcherTest, DetectFileModification) {
   FilePathWatcher::ChangeType detected_type = FilePathWatcher::ChangeType::kCreated;
 
   io_runner()->PostTask(FROM_HERE, [&]() {
-    bool ok = watcher->Watch(
-        temp_dir_, false,
-        [&](const std::string&, FilePathWatcher::ChangeType type) {
-          detected_type = type;
-          done.Signal();
-        });
+    bool ok = watcher->Watch(temp_dir_, false, [&](const std::string &, FilePathWatcher::ChangeType type) {
+      detected_type = type;
+      done.Signal();
+    });
     ASSERT_TRUE(ok);
   });
 
@@ -184,12 +184,10 @@ TEST_F(FilePathWatcherTest, DetectFileDeletion) {
   FilePathWatcher::ChangeType detected_type = FilePathWatcher::ChangeType::kModified;
 
   io_runner()->PostTask(FROM_HERE, [&]() {
-    bool ok = watcher->Watch(
-        temp_dir_, false,
-        [&](const std::string&, FilePathWatcher::ChangeType type) {
-          detected_type = type;
-          done.Signal();
-        });
+    bool ok = watcher->Watch(temp_dir_, false, [&](const std::string &, FilePathWatcher::ChangeType type) {
+      detected_type = type;
+      done.Signal();
+    });
     ASSERT_TRUE(ok);
   });
 
@@ -207,18 +205,18 @@ TEST_F(FilePathWatcherTest, CancelStopsCallbacks) {
   std::atomic<int> callback_count{0};
 
   io_runner()->PostTask(FROM_HERE, [&]() {
-    bool ok = watcher->Watch(
-        temp_dir_, false,
-        [&](const std::string&, FilePathWatcher::ChangeType) {
-          ++callback_count;
-        });
+    bool ok =
+        watcher->Watch(temp_dir_, false, [&](const std::string &, FilePathWatcher::ChangeType) { ++callback_count; });
     ASSERT_TRUE(ok);
   });
 
   SleepMs(200);
 
   WaitableEvent cancel_done(WaitableEvent::ResetPolicy::kManual);
-  io_runner()->PostTask(FROM_HERE, [&]() { watcher->Cancel(); cancel_done.Signal(); });
+  io_runner()->PostTask(FROM_HERE, [&]() {
+    watcher->Cancel();
+    cancel_done.Signal();
+  });
   ASSERT_TRUE(cancel_done.TimedWait(milliseconds(2000)));
 
   CreateEmptyFile(temp_dir_ + "/after_cancel.txt");
@@ -233,8 +231,7 @@ TEST_F(FilePathWatcherTest, WatchFailsWithEmptyPath) {
   WaitableEvent done(WaitableEvent::ResetPolicy::kManual);
 
   io_runner()->PostTask(FROM_HERE, [&]() {
-    bool ok = watcher->Watch("", false,
-                             [](const std::string&, FilePathWatcher::ChangeType) {});
+    bool ok = watcher->Watch("", false, [](const std::string &, FilePathWatcher::ChangeType) {});
     EXPECT_FALSE(ok);
     done.Signal();
   });
@@ -262,11 +259,9 @@ TEST_F(FilePathWatcherTest, DestroyImplicitlyCancels) {
 
   io_runner()->PostTask(FROM_HERE, [&]() {
     auto watcher = std::make_unique<FilePathWatcher>(io_runner());
-    bool ok = watcher->Watch(
-        temp_dir_, false,
-        [](const std::string&, FilePathWatcher::ChangeType) {
-          ADD_FAILURE() << "Callback fired after watcher destroyed";
-        });
+    bool ok = watcher->Watch(temp_dir_, false, [](const std::string &, FilePathWatcher::ChangeType) {
+      ADD_FAILURE() << "Callback fired after watcher destroyed";
+    });
     ASSERT_TRUE(ok);
     watcher.reset();
     done.Signal();
@@ -284,11 +279,8 @@ TEST_F(FilePathWatcherTest, RewatchAfterCancel) {
   WaitableEvent done2(WaitableEvent::ResetPolicy::kManual);
 
   io_runner()->PostTask(FROM_HERE, [&]() {
-    bool ok = watcher->Watch(
-        temp_dir_, false,
-        [&](const std::string&, FilePathWatcher::ChangeType) {
-          done1.Signal();
-        });
+    bool ok =
+        watcher->Watch(temp_dir_, false, [&](const std::string &, FilePathWatcher::ChangeType) { done1.Signal(); });
     ASSERT_TRUE(ok);
   });
   SleepMs(200);
@@ -299,11 +291,8 @@ TEST_F(FilePathWatcherTest, RewatchAfterCancel) {
   WaitableEvent rewatch_done(WaitableEvent::ResetPolicy::kManual);
   io_runner()->PostTask(FROM_HERE, [&]() {
     watcher->Cancel();
-    bool ok = watcher->Watch(
-        temp_dir_, false,
-        [&](const std::string&, FilePathWatcher::ChangeType) {
-          done2.Signal();
-        });
+    bool ok =
+        watcher->Watch(temp_dir_, false, [&](const std::string &, FilePathWatcher::ChangeType) { done2.Signal(); });
     ASSERT_TRUE(ok);
     rewatch_done.Signal();
   });
@@ -337,15 +326,12 @@ TEST_F(FilePathWatcherTest, DestroyWhileIoPending) {
   auto runner = io_runner();
   io_runner()->PostTask(FROM_HERE, [runner, this, &watch_ready]() {
     auto watcher = std::make_unique<FilePathWatcher>(runner);
-    bool ok = watcher->Watch(temp_dir_, /*recursive=*/false,
-                             [](const std::string&,
-                                FilePathWatcher::ChangeType) {});
+    bool ok = watcher->Watch(temp_dir_, /*recursive=*/false, [](const std::string &, FilePathWatcher::ChangeType) {});
     ASSERT_TRUE(ok);
 
     // Stash the watcher in a shared_ptr on the IO thread so the
     // destroy-task (posted later) can reach it.
-    auto stash = std::make_shared<std::unique_ptr<FilePathWatcher>>(
-        std::move(watcher));
+    auto stash = std::make_shared<std::unique_ptr<FilePathWatcher>>(std::move(watcher));
 
     // Post the destroy-task right after arming.
     runner->PostTask(FROM_HERE, [stash]() { stash->reset(); });
@@ -399,12 +385,10 @@ TEST_F(FilePathWatcherTest, CancelPreventsPendingCallbacks) {
 
   WaitableEvent watch_ready(WaitableEvent::ResetPolicy::kManual);
   io_runner()->PostTask(FROM_HERE, [&]() {
-    bool ok = watcher->Watch(
-        temp_dir_, /*recursive=*/false,
-        [&callbacks_fired](const std::string&,
-                           FilePathWatcher::ChangeType) {
-          ++callbacks_fired;
-        });
+    bool ok =
+        watcher->Watch(temp_dir_,
+                       /*recursive=*/false,
+                       [&callbacks_fired](const std::string &, FilePathWatcher::ChangeType) { ++callbacks_fired; });
     ASSERT_TRUE(ok);
     watch_ready.Signal();
   });
@@ -457,18 +441,16 @@ TEST_F(FilePathWatcherTest, RecursiveWatchDetectsNewSubdirectoryChanges) {
   int callback_seq = 0;
 
   io_runner()->PostTask(FROM_HERE, [&]() {
-    bool ok = watcher->Watch(
-        temp_dir_, /*recursive=*/true,
-        [&](const std::string& path, FilePathWatcher::ChangeType) {
-          ++callback_seq;
-          if (callback_seq == 1) {
-            first_path = path;
-            got_subdir.Signal();
-          } else {
-            second_path = path;
-            got_file.Signal();
-          }
-        });
+    bool ok = watcher->Watch(temp_dir_, /*recursive=*/true, [&](const std::string &path, FilePathWatcher::ChangeType) {
+      ++callback_seq;
+      if (callback_seq == 1) {
+        first_path = path;
+        got_subdir.Signal();
+      } else {
+        second_path = path;
+        got_file.Signal();
+      }
+    });
     ASSERT_TRUE(ok);
   });
 
@@ -498,5 +480,5 @@ TEST_F(FilePathWatcherTest, RecursiveWatchDetectsNewSubdirectoryChanges) {
   DestroyWatcherOnIO(io_runner(), watcher);
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

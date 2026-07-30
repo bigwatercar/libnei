@@ -12,8 +12,10 @@
 namespace nei {
 
 class MessagePumpDefault::Impl {
- public:
-  Impl() : wake_up_event_(WaitableEvent::ResetPolicy::kAutomatic, false) {}
+public:
+  Impl()
+      : wake_up_event_(WaitableEvent::ResetPolicy::kAutomatic, false) {
+  }
 
   int EnterRunLoopAndGetDepth(PlatformThread::PlatformThreadId current_thread_id) {
     AutoLock lock(state_lock_);
@@ -66,7 +68,7 @@ class MessagePumpDefault::Impl {
     wake_up_event_.Signal();
   }
 
-  void ScheduleDelayedWork(const TimeTicks& delayed_run_time) {
+  void ScheduleDelayedWork(const TimeTicks &delayed_run_time) {
     bool should_wake = false;
     {
       AutoLock lock(state_lock_);
@@ -81,7 +83,7 @@ class MessagePumpDefault::Impl {
     }
   }
 
-  void UpdateDelayedWorkFromDelegate(const Delegate::NextWorkInfo& next_work_info) {
+  void UpdateDelayedWorkFromDelegate(const Delegate::NextWorkInfo &next_work_info) {
     AutoLock lock(state_lock_);
     if (next_work_info.next_run_time == Delegate::NextWorkInfo::kNoScheduledRunTime) {
       // Preserve an existing delayed deadline. In nested Run() scenarios,
@@ -102,7 +104,7 @@ class MessagePumpDefault::Impl {
     return had_work;
   }
 
-  bool GetDelayedRunTime(TimeTicks* delayed_run_time) const {
+  bool GetDelayedRunTime(TimeTicks *delayed_run_time) const {
     AutoLock lock(state_lock_);
     if (!has_delayed_run_time_) {
       return false;
@@ -133,7 +135,7 @@ class MessagePumpDefault::Impl {
     }
   }
 
- private:
+private:
   mutable Lock state_lock_;
 
   int run_depth_ = 0;
@@ -147,11 +149,13 @@ class MessagePumpDefault::Impl {
   WaitableEvent wake_up_event_;
 };
 
-MessagePumpDefault::MessagePumpDefault() : impl_(std::make_unique<Impl>()) {}
+MessagePumpDefault::MessagePumpDefault()
+    : impl_(std::make_unique<Impl>()) {
+}
 
 MessagePumpDefault::~MessagePumpDefault() = default;
 
-void MessagePumpDefault::Run(Delegate* delegate) {
+void MessagePumpDefault::Run(Delegate *delegate) {
   if (delegate == nullptr) {
     return;
   }
@@ -216,8 +220,7 @@ void MessagePumpDefault::Run(Delegate* delegate) {
       continue;
     }
 
-    const TimeTicks now = !next_work_info.recent_now.is_null() ? next_work_info.recent_now
-                                                                : TimeTicks::Now();
+    const TimeTicks now = !next_work_info.recent_now.is_null() ? next_work_info.recent_now : TimeTicks::Now();
     if (delayed_run_time <= now) {
       // Deadline already reached; let next iteration call DoDelayedWork().
       impl_->ClearExpiredDelayedRunTime(now);
@@ -259,11 +262,11 @@ void MessagePumpDefault::ScheduleWork() {
   impl_->ScheduleWork();
 }
 
-void MessagePumpDefault::ScheduleDelayedWork(const TimeTicks& delayed_run_time) {
+void MessagePumpDefault::ScheduleDelayedWork(const TimeTicks &delayed_run_time) {
   // This API is called by task-queue owners when the queue head delayed task
   // changes. The pump records the earliest known deadline and will wake earlier
   // if the new deadline is sooner than the previous one.
   impl_->ScheduleDelayedWork(delayed_run_time);
 }
 
-}  // namespace nei
+} // namespace nei

@@ -17,7 +17,7 @@ namespace nei {
 class TaskRunner;
 
 class NEI_API AsyncFileWin final : public AsyncFile {
- public:
+public:
   struct StageCounters {
     std::uint64_t open_reached = 0;
     std::uint64_t write_reached = 0;
@@ -36,17 +36,17 @@ class NEI_API AsyncFileWin final : public AsyncFile {
   };
 
   explicit AsyncFileWin(scoped_refptr<TaskRunner> io_task_runner);
-  AsyncFileWin(AsyncFileWin&& other) noexcept;
-  AsyncFileWin& operator=(AsyncFileWin&& other) noexcept;
+  AsyncFileWin(AsyncFileWin &&other) noexcept;
+  AsyncFileWin &operator=(AsyncFileWin &&other) noexcept;
   ~AsyncFileWin() override;
 
-  AsyncFileWin(const AsyncFileWin&) = delete;
-  AsyncFileWin& operator=(const AsyncFileWin&) = delete;
+  AsyncFileWin(const AsyncFileWin &) = delete;
+  AsyncFileWin &operator=(const AsyncFileWin &) = delete;
 
-  void OpenAsync(const std::string& path,
+  void OpenAsync(const std::string &path,
                  OpenMode mode,
                  OpenDisposition disposition,
-                 const scoped_refptr<TaskRunner>& background_runner,
+                 const scoped_refptr<TaskRunner> &background_runner,
                  OpenCallback callback) override;
 
   void ReadAsync(scoped_refptr<IOBuffer> buf,
@@ -65,15 +65,15 @@ class NEI_API AsyncFileWin final : public AsyncFile {
   void CloseAsync(CloseCallback callback) override;
   bool is_open() const override;
 
- private:
+private:
   class Impl;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // defined(_WIN32)
+#endif // defined(_WIN32)
 
-#endif  // NEIXX_IO_ASYNC_FILE_WIN_H_
+#endif // NEIXX_IO_ASYNC_FILE_WIN_H_

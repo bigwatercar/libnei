@@ -19,11 +19,11 @@
 namespace nei {
 namespace internal {
 
-class NEI_API JobTaskSource final : public JobDelegate,
-    public RefCountedThreadSafe<JobTaskSource> {
- public:
-  JobTaskSource(RepeatingCallback<void(JobDelegate*)> task,
-                MaxConcurrencyCallback max_concurrency_cb, int initial_workers);
+class NEI_API JobTaskSource final : public JobDelegate, public RefCountedThreadSafe<JobTaskSource> {
+public:
+  JobTaskSource(RepeatingCallback<void(JobDelegate *)> task,
+                MaxConcurrencyCallback max_concurrency_cb,
+                int initial_workers);
   ~JobTaskSource() override = default;
 
   bool ShouldYield() override;
@@ -36,16 +36,20 @@ class NEI_API JobTaskSource final : public JobDelegate,
   void PostInitialWorkers(int count);
   void Join(bool steal_work);
   void Cancel();
-  bool is_completed() const { return is_completed_.load(std::memory_order_acquire); }
+
+  bool is_completed() const {
+    return is_completed_.load(std::memory_order_acquire);
+  }
+
   void UpdatePriority(TaskPriority priority);
 
- private:
+private:
   void OnWorkerExited();
   void PostWorkers(int count);
   void MaybeSpawnWorkers();
   std::size_t AssignTaskId();
 
-  RepeatingCallback<void(JobDelegate*)> task_;
+  RepeatingCallback<void(JobDelegate *)> task_;
   MaxConcurrencyCallback max_concurrency_cb_;
   const int initial_workers_;
   scoped_refptr<TaskRunner> runner_;
@@ -59,7 +63,7 @@ class NEI_API JobTaskSource final : public JobDelegate,
   std::atomic<std::size_t> next_task_id_{0};
 };
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei
 
-#endif  // NEIXX_TASK_INTERNAL_JOB_TASK_SOURCE_H_
+#endif // NEIXX_TASK_INTERNAL_JOB_TASK_SOURCE_H_

@@ -11,12 +11,19 @@
 #include <nei/utils/crc32.h>
 #include <nei/utils/sha256.h>
 #if __cplusplus >= 202002L
-namespace { inline std::string PathToUTF8(const std::filesystem::path& p) { auto u = p.u8string(); return {reinterpret_cast<const char*>(u.data()), u.size()}; } }
+namespace {
+inline std::string PathToUTF8(const std::filesystem::path &p) {
+  auto u = p.u8string();
+  return {reinterpret_cast<const char *>(u.data()), u.size()};
+}
+} // namespace
 #else
-namespace { inline std::string PathToUTF8(const std::filesystem::path& p) { return p.u8string(); } }
+namespace {
+inline std::string PathToUTF8(const std::filesystem::path &p) {
+  return p.u8string();
+}
+} // namespace
 #endif
-
-
 
 namespace {
 
@@ -43,7 +50,7 @@ void WriteFileAll(const std::filesystem::path &path, const std::string &content)
   ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
 }
 
-}  // namespace
+} // namespace
 
 TEST(UtilsCrc32Test, MatchesKnownVectors) {
   struct Case {
@@ -51,6 +58,7 @@ TEST(UtilsCrc32Test, MatchesKnownVectors) {
     uint32_t checksum;
     const char *hex;
   };
+
   const Case cases[] = {
       {"", 0x00000000U, "00000000"},
       {"123456789", 0xCBF43926U, "cbf43926"},
@@ -102,11 +110,12 @@ TEST(UtilsSha256Test, MatchesKnownVectors) {
     const char *input;
     const char *hex;
   };
+
   const Case cases[] = {
       {"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
       {"abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
       {"The quick brown fox jumps over the lazy dog",
-      "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592"},
+       "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592"},
   };
 
   for (const Case &c : cases) {
@@ -127,8 +136,7 @@ TEST(UtilsSha256Test, IncrementalAndFileHelpersWork) {
   nei_sha256_update(&ctx, input.data(), 1U);
   nei_sha256_update(&ctx, input.data() + 1, input.size() - 1U);
   nei_sha256_final(&ctx, digest.data());
-  EXPECT_EQ(ToHex(digest.data(), digest.size()),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  EXPECT_EQ(ToHex(digest.data(), digest.size()), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 
   nei_sha256_to_hex(digest.data(), hex.data());
   EXPECT_STREQ(hex.data(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");

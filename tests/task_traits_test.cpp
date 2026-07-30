@@ -6,8 +6,7 @@ namespace nei {
 namespace {
 
 TEST(TaskTraitsTest, CopyAndMoveDoNotUseVariadicApply) {
-  TaskTraits original(MayBlock(), TaskPriority::USER_BLOCKING,
-                      TaskShutdownBehavior::SKIP_ON_SHUTDOWN);
+  TaskTraits original(MayBlock(), TaskPriority::USER_BLOCKING, TaskShutdownBehavior::SKIP_ON_SHUTDOWN);
 
   TaskTraits copied(original);
   EXPECT_TRUE(copied.may_block());
@@ -21,13 +20,12 @@ TEST(TaskTraitsTest, CopyAndMoveDoNotUseVariadicApply) {
 }
 
 TEST(TaskTraitsTest, VariadicCtorStillAcceptsDeclarativeArgs) {
-  TaskTraits traits(MayBlock(), TaskPriority::BEST_EFFORT,
-                    TaskShutdownBehavior::SKIP_ON_SHUTDOWN);
+  TaskTraits traits(MayBlock(), TaskPriority::BEST_EFFORT, TaskShutdownBehavior::SKIP_ON_SHUTDOWN);
 
   EXPECT_TRUE(traits.may_block());
   EXPECT_EQ(traits.priority(), TaskPriority::BEST_EFFORT);
   EXPECT_EQ(traits.shutdown_behavior(), TaskShutdownBehavior::SKIP_ON_SHUTDOWN);
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

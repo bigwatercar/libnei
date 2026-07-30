@@ -32,30 +32,26 @@ namespace nei::net {
 // TCPClientSocket::Impl (POSIX: EINPROGRESS connect + epoll r/w)
 // =============================================================================
 
-class TCPClientSocket::Impl final
-    : public RefCountedThreadSafe<Impl>,
-      public MessagePumpForIO::Watcher {
- public:
+class TCPClientSocket::Impl final : public RefCountedThreadSafe<Impl>, public MessagePumpForIO::Watcher {
+public:
   Impl();
   // From TCPServerSocket accept  --  socket is already connected, io_runner
   // is bound immediately to prevent accidental Connect() misuse.
   Impl(int accepted_fd, scoped_refptr<TaskRunner> io_runner);
 
-  bool Connect(const IPEndPoint& addr,
-               TCPClientSocket::ConnectCallback callback,
-               scoped_refptr<TaskRunner> io_runner);
-  void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len,
-                 AsyncInputStream::IOReadCallback callback);
-  void WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len,
-                  AsyncOutputStream::IOWriteCallback callback);
+  bool Connect(const IPEndPoint &addr, TCPClientSocket::ConnectCallback callback, scoped_refptr<TaskRunner> io_runner);
+  void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, AsyncInputStream::IOReadCallback callback);
+  void WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, AsyncOutputStream::IOWriteCallback callback);
   void Close();
   void ShutdownWrite();
-  scoped_refptr<TaskRunner> io_task_runner() const { return io_runner_; }
+
+  scoped_refptr<TaskRunner> io_task_runner() const {
+    return io_runner_;
+  }
 
   // Keep-Alive
-  bool SetKeepAlive(const KeepAliveConfig& config);
-  void StartKeepAliveMonitor(TimeDelta check_interval,
-                             OnceCallback<void()> on_dead);
+  bool SetKeepAlive(const KeepAliveConfig &config);
+  void StartKeepAliveMonitor(TimeDelta check_interval, OnceCallback<void()> on_dead);
   void StopKeepAliveMonitor();
 
   // RefCountedThreadSafe release path  --  calls Close() and then the
@@ -68,14 +64,13 @@ class TCPClientSocket::Impl final
   // the Impl stays alive in the background until the peer's EOF arrives.
   void Orphan();
 
- private:
+private:
   // MessagePumpForIO::Watcher
   void OnFileCanReadWithoutBlocking(NativeIOHandle handle) override;
   void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) override;
 
-  bool EndPointToSockAddr(const IPEndPoint& ep,
-                          ::sockaddr_storage* out, ::socklen_t* out_len);
-  int CreateSocket(const IPEndPoint& addr);
+  bool EndPointToSockAddr(const IPEndPoint &ep, ::sockaddr_storage *out, ::socklen_t *out_len);
+  int CreateSocket(const IPEndPoint &addr);
 
   void PostConnectResult(bool success);
   void PostReadResult(AsyncInputStream::IOReadCallback cb, bool success, std::size_t bytes);
@@ -93,8 +88,7 @@ class TCPClientSocket::Impl final
 
   // Actual connect logic (socket create, bind, connect, pump register).
   // Called by Connect() after the trampoline check.
-  bool DoConnect(const IPEndPoint& addr,
-                 TCPClientSocket::ConnectCallback callback);
+  bool DoConnect(const IPEndPoint &addr, TCPClientSocket::ConnectCallback callback);
 
   int fd_ = -1;
   bool connected_ = false;
@@ -148,7 +142,7 @@ class TCPClientSocket::Impl final
   WeakPtrFactory<Impl> weak_factory_;
 };
 
-}  // namespace nei::net
+} // namespace nei::net
 
-#endif  // !_WIN32
-#endif  // NEIXX_NET_TCP_CLIENT_SOCKET_POSIX_H_
+#endif // !_WIN32
+#endif // NEIXX_NET_TCP_CLIENT_SOCKET_POSIX_H_

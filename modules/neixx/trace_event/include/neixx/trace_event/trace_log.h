@@ -49,12 +49,12 @@ namespace nei {
 //   这些字面量位于可执行文件的只读数据段 (.rodata), 生命周期与进程等长。
 // =============================================================================
 struct NEI_API TraceEvent {
-  const char*   category = nullptr;   // 字符串字面量指针 (.rodata)
-  const char*   name = nullptr;       // 字符串字面量指针 (.rodata)
-  char          phase = 'X';          // 事件阶段: 'X' / 'B' / 'E' / 'I'
-  std::uint64_t thread_id = 0;        // PlatformThread::CurrentId()
-  std::int64_t  timestamp_us = 0;     // 时间戳 (微秒)
-  std::int64_t  duration_us = 0;      // 持续时间 (微秒), 仅 ph:'X' 有效
+  const char *category = nullptr; // 字符串字面量指针 (.rodata)
+  const char *name = nullptr;     // 字符串字面量指针 (.rodata)
+  char phase = 'X';               // 事件阶段: 'X' / 'B' / 'E' / 'I'
+  std::uint64_t thread_id = 0;    // PlatformThread::CurrentId()
+  std::int64_t timestamp_us = 0;  // 时间戳 (微秒)
+  std::int64_t duration_us = 0;   // 持续时间 (微秒), 仅 ph:'X' 有效
 };
 
 // =============================================================================
@@ -67,23 +67,25 @@ struct NEI_API TraceEvent {
 //   彻底消除 "主线程遍历 + 工作线程 push_back" 的并发修改 UB。
 // =============================================================================
 struct ThreadTraceBuffer {
-  std::mutex              mutex;
+  std::mutex mutex;
   std::vector<TraceEvent> events;
 
-  ThreadTraceBuffer() { events.reserve(256); }
+  ThreadTraceBuffer() {
+    events.reserve(256);
+  }
 };
 
 // =============================================================================
 // TraceLog 单例
 // =============================================================================
 class NEI_API TraceLog final {
- public:
+public:
   // 获取全局单例。
   // 使用 LeakySingletonTraits 防止关机崩溃 (Crash-on-Shutdown):
   //   main() 结束后, 若残存后台线程仍在打点 TRACE_EVENT0,
   //   访问已析构的 mutex 会导致段错误。Leaky 策略保证实例
   //   内存永不释放, 仅通过 AtExit 回调清理内部 Buffer 数据。
-  static TraceLog& GetInstance();
+  static TraceLog &GetInstance();
 
   // 开启/关闭全局 Trace 收集。
   //   enabled=true:  设置全局原子标记, 此后所有线程的 TRACE_EVENT0 激活
@@ -105,26 +107,26 @@ class NEI_API TraceLog final {
   //
   // 注意: 不依赖 g_trace_enabled 标志来防止并发修改  --  --  改为对每个
   //       Buffer 加锁提取, 彻底消除 "一边读一边写" 的数据竞争。
-  void Flush(std::ostream& out);
+  void Flush(std::ostream &out);
 
   // 清除所有已收集的事件数据 (不改变 enabled 状态)
   void Clear();
 
   // 注册当前线程的 Buffer 到全局注册表, 返回裸指针。
   // 首次打点时自动调用; 同一线程多次调用是幂等的。
-  ThreadTraceBuffer* RegisterCurrentThread();
+  ThreadTraceBuffer *RegisterCurrentThread();
 
   // 写入一条事件到当前线程的 Buffer。
   void AddEvent(TraceEvent event);
 
-  TraceLog(const TraceLog&) = delete;
-  TraceLog& operator=(const TraceLog&) = delete;
+  TraceLog(const TraceLog &) = delete;
+  TraceLog &operator=(const TraceLog &) = delete;
 
   // 将 Buffer 加入/移出全局注册表 (由 TLS 机制调用)
   void RegisterBuffer(std::unique_ptr<ThreadTraceBuffer> buf);
-  void UnregisterBuffer(ThreadTraceBuffer* buf);
+  void UnregisterBuffer(ThreadTraceBuffer *buf);
 
- private:
+private:
   friend class Singleton<TraceLog, LeakySingletonTraits<TraceLog>>;
   friend struct LeakySingletonTraits<TraceLog>;
 
@@ -133,7 +135,7 @@ class NEI_API TraceLog final {
 
   // 全局注册表: TraceLog 拥有所有 Buffer 内存。
   // 线程通过裸指针访问 (指针在 TraceLog 存活期间始终有效)。
-  mutable std::mutex                              registry_lock_;
+  mutable std::mutex registry_lock_;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::vector<std::unique_ptr<ThreadTraceBuffer>> thread_buffers_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
@@ -148,6 +150,6 @@ class NEI_API TraceLog final {
 // 最坏情况: 关闭 Trace 后仍有极少量残留事件写入 -> 直接丢弃, 无副作用。
 extern NEI_API std::atomic<bool> g_trace_enabled;
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_TRACE_EVENT_TRACE_LOG_H_
+#endif // NEIXX_TRACE_EVENT_TRACE_LOG_H_

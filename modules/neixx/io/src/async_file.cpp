@@ -13,8 +13,7 @@
 
 namespace nei {
 
-std::unique_ptr<AsyncFile> AsyncFile::Create(
-    scoped_refptr<TaskRunner> io_task_runner) {
+std::unique_ptr<AsyncFile> AsyncFile::Create(scoped_refptr<TaskRunner> io_task_runner) {
 #if defined(_WIN32)
   return std::make_unique<AsyncFileWin>(std::move(io_task_runner));
 #else
@@ -22,4 +21,4 @@ std::unique_ptr<AsyncFile> AsyncFile::Create(
 #endif
 }
 
-}  // namespace nei
+} // namespace nei

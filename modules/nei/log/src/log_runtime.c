@@ -30,9 +30,9 @@ static void _nei_log_advance_committed_pos(nei_log_ring_st *ring) {
 }
 
 nei_log_runtime_st s_runtime = {
-  .stop_requested = 0,
-  .initialized = 0,
-  .auto_flush_interval_ms = 0,
+    .stop_requested = 0,
+    .initialized = 0,
+    .auto_flush_interval_ms = 0,
 };
 
 static uint32_t s_runtime_init_count = 0U;
@@ -64,9 +64,9 @@ static void _nei_log_update_ring_hwm(uint64_t depth) {
     if (depth <= old) {
       return;
     }
-    if ((uint64_t)InterlockedCompareExchange64((volatile LONGLONG *)&s_runtime.stat_ring_high_watermark,
-                                               (LONGLONG)depth,
-                                               (LONGLONG)old) == old) {
+    if ((uint64_t)InterlockedCompareExchange64(
+            (volatile LONGLONG *)&s_runtime.stat_ring_high_watermark, (LONGLONG)depth, (LONGLONG)old)
+        == old) {
       return;
     }
   }
@@ -76,12 +76,8 @@ static void _nei_log_update_ring_hwm(uint64_t depth) {
     if (depth <= old) {
       return;
     }
-    if (__atomic_compare_exchange_n(&s_runtime.stat_ring_high_watermark,
-                                    &old,
-                                    depth,
-                                    0,
-                                    __ATOMIC_ACQ_REL,
-                                    __ATOMIC_ACQUIRE)) {
+    if (__atomic_compare_exchange_n(
+            &s_runtime.stat_ring_high_watermark, &old, depth, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
       return;
     }
   }
@@ -230,24 +226,24 @@ void _nei_log_shutdown_runtime(void) {
     return;
   }
 
-  #if defined(_WIN32)
-    EnterCriticalSection(&s_runtime.mutex);
-    s_runtime.stop_requested = 1;
-    _NEI_LOG_BROADCAST_COND(&s_runtime.cond);
-    LeaveCriticalSection(&s_runtime.mutex);
-    WaitForSingleObject(s_runtime.thread, INFINITE);
-    CloseHandle(s_runtime.thread);
-    s_runtime.consumer_thread_id = 0U;
-    DeleteCriticalSection(&s_runtime.mutex);
-  #else
-    pthread_mutex_lock(&s_runtime.mutex);
-    s_runtime.stop_requested = 1;
-    _NEI_LOG_BROADCAST_COND(&s_runtime.cond);
-    pthread_mutex_unlock(&s_runtime.mutex);
-    pthread_join(s_runtime.thread, NULL);
-    pthread_cond_destroy(&s_runtime.cond);
-    pthread_mutex_destroy(&s_runtime.mutex);
-  #endif
+#if defined(_WIN32)
+  EnterCriticalSection(&s_runtime.mutex);
+  s_runtime.stop_requested = 1;
+  _NEI_LOG_BROADCAST_COND(&s_runtime.cond);
+  LeaveCriticalSection(&s_runtime.mutex);
+  WaitForSingleObject(s_runtime.thread, INFINITE);
+  CloseHandle(s_runtime.thread);
+  s_runtime.consumer_thread_id = 0U;
+  DeleteCriticalSection(&s_runtime.mutex);
+#else
+  pthread_mutex_lock(&s_runtime.mutex);
+  s_runtime.stop_requested = 1;
+  _NEI_LOG_BROADCAST_COND(&s_runtime.cond);
+  pthread_mutex_unlock(&s_runtime.mutex);
+  pthread_join(s_runtime.thread, NULL);
+  pthread_cond_destroy(&s_runtime.cond);
+  pthread_mutex_destroy(&s_runtime.mutex);
+#endif
   s_runtime.initialized = 0;
 }
 
@@ -461,7 +457,7 @@ static void *_nei_log_consumer_thread(void *arg) {
         } else if (drained >= 4U) {
           adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 2U; /* 256: medium */
         } else {
-          adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS;       /* 512: sync/quiet */
+          adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS; /* 512: sync/quiet */
         }
         _nei_log_notify_waiters_after_drain(rt);
         for (idle_spin = 0U; idle_spin < adaptive_iters; ++idle_spin) {
@@ -495,10 +491,10 @@ static void *_nei_log_consumer_thread(void *arg) {
         struct timespec ts;
         int rc;
         clock_gettime(CLOCK_REALTIME, &ts);
-        ts.tv_sec  += (time_t)(rt->auto_flush_interval_ms / 1000U);
+        ts.tv_sec += (time_t)(rt->auto_flush_interval_ms / 1000U);
         ts.tv_nsec += (long)((rt->auto_flush_interval_ms % 1000U) * 1000000U);
         if (ts.tv_nsec >= 1000000000L) {
-          ts.tv_sec  += 1;
+          ts.tv_sec += 1;
           ts.tv_nsec -= 1000000000L;
         }
         rc = pthread_cond_timedwait(&rt->cond, &rt->mutex, &ts);

@@ -27,4 +27,4 @@ int64_t nei_time_qpc_fast_us(void);
 }
 #endif
 
-#endif  // NEI_CORE_TIME_INTERNAL_H
+#endif // NEI_CORE_TIME_INTERNAL_H

@@ -15,13 +15,13 @@
 namespace nei {
 
 class NEI_API JobHandle {
- public:
+public:
   JobHandle();
   ~JobHandle();
-  JobHandle(const JobHandle&) = delete;
-  JobHandle& operator=(const JobHandle&) = delete;
-  JobHandle(JobHandle&&) noexcept;
-  JobHandle& operator=(JobHandle&&) noexcept;
+  JobHandle(const JobHandle &) = delete;
+  JobHandle &operator=(const JobHandle &) = delete;
+  JobHandle(JobHandle &&) noexcept;
+  JobHandle &operator=(JobHandle &&) noexcept;
 
   void Join();
   void Cancel();
@@ -31,21 +31,25 @@ class NEI_API JobHandle {
   void UpdatePriority(TaskPriority priority);
   void Detach();
 
-  static JobHandle PostJob(const Location& from_here, TaskTraits traits,
-      RepeatingCallback<void(JobDelegate*)> task,
-      MaxConcurrencyCallback max_concurrency_cb, int initial_workers = 0);
+  static JobHandle PostJob(const Location &from_here,
+                           TaskTraits traits,
+                           RepeatingCallback<void(JobDelegate *)> task,
+                           MaxConcurrencyCallback max_concurrency_cb,
+                           int initial_workers = 0);
 
- private:
+private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
 
-inline JobHandle PostJob(const Location& from_here, TaskTraits traits,
-    RepeatingCallback<void(JobDelegate*)> task,
-    MaxConcurrencyCallback max_concurrency_cb, int initial_workers = 0) {
-  return JobHandle::PostJob(from_here, std::move(traits), std::move(task),
-      std::move(max_concurrency_cb), initial_workers);
+inline JobHandle PostJob(const Location &from_here,
+                         TaskTraits traits,
+                         RepeatingCallback<void(JobDelegate *)> task,
+                         MaxConcurrencyCallback max_concurrency_cb,
+                         int initial_workers = 0) {
+  return JobHandle::PostJob(
+      from_here, std::move(traits), std::move(task), std::move(max_concurrency_cb), initial_workers);
 }
 
-}  // namespace nei
-#endif  // NEIXX_TASK_POST_JOB_H_
+} // namespace nei
+#endif // NEIXX_TASK_POST_JOB_H_

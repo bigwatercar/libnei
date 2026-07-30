@@ -17,18 +17,14 @@ namespace nei {
 namespace detail {
 
 template <typename T, typename = void>
-struct IsRefCountedLike : std::false_type {
-};
+struct IsRefCountedLike : std::false_type {};
 
 template <typename T>
-struct IsRefCountedLike<T,
-                        std::void_t<decltype(std::declval<const T &>().AddRef()),
-                                    decltype(std::declval<const T &>().Release())>>
-    : std::bool_constant<std::is_same_v<decltype(std::declval<const T &>().AddRef()),
-                                        void> &&
-                         std::is_same_v<decltype(std::declval<const T &>().Release()),
-                                        void>> {
-};
+struct IsRefCountedLike<
+    T,
+    std::void_t<decltype(std::declval<const T &>().AddRef()), decltype(std::declval<const T &>().Release())>>
+    : std::bool_constant<std::is_same_v<decltype(std::declval<const T &>().AddRef()), void>
+                         && std::is_same_v<decltype(std::declval<const T &>().Release()), void>> {};
 
 #if defined(__cpp_concepts) && __cpp_concepts >= 201907L
 template <typename T>
@@ -51,13 +47,25 @@ protected:
   ~RefCountedThreadSafeBase() = default;
 
 #if defined(_MSC_VER)
-  void AddRefImpl() const noexcept { _InterlockedIncrement(&ref_count_); }
-  bool ReleaseImpl() const noexcept { return _InterlockedDecrement(&ref_count_) == 0; }
+  void AddRefImpl() const noexcept {
+    _InterlockedIncrement(&ref_count_);
+  }
+
+  bool ReleaseImpl() const noexcept {
+    return _InterlockedDecrement(&ref_count_) == 0;
+  }
+
 private:
   mutable volatile long ref_count_ = 0;
 #else
-  void AddRefImpl() const noexcept { ref_count_.fetch_add(1, std::memory_order_relaxed); }
-  bool ReleaseImpl() const noexcept { return ref_count_.fetch_sub(1, std::memory_order_acq_rel) == 1; }
+  void AddRefImpl() const noexcept {
+    ref_count_.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  bool ReleaseImpl() const noexcept {
+    return ref_count_.fetch_sub(1, std::memory_order_acq_rel) == 1;
+  }
+
 private:
   mutable std::atomic<int> ref_count_{0};
 #endif
@@ -76,8 +84,13 @@ protected:
   RefCountedBase() noexcept = default;
   ~RefCountedBase() = default;
 
-  void AddRefImpl() const noexcept { ++ref_count_; }
-  bool ReleaseImpl() const noexcept { return --ref_count_ == 0; }
+  void AddRefImpl() const noexcept {
+    ++ref_count_;
+  }
+
+  bool ReleaseImpl() const noexcept {
+    return --ref_count_ == 0;
+  }
 
 private:
   mutable int ref_count_ = 0;
@@ -131,7 +144,7 @@ public:
     return ref_count_.load(std::memory_order_acquire);
 #endif
   }
-#endif  // !defined(NDEBUG)
+#endif // !defined(NDEBUG)
 
 protected:
   RefCountedThreadSafe() noexcept = default;
@@ -160,8 +173,13 @@ public:
   }
 
 #if !defined(NDEBUG)
-  bool HasOneRef() const { return ref_count_ == 1; }
-  int DebugRefCount() const { return ref_count_; }
+  bool HasOneRef() const {
+    return ref_count_ == 1;
+  }
+
+  int DebugRefCount() const {
+    return ref_count_;
+  }
 #endif
 
 protected:
@@ -182,28 +200,32 @@ public:
 
   scoped_refptr() noexcept = default;
 
-  scoped_refptr(std::nullptr_t) noexcept : ptr_(nullptr) {
+  scoped_refptr(std::nullptr_t) noexcept
+      : ptr_(nullptr) {
   }
 
   // Takes a raw pointer and acquires one reference if non-null.
-  explicit scoped_refptr(T *ptr) noexcept : ptr_(ptr) {
+  explicit scoped_refptr(T *ptr) noexcept
+      : ptr_(ptr) {
     AddRefIfNeeded();
   }
 
-  scoped_refptr(const scoped_refptr &other) noexcept : ptr_(other.ptr_) {
+  scoped_refptr(const scoped_refptr &other) noexcept
+      : ptr_(other.ptr_) {
     AddRefIfNeeded();
   }
 
   // Implicit upcast from scoped_refptr<U> to scoped_refptr<T> when U* -> T*.
   // This allows scoped_refptr<Derived> to be used where scoped_refptr<Base>
   // is expected, sharing the same reference count.
-  template <typename U,
-            typename = std::enable_if_t<std::is_convertible_v<U*, T*>>>
-  scoped_refptr(const scoped_refptr<U> &other) noexcept : ptr_(other.get()) {
+  template <typename U, typename = std::enable_if_t<std::is_convertible_v<U *, T *>>>
+  scoped_refptr(const scoped_refptr<U> &other) noexcept
+      : ptr_(other.get()) {
     AddRefIfNeeded();
   }
 
-  scoped_refptr(scoped_refptr &&other) noexcept : ptr_(other.ptr_) {
+  scoped_refptr(scoped_refptr &&other) noexcept
+      : ptr_(other.ptr_) {
     other.ptr_ = nullptr;
   }
 
@@ -290,34 +312,32 @@ private:
 // provide the expected comparison semantics without an implicit boolean path.
 
 template <typename T, typename U>
-bool operator==(const scoped_refptr<T>& lhs,
-                const scoped_refptr<U>& rhs) noexcept {
+bool operator==(const scoped_refptr<T> &lhs, const scoped_refptr<U> &rhs) noexcept {
   return lhs.get() == rhs.get();
 }
 
 template <typename T, typename U>
-bool operator!=(const scoped_refptr<T>& lhs,
-                const scoped_refptr<U>& rhs) noexcept {
+bool operator!=(const scoped_refptr<T> &lhs, const scoped_refptr<U> &rhs) noexcept {
   return lhs.get() != rhs.get();
 }
 
 template <typename T>
-bool operator==(const scoped_refptr<T>& lhs, std::nullptr_t) noexcept {
+bool operator==(const scoped_refptr<T> &lhs, std::nullptr_t) noexcept {
   return lhs.get() == nullptr;
 }
 
 template <typename T>
-bool operator!=(const scoped_refptr<T>& lhs, std::nullptr_t) noexcept {
+bool operator!=(const scoped_refptr<T> &lhs, std::nullptr_t) noexcept {
   return lhs.get() != nullptr;
 }
 
 template <typename T>
-bool operator==(std::nullptr_t, const scoped_refptr<T>& rhs) noexcept {
+bool operator==(std::nullptr_t, const scoped_refptr<T> &rhs) noexcept {
   return rhs.get() == nullptr;
 }
 
 template <typename T>
-bool operator!=(std::nullptr_t, const scoped_refptr<T>& rhs) noexcept {
+bool operator!=(std::nullptr_t, const scoped_refptr<T> &rhs) noexcept {
   return rhs.get() != nullptr;
 }
 
@@ -337,7 +357,7 @@ scoped_refptr<T> MakeRefCounted(Args &&...args) {
 // by a task closure and the object may be destroyed before the task runs.
 // =============================================================================
 template <typename T>
-scoped_refptr<T> WrapRefCounted(T* ptr) {
+scoped_refptr<T> WrapRefCounted(T *ptr) {
   return scoped_refptr<T>(ptr);
 }
 

@@ -156,7 +156,9 @@ T &&UnwrapBoundArg(T &arg) noexcept {
 template <typename T>
 class PassedWrapper {
 public:
-  explicit PassedWrapper(T &&t) : value_(std::move(t)) {}
+  explicit PassedWrapper(T &&t)
+      : value_(std::move(t)) {
+  }
 
   PassedWrapper(const PassedWrapper &) = delete;
   PassedWrapper &operator=(const PassedWrapper &) = delete;
@@ -164,7 +166,9 @@ public:
   PassedWrapper &operator=(PassedWrapper &&) = default;
 
   // Extract the held value.  Must only be called once.
-  T &&Take() { return std::move(value_); }
+  T &&Take() {
+    return std::move(value_);
+  }
 
 private:
   T value_;

@@ -16,18 +16,21 @@ struct WsaInit {
     WSADATA data = {};
     WSAStartup(MAKEWORD(2, 2), &data);
   }
+
   // NoDestructor skips the destructor  --  WSACleanup is unnecessary at process
   // exit and may race with other Winsock-using static destructors.
-  ~WsaInit() { WSACleanup(); }
+  ~WsaInit() {
+    WSACleanup();
+  }
 };
 
-}  // namespace
+} // namespace
 
 void EnsureWsa() {
   static NoDestructor<WsaInit> init;
   (void)init;
 }
 
-}  // namespace nei::net
+} // namespace nei::net
 
-#endif  // _WIN32
+#endif // _WIN32

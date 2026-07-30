@@ -46,12 +46,12 @@ namespace internal {
 //   ReadAsync() races with ResetBinding() on relaxed hardware.
 // ---------------------------------------------------------------------------
 class AsyncInputStreamProxy final : public AsyncInputStream {
- public:
+public:
   AsyncInputStreamProxy();
   ~AsyncInputStreamProxy() override;
 
   // Called from the IO thread before the first ReadAsync().
-  void Bind(AsyncInputStream* target, scoped_refptr<TaskRunner> io_task_runner);
+  void Bind(AsyncInputStream *target, scoped_refptr<TaskRunner> io_task_runner);
 
   // Called from the IO thread after the process has terminated.
   // After this call, subsequent ReadAsync() calls receive success=false.
@@ -59,17 +59,15 @@ class AsyncInputStreamProxy final : public AsyncInputStream {
 
   // May be called from any thread.  Issues one asynchronous read into `buf`.
   // Exactly one invocation of `callback` is guaranteed.
-  void ReadAsync(scoped_refptr<IOBuffer> buf,
-                 std::size_t buf_len,
-                 IOReadCallback callback) override;
+  void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback) override;
 
   void Close() override;
 
- private:
+private:
   // Pointer to the real IO stream.  Stored atomically so captures inside
   // ReadAsync() observe either the old or new value atomically (no tear).
   // Written only from the IO thread (Bind/ResetBinding/Close).
-  std::atomic<AsyncInputStream*> target_{nullptr};
+  std::atomic<AsyncInputStream *> target_{nullptr};
 
   // Both runners are set exactly once at Bind() and cleared at
   // ResetBinding().  Reads from ReadAsync() obey the init-before-use
@@ -97,30 +95,28 @@ class AsyncInputStreamProxy final : public AsyncInputStream {
 // thread; WriteAsync from any thread.
 // ---------------------------------------------------------------------------
 class AsyncOutputStreamProxy final : public AsyncOutputStream {
- public:
+public:
   AsyncOutputStreamProxy();
   ~AsyncOutputStreamProxy() override;
 
-  void Bind(AsyncOutputStream* target, scoped_refptr<TaskRunner> runner);
+  void Bind(AsyncOutputStream *target, scoped_refptr<TaskRunner> runner);
   void ResetBinding();
 
   // Submits `buf_len` bytes from buf->data() to the underlying stream.
   // buf is kept alive by the scoped_refptr for the duration of the kernel IO.
-  void WriteAsync(scoped_refptr<IOBuffer> buf,
-                  std::size_t buf_len,
-                  IOWriteCallback callback) override;
+  void WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOWriteCallback callback) override;
 
   void Close() override;
 
- private:
-  std::atomic<AsyncOutputStream*> target_{nullptr};
+private:
+  std::atomic<AsyncOutputStream *> target_{nullptr};
   scoped_refptr<TaskRunner> io_task_runner_;
   std::atomic<bool> closed_{false};
 
   DECLARE_SEQUENCE_CHECKER(io_sequence_checker_);
 };
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei
 
-#endif  // NEIXX_PROCESS_CHILD_PROCESS_STREAM_PROXY_H_
+#endif // NEIXX_PROCESS_CHILD_PROCESS_STREAM_PROXY_H_

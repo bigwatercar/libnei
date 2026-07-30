@@ -51,8 +51,7 @@ public:
     if (is_null()) {
       return "unknown";
     }
-    return std::string(function_name_) + "@" +
-           std::string(file_name_) + ":" + std::to_string(line_);
+    return std::string(function_name_) + "@" + std::string(file_name_) + ":" + std::to_string(line_);
   }
 
 private:

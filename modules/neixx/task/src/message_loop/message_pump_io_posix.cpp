@@ -27,21 +27,17 @@
 namespace nei {
 namespace {
 
-ThreadLocalStorage::Slot& GetCurrentPumpSlot() {
+ThreadLocalStorage::Slot &GetCurrentPumpSlot() {
   static ThreadLocalStorage::Slot slot;
   static std::once_flag once;
-  std::call_once(once, []() {
-    (void)slot.Initialize();
-  });
+  std::call_once(once, []() { (void)slot.Initialize(); });
   return slot;
 }
 
 constexpr std::size_t kMaxEpollEvents = 16;
 
-int ComputeWaitTimeoutMs(const MessagePump::Delegate::NextWorkInfo& next_work_info,
-                         const TimeTicks& delayed_run_time) {
-  const TimeTicks now = !next_work_info.recent_now.is_null() ? next_work_info.recent_now
-                                                             : TimeTicks::Now();
+int ComputeWaitTimeoutMs(const MessagePump::Delegate::NextWorkInfo &next_work_info, const TimeTicks &delayed_run_time) {
+  const TimeTicks now = !next_work_info.recent_now.is_null() ? next_work_info.recent_now : TimeTicks::Now();
   if (delayed_run_time <= now) {
     return 0;
   }
@@ -54,28 +50,26 @@ int ComputeWaitTimeoutMs(const MessagePump::Delegate::NextWorkInfo& next_work_in
   return static_cast<int>(wait_ms);
 }
 
-}  // namespace
+} // namespace
 
 class MessagePumpForIOState {
- public:
+public:
   struct WatchRecord {
     NativeIOHandle handle = NativeIOHandle{};
-    MessagePumpForIO::Watcher* watcher = nullptr;
+    MessagePumpForIO::Watcher *watcher = nullptr;
     MessagePumpForIO::FdWatchController::Mode mode = MessagePumpForIO::FdWatchController::Mode::READ;
   };
 
   MessagePumpForIOState() {
     epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
     if (epoll_fd_ < 0) {
-      std::fprintf(stderr, "[MessagePumpForIO] epoll_create1 failed: %s\n",
-                   std::strerror(errno));
+      std::fprintf(stderr, "[MessagePumpForIO] epoll_create1 failed: %s\n", std::strerror(errno));
       return;
     }
 
     event_fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (event_fd_ < 0) {
-      std::fprintf(stderr, "[MessagePumpForIO] eventfd failed: %s\n",
-                   std::strerror(errno));
+      std::fprintf(stderr, "[MessagePumpForIO] eventfd failed: %s\n", std::strerror(errno));
       (void)close(epoll_fd_);
       epoll_fd_ = -1;
       return;
@@ -90,8 +84,7 @@ class MessagePumpForIOState {
     // with a real user fd that happens to have the same numeric value.
     ev.data.fd = event_fd_;
     if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, event_fd_, &ev) != 0) {
-      std::fprintf(stderr, "[MessagePumpForIO] epoll_ctl ADD wakefd failed: %s\n",
-                   std::strerror(errno));
+      std::fprintf(stderr, "[MessagePumpForIO] epoll_ctl ADD wakefd failed: %s\n", std::strerror(errno));
       (void)close(event_fd_);
       (void)close(epoll_fd_);
       event_fd_ = -1;
@@ -154,7 +147,7 @@ class MessagePumpForIOState {
     WakePump();
   }
 
-  void ScheduleDelayedWork(const TimeTicks& delayed_run_time) {
+  void ScheduleDelayedWork(const TimeTicks &delayed_run_time) {
     bool should_wake = false;
     {
       AutoLock lock(state_lock_);
@@ -169,7 +162,7 @@ class MessagePumpForIOState {
     }
   }
 
-  void UpdateDelayedWorkFromDelegate(const MessagePump::Delegate::NextWorkInfo& next_work_info) {
+  void UpdateDelayedWorkFromDelegate(const MessagePump::Delegate::NextWorkInfo &next_work_info) {
     AutoLock lock(state_lock_);
     if (next_work_info.next_run_time == MessagePump::Delegate::NextWorkInfo::kNoScheduledRunTime) {
       return;
@@ -180,7 +173,7 @@ class MessagePumpForIOState {
     }
   }
 
-  bool GetDelayedRunTime(TimeTicks* delayed_run_time) const {
+  bool GetDelayedRunTime(TimeTicks *delayed_run_time) const {
     AutoLock lock(state_lock_);
     if (!has_delayed_run_time_) {
       return false;
@@ -196,22 +189,23 @@ class MessagePumpForIOState {
     }
   }
 
-  void DrainPendingWakeups(MessagePump::Delegate* delegate) {
+  void DrainPendingWakeups(MessagePump::Delegate *delegate) {
     TRACE_EVENT0("nei.message_pump", "DrainPendingWakeups");
     // 传入 should_run_task=false：仅排干 OS 层的 eventfd 信号，不触发
     // delegate->DoWork()，防止 DoWork 内部 PostTask 再次写 eventfd 导致死循环。
-    while (DispatchOneBatch(delegate, 0, /*should_run_task=*/false)) {}
+    while (DispatchOneBatch(delegate, 0, /*should_run_task=*/false)) {
+    }
   }
 
-  bool WaitAndDispatch(MessagePump::Delegate* delegate, int timeout_ms) {
+  bool WaitAndDispatch(MessagePump::Delegate *delegate, int timeout_ms) {
     TRACE_EVENT0("nei.message_pump", "WaitAndDispatch");
     return DispatchOneBatch(delegate, timeout_ms);
   }
 
-  bool RegisterWatch(MessagePumpForIO::FdWatchController* controller,
+  bool RegisterWatch(MessagePumpForIO::FdWatchController *controller,
                      NativeIOHandle handle,
                      MessagePumpForIO::FdWatchController::Mode mode,
-                     MessagePumpForIO::Watcher* watcher,
+                     MessagePumpForIO::Watcher *watcher,
                      bool oneshot) {
     if (controller == nullptr || watcher == nullptr || epoll_fd_ < 0 || event_fd_ < 0) {
       return false;
@@ -221,10 +215,12 @@ class MessagePumpForIOState {
 
     // Build the desired event mask for this watch.
     std::uint32_t desired_events = EPOLLERR | EPOLLHUP;
-    if (mode == MessagePumpForIO::FdWatchController::Mode::READ || mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
+    if (mode == MessagePumpForIO::FdWatchController::Mode::READ
+        || mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
       desired_events |= EPOLLIN;
     }
-    if (mode == MessagePumpForIO::FdWatchController::Mode::WRITE || mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
+    if (mode == MessagePumpForIO::FdWatchController::Mode::WRITE
+        || mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
       desired_events |= EPOLLOUT;
     }
 
@@ -233,17 +229,17 @@ class MessagePumpForIOState {
       AutoLock lock(state_lock_);
       // If another watch already exists for this fd, use EPOLL_CTL_MOD to
       // merge the new flags instead of ADD (which would fail with EEXIST).
-      for (const auto& kv : watches_) {
+      for (const auto &kv : watches_) {
         if (kv.second.handle == handle) {
           epoll_op = EPOLL_CTL_MOD;
           // Merge the existing watch's events with our desired events.
           std::uint32_t existing = EPOLLERR | EPOLLHUP;
-          if (kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ ||
-              kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
+          if (kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ
+              || kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
             existing |= EPOLLIN;
           }
-          if (kv.second.mode == MessagePumpForIO::FdWatchController::Mode::WRITE ||
-              kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
+          if (kv.second.mode == MessagePumpForIO::FdWatchController::Mode::WRITE
+              || kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
             existing |= EPOLLOUT;
           }
           desired_events |= existing;
@@ -280,7 +276,7 @@ class MessagePumpForIOState {
       }
     }
 
-    controller->pump_ = nullptr;  // set by owner after success
+    controller->pump_ = nullptr; // set by owner after success
     controller->handle_ = handle;
     controller->watcher_ = watcher;
     controller->mode_ = mode;
@@ -301,16 +297,16 @@ class MessagePumpForIOState {
     // instead of EPOLL_CTL_DEL which would drop all watches for this fd.
     std::uint32_t remaining_events = 0;
     bool has_other = false;
-    for (const auto& kv : watches_) {
+    for (const auto &kv : watches_) {
       if (kv.second.handle == handle) {
         has_other = true;
         remaining_events |= EPOLLERR | EPOLLHUP;
-        if (kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ ||
-            kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
+        if (kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ
+            || kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
           remaining_events |= EPOLLIN;
         }
-        if (kv.second.mode == MessagePumpForIO::FdWatchController::Mode::WRITE ||
-            kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
+        if (kv.second.mode == MessagePumpForIO::FdWatchController::Mode::WRITE
+            || kv.second.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE) {
           remaining_events |= EPOLLOUT;
         }
       }
@@ -330,7 +326,7 @@ class MessagePumpForIOState {
     }
   }
 
- private:
+private:
   void WakePump() {
     TRACE_EVENT_INSTANT("nei.message_pump", "WakePump");
     if (event_fd_ < 0) {
@@ -362,8 +358,7 @@ class MessagePumpForIOState {
     return drained;
   }
 
-  bool DispatchOneBatch(MessagePump::Delegate* delegate, int timeout_ms,
-                        bool should_run_task = true) {
+  bool DispatchOneBatch(MessagePump::Delegate *delegate, int timeout_ms, bool should_run_task = true) {
     if (epoll_fd_ < 0) {
       return false;
     }
@@ -380,7 +375,7 @@ class MessagePumpForIOState {
     bool any_event = false;
     bool ran_work_wakeup = false;
     for (int i = 0; i < event_count; ++i) {
-      const epoll_event& event = events[static_cast<std::size_t>(i)];
+      const epoll_event &event = events[static_cast<std::size_t>(i)];
       if (event.data.fd == event_fd_) {
         (void)DrainWakeEvent();
         TRACE_EVENT_INSTANT("nei.message_pump", "WakeEventDrained");
@@ -399,7 +394,7 @@ class MessagePumpForIOState {
       std::vector<WatchRecord> watchers;
       {
         AutoLock lock(state_lock_);
-        for (const auto& kv : watches_) {
+        for (const auto &kv : watches_) {
           if (kv.second.handle == triggered_fd) {
             watchers.push_back(kv.second);
           }
@@ -414,23 +409,21 @@ class MessagePumpForIOState {
       // may carry both flags (e.g. EPOLLHUP makes the fd both readable
       // and writable), so we check each flag independently against the
       // watcher's registered mode.
-      for (const auto& record : watchers) {
+      for (const auto &record : watchers) {
         if (record.watcher == nullptr)
           continue;
 
-        const bool can_read =
-            (event.events & (EPOLLIN | EPOLLHUP | EPOLLERR)) != 0;
-        const bool can_write =
-            (event.events & (EPOLLOUT | EPOLLERR)) != 0;
+        const bool can_read = (event.events & (EPOLLIN | EPOLLHUP | EPOLLERR)) != 0;
+        const bool can_write = (event.events & (EPOLLOUT | EPOLLERR)) != 0;
 
-        if (can_read &&
-            (record.mode == MessagePumpForIO::FdWatchController::Mode::READ ||
-             record.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE)) {
+        if (can_read
+            && (record.mode == MessagePumpForIO::FdWatchController::Mode::READ
+                || record.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE)) {
           record.watcher->OnFileCanReadWithoutBlocking(record.handle);
         }
-        if (can_write &&
-            (record.mode == MessagePumpForIO::FdWatchController::Mode::WRITE ||
-             record.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE)) {
+        if (can_write
+            && (record.mode == MessagePumpForIO::FdWatchController::Mode::WRITE
+                || record.mode == MessagePumpForIO::FdWatchController::Mode::READ_WRITE)) {
           record.watcher->OnFileCanWriteWithoutBlocking(record.handle);
         }
       }
@@ -465,11 +458,8 @@ MessagePumpForIO::FdWatchController::~FdWatchController() {
   StopWatching();
 }
 
-bool MessagePumpForIO::FdWatchController::StartWatching(MessagePumpForIO* pump,
-                                                        NativeIOHandle handle,
-                                                        Mode mode,
-                                                        MessagePumpForIO::Watcher* watcher,
-                                                        bool oneshot) {
+bool MessagePumpForIO::FdWatchController::StartWatching(
+    MessagePumpForIO *pump, NativeIOHandle handle, Mode mode, MessagePumpForIO::Watcher *watcher, bool oneshot) {
   if (pump == nullptr || watcher == nullptr || pump->impl_ == nullptr) {
     return false;
   }
@@ -520,22 +510,24 @@ bool MessagePumpForIO::FdWatchController::is_watching() const {
   return watch_id_ != 0;
 }
 
-MessagePumpForIO::MessagePumpForIO() : impl_(std::make_shared<MessagePumpForIOState>()) {}
+MessagePumpForIO::MessagePumpForIO()
+    : impl_(std::make_shared<MessagePumpForIOState>()) {
+}
 
 MessagePumpForIO::~MessagePumpForIO() {
   Quit();
 }
 
-MessagePumpForIO* MessagePumpForIO::Current() {
-  return reinterpret_cast<MessagePumpForIO*>(GetCurrentPumpSlot().Get());
+MessagePumpForIO *MessagePumpForIO::Current() {
+  return reinterpret_cast<MessagePumpForIO *>(GetCurrentPumpSlot().Get());
 }
 
-void MessagePumpForIO::Run(Delegate* delegate) {
+void MessagePumpForIO::Run(Delegate *delegate) {
   if (delegate == nullptr || impl_ == nullptr) {
     return;
   }
 
-  MessagePumpForIO* previous = Current();
+  MessagePumpForIO *previous = Current();
   GetCurrentPumpSlot().Set(this);
 
   const PlatformThread::PlatformThreadId current_thread_id = PlatformThread::CurrentId();
@@ -588,8 +580,7 @@ void MessagePumpForIO::Run(Delegate* delegate) {
       continue;
     }
 
-    const TimeTicks now = !next_work_info.recent_now.is_null() ? next_work_info.recent_now
-                                                                : TimeTicks::Now();
+    const TimeTicks now = !next_work_info.recent_now.is_null() ? next_work_info.recent_now : TimeTicks::Now();
     if (delayed_run_time <= now) {
       impl_->ClearExpiredDelayedRunTime(now);
       continue;
@@ -617,12 +608,12 @@ void MessagePumpForIO::ScheduleWork() {
   }
 }
 
-void MessagePumpForIO::ScheduleDelayedWork(const TimeTicks& delayed_run_time) {
+void MessagePumpForIO::ScheduleDelayedWork(const TimeTicks &delayed_run_time) {
   if (impl_ != nullptr) {
     impl_->ScheduleDelayedWork(delayed_run_time);
   }
 }
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // !defined(_WIN32)
+#endif // !defined(_WIN32)

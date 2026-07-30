@@ -29,17 +29,17 @@ namespace nei {
 ///     return 0;                                   // 3. ~AtExitManager drains all cleanups LIFO
 ///   }
 class NEI_API ThreadPoolInstance final {
- public:
+public:
   /// Convenience alias: the same struct as ThreadPool::InitParams.
   using InitParams = ThreadPool::InitParams;
 
   /// Returns the global singleton, or nullptr if not yet initialized or already
   /// shut down.
-  static ThreadPoolInstance* Get();
+  static ThreadPoolInstance *Get();
 
   /// Creates the global singleton with fully specified parameters.
   /// Must be called only once. Asserts if called a second time.
-  static void CreateAndStart(const InitParams& params);
+  static void CreateAndStart(const InitParams &params);
 
   /// Shorthand: creates the singleton with all-default parameters.
   /// Equivalent to CreateAndStart(InitParams{}).
@@ -57,23 +57,21 @@ class NEI_API ThreadPoolInstance final {
   static void ResetForTesting();
 
   /// Creates a sequenced TaskRunner on the global pool.
-  scoped_refptr<TaskRunner> CreateSequencedTaskRunner(
-      const TaskTraits& traits = TaskTraits());
+  scoped_refptr<TaskRunner> CreateSequencedTaskRunner(const TaskTraits &traits = TaskTraits());
 
   /// Creates a parallel TaskRunner on the global pool (for PostJob).
-  scoped_refptr<TaskRunner> CreateParallelTaskRunner(
-      const TaskTraits& traits = TaskTraits());
+  scoped_refptr<TaskRunner> CreateParallelTaskRunner(const TaskTraits &traits = TaskTraits());
 
-  ThreadPoolInstance(const ThreadPoolInstance&) = delete;
-  ThreadPoolInstance& operator=(const ThreadPoolInstance&) = delete;
+  ThreadPoolInstance(const ThreadPoolInstance &) = delete;
+  ThreadPoolInstance &operator=(const ThreadPoolInstance &) = delete;
 
- private:
-  explicit ThreadPoolInstance(const InitParams& params);
+private:
+  explicit ThreadPoolInstance(const InitParams &params);
   ~ThreadPoolInstance();
 
   ThreadPool pool_;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_TASK_THREAD_POOL_INSTANCE_H_
+#endif // NEIXX_TASK_THREAD_POOL_INSTANCE_H_

@@ -22,7 +22,7 @@ namespace nei::net {
 // IPAddress
 // =============================================================================
 
-IPAddress::IPAddress(Family family, const uint8_t* bytes)
+IPAddress::IPAddress(Family family, const uint8_t *bytes)
     : family_(family) {
   if (family == Family::kIPv4) {
     std::memcpy(data_.data(), bytes, 4);
@@ -40,7 +40,7 @@ IPAddress IPAddress::FromIPv6(const uint8_t bytes[16]) {
   return IPAddress(Family::kIPv6, bytes);
 }
 
-IPAddress IPAddress::FromString(const std::string& str) {
+IPAddress IPAddress::FromString(const std::string &str) {
   if (str.empty())
     return IPAddress();
 
@@ -49,14 +49,11 @@ IPAddress IPAddress::FromString(const std::string& str) {
     struct in_addr v4_addr = {};
 #if defined(_WIN32)
     std::u16string u16 = UTF8ToUTF16(str);
-    if (InetPtonW(AF_INET,
-                  reinterpret_cast<const wchar_t*>(u16.c_str()),
-                  &v4_addr) == 1) {
+    if (InetPtonW(AF_INET, reinterpret_cast<const wchar_t *>(u16.c_str()), &v4_addr) == 1) {
 #else
     if (inet_pton(AF_INET, str.c_str(), &v4_addr) == 1) {
 #endif
-      return IPAddress(Family::kIPv4,
-                       reinterpret_cast<const uint8_t*>(&v4_addr));
+      return IPAddress(Family::kIPv4, reinterpret_cast<const uint8_t *>(&v4_addr));
     }
   }
 
@@ -65,18 +62,15 @@ IPAddress IPAddress::FromString(const std::string& str) {
     struct in6_addr v6_addr = {};
 #if defined(_WIN32)
     std::u16string u16 = UTF8ToUTF16(str);
-    if (InetPtonW(AF_INET6,
-                  reinterpret_cast<const wchar_t*>(u16.c_str()),
-                  &v6_addr) == 1) {
+    if (InetPtonW(AF_INET6, reinterpret_cast<const wchar_t *>(u16.c_str()), &v6_addr) == 1) {
 #else
     if (inet_pton(AF_INET6, str.c_str(), &v6_addr) == 1) {
 #endif
-      return IPAddress(Family::kIPv6,
-                       reinterpret_cast<const uint8_t*>(&v6_addr));
+      return IPAddress(Family::kIPv6, reinterpret_cast<const uint8_t *>(&v6_addr));
     }
   }
 
-  return IPAddress();  // Parse failure -> unspecified.
+  return IPAddress(); // Parse failure -> unspecified.
 }
 
 std::string IPAddress::ToString() const {
@@ -89,8 +83,7 @@ std::string IPAddress::ToString() const {
     struct in_addr v4 = {};
     std::memcpy(&v4, data_.data(), sizeof(v4));
     if (InetNtopW(AF_INET, &v4, wbuf, INET_ADDRSTRLEN))
-      return UTF16ToUTF8(std::u16string_view(
-          reinterpret_cast<const char16_t*>(wbuf)));
+      return UTF16ToUTF8(std::u16string_view(reinterpret_cast<const char16_t *>(wbuf)));
 #else
     char buf[INET6_ADDRSTRLEN] = {};
     struct in_addr v4 = {};
@@ -104,8 +97,7 @@ std::string IPAddress::ToString() const {
     struct in6_addr v6 = {};
     std::memcpy(&v6, data_.data(), sizeof(v6));
     if (InetNtopW(AF_INET6, &v6, wbuf, INET6_ADDRSTRLEN))
-      return UTF16ToUTF8(std::u16string_view(
-          reinterpret_cast<const char16_t*>(wbuf)));
+      return UTF16ToUTF8(std::u16string_view(reinterpret_cast<const char16_t *>(wbuf)));
 #else
     char buf[INET6_ADDRSTRLEN] = {};
     struct in6_addr v6 = {};
@@ -115,10 +107,10 @@ std::string IPAddress::ToString() const {
 #endif
   }
 
-  return std::string();  // Conversion failure fallback.
+  return std::string(); // Conversion failure fallback.
 }
 
-bool IPAddress::operator==(const IPAddress& other) const noexcept {
+bool IPAddress::operator==(const IPAddress &other) const noexcept {
   if (family_ != other.family_)
     return false;
   if (IsUnspecified())
@@ -127,11 +119,11 @@ bool IPAddress::operator==(const IPAddress& other) const noexcept {
   return std::memcmp(data_.data(), other.data_.data(), len) == 0;
 }
 
-bool IPAddress::operator!=(const IPAddress& other) const noexcept {
+bool IPAddress::operator!=(const IPAddress &other) const noexcept {
   return !(*this == other);
 }
 
-bool IPAddress::operator<(const IPAddress& other) const noexcept {
+bool IPAddress::operator<(const IPAddress &other) const noexcept {
   if (family_ != other.family_)
     return static_cast<uint8_t>(family_) < static_cast<uint8_t>(other.family_);
   if (IsUnspecified())
@@ -161,4 +153,4 @@ std::string IPEndPoint::ToString() const {
   return result;
 }
 
-}  // namespace nei::net
+} // namespace nei::net

@@ -13,12 +13,12 @@ class TaskQueue;
 // Returns the TaskQueue that the current pool worker thread is actively
 // processing, or nullptr if the current thread is not a pool worker or
 // is between queues.
-TaskQueue* GetCurrentPooledTaskQueue();
+TaskQueue *GetCurrentPooledTaskQueue();
 
 // Called by pool worker threads when beginning/ending work on a queue.
-void SetCurrentPooledTaskQueue(TaskQueue* queue);
+void SetCurrentPooledTaskQueue(TaskQueue *queue);
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei
 
-#endif  // NEIXX_TASK_INTERNAL_POOLED_TASK_RUNNER_UTILS_H_
+#endif // NEIXX_TASK_INTERNAL_POOLED_TASK_RUNNER_UTILS_H_

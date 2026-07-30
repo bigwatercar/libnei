@@ -12,9 +12,8 @@
 
 namespace nei {
 
-
 #if defined(_WIN32)
-using NativeIOHandle = void*;
+using NativeIOHandle = void *;
 #else
 using NativeIOHandle = int;
 #endif
@@ -26,32 +25,36 @@ using NativeIOHandle = int;
 class MessagePumpForIOState;
 
 class NEI_API MessagePumpForIO final : public MessagePump {
- public:
+public:
   typedef MessagePumpForIOState Impl;
 
   class CompletionWatcher;
 
   class Watcher {
-   public:
+  public:
     virtual ~Watcher() = default;
 
     virtual void OnFileCanReadWithoutBlocking(NativeIOHandle handle) = 0;
     virtual void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) = 0;
 
-    virtual CompletionWatcher* AsCompletionWatcher() { return nullptr; }
+    virtual CompletionWatcher *AsCompletionWatcher() {
+      return nullptr;
+    }
   };
 
   // Optional Windows-only completion callback extension.
   // Implementers can downcast from Watcher in the pump and receive raw
   // OVERLAPPED completion notifications without changing POSIX behavior.
   class CompletionWatcher : public Watcher {
-   public:
+  public:
     virtual ~CompletionWatcher() = default;
 
-    CompletionWatcher* AsCompletionWatcher() override { return this; }
+    CompletionWatcher *AsCompletionWatcher() override {
+      return this;
+    }
 
     virtual void OnIOCompleted(NativeIOHandle handle,
-                               void* overlapped_context,
+                               void *overlapped_context,
                                std::uint32_t bytes_transferred,
                                std::uint32_t error_code) = 0;
   };
@@ -63,7 +66,7 @@ class NEI_API MessagePumpForIO final : public MessagePump {
   };
 
   class NEI_API FdWatchController final {
-   public:
+  public:
     enum class Mode {
       READ,
       WRITE,
@@ -73,29 +76,26 @@ class NEI_API MessagePumpForIO final : public MessagePump {
     FdWatchController();
     ~FdWatchController();
 
-    FdWatchController(const FdWatchController&) = delete;
-    FdWatchController& operator=(const FdWatchController&) = delete;
-    FdWatchController(FdWatchController&&) = delete;
-    FdWatchController& operator=(FdWatchController&&) = delete;
+    FdWatchController(const FdWatchController &) = delete;
+    FdWatchController &operator=(const FdWatchController &) = delete;
+    FdWatchController(FdWatchController &&) = delete;
+    FdWatchController &operator=(FdWatchController &&) = delete;
 
-    bool StartWatching(MessagePumpForIO* pump,
-                       NativeIOHandle handle,
-                       Mode mode,
-                       Watcher* watcher,
-                       bool oneshot = false);
+    bool
+    StartWatching(MessagePumpForIO *pump, NativeIOHandle handle, Mode mode, Watcher *watcher, bool oneshot = false);
     void StopWatching();
     bool is_watching() const;
 
-   private:
+  private:
     friend class MessagePumpForIO;
     friend class MessagePumpForIOState;
 
-    MessagePumpForIO* pump_ = nullptr;
+    MessagePumpForIO *pump_ = nullptr;
     NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
     std::shared_ptr<Impl> impl_;
     NEI_SUPPRESS_MSC_WARNING_4251_END
     NativeIOHandle handle_ = NativeIOHandle{};
-    Watcher* watcher_ = nullptr;
+    Watcher *watcher_ = nullptr;
     Mode mode_ = Mode::READ;
     std::uint64_t watch_id_ = 0;
   };
@@ -103,27 +103,27 @@ class NEI_API MessagePumpForIO final : public MessagePump {
   MessagePumpForIO();
   ~MessagePumpForIO() override;
 
-  MessagePumpForIO(const MessagePumpForIO&) = delete;
-  MessagePumpForIO& operator=(const MessagePumpForIO&) = delete;
+  MessagePumpForIO(const MessagePumpForIO &) = delete;
+  MessagePumpForIO &operator=(const MessagePumpForIO &) = delete;
 
   // Returns the currently running MessagePumpForIO on this thread, or nullptr
   // when the current thread is not inside MessagePumpForIO::Run().
-  static MessagePumpForIO* Current();
+  static MessagePumpForIO *Current();
 
   static void ResetDebugCountersForTesting();
   static DebugCounters GetDebugCountersForTesting();
 
-  void Run(Delegate* delegate) override;
+  void Run(Delegate *delegate) override;
   void Quit() override;
   void ScheduleWork() override;
-  void ScheduleDelayedWork(const TimeTicks& delayed_run_time) override;
+  void ScheduleDelayedWork(const TimeTicks &delayed_run_time) override;
 
- private:
+private:
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::shared_ptr<Impl> impl_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_TASK_MESSAGE_LOOP_MESSAGE_PUMP_IO_H_
+#endif // NEIXX_TASK_MESSAGE_LOOP_MESSAGE_PUMP_IO_H_

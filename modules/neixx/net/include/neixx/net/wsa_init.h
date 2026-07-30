@@ -22,12 +22,13 @@ namespace nei::net {
 // Call once on any thread before Winsock usage. Subsequent calls are no-ops.
 NEI_API void EnsureWsa();
 
-#else  // !_WIN32
+#else // !_WIN32
 
-inline void EnsureWsa() {}
+inline void EnsureWsa() {
+}
 
-#endif  // _WIN32
+#endif // _WIN32
 
-}  // namespace nei::net
+} // namespace nei::net
 
-#endif  // NEIXX_NET_WSA_INIT_H_
+#endif // NEIXX_NET_WSA_INIT_H_

@@ -29,11 +29,11 @@ void PostEmptyFailure(scoped_refptr<TaskRunner> runner, Callback callback) {
   }
 }
 
-}  // namespace
+} // namespace
 
-StreamReader::StreamReader(AsyncInputStream* stream)
-    : stream_(stream),
-      target_task_runner_(ThreadTaskRunnerHandle::Get()) {
+StreamReader::StreamReader(AsyncInputStream *stream)
+    : stream_(stream)
+    , target_task_runner_(ThreadTaskRunnerHandle::Get()) {
   DCHECK(stream_ != nullptr);
 }
 
@@ -41,15 +41,13 @@ StreamReader::~StreamReader() {
   weak_factory_.InvalidateWeakPtrs(FROM_HERE);
 }
 
-void StreamReader::ReadBytes(std::size_t bytes_to_read,
-                             ReadBytesCallback user_callback) {
+void StreamReader::ReadBytes(std::size_t bytes_to_read, ReadBytesCallback user_callback) {
   if (stream_ == nullptr || bytes_to_read == 0) {
     PostEmptyFailure(target_task_runner_, std::move(user_callback));
     return;
   }
 
-  scoped_refptr<IOBufferWithSize> sized_buffer =
-      IOBufferPool::GetInstance().AcquireBuffer(bytes_to_read);
+  scoped_refptr<IOBufferWithSize> sized_buffer = IOBufferPool::GetInstance().AcquireBuffer(bytes_to_read);
   scoped_refptr<IOBuffer> base_buffer(sized_buffer.get());
 
   auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
@@ -63,35 +61,29 @@ void StreamReader::ReadBytes(std::size_t bytes_to_read,
   //   4) On target_runner, WeakPtr gate drops stale callbacks after owner
   //      destruction, preventing shutdown-time UAF crashes.
   stream_->ReadAsync(
-      std::move(base_buffer), bytes_to_read,
-      [weak_this,
-       target_runner,
-       sized_buffer,
-       user_callback = std::move(user_callback)](bool success,
-                                                 std::size_t bytes_read) mutable {
-        auto deliver = [weak_this,
-                        sized_buffer,
-                        success,
-                        bytes_read,
-                        user_callback = std::move(user_callback)]() mutable {
-          if (!weak_this) {
-            return;
-          }
+      std::move(base_buffer),
+      bytes_to_read,
+      [weak_this, target_runner, sized_buffer, user_callback = std::move(user_callback)](
+          bool success, std::size_t bytes_read) mutable {
+        auto deliver =
+            [weak_this, sized_buffer, success, bytes_read, user_callback = std::move(user_callback)]() mutable {
+              if (!weak_this) {
+                return;
+              }
 
-          std::vector<std::uint8_t> output;
-          if (success && bytes_read > 0) {
-            const std::size_t bounded = (std::min)(bytes_read, sized_buffer->size());
-            const std::uint8_t* begin =
-                reinterpret_cast<const std::uint8_t*>(sized_buffer->data());
-            output.assign(begin, begin + bounded);
-          } else {
-            success = false;
-          }
+              std::vector<std::uint8_t> output;
+              if (success && bytes_read > 0) {
+                const std::size_t bounded = (std::min)(bytes_read, sized_buffer->size());
+                const std::uint8_t *begin = reinterpret_cast<const std::uint8_t *>(sized_buffer->data());
+                output.assign(begin, begin + bounded);
+              } else {
+                success = false;
+              }
 
-          if (user_callback) {
-            user_callback(success, std::move(output));
-          }
-        };
+              if (user_callback) {
+                user_callback(success, std::move(output));
+              }
+            };
 
         if (target_runner) {
           (void)target_runner->PostTask(FROM_HERE, std::move(deliver));
@@ -101,15 +93,13 @@ void StreamReader::ReadBytes(std::size_t bytes_to_read,
       });
 }
 
-void StreamReader::ReadString(std::size_t bytes_to_read,
-                              ReadStringCallback user_callback) {
+void StreamReader::ReadString(std::size_t bytes_to_read, ReadStringCallback user_callback) {
   if (stream_ == nullptr || bytes_to_read == 0) {
     PostEmptyFailure(target_task_runner_, std::move(user_callback));
     return;
   }
 
-  scoped_refptr<IOBufferWithSize> sized_buffer =
-      IOBufferPool::GetInstance().AcquireBuffer(bytes_to_read);
+  scoped_refptr<IOBufferWithSize> sized_buffer = IOBufferPool::GetInstance().AcquireBuffer(bytes_to_read);
   scoped_refptr<IOBuffer> base_buffer(sized_buffer.get());
 
   auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
@@ -121,33 +111,28 @@ void StreamReader::ReadString(std::size_t bytes_to_read,
   //   back to target_runner. That closure is the single serialization point
   //   where WeakPtr validity is checked and user callback is fired.
   stream_->ReadAsync(
-      std::move(base_buffer), bytes_to_read,
-      [weak_this,
-       target_runner,
-       sized_buffer,
-       user_callback = std::move(user_callback)](bool success,
-                                                 std::size_t bytes_read) mutable {
-        auto deliver = [weak_this,
-                        sized_buffer,
-                        success,
-                        bytes_read,
-                        user_callback = std::move(user_callback)]() mutable {
-          if (!weak_this) {
-            return;
-          }
+      std::move(base_buffer),
+      bytes_to_read,
+      [weak_this, target_runner, sized_buffer, user_callback = std::move(user_callback)](
+          bool success, std::size_t bytes_read) mutable {
+        auto deliver =
+            [weak_this, sized_buffer, success, bytes_read, user_callback = std::move(user_callback)]() mutable {
+              if (!weak_this) {
+                return;
+              }
 
-          std::string output;
-          if (success && bytes_read > 0) {
-            const std::size_t bounded = (std::min)(bytes_read, sized_buffer->size());
-            output.assign(reinterpret_cast<const char*>(sized_buffer->data()), bounded);
-          } else {
-            success = false;
-          }
+              std::string output;
+              if (success && bytes_read > 0) {
+                const std::size_t bounded = (std::min)(bytes_read, sized_buffer->size());
+                output.assign(reinterpret_cast<const char *>(sized_buffer->data()), bounded);
+              } else {
+                success = false;
+              }
 
-          if (user_callback) {
-            user_callback(success, std::move(output));
-          }
-        };
+              if (user_callback) {
+                user_callback(success, std::move(output));
+              }
+            };
 
         if (target_runner) {
           (void)target_runner->PostTask(FROM_HERE, std::move(deliver));
@@ -157,4 +142,4 @@ void StreamReader::ReadString(std::size_t bytes_to_read,
       });
 }
 
-}  // namespace nei
+} // namespace nei

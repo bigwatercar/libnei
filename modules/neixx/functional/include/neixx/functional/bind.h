@@ -59,8 +59,7 @@ RepeatingCallback<void()> BindRepeating(F &&functor, Args &&...args) {
   };
 
   auto shared = std::make_shared<Storage>(
-      Storage{Fn(std::forward<F>(functor)),
-              BoundArgs(detail::StoreBoundArg(std::forward<Args>(args))...)});
+      Storage{Fn(std::forward<F>(functor)), BoundArgs(detail::StoreBoundArg(std::forward<Args>(args))...)});
 
   return RepeatingCallback<void()>([shared]() {
     if constexpr (sizeof...(Args) > 0) {

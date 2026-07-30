@@ -14,9 +14,8 @@ TEST(TextNormalizationTest, WidthConversionUtf8AndUtf16) {
 
 TEST(TextNormalizationTest, NormalizeChineseTextMapsPunctuationAndSpaces) {
   const std::string input = "Hello\u3000\u3000World\uFF01\u3002";
-  EXPECT_EQ(nei::NormalizeChineseText(input,
-                                      nei::SpaceNormalization::kCollapseRuns,
-                                      nei::PunctuationNormalization::kZhToAscii),
+  EXPECT_EQ(nei::NormalizeChineseText(
+                input, nei::SpaceNormalization::kCollapseRuns, nei::PunctuationNormalization::kZhToAscii),
             "Hello World!.");
 }
 

@@ -1111,7 +1111,7 @@ TEST(LogCTest, BuiltinFileSinkRotatesAtConfiguredSize) {
   (void)std::remove(file_path_2.c_str());
 
   nei_log_default_file_sink_options_st rotate_opts = nei_log_default_file_sink_options();
-  rotate_opts.max_file_bytes   = 64U;
+  rotate_opts.max_file_bytes = 64U;
   rotate_opts.max_backup_files = 2U;
   nei_log_sink_st *sink = nei_log_create_default_file_sink(file_path.c_str(), &rotate_opts);
   ASSERT_NE(sink, nullptr);
@@ -1466,61 +1466,73 @@ TEST_F(LogCDeathTest, ImmediateCrashOnFatalTriggersProcessExit) {
   /* This test uses EXPECT_DEATH to verify that emitting a FATAL log with
    * immediate_crash_on_fatal enabled actually crashes the process.
    * EXPECT_DEATH runs the code in a child process and verifies it exits abnormally. */
-  EXPECT_DEATH({
-    nei_log_config_st cfg = *nei_log_default_config();
-    cfg.immediate_crash_on_fatal = 1U;
-    cfg.level_flags.all = 0xFFFFFFFFu;  /* Enable all levels */
+  EXPECT_DEATH(
+      {
+        nei_log_config_st cfg = *nei_log_default_config();
+        cfg.immediate_crash_on_fatal = 1U;
+        cfg.level_flags.all = 0xFFFFFFFFu; /* Enable all levels */
 
-    nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
-    if (nei_log_add_config(&cfg, &cfg_handle) != 0) {
-      return;  /* Bail out if config add fails */
-    }
+        nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+        if (nei_log_add_config(&cfg, &cfg_handle) != 0) {
+          return; /* Bail out if config add fails */
+        }
 
-    /* Emit a FATAL log - this should trigger immediate crash */
-    nei_llog(cfg_handle, NEI_L_FATAL, __FILE__, __LINE__, "crash_test",
-             "fatal error: immediate crash should be triggered now!");
-    nei_log_flush();
+        /* Emit a FATAL log - this should trigger immediate crash */
+        nei_llog(cfg_handle,
+                 NEI_L_FATAL,
+                 __FILE__,
+                 __LINE__,
+                 "crash_test",
+                 "fatal error: immediate crash should be triggered now!");
+        nei_log_flush();
 
-    /* This line should never be reached */
-    nei_log_remove_config(cfg_handle);
-  }, ".*");  /* Expect any form of abnormal termination */
+        /* This line should never be reached */
+        nei_log_remove_config(cfg_handle);
+      },
+      ".*"); /* Expect any form of abnormal termination */
 }
 
 TEST(LogCTest, ImmediateCrashOnFatalFallbackPathTerminates) {
 #if defined(_WIN32)
-  EXPECT_EXIT({
-    _putenv_s("NEI_LOG_TEST_SKIP_PRIMARY_CRASH", "1");
-    _putenv_s("NEI_LOG_TEST_SKIP_SECONDARY_CRASH", "1");
+  EXPECT_EXIT(
+      {
+        _putenv_s("NEI_LOG_TEST_SKIP_PRIMARY_CRASH", "1");
+        _putenv_s("NEI_LOG_TEST_SKIP_SECONDARY_CRASH", "1");
 
-    nei_log_config_st cfg = *nei_log_default_config();
-    cfg.immediate_crash_on_fatal = 1U;
-    cfg.level_flags.all = 0xFFFFFFFFu;
+        nei_log_config_st cfg = *nei_log_default_config();
+        cfg.immediate_crash_on_fatal = 1U;
+        cfg.level_flags.all = 0xFFFFFFFFu;
 
-    nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
-    if (nei_log_add_config(&cfg, &cfg_handle) != 0) {
-      _Exit(3);
-    }
+        nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+        if (nei_log_add_config(&cfg, &cfg_handle) != 0) {
+          _Exit(3);
+        }
 
-    nei_llog(cfg_handle, NEI_L_FATAL, __FILE__, __LINE__, "crash_fallback", "fatal triggers fallback exit path");
-    _Exit(4);
-  }, ::testing::ExitedWithCode(0xEE), ".*");
+        nei_llog(cfg_handle, NEI_L_FATAL, __FILE__, __LINE__, "crash_fallback", "fatal triggers fallback exit path");
+        _Exit(4);
+      },
+      ::testing::ExitedWithCode(0xEE),
+      ".*");
 #else
-  EXPECT_EXIT({
-    setenv("NEI_LOG_TEST_SKIP_PRIMARY_CRASH", "1", 1);
-    setenv("NEI_LOG_TEST_SKIP_SECONDARY_CRASH", "1", 1);
+  EXPECT_EXIT(
+      {
+        setenv("NEI_LOG_TEST_SKIP_PRIMARY_CRASH", "1", 1);
+        setenv("NEI_LOG_TEST_SKIP_SECONDARY_CRASH", "1", 1);
 
-    nei_log_config_st cfg = *nei_log_default_config();
-    cfg.immediate_crash_on_fatal = 1U;
-    cfg.level_flags.all = 0xFFFFFFFFu;
+        nei_log_config_st cfg = *nei_log_default_config();
+        cfg.immediate_crash_on_fatal = 1U;
+        cfg.level_flags.all = 0xFFFFFFFFu;
 
-    nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
-    if (nei_log_add_config(&cfg, &cfg_handle) != 0) {
-      _Exit(3);
-    }
+        nei_log_config_handle_t cfg_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+        if (nei_log_add_config(&cfg, &cfg_handle) != 0) {
+          _Exit(3);
+        }
 
-    nei_llog(cfg_handle, NEI_L_FATAL, __FILE__, __LINE__, "crash_fallback", "fatal triggers fallback exit path");
-    _Exit(4);
-  }, ::testing::ExitedWithCode(134), ".*");
+        nei_llog(cfg_handle, NEI_L_FATAL, __FILE__, __LINE__, "crash_fallback", "fatal triggers fallback exit path");
+        _Exit(4);
+      },
+      ::testing::ExitedWithCode(134),
+      ".*");
 #endif
 }
 
@@ -1544,7 +1556,7 @@ extern "C" void ConfigTest_TrackAndFreeRelease(struct nei_log_sink_st *sink) {
   free(sink);
 }
 
-}  // namespace
+} // namespace
 
 // Verifies that in-place config modifications followed by nei_log_update_config()
 // are visible to subsequent log calls.
@@ -1696,8 +1708,8 @@ TEST(LogCTest, AutoFlushFlushesPendingData) {
   /* Disable batch flushing so data goes to the FILE* buffer but isn't
    * fflush'd until the auto-flush timer fires. */
   nei_log_default_file_sink_options_st opts = nei_log_default_file_sink_options();
-  opts.flush_interval    = 0U;   /* never auto-flush per record count */
-  opts.write_batch_bytes = 0U;   /* disable batch writing */
+  opts.flush_interval = 0U;    /* never auto-flush per record count */
+  opts.write_batch_bytes = 0U; /* disable batch writing */
   nei_log_sink_st *sink = nei_log_create_default_file_sink(file_path.c_str(), &opts);
   ASSERT_NE(sink, nullptr);
 

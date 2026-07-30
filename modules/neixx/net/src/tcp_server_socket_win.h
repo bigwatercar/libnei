@@ -36,14 +36,13 @@ struct AcceptContext;
 // TCPServerSocket::Impl (Windows: AcceptEx + IOCP via CompletionWatcher)
 // =============================================================================
 
-class TCPServerSocket::Impl final
-    : public RefCountedThreadSafe<Impl>,
-      public MessagePumpForIO::CompletionWatcher {
- public:
+class TCPServerSocket::Impl final : public RefCountedThreadSafe<Impl>, public MessagePumpForIO::CompletionWatcher {
+public:
   Impl();
   ~Impl();
 
-  bool Listen(const IPEndPoint& addr, int backlog,
+  bool Listen(const IPEndPoint &addr,
+              int backlog,
               TCPServerSocket::AcceptCallback callback,
               scoped_refptr<TaskRunner> acceptor_runner,
               TCPServerSocket::RunnerSelector worker_selector);
@@ -54,11 +53,16 @@ class TCPServerSocket::Impl final
   // listening, and self-holds until in-flight I/O completes.
   void Orphan();
 
- private:
+private:
   // MessagePumpForIO::CompletionWatcher
-  void OnFileCanReadWithoutBlocking(NativeIOHandle) override {}
-  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {}
-  void OnIOCompleted(NativeIOHandle handle, void* overlapped_context,
+  void OnFileCanReadWithoutBlocking(NativeIOHandle) override {
+  }
+
+  void OnFileCanWriteWithoutBlocking(NativeIOHandle) override {
+  }
+
+  void OnIOCompleted(NativeIOHandle handle,
+                     void *overlapped_context,
                      std::uint32_t bytes_transferred,
                      std::uint32_t error_code) override;
 
@@ -69,11 +73,10 @@ class TCPServerSocket::Impl final
   // (64-128 entries) to avoid WSAECONNREFUSED from the NIC layer.
   void PostAcceptBatch(int count);
 
-  SOCKET CreateListenSocket(const IPEndPoint& addr, int backlog);
+  SOCKET CreateListenSocket(const IPEndPoint &addr, int backlog);
   SOCKET CreateClientSocket();
   scoped_refptr<IOBuffer> CreateAddrBuffer();
-  bool EndPointToSockAddr(const IPEndPoint& ep,
-                          struct sockaddr_storage* out, int* out_len);
+  bool EndPointToSockAddr(const IPEndPoint &ep, struct sockaddr_storage *out, int *out_len);
 
   SOCKET listen_socket_ = INVALID_SOCKET;
   std::atomic<bool> closed_{false};
@@ -82,7 +85,7 @@ class TCPServerSocket::Impl final
   // IOCP watcher controller  --  registers listen socket with the pump.
   MessagePumpForIO::FdWatchController controller_;
   std::mutex mutex_;
-  std::vector<AcceptContext*> pending_accepts_;
+  std::vector<AcceptContext *> pending_accepts_;
 
   // Callback + runner stored for re-issuing accepts.
   TCPServerSocket::AcceptCallback accept_callback_;
@@ -97,7 +100,7 @@ class TCPServerSocket::Impl final
 
   // Like ReleaseSelfHoldIfNeeded but called when mutex_ is already held.
   // Releases the lock before calling this->Release() to avoid deadlock.
-  void ReleaseSelfHoldUnderLock(std::unique_lock<std::mutex>& lock);
+  void ReleaseSelfHoldUnderLock(std::unique_lock<std::mutex> &lock);
 
   // Self-hold flag (protected by mutex_).  When true, the Impl holds an
   // extra reference to itself for background graceful shutdown.
@@ -107,7 +110,7 @@ class TCPServerSocket::Impl final
   WeakPtrFactory<Impl> weak_factory_;
 };
 
-}  // namespace nei::net
+} // namespace nei::net
 
-#endif  // _WIN32
-#endif  // NEIXX_NET_TCP_SERVER_SOCKET_WIN_H_
+#endif // _WIN32
+#endif // NEIXX_NET_TCP_SERVER_SOCKET_WIN_H_

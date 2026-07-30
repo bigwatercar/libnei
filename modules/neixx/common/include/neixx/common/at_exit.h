@@ -9,6 +9,7 @@
 
 #include <nei/macros/nei_export.h>
 #include <nei/macros/suppress_compiler_warnings.h>
+
 namespace nei {
 
 // ---------------------------------------------------------------------------
@@ -75,7 +76,7 @@ namespace nei {
 // This guarantees that the object outlives all its users and is only reclaimed
 // after every other exit callback has already run.
 class NEI_API AtExitManager {
- public:
+public:
   // The callback type stored on the exit stack.
   // Uses std::function for maximum flexibility; callers may pass lambdas,
   // bind expressions, or function pointers.
@@ -95,8 +96,8 @@ class NEI_API AtExitManager {
   // then unregisters *this* as the active manager.
   ~AtExitManager();
 
-  AtExitManager(const AtExitManager&) = delete;
-  AtExitManager& operator=(const AtExitManager&) = delete;
+  AtExitManager(const AtExitManager &) = delete;
+  AtExitManager &operator=(const AtExitManager &) = delete;
 
   // -----------------------------------------------------------------------
   // Callback registration
@@ -129,10 +130,10 @@ class NEI_API AtExitManager {
   // Safe to call multiple times; subsequent calls are no-ops.
   static void ProcessCallbacksNow();
 
- private:
+private:
   // Points to the single active AtExitManager instance, or nullptr.
   // Read/write is protected by `lock_` in RegisterCallback / ctor / dtor.
-  static AtExitManager* g_top_manager_;
+  static AtExitManager *g_top_manager_;
 
   // Guards both `g_top_manager_` and `stack_`.
   static std::mutex lock_;
@@ -144,6 +145,6 @@ class NEI_API AtExitManager {
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_COMMON_AT_EXIT_H_
+#endif // NEIXX_COMMON_AT_EXIT_H_

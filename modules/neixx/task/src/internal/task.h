@@ -34,7 +34,7 @@ struct Task {
   //
   //   Cross-queue comparisons are NOT meaningful  --  the heap is per-queue,
   //   so operator> is only used within a single TaskQueue's delayed_incoming_queue_.
-  bool operator>(const Task& other) const {
+  bool operator>(const Task &other) const {
     if (delayed_run_time != other.delayed_run_time) {
       return delayed_run_time > other.delayed_run_time;
     }
@@ -42,7 +42,7 @@ struct Task {
   }
 };
 
-}  // namespace internal
-}  // namespace nei
+} // namespace internal
+} // namespace nei
 
-#endif  // NEIXX_TASK_INTERNAL_TASK_H_
+#endif // NEIXX_TASK_INTERNAL_TASK_H_

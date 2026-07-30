@@ -20,10 +20,8 @@ namespace {
 // This mirrors the real pipe/file stream pull contract so that AsyncLineReader
 // tests remain faithful to production behaviour.
 class FakeAsyncInputStream final : public AsyncInputStream {
- public:
-  void ReadAsync(scoped_refptr<IOBuffer> buf,
-                 std::size_t buf_len,
-                 IOReadCallback callback) override {
+public:
+  void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback) override {
     pending_buf_ = std::move(buf);
     pending_len_ = buf_len;
     pending_cb_ = std::move(callback);
@@ -34,8 +32,9 @@ class FakeAsyncInputStream final : public AsyncInputStream {
   }
 
   // Push `chunk` bytes into the pending read buffer and fire the callback.
-  void Emit(const std::string& chunk) {
-    if (!pending_cb_) return;
+  void Emit(const std::string &chunk) {
+    if (!pending_cb_)
+      return;
 
     const std::size_t n = (std::min)(chunk.size(), pending_len_);
     std::memcpy(pending_buf_->data(), chunk.data(), n);
@@ -47,13 +46,14 @@ class FakeAsyncInputStream final : public AsyncInputStream {
 
   // Signal EOF: fire the pending callback with success=false, bytes=0.
   void EmitEof() {
-    if (!pending_cb_) return;
+    if (!pending_cb_)
+      return;
     IOReadCallback cb = std::move(pending_cb_);
     pending_buf_.reset();
     cb(false, 0u);
   }
 
- private:
+private:
   scoped_refptr<IOBuffer> pending_buf_;
   std::size_t pending_len_ = 0;
   IOReadCallback pending_cb_;
@@ -64,9 +64,7 @@ TEST(AsyncLineReaderTest, SplitsLinesAndTrimsCarriageReturn) {
   AsyncLineReader reader(&input);
 
   std::vector<std::string> lines;
-  reader.StartReadingLines([&lines](std::string&& line) {
-    lines.push_back(std::move(line));
-  });
+  reader.StartReadingLines([&lines](std::string &&line) { lines.push_back(std::move(line)); });
 
   // Each Emit() satisfies the most recent ReadAsync() and AsyncLineReader
   // issues the next ReadAsync() internally (pull model).
@@ -85,9 +83,7 @@ TEST(AsyncLineReaderTest, FlushesTrailingPartialLineOnEof) {
   AsyncLineReader reader(&input);
 
   std::vector<std::string> lines;
-  reader.StartReadingLines([&lines](std::string&& line) {
-    lines.push_back(std::move(line));
-  });
+  reader.StartReadingLines([&lines](std::string &&line) { lines.push_back(std::move(line)); });
 
   input.Emit("partial-without-newline");
   input.EmitEof();
@@ -101,9 +97,7 @@ TEST(AsyncLineReaderTest, DestructorDoesNotInvokeCallback) {
   std::vector<std::string> lines;
   {
     AsyncLineReader reader(&input);
-    reader.StartReadingLines([&lines](std::string&& line) {
-      lines.push_back(std::move(line));
-    });
+    reader.StartReadingLines([&lines](std::string &&line) { lines.push_back(std::move(line)); });
 
     input.Emit("trailing-without-eof");
     // Reader is destroyed without EOF.  The destructor must not call the
@@ -118,9 +112,7 @@ TEST(AsyncLineReaderTest, FlushPendingLineEmitsTrailingDataAndKeepsReading) {
   AsyncLineReader reader(&input);
 
   std::vector<std::string> lines;
-  reader.StartReadingLines([&lines](std::string&& line) {
-    lines.push_back(std::move(line));
-  });
+  reader.StartReadingLines([&lines](std::string &&line) { lines.push_back(std::move(line)); });
 
   input.Emit("trailing");
   reader.FlushPendingLine();
@@ -135,5 +127,5 @@ TEST(AsyncLineReaderTest, FlushPendingLineEmitsTrailingDataAndKeepsReading) {
   EXPECT_EQ(lines.size(), 2u);
 }
 
-}  // namespace
-}  // namespace nei
+} // namespace
+} // namespace nei

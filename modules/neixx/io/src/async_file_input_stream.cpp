@@ -18,16 +18,17 @@ struct AsyncFileInputStreamState {
   explicit AsyncFileInputStreamState(std::unique_ptr<AsyncFile> file_in,
                                      std::size_t chunk_size_in,
                                      std::int64_t start_offset)
-      : file(std::move(file_in)),
-        chunk_size((std::max)(chunk_size_in, static_cast<std::size_t>(1))),
-        next_offset(start_offset < 0 ? 0 : static_cast<std::uint64_t>(start_offset)) {}
+      : file(std::move(file_in))
+      , chunk_size((std::max)(chunk_size_in, static_cast<std::size_t>(1)))
+      , next_offset(start_offset < 0 ? 0 : static_cast<std::uint64_t>(start_offset)) {
+  }
 
   std::mutex lock;
   std::unique_ptr<AsyncFile> file;
   std::size_t chunk_size = 4096;
   std::uint64_t next_offset = 0;
   bool closed = false;
-  bool read_in_flight = false;  // Prevents overlapping reads.
+  bool read_in_flight = false; // Prevents overlapping reads.
 };
 
 // ---------------------------------------------------------------------------
@@ -37,30 +38,30 @@ struct AsyncFileInputStreamState {
 AsyncFileInputStream::AsyncFileInputStream(std::unique_ptr<AsyncFile> file,
                                            std::size_t chunk_size,
                                            std::int64_t start_offset)
-    : state_(std::make_shared<AsyncFileInputStreamState>(
-          std::move(file), chunk_size, start_offset)) {}
+    : state_(std::make_shared<AsyncFileInputStreamState>(std::move(file), chunk_size, start_offset)) {
+}
 
 AsyncFileInputStream::~AsyncFileInputStream() {
   Close();
 }
 
-void AsyncFileInputStream::ReadAsync(scoped_refptr<IOBuffer> buf,
-                                     std::size_t buf_len,
-                                     IOReadCallback callback) {
+void AsyncFileInputStream::ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback) {
   // Validate and prepare.
-  AsyncFile* file = nullptr;
+  AsyncFile *file = nullptr;
   std::size_t read_size = 0;
   std::uint64_t offset = 0;
 
   {
     std::lock_guard<std::mutex> lock(state_->lock);
     if (state_->closed || !state_->file) {
-      if (callback) callback(false, 0u);
+      if (callback)
+        callback(false, 0u);
       return;
     }
     if (state_->read_in_flight) {
       // Concurrent ReadAsync calls are not supported; treat as error.
-      if (callback) callback(false, 0u);
+      if (callback)
+        callback(false, 0u);
       return;
     }
     state_->read_in_flight = true;
@@ -72,30 +73,30 @@ void AsyncFileInputStream::ReadAsync(scoped_refptr<IOBuffer> buf,
   }
 
   // Issue the read directly into the caller-supplied IOBuffer.
-  file->ReadAsync(
-      std::move(buf), read_size, offset,
-      [state = state_, callback = std::move(callback)](
-          bool success, std::size_t bytes_read,
-          AsyncFile::Error /*error*/) mutable {
-        bool ok = false;
+  file->ReadAsync(std::move(buf),
+                  read_size,
+                  offset,
+                  [state = state_, callback = std::move(callback)](
+                      bool success, std::size_t bytes_read, AsyncFile::Error /*error*/) mutable {
+                    bool ok = false;
 
-        {
-          std::lock_guard<std::mutex> lock(state->lock);
-          state->read_in_flight = false;
-          if (success && bytes_read > 0) {
-            state->next_offset += static_cast<std::uint64_t>(bytes_read);
-          }
-          ok = (!state->closed && success && bytes_read > 0);
-        }
+                    {
+                      std::lock_guard<std::mutex> lock(state->lock);
+                      state->read_in_flight = false;
+                      if (success && bytes_read > 0) {
+                        state->next_offset += static_cast<std::uint64_t>(bytes_read);
+                      }
+                      ok = (!state->closed && success && bytes_read > 0);
+                    }
 
-        if (callback) {
-          callback(ok, bytes_read);
-        }
-      });
+                    if (callback) {
+                      callback(ok, bytes_read);
+                    }
+                  });
 }
 
 void AsyncFileInputStream::Close() {
-  AsyncFile* file = nullptr;
+  AsyncFile *file = nullptr;
   {
     std::lock_guard<std::mutex> lock(state_->lock);
     if (state_->closed) {
@@ -110,4 +111,4 @@ void AsyncFileInputStream::Close() {
   }
 }
 
-}  // namespace nei
+} // namespace nei

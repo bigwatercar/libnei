@@ -21,7 +21,7 @@ namespace nei {
 
 namespace internal {
 class TaskQueue;
-}  // namespace internal
+} // namespace internal
 
 struct NEI_API TaskRunnerTracingStats {
   std::int64_t weak_ptr_expired_posts = 0;
@@ -34,48 +34,42 @@ struct NEI_API TaskRunnerTracingStats {
 };
 
 class NEI_API TaskRunner : public RefCountedThreadSafe<TaskRunner> {
- public:
+public:
   virtual ~TaskRunner() = default;
 
   // Returns true if the task was successfully enqueued.
-  bool PostTask(const Location& from_here, OnceClosure task);
+  bool PostTask(const Location &from_here, OnceClosure task);
   // delay <= 0 is treated as immediate work and is posted without entering
   // the delayed queue. Returns true if successfully enqueued.
-  bool PostDelayedTask(const Location& from_here, OnceClosure task, TimeDelta delay);
+  bool PostDelayedTask(const Location &from_here, OnceClosure task, TimeDelta delay);
 
   template <typename T>
-  bool DeleteSoon(const Location& from_here, T* object) {
-    return PostTask(from_here, [object]() {
-      delete object;
-    });
+  bool DeleteSoon(const Location &from_here, T *object) {
+    return PostTask(from_here, [object]() { delete object; });
   }
 
-  virtual bool PostTaskWithTraits(const Location& from_here,
-                                  const TaskTraits& traits,
-                                  OnceClosure task) = 0;
-  virtual bool PostDelayedTaskWithTraits(const Location& from_here,
-                                         const TaskTraits& traits,
-                                         OnceClosure task,
-                                         TimeDelta delay) = 0;
+  virtual bool PostTaskWithTraits(const Location &from_here, const TaskTraits &traits, OnceClosure task) = 0;
+  virtual bool
+  PostDelayedTaskWithTraits(const Location &from_here, const TaskTraits &traits, OnceClosure task, TimeDelta delay) = 0;
 
-  static scoped_refptr<TaskRunner> Create(internal::TaskQueue* task_queue,
-                                          const TaskTraits& traits = TaskTraits());
+  static scoped_refptr<TaskRunner> Create(internal::TaskQueue *task_queue, const TaskTraits &traits = TaskTraits());
 
   // Creates a TaskRunner for thread-pool queues.  Differs from Create() in
   // that BelongsToCurrentThread() always returns false and
   // RunsTasksInCurrentSequence() uses TLS-based detection to determine
   // whether the calling thread is currently executing a task from this
   // runner's queue.
-  static scoped_refptr<TaskRunner> CreateForThreadPool(
-      internal::TaskQueue* task_queue,
-      const TaskTraits& traits = TaskTraits());
+  static scoped_refptr<TaskRunner> CreateForThreadPool(internal::TaskQueue *task_queue,
+                                                       const TaskTraits &traits = TaskTraits());
 
   // Returns true if the current thread is the thread this runner is bound
   // to.  For IO thread runners, the bound thread is the one that owns the
   // underlying MessagePumpForIO.  For thread-pool runners, this always
   // returns false (pool runners are not bound to a specific thread).
   // Use RunsTasksInCurrentSequence() for pool-aware sequence detection.
-  virtual bool BelongsToCurrentThread() const { return false; }
+  virtual bool BelongsToCurrentThread() const {
+    return false;
+  }
 
   // Returns true if tasks posted to this runner are guaranteed to run on
   // the calling thread (i.e., the calling thread is the runner's dedicated
@@ -85,7 +79,9 @@ class NEI_API TaskRunner : public RefCountedThreadSafe<TaskRunner> {
   // For SequenceManager-backed runners: same as BelongsToCurrentThread().
   // For ThreadPool runners: true only if the current thread is actively
   // executing a task from this runner's queue (TLS-based detection).
-  virtual bool RunsTasksInCurrentSequence() const { return false; }
+  virtual bool RunsTasksInCurrentSequence() const {
+    return false;
+  }
 
   // Observability helpers for delayed-overflow fallback path.
   // Intended for tests and diagnostics.
@@ -96,17 +92,21 @@ class NEI_API TaskRunner : public RefCountedThreadSafe<TaskRunner> {
   static TaskRunnerTracingStats GetTracingStatsForTesting();
   static void ResetTracingStatsForTesting();
 
- protected:
-  explicit TaskRunner(const TaskTraits& traits = TaskTraits()) : traits_(traits) {}
+protected:
+  explicit TaskRunner(const TaskTraits &traits = TaskTraits())
+      : traits_(traits) {
+  }
 
-  const TaskTraits& traits() const { return traits_; }
+  const TaskTraits &traits() const {
+    return traits_;
+  }
 
- private:
+private:
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   TaskTraits traits_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_TASK_TASK_RUNNER_H_
+#endif // NEIXX_TASK_TASK_RUNNER_H_

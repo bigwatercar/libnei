@@ -51,7 +51,7 @@
 //     target_compile_definitions(my_app PRIVATE DCHECK_ALWAYS_ON)
 //
 #if defined(DCHECK_ALWAYS_ON) && !NEI_DCHECK_IS_ON
-#undef  NEI_DCHECK_IS_ON
+#undef NEI_DCHECK_IS_ON
 #define NEI_DCHECK_IS_ON 1
 #endif
 
@@ -65,7 +65,7 @@ namespace nei {
 
 // --- Debug / DCHECK_ALWAYS_ON 实现 ------------------------------------------
 class NEI_API ThreadChecker {
- public:
+public:
   ThreadChecker() {
     // 构造时立即绑定到当前物理线程。
     // PlatformThread::CurrentId() 返回 std::uintptr_t，在所有平台上均非零。
@@ -76,10 +76,10 @@ class NEI_API ThreadChecker {
   }
 
   // 禁止拷贝/移动  --  --  checker 的生命周期与宿主对象严格绑定。
-  ThreadChecker(const ThreadChecker&) = delete;
-  ThreadChecker& operator=(const ThreadChecker&) = delete;
-  ThreadChecker(ThreadChecker&&) = delete;
-  ThreadChecker& operator=(ThreadChecker&&) = delete;
+  ThreadChecker(const ThreadChecker &) = delete;
+  ThreadChecker &operator=(const ThreadChecker &) = delete;
+  ThreadChecker(ThreadChecker &&) = delete;
+  ThreadChecker &operator=(ThreadChecker &&) = delete;
 
   // -----------------------------------------------------------------------
   // CalledOnValidThread()  --  判断当前线程是否为构造/绑定时的合法线程。
@@ -102,8 +102,7 @@ class NEI_API ThreadChecker {
     // 慢速路径：detached 状态 (bound == 0)，尝试惰性绑定。
     if (bound == kDetachedSentinel) {
       PlatformThread::PlatformThreadId expected = kDetachedSentinel;
-      if (thread_id_.compare_exchange_strong(expected, current,
-                                              std::memory_order_acq_rel)) {
+      if (thread_id_.compare_exchange_strong(expected, current, std::memory_order_acq_rel)) {
         // CAS 成功  --  --  当前线程抢到绑定权。
         return true;
       }
@@ -126,7 +125,7 @@ class NEI_API ThreadChecker {
     thread_id_.store(kDetachedSentinel, std::memory_order_release);
   }
 
- private:
+private:
   // 值为 0 表示"已 detach，等待惰性绑定"。
   // PlatformThread::CurrentId() 在所有平台上绝不返回 0，
   // 因此 0 是安全的哨兵值。
@@ -137,25 +136,29 @@ class NEI_API ThreadChecker {
   mutable std::atomic<PlatformThread::PlatformThreadId> thread_id_;
 };
 
-#else  // !NEI_DCHECK_IS_ON
+#else // !NEI_DCHECK_IS_ON
 
 // --- Release 实现：完全空结构体，零开销 -------------------------------------
 class NEI_API ThreadChecker {
- public:
+public:
   constexpr ThreadChecker() = default;
 
-  ThreadChecker(const ThreadChecker&) = delete;
-  ThreadChecker& operator=(const ThreadChecker&) = delete;
-  ThreadChecker(ThreadChecker&&) = delete;
-  ThreadChecker& operator=(ThreadChecker&&) = delete;
+  ThreadChecker(const ThreadChecker &) = delete;
+  ThreadChecker &operator=(const ThreadChecker &) = delete;
+  ThreadChecker(ThreadChecker &&) = delete;
+  ThreadChecker &operator=(ThreadChecker &&) = delete;
 
-  constexpr bool CalledOnValidThread() const { return true; }
-  void DetachFromThread() {}
+  constexpr bool CalledOnValidThread() const {
+    return true;
+  }
+
+  void DetachFromThread() {
+  }
 };
 
-#endif  // NEI_DCHECK_IS_ON
+#endif // NEI_DCHECK_IS_ON
 
-}  // namespace nei
+} // namespace nei
 
 // =============================================================================
 // 配套宏定义
@@ -174,22 +177,21 @@ class NEI_API ThreadChecker {
 
 // 断言当前执行线程与 name 绑定的线程一致。
 // 用法：DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-#define DCHECK_CALLED_ON_VALID_THREAD(name) \
-  DCHECK((name).CalledOnValidThread())
+#define DCHECK_CALLED_ON_VALID_THREAD(name) DCHECK((name).CalledOnValidThread())
 
 // 解除 name 的线程绑定，允许下一次校验时惰性绑定到新线程。
 // 用法：DETACH_FROM_THREAD(thread_checker_);
 #define DETACH_FROM_THREAD(name) (name).DetachFromThread()
 
-#else  // !NEI_DCHECK_IS_ON
+#else // !NEI_DCHECK_IS_ON
 
 // Release 模式：完全零开销  --  --  不声明任何成员，不产生任何代码。
 // 注意：DECLARE_THREAD_CHECKER 展开为空（不是 ((void)0)），
 // 因为它用于类成员声明，((void)0) 在 class body 中是非法的。
 #define DECLARE_THREAD_CHECKER(name)
 #define DCHECK_CALLED_ON_VALID_THREAD(name) ((void)0)
-#define DETACH_FROM_THREAD(name)            ((void)0)
+#define DETACH_FROM_THREAD(name) ((void)0)
 
-#endif  // NEI_DCHECK_IS_ON
+#endif // NEI_DCHECK_IS_ON
 
-#endif  // NEIXX_TASK_THREAD_CHECKER_H_
+#endif // NEIXX_TASK_THREAD_CHECKER_H_

@@ -40,8 +40,7 @@ extern "C" {
  *         returned as a positive value.  On error, returns a negative
  *         value.
  */
-NEI_API int nei_wstr_to_utf8(const wchar_t *src, int src_len,
-                             char *buf, size_t size);
+NEI_API int nei_wstr_to_utf8(const wchar_t *src, int src_len, char *buf, size_t size);
 
 /**
  * @brief Convert a null-terminated UTF-8 string to a wide string buffer.
@@ -75,8 +74,7 @@ NEI_API int nei_utf8_to_wstr(const char *src, wchar_t *buf, int size);
  *         returned as a positive value.  On error, returns a negative
  *         value.
  */
-NEI_API int nei_mbcs_to_utf8(const char *src, int src_len,
-                             char *buf, size_t size);
+NEI_API int nei_mbcs_to_utf8(const char *src, int src_len, char *buf, size_t size);
 
 /**
  * @brief Convert a UTF-8 string to the system's ANSI code page (MBCS).
@@ -93,8 +91,7 @@ NEI_API int nei_mbcs_to_utf8(const char *src, int src_len,
  *         returned as a positive value.  On error, returns a negative
  *         value.
  */
-NEI_API int nei_utf8_to_mbcs(const char *src, int src_len,
-                             char *buf, size_t size);
+NEI_API int nei_utf8_to_mbcs(const char *src, int src_len, char *buf, size_t size);
 
 #ifdef __cplusplus
 }

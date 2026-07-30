@@ -22,9 +22,9 @@ namespace nei {
 // - Run() thread repeatedly calls Delegate methods to drain runnable work.
 // - When no work is runnable, Run() waits until explicit wakeup or delayed deadline.
 class NEI_API MessagePump {
- public:
+public:
   class NEI_API Delegate {
-   public:
+  public:
     struct NextWorkInfo {
       // Sentinel used when no delayed task is scheduled.
       static constexpr TimeTicks kNoScheduledRunTime = TimeTicks();
@@ -50,7 +50,7 @@ class NEI_API MessagePump {
     //
     // next_work_info lets delegate return the next delayed deadline together
     // with an optional cached now timestamp to reduce expensive clock queries.
-    virtual bool DoDelayedWork(NextWorkInfo* next_work_info) = 0;
+    virtual bool DoDelayedWork(NextWorkInfo *next_work_info) = 0;
 
     // Runs low-priority idle work when no immediate/delayed work is available.
     // Returns true if idle work was run and the pump should continue immediately.
@@ -60,7 +60,7 @@ class NEI_API MessagePump {
   virtual ~MessagePump() = default;
 
   // Runs the loop on the current thread until Quit() is called.
-  virtual void Run(Delegate* delegate) = 0;
+  virtual void Run(Delegate *delegate) = 0;
 
   // Requests Run() to exit. May be called from any thread.
   virtual void Quit() = 0;
@@ -72,12 +72,12 @@ class NEI_API MessagePump {
   // Notifies the pump about the next delayed work deadline.
   // Implementations should track the earliest deadline and wake early when needed.
   // May be called from any thread.
-  virtual void ScheduleDelayedWork(const TimeTicks& delayed_run_time) = 0;
+  virtual void ScheduleDelayedWork(const TimeTicks &delayed_run_time) = 0;
 
- protected:
+protected:
   MessagePump() = default;
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_TASK_MESSAGE_LOOP_MESSAGE_PUMP_H_
+#endif // NEIXX_TASK_MESSAGE_LOOP_MESSAGE_PUMP_H_

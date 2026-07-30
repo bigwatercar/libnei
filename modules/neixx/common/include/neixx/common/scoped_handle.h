@@ -39,53 +39,84 @@ namespace nei {
 
 struct DefaultHandleTraits {
   using Handle = HANDLE;
-  static Handle NullValue() { return INVALID_HANDLE_VALUE; }
+
+  static Handle NullValue() {
+    return INVALID_HANDLE_VALUE;
+  }
+
   static bool IsValid(Handle h) {
     return h != nullptr && h != INVALID_HANDLE_VALUE;
   }
-  static void Close(Handle h) { ::CloseHandle(h); }
+
+  static void Close(Handle h) {
+    ::CloseHandle(h);
+  }
 };
 
 struct NullHandleTraits {
   using Handle = HANDLE;
-  static Handle NullValue() { return nullptr; }
-  static bool IsValid(Handle h) { return h != nullptr; }
-  static void Close(Handle h) { if (h) ::CloseHandle(h); }
+
+  static Handle NullValue() {
+    return nullptr;
+  }
+
+  static bool IsValid(Handle h) {
+    return h != nullptr;
+  }
+
+  static void Close(Handle h) {
+    if (h)
+      ::CloseHandle(h);
+  }
 };
 
 struct PseudoHandleTraits {
   using Handle = HANDLE;
+
   // INVALID_HANDLE_VALUE is the reset sentinel for release().
-  static Handle NullValue() { return INVALID_HANDLE_VALUE; }
+  static Handle NullValue() {
+    return INVALID_HANDLE_VALUE;
+  }
+
   // Rejects both NULL and INVALID_HANDLE_VALUE  --  GetStdHandle uses
   // both as failure indicators for distinct error modes.
   static bool IsValid(Handle h) {
     return h != nullptr && h != INVALID_HANDLE_VALUE;
   }
+
   // Pseudo-handles are owned by the OS  --  must never be closed.
-  static void Close(Handle h) { (void)h; }
+  static void Close(Handle h) {
+    (void)h;
+  }
 };
 
 // ---- ScopedHandle ---------------------------------------------------------
 
 template <typename Traits>
 class ScopedHandle {
- public:
+public:
   using Handle = typename Traits::Handle;
 
-  ScopedHandle() : handle_(Traits::NullValue()) {}
+  ScopedHandle()
+      : handle_(Traits::NullValue()) {
+  }
 
-  explicit ScopedHandle(Handle h) : handle_(h) {}
+  explicit ScopedHandle(Handle h)
+      : handle_(h) {
+  }
 
-  ~ScopedHandle() { Close(); }
+  ~ScopedHandle() {
+    Close();
+  }
 
-  ScopedHandle(const ScopedHandle&) = delete;
-  ScopedHandle& operator=(const ScopedHandle&) = delete;
+  ScopedHandle(const ScopedHandle &) = delete;
+  ScopedHandle &operator=(const ScopedHandle &) = delete;
 
-  ScopedHandle(ScopedHandle&& other) noexcept
-      : handle_(other.release()) {}
+  ScopedHandle(ScopedHandle &&other) noexcept
+      : handle_(other.release()) {
+  }
 
-  ScopedHandle& operator=(ScopedHandle&& other) noexcept {
+  ScopedHandle &operator=(ScopedHandle &&other) noexcept {
     if (this != &other) {
       Close();
       handle_ = other.release();
@@ -96,10 +127,14 @@ class ScopedHandle {
   // ---- Accessors ---------------------------------------------------------
 
   // Returns the raw handle without transferring ownership.
-  Handle Get() const { return handle_; }
+  Handle Get() const {
+    return handle_;
+  }
 
   // Returns true if the handle is valid according to the traits.
-  bool IsValid() const { return Traits::IsValid(handle_); }
+  bool IsValid() const {
+    return Traits::IsValid(handle_);
+  }
 
   // ---- Ownership transfer -------------------------------------------------
 
@@ -121,7 +156,7 @@ class ScopedHandle {
   // Closes the current handle and returns a pointer to the internal
   // storage so that a Windows API can write into it directly
   // (e.g. &scoped_handle.Receive() for output parameters).
-  Handle* Receive() {
+  Handle *Receive() {
     Close();
     return &handle_;
   }
@@ -136,28 +171,29 @@ class ScopedHandle {
 
   // ---- Comparison ---------------------------------------------------------
 
-  bool operator==(const ScopedHandle& other) const {
+  bool operator==(const ScopedHandle &other) const {
     return handle_ == other.handle_;
   }
-  bool operator!=(const ScopedHandle& other) const {
+
+  bool operator!=(const ScopedHandle &other) const {
     return handle_ != other.handle_;
   }
 
   // ---- Swap ---------------------------------------------------------------
 
-  void swap(ScopedHandle& other) noexcept {
+  void swap(ScopedHandle &other) noexcept {
     std::swap(handle_, other.handle_);
   }
 
- private:
+private:
   Handle handle_;
 };
 
 template <typename Traits>
-void swap(ScopedHandle<Traits>& a, ScopedHandle<Traits>& b) noexcept {
+void swap(ScopedHandle<Traits> &a, ScopedHandle<Traits> &b) noexcept {
   a.swap(b);
 }
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_COMMON_SCOPED_HANDLE_H_
+#endif // NEIXX_COMMON_SCOPED_HANDLE_H_

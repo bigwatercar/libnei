@@ -29,44 +29,33 @@ constexpr bool HasTrimPosition(TrimPositions value, TrimPositions flag) {
   return (static_cast<int>(value) & static_cast<int>(flag)) != 0;
 }
 
-NEI_API bool StartsWith(std::string_view input,
-                        std::string_view prefix,
-                        CompareCase compare_case = CompareCase::kSensitive);
-NEI_API bool StartsWith(std::u16string_view input,
-                        std::u16string_view prefix,
-                        CompareCase compare_case = CompareCase::kSensitive);
+NEI_API bool
+StartsWith(std::string_view input, std::string_view prefix, CompareCase compare_case = CompareCase::kSensitive);
+NEI_API bool
+StartsWith(std::u16string_view input, std::u16string_view prefix, CompareCase compare_case = CompareCase::kSensitive);
 #if __cplusplus >= 202002L
-NEI_API bool StartsWith(std::u8string_view input,
-                        std::u8string_view prefix,
-                        CompareCase compare_case = CompareCase::kSensitive);
+NEI_API bool
+StartsWith(std::u8string_view input, std::u8string_view prefix, CompareCase compare_case = CompareCase::kSensitive);
 #endif
 
-NEI_API bool EndsWith(std::string_view input,
-                      std::string_view suffix,
-                      CompareCase compare_case = CompareCase::kSensitive);
-NEI_API bool EndsWith(std::u16string_view input,
-                      std::u16string_view suffix,
-                      CompareCase compare_case = CompareCase::kSensitive);
+NEI_API bool
+EndsWith(std::string_view input, std::string_view suffix, CompareCase compare_case = CompareCase::kSensitive);
+NEI_API bool
+EndsWith(std::u16string_view input, std::u16string_view suffix, CompareCase compare_case = CompareCase::kSensitive);
 #if __cplusplus >= 202002L
-NEI_API bool EndsWith(std::u8string_view input,
-                      std::u8string_view suffix,
-                      CompareCase compare_case = CompareCase::kSensitive);
+NEI_API bool
+EndsWith(std::u8string_view input, std::u8string_view suffix, CompareCase compare_case = CompareCase::kSensitive);
 #endif
 
 // Three-way string comparison. Returns:
 //   < 0  if lhs < rhs
 //   == 0 if lhs == rhs
 //   > 0  if lhs > rhs
-NEI_API int Compare(std::string_view lhs,
-                    std::string_view rhs,
-                    CompareCase compare_case = CompareCase::kSensitive);
-NEI_API int Compare(std::u16string_view lhs,
-                    std::u16string_view rhs,
-                    CompareCase compare_case = CompareCase::kSensitive);
+NEI_API int Compare(std::string_view lhs, std::string_view rhs, CompareCase compare_case = CompareCase::kSensitive);
+NEI_API int
+Compare(std::u16string_view lhs, std::u16string_view rhs, CompareCase compare_case = CompareCase::kSensitive);
 #if __cplusplus >= 202002L
-NEI_API int Compare(std::u8string_view lhs,
-                    std::u8string_view rhs,
-                    CompareCase compare_case = CompareCase::kSensitive);
+NEI_API int Compare(std::u8string_view lhs, std::u8string_view rhs, CompareCase compare_case = CompareCase::kSensitive);
 #endif
 
 NEI_API std::string TrimWhitespace(std::string_view input, TrimPositions positions = TrimPositions::kAll);

@@ -8,7 +8,7 @@ namespace nei {
 // Static member definitions
 // ---------------------------------------------------------------------------
 
-AtExitManager* AtExitManager::g_top_manager_ = nullptr;
+AtExitManager *AtExitManager::g_top_manager_ = nullptr;
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::mutex AtExitManager::lock_;
@@ -23,14 +23,14 @@ AtExitManager::AtExitManager() {
   // At most one AtExitManager may exist at any time.  A second construction
   // is always a programmer error  --  DCHECK in debug, CHECK in release  --  and
   // must abort before any damage is done.
-  DCHECK_EQ_MSG(g_top_manager_, nullptr,
+  DCHECK_EQ_MSG(g_top_manager_,
+                nullptr,
                 "AtExitManager: a second instance was created while one is "
                 "already active.  Only one AtExitManager may exist at a time.");
 
   // In release builds, DCHECK is a no-op.  Use a hard CHECK to guarantee
   // single-instance enforcement in all configurations.
-  CHECK_MSG(g_top_manager_ == nullptr,
-            "AtExitManager: duplicate instance detected.  Aborting.");
+  CHECK_MSG(g_top_manager_ == nullptr, "AtExitManager: duplicate instance detected.  Aborting.");
 
   g_top_manager_ = this;
 }
@@ -63,7 +63,7 @@ AtExitManager::~AtExitManager() {
 // static
 bool AtExitManager::RegisterCallback(Callback callback) {
   if (!callback) {
-    return false;  // Null callbacks are silently ignored.
+    return false; // Null callbacks are silently ignored.
   }
 
   std::lock_guard<std::mutex> lock(lock_);
@@ -92,7 +92,7 @@ void AtExitManager::ProcessCallbacksNow() {
     std::lock_guard<std::mutex> lock(lock_);
 
     if (g_top_manager_ == nullptr) {
-      return;  // Nothing to process.
+      return; // Nothing to process.
     }
 
     // Swap: after this, g_top_manager_->stack_ is empty, so new callbacks
@@ -109,4 +109,4 @@ void AtExitManager::ProcessCallbacksNow() {
   }
 }
 
-}  // namespace nei
+} // namespace nei

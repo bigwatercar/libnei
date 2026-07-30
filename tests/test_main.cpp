@@ -13,7 +13,7 @@
 
 #include <gtest/gtest.h>
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   // The AtExitManager MUST be the first stack object so it outlives all
   // singletons created during test execution.  Without it, any
   // Singleton<T>::GetInstance() call will CHECK-fail.

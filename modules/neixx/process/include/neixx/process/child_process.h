@@ -120,7 +120,7 @@ struct ProcessExitInfo {
 
 /// Callback sink for child process lifecycle notifications.
 class NEI_API ChildProcessListener {
- public:
+public:
   virtual ~ChildProcessListener() = default;
 
   /// Called after a successful launch with the child PID.
@@ -128,12 +128,12 @@ class NEI_API ChildProcessListener {
   /// Called when launch fails and no running child is produced.
   virtual void OnProcessLaunchFailed() = 0;
   /// Called exactly once when the child reaches a terminal state.
-  virtual void OnProcessTerminated(const ProcessExitInfo& info) = 0;
+  virtual void OnProcessTerminated(const ProcessExitInfo &info) = 0;
 };
 
 /// High-level async child process wrapper.
 class NEI_API ChildProcess {
- public:
+public:
   class Impl;
 
   /// Uses the default ProcessService.
@@ -146,8 +146,7 @@ class NEI_API ChildProcess {
   /// @param command_line Child executable and arguments.
   /// @param options Launch options, stdio wiring, and resource limits.
   /// @return true if creation and monitoring setup succeed.
-  bool Launch(const CommandLine& command_line,
-              const ProcessLaunchOptions& options);
+  bool Launch(const CommandLine &command_line, const ProcessLaunchOptions &options);
 
   /// Requests child termination.
   /// @param exit_code Expected exit code for hard-kill paths where supported.
@@ -157,21 +156,21 @@ class NEI_API ChildProcess {
   bool Terminate(int exit_code, bool force);
 
   /// Sets the listener used for lifecycle callbacks.
-  void SetListener(ChildProcessListener* listener);
+  void SetListener(ChildProcessListener *listener);
 
   /// Returns non-owning async stdout stream, or nullptr if not piped.
-  AsyncInputStream* GetStdoutStream() const;
+  AsyncInputStream *GetStdoutStream() const;
   /// Returns non-owning async stderr stream, or nullptr if not piped.
-  AsyncInputStream* GetStderrStream() const;
+  AsyncInputStream *GetStderrStream() const;
   /// Returns non-owning async stdin stream, or nullptr if not piped.
-  AsyncOutputStream* GetStdinStream() const;
+  AsyncOutputStream *GetStdinStream() const;
 
- private:
+private:
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   std::unique_ptr<Impl> impl_;
   NEI_SUPPRESS_MSC_WARNING_END
 };
 
-}  // namespace nei
+} // namespace nei
 
-#endif  // NEIXX_PROCESS_CHILD_PROCESS_H_
+#endif // NEIXX_PROCESS_CHILD_PROCESS_H_
