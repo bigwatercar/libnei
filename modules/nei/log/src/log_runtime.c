@@ -12,6 +12,24 @@ static void *_nei_log_consumer_thread(void *arg);
 /* Forward declaration */
 static void _nei_log_process_events(const uint8_t *buf, size_t size);
 
+/* High-resolution monotonic clock in nanoseconds.
+ * Used for benchmark/diagnostic phase timing of the consumer loop. */
+static uint64_t _nei_log_time_ns(void) {
+#if defined(_WIN32)
+  static LARGE_INTEGER s_freq = {0, 0};
+  LARGE_INTEGER counter;
+  if (s_freq.QuadPart == 0) {
+    QueryPerformanceFrequency(&s_freq);
+  }
+  QueryPerformanceCounter(&counter);
+  return (uint64_t)((counter.QuadPart * 1000000000ULL) / s_freq.QuadPart);
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+#endif
+}
+
 static void _nei_log_advance_committed_pos(nei_log_ring_st *ring) {
   for (;;) {
     uint64_t committed = _NEI_LOG_ATOMIC_LOAD64(&ring->committed_pos);
@@ -173,17 +191,29 @@ int _nei_log_get_perf_stats_for_test(nei_log_perf_stats_st *out_stats) {
     return -1;
   }
   out_stats->producer_spin_loops = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_producer_spin_loops);
+  out_stats->producer_spin_total_ns = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_producer_spin_total_ns);
   out_stats->flush_wait_loops = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_flush_wait_loops);
   out_stats->consumer_wakeups = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_consumer_wakeups);
   out_stats->ring_high_watermark = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_ring_high_watermark);
+  out_stats->consumer_drain_total_ns = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_consumer_drain_total_ns);
+  out_stats->consumer_sync_total_ns = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_consumer_sync_total_ns);
+  out_stats->consumer_fast_retry_hits = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_consumer_fast_retry_hits);
+  out_stats->consumer_fast_retry_misses = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_consumer_fast_retry_misses);
+  out_stats->consumer_drain_batches = _NEI_LOG_ATOMIC_LOAD64(&s_runtime.stat_consumer_drain_batches);
   return 0;
 }
 
 void _nei_log_reset_perf_stats_for_test(void) {
   _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_producer_spin_loops, 0U);
+  _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_producer_spin_total_ns, 0U);
   _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_flush_wait_loops, 0U);
   _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_consumer_wakeups, 0U);
   _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_ring_high_watermark, 0U);
+  _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_consumer_drain_total_ns, 0U);
+  _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_consumer_sync_total_ns, 0U);
+  _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_consumer_fast_retry_hits, 0U);
+  _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_consumer_fast_retry_misses, 0U);
+  _NEI_LOG_ATOMIC_STORE64(&s_runtime.stat_consumer_drain_batches, 0U);
 }
 
 int _nei_log_reserve_unpublished_slot_for_test(uint64_t *out_reserved_pos) {
@@ -279,22 +309,16 @@ static uint64_t _nei_log_drain_ring(nei_log_ring_st *ring) {
 }
 
 static void _nei_log_notify_waiters_after_drain(nei_log_runtime_st *rt) {
-  const uint64_t backlog = _NEI_LOG_ATOMIC_LOAD64(&rt->ring.write_pos) - _NEI_LOG_ATOMIC_LOAD64(&rt->ring.consumer_pos);
+  /* Always broadcast: a single drain cycle may free slots for multiple
+   * blocked producers.  Using signal when backlog ≤ 8 risks a lost-wakeup
+   * deadlock where N producers are waiting but only 1 is woken. */
 #if defined(_WIN32)
   EnterCriticalSection(&rt->mutex);
-  if (backlog > 8U) {
-    _NEI_LOG_BROADCAST_COND(&rt->cond);
-  } else {
-    _NEI_LOG_SIGNAL_COND(&rt->cond);
-  }
+  _NEI_LOG_BROADCAST_COND(&rt->cond);
   LeaveCriticalSection(&rt->mutex);
 #else
   pthread_mutex_lock(&rt->mutex);
-  if (backlog > 8U) {
-    _NEI_LOG_BROADCAST_COND(&rt->cond);
-  } else {
-    _NEI_LOG_SIGNAL_COND(&rt->cond);
-  }
+  _NEI_LOG_BROADCAST_COND(&rt->cond);
   pthread_mutex_unlock(&rt->mutex);
 #endif
 }
@@ -322,8 +346,11 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
   /* Spin-wait for the reserved slot to be released by the consumer.
    * IMPORTANT: once write_pos is incremented we must eventually publish this
    * exact sequence number. Dropping here would leave a "hole" and stall flush
-   * forever because consumer_pos can only advance in order. */
-  while (_NEI_LOG_ATOMIC_LOAD32(&slot->state) != 0U) {
+   * forever because consumer_pos can only advance in order. */  {
+    uint64_t spin_start_ns = 0U;
+    if (spins == 0U) {
+      spin_start_ns = _nei_log_time_ns(); /* snapshot before first potential spin */
+    }  while (_NEI_LOG_ATOMIC_LOAD32(&slot->state) != 0U) {
     spins += 1U;
     if (spins <= _NEI_LOG_RING_WAIT_RELAX_ITERS) {
       _NEI_LOG_CPU_YIELD();
@@ -352,6 +379,11 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
   if (spins > 0U) {
     (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&s_runtime.stat_producer_spin_loops, spins);
   }
+  if (spins > 0U && spin_start_ns > 0U) {
+    uint64_t spin_ns = _nei_log_time_ns() - spin_start_ns;
+    (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&s_runtime.stat_producer_spin_total_ns, spin_ns);
+  }
+  } /* end spin block */
 
   /* Write the serialized event, then publish with a store-release. */
   slot->size = (uint32_t)len;
@@ -372,23 +404,57 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
 static void _nei_log_process_events(const uint8_t *buf, size_t size) {
   size_t offset = 0U;
   char message[2048];
+  /* Cache the last acquired config across multiple events in the same drain
+   * batch.  The vast majority of events share the same config handle, so
+   * batching acquire/release eliminates the per-event SRWLock + atomic-inc/dec
+   * overhead for the common case. */
+  const nei_log_config_st *cached_config = NULL;
+  size_t cached_slot = (size_t)-1;
+  nei_log_config_handle_t cached_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+
   while (offset + sizeof(nei_log_event_header_st) <= size) {
-    const nei_log_config_st *config = NULL;
-    size_t config_slot = (size_t)-1;
+    const nei_log_config_st *config;
+    size_t config_slot;
     const nei_log_event_header_st *header = (const nei_log_event_header_st *)(buf + offset);
     const size_t payload_size = (size_t)header->total_size - sizeof(nei_log_event_header_st);
     const uint8_t *payload = buf + offset + sizeof(nei_log_event_header_st);
     if (header->total_size == 0U || offset + header->total_size > size) {
       break;
     }
-    config = _nei_log_acquire_config_for_emit(header->config_handle, &config_slot);
+
+    /* Fast path: same config as the previous event — reuse the cached
+     * reference without acquiring/releasing the SRWLock. */
+    if (cached_config != NULL && header->config_handle == cached_handle) {
+      config = cached_config;
+      config_slot = cached_slot;
+    } else {
+      /* Config changed (or first event).  Release the previous config and
+       * acquire the new one under the reader-writer lock. */
+      if (cached_slot != (size_t)-1) {
+        _nei_log_release_config_after_emit(cached_slot);
+        cached_config = NULL;
+        cached_slot = (size_t)-1;
+        cached_handle = NEI_LOG_INVALID_CONFIG_HANDLE;
+      }
+      config = _nei_log_acquire_config_for_emit(header->config_handle, &config_slot);
+      if (config != NULL) {
+        cached_config = config;
+        cached_slot = config_slot;
+        cached_handle = header->config_handle;
+      }
+    }
+
     if (config != NULL && _nei_log_format_event(header, config, payload, payload_size, message, sizeof(message)) == 0) {
       _nei_log_emit_message(config, header->level, header->verbose, message, strlen(message));
     }
-    if (config_slot != (size_t)-1) {
-      _nei_log_release_config_after_emit(config_slot);
-    }
+
+    /* Release is deferred — we still hold the cached reference. */
     offset += header->total_size;
+  }
+
+  /* Release the last cached config. */
+  if (cached_slot != (size_t)-1) {
+    _nei_log_release_config_after_emit(cached_slot);
   }
 }
 
@@ -446,11 +512,29 @@ static void *_nei_log_consumer_thread(void *arg) {
     }
     LeaveCriticalSection(&rt->mutex);
     {
+      uint64_t drain_start_ns = _nei_log_time_ns();
       uint64_t drained = _nei_log_drain_ring(&rt->ring);
       if (drained > 0U) {
-        /* Adaptive idle spin: longer in quiet/sync mode (small drain batch) so the
-         * consumer stays hot between per-call flushes; shorter in burst/async mode
-         * to avoid burning CPU between large drain batches. */
+        uint64_t drain_elapsed_ns = _nei_log_time_ns() - drain_start_ns;
+        (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_drain_total_ns, drain_elapsed_ns);
+        (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_drain_batches, 1U);
+
+        /* Fast re-check: if more work arrived while we were draining,
+         * loop back immediately without the EnterCS + condvar overhead.
+         * This keeps the consumer hot during sustained bursts. */
+        if (_nei_log_ring_has_ready_slot(&rt->ring)) {
+          (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_fast_retry_hits, 1U);
+          EnterCriticalSection(&rt->mutex);
+          continue;
+        }
+        (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_fast_retry_misses, 1U);
+
+        /* Ring is empty after drain.  Notify any producers that may be
+         * blocking on condvar, then do a brief idle spin before sleeping
+         * (handles the quiet/sync case where producers post one log and
+         * flush). */
+        uint64_t sync_start_ns = _nei_log_time_ns();
+        {
         uint32_t adaptive_iters;
         if (drained >= 16U) {
           adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 4U; /* 128: burst */
@@ -464,12 +548,16 @@ static void *_nei_log_consumer_thread(void *arg) {
           if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
             break;
           }
-          /* SwitchToThread every 64th iter (less OS overhead than every 32nd). */
           if ((idle_spin & 63U) == 63U) {
             _NEI_LOG_THREAD_YIELD();
           } else {
             _NEI_LOG_CPU_YIELD();
           }
+        }
+        }
+        {
+          uint64_t sync_elapsed_ns = _nei_log_time_ns() - sync_start_ns;
+          (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_sync_total_ns, sync_elapsed_ns);
         }
         EnterCriticalSection(&rt->mutex);
         continue;
@@ -518,8 +606,23 @@ static void *_nei_log_consumer_thread(void *arg) {
     }
     pthread_mutex_unlock(&rt->mutex);
     {
+      uint64_t drain_start_ns_posix = _nei_log_time_ns();
       uint64_t drained = _nei_log_drain_ring(&rt->ring);
       if (drained > 0U) {
+        uint64_t drain_elapsed_ns = _nei_log_time_ns() - drain_start_ns_posix;
+        (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_drain_total_ns, drain_elapsed_ns);
+        (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_drain_batches, 1U);
+
+        /* Fast re-check: loop back immediately if more work arrived. */
+        if (_nei_log_ring_has_ready_slot(&rt->ring)) {
+          (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_fast_retry_hits, 1U);
+          pthread_mutex_lock(&rt->mutex);
+          continue;
+        }
+        (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_fast_retry_misses, 1U);
+
+        uint64_t sync_start_ns = _nei_log_time_ns();
+        {
         uint32_t adaptive_iters;
         if (drained >= 16U) {
           adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 4U;
@@ -538,6 +641,11 @@ static void *_nei_log_consumer_thread(void *arg) {
           } else {
             _NEI_LOG_CPU_YIELD();
           }
+        }
+        }
+        {
+          uint64_t sync_elapsed_ns = _nei_log_time_ns() - sync_start_ns;
+          (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&rt->stat_consumer_sync_total_ns, sync_elapsed_ns);
         }
         pthread_mutex_lock(&rt->mutex);
         continue;

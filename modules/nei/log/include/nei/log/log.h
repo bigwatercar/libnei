@@ -158,12 +158,24 @@ typedef struct nei_log_sink_st nei_log_sink_st;
 typedef struct nei_log_perf_stats_st {
   /** Producer-side spin iterations while waiting for a reserved ring slot to become free. */
   uint64_t producer_spin_loops;
+  /** Total time (ns) producers spent spinning waiting for a ring slot. */
+  uint64_t producer_spin_total_ns;
   /** Number of wait-loop iterations in @ref nei_log_flush while waiting for target drain. */
   uint64_t flush_wait_loops;
   /** Number of consumer thread wakeups from condition-variable waits. */
   uint64_t consumer_wakeups;
   /** Maximum observed in-flight ring depth (write_pos - consumer_pos). */
   uint64_t ring_high_watermark;
+  /** Total time (ns) consumer spent in drain_ring processing events. */
+  uint64_t consumer_drain_total_ns;
+  /** Total time (ns) consumer spent in EnterCS + notify + idle_spin sync overhead. */
+  uint64_t consumer_sync_total_ns;
+  /** Number of times the consumer fast re-check found work immediately after drain. */
+  uint64_t consumer_fast_retry_hits;
+  /** Number of times the consumer fast re-check found no work after drain. */
+  uint64_t consumer_fast_retry_misses;
+  /** Total number of drain batches (drain_ring calls with drained > 0). */
+  uint64_t consumer_drain_batches;
 } nei_log_perf_stats_st;
 
 /**

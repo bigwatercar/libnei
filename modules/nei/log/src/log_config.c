@@ -153,11 +153,22 @@ const nei_log_config_st *_nei_log_acquire_config_for_emit(nei_log_config_handle_
 }
 
 void _nei_log_release_config_after_emit(size_t slot) {
+  uint32_t prev;
+
   if (slot >= _NEI_LOG_MAX_CONFIGS) {
     return;
   }
 
-  (void)_NEI_LOG_ATOMIC_FETCH_SUB32(&s_config_active_emit_counts[slot], 1U);
+  prev = (uint32_t)_NEI_LOG_ATOMIC_FETCH_SUB32(&s_config_active_emit_counts[slot], 1U);
+
+  /* Only signal the condition variable when the active-emit count drops to
+   * zero — that is the exact moment a quiescent waiter cares about.
+   * Entering the critical section on every single emit (1M+ events/s) is a
+   * significant source of consumer-thread overhead for a wake-up that is
+   * needed only during rare config updates. */
+  if (prev != 1U) {
+    return;
+  }
 
 #if defined(_WIN32)
   EnterCriticalSection(&s_runtime.mutex);

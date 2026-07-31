@@ -125,7 +125,8 @@ static std::string join_path(const std::string &dir, const char *name) {
 
 void run_log_benchmark(const std::string &name, std::function<void()> log_func, int iterations = 1000000) {
   LogCollector collector;
-  nei_log_perf_stats_st stats = {};
+  nei_log_perf_stats_st stats_before = {};
+  nei_log_perf_stats_st stats_after = {};
   nei_log_sink_st sink = {};
   sink.llog = CollectLevelLog;
   sink.opaque = &collector;
@@ -133,7 +134,9 @@ void run_log_benchmark(const std::string &name, std::function<void()> log_func, 
   BenchmarkConfigGuard guard;
   guard.set_primary_sink(&sink);
 
-  nei_log_reset_perf_stats_for_test();
+  /* Drain any pending events first so the consumer is idle, then snapshot. */
+  nei_log_flush();
+  (void)nei_log_get_perf_stats_for_test(&stats_before);
 
   auto start_enqueue = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iterations; ++i) {
@@ -145,13 +148,27 @@ void run_log_benchmark(const std::string &name, std::function<void()> log_func, 
   nei_log_flush();
   auto end_flush = std::chrono::high_resolution_clock::now();
 
-  (void)nei_log_get_perf_stats_for_test(&stats);
+  (void)nei_log_get_perf_stats_for_test(&stats_after);
 
   auto enqueue_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_enqueue - start_enqueue);
   auto flush_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_flush - start_flush);
   auto e2e_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_flush - start_enqueue);
   double enqueue_avg = static_cast<double>(enqueue_duration.count()) / iterations;
   double e2e_avg = static_cast<double>(e2e_duration.count()) / iterations;
+
+  /* Compute delta stats (after - before) to avoid race with consumer thread. */
+  uint64_t producer_spins = stats_after.producer_spin_loops - stats_before.producer_spin_loops;
+  uint64_t producer_spin_ns = stats_after.producer_spin_total_ns - stats_before.producer_spin_total_ns;
+  uint64_t flush_waits = stats_after.flush_wait_loops - stats_before.flush_wait_loops;
+  uint64_t wakeups = stats_after.consumer_wakeups - stats_before.consumer_wakeups;
+  uint64_t hwm = stats_after.ring_high_watermark > stats_before.ring_high_watermark
+                     ? stats_after.ring_high_watermark
+                     : stats_before.ring_high_watermark;
+  uint64_t drain_ns = stats_after.consumer_drain_total_ns - stats_before.consumer_drain_total_ns;
+  uint64_t sync_ns = stats_after.consumer_sync_total_ns - stats_before.consumer_sync_total_ns;
+  uint64_t fast_hits = stats_after.consumer_fast_retry_hits - stats_before.consumer_fast_retry_hits;
+  uint64_t fast_misses = stats_after.consumer_fast_retry_misses - stats_before.consumer_fast_retry_misses;
+  uint64_t batches = stats_after.consumer_drain_batches - stats_before.consumer_drain_batches;
 
   std::cout << name << ":\n";
   std::cout << "  Iterations: " << iterations << "\n";
@@ -162,14 +179,42 @@ void run_log_benchmark(const std::string &name, std::function<void()> log_func, 
   std::cout << "  E2E avg per log: " << e2e_avg << " microseconds\n";
   std::cout << "  Enqueue logs/sec: " << (1000000.0 / enqueue_avg) << "\n";
   std::cout << "  E2E logs/sec: " << (1000000.0 / e2e_avg) << "\n";
-  std::cout << "  Runtime stats: producer_spins=" << stats.producer_spin_loops
-            << ", flush_wait_loops=" << stats.flush_wait_loops << ", consumer_wakeups=" << stats.consumer_wakeups
-            << ", ring_hwm=" << stats.ring_high_watermark << "\n\n";
+  std::cout << "  Runtime stats: producer_spins=" << producer_spins
+            << ", flush_wait_loops=" << flush_waits << ", consumer_wakeups=" << wakeups
+            << ", ring_hwm=" << hwm << "\n";
+  /* Phase-level breakdown */
+  {
+    double producer_spin_ns_per = producer_spins > 0
+                                     ? static_cast<double>(producer_spin_ns) / producer_spins
+                                     : 0.0;
+    double consumer_drain_ns_per =
+        batches > 0 ? static_cast<double>(drain_ns) / batches : 0.0;
+    double consumer_sync_ns_per =
+        batches > 0 ? static_cast<double>(sync_ns) / batches : 0.0;
+    std::cout << "  Phase breakdown:\n";
+    std::cout << "    producer_spin_total: " << (producer_spin_ns / 1000.0) << " us"
+              << " (avg " << (producer_spins > 0 ? producer_spin_ns_per : 0.0) << " ns/spin_iter)\n";
+    std::cout << "    consumer_drain_total: " << (drain_ns / 1000.0) << " us"
+              << " (avg " << (consumer_drain_ns_per / 1000.0) << " us/batch"
+              << ", " << batches << " batches)\n";
+    std::cout << "    consumer_sync_total: " << (sync_ns / 1000.0) << " us"
+              << " (avg " << (consumer_sync_ns_per / 1000.0) << " us/batch)\n";
+    std::cout << "    consumer_fast_retry: " << fast_hits << " hits, "
+              << fast_misses << " misses";
+    if (fast_hits + fast_misses > 0) {
+      double hit_rate = 100.0 * static_cast<double>(fast_hits)
+                        / static_cast<double>(fast_hits + fast_misses);
+      std::cout << " (" << hit_rate << "% hit rate)";
+    }
+    std::cout << "\n";
+  }
+  std::cout << "\n";
 }
 
 void run_vlog_benchmark(const std::string &name, std::function<void()> log_func, int iterations = 1000000) {
   LogCollector collector;
-  nei_log_perf_stats_st stats = {};
+  nei_log_perf_stats_st stats_before = {};
+  nei_log_perf_stats_st stats_after = {};
   nei_log_sink_st sink = {};
   sink.vlog = CollectVerboseLog;
   sink.opaque = &collector;
@@ -177,7 +222,9 @@ void run_vlog_benchmark(const std::string &name, std::function<void()> log_func,
   BenchmarkConfigGuard guard;
   guard.set_primary_sink(&sink);
 
-  nei_log_reset_perf_stats_for_test();
+  /* Drain pending events first, then snapshot baseline. */
+  nei_log_flush();
+  (void)nei_log_get_perf_stats_for_test(&stats_before);
 
   auto start_enqueue = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iterations; ++i) {
@@ -189,13 +236,27 @@ void run_vlog_benchmark(const std::string &name, std::function<void()> log_func,
   nei_log_flush();
   auto end_flush = std::chrono::high_resolution_clock::now();
 
-  (void)nei_log_get_perf_stats_for_test(&stats);
+  (void)nei_log_get_perf_stats_for_test(&stats_after);
 
   auto enqueue_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_enqueue - start_enqueue);
   auto flush_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_flush - start_flush);
   auto e2e_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_flush - start_enqueue);
   double enqueue_avg = static_cast<double>(enqueue_duration.count()) / iterations;
   double e2e_avg = static_cast<double>(e2e_duration.count()) / iterations;
+
+  /* Compute delta stats to avoid race with consumer thread. */
+  uint64_t producer_spins = stats_after.producer_spin_loops - stats_before.producer_spin_loops;
+  uint64_t producer_spin_ns = stats_after.producer_spin_total_ns - stats_before.producer_spin_total_ns;
+  uint64_t flush_waits = stats_after.flush_wait_loops - stats_before.flush_wait_loops;
+  uint64_t wakeups = stats_after.consumer_wakeups - stats_before.consumer_wakeups;
+  uint64_t hwm = stats_after.ring_high_watermark > stats_before.ring_high_watermark
+                     ? stats_after.ring_high_watermark
+                     : stats_before.ring_high_watermark;
+  uint64_t drain_ns = stats_after.consumer_drain_total_ns - stats_before.consumer_drain_total_ns;
+  uint64_t sync_ns = stats_after.consumer_sync_total_ns - stats_before.consumer_sync_total_ns;
+  uint64_t fast_hits = stats_after.consumer_fast_retry_hits - stats_before.consumer_fast_retry_hits;
+  uint64_t fast_misses = stats_after.consumer_fast_retry_misses - stats_before.consumer_fast_retry_misses;
+  uint64_t batches = stats_after.consumer_drain_batches - stats_before.consumer_drain_batches;
 
   std::cout << name << ":\n";
   std::cout << "  Iterations: " << iterations << "\n";
@@ -206,9 +267,36 @@ void run_vlog_benchmark(const std::string &name, std::function<void()> log_func,
   std::cout << "  E2E avg per log: " << e2e_avg << " microseconds\n";
   std::cout << "  Enqueue logs/sec: " << (1000000.0 / enqueue_avg) << "\n";
   std::cout << "  E2E logs/sec: " << (1000000.0 / e2e_avg) << "\n";
-  std::cout << "  Runtime stats: producer_spins=" << stats.producer_spin_loops
-            << ", flush_wait_loops=" << stats.flush_wait_loops << ", consumer_wakeups=" << stats.consumer_wakeups
-            << ", ring_hwm=" << stats.ring_high_watermark << "\n\n";
+  std::cout << "  Runtime stats: producer_spins=" << producer_spins
+            << ", flush_wait_loops=" << flush_waits << ", consumer_wakeups=" << wakeups
+            << ", ring_hwm=" << hwm << "\n";
+  /* Phase-level breakdown */
+  {
+    double producer_spin_ns_per = producer_spins > 0
+                                     ? static_cast<double>(producer_spin_ns) / producer_spins
+                                     : 0.0;
+    double consumer_drain_ns_per =
+        batches > 0 ? static_cast<double>(drain_ns) / batches : 0.0;
+    double consumer_sync_ns_per =
+        batches > 0 ? static_cast<double>(sync_ns) / batches : 0.0;
+    std::cout << "  Phase breakdown:\n";
+    std::cout << "    producer_spin_total: " << (producer_spin_ns / 1000.0) << " us"
+              << " (avg " << (producer_spins > 0 ? producer_spin_ns_per : 0.0) << " ns/spin_iter)\n";
+    std::cout << "    consumer_drain_total: " << (drain_ns / 1000.0) << " us"
+              << " (avg " << (consumer_drain_ns_per / 1000.0) << " us/batch"
+              << ", " << batches << " batches)\n";
+    std::cout << "    consumer_sync_total: " << (sync_ns / 1000.0) << " us"
+              << " (avg " << (consumer_sync_ns_per / 1000.0) << " us/batch)\n";
+    std::cout << "    consumer_fast_retry: " << fast_hits << " hits, "
+              << fast_misses << " misses";
+    if (fast_hits + fast_misses > 0) {
+      double hit_rate = 100.0 * static_cast<double>(fast_hits)
+                        / static_cast<double>(fast_hits + fast_misses);
+      std::cout << " (" << hit_rate << "% hit rate)";
+    }
+    std::cout << "\n";
+  }
+  std::cout << "\n";
 }
 
 void run_file_log_benchmark(const std::string &name,

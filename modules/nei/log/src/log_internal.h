@@ -180,12 +180,17 @@ typedef struct _nei_log_event_header_st {
  * @brief One slot in the MPSC ring buffer.
  * @details Producers write here lock-free; the consumer reads in order.
  *          `state` is the commit flag: 0 = empty (consumer owns), 1 = committed (data valid).
- */
+ *
+ * Slot size is padded to a multiple of the cache-line size (64 B) so that
+ * adjacent slots never share a cache line, avoiding false sharing between
+ * producers writing to different slots. */
+#define _NEI_LOG_CACHELINE 64U
 typedef struct {
   _nei_log_atomic32_t state;         /**< 0 = empty; 1 = committed. */
   uint32_t size;                     /**< Valid byte count in @ref data. */
   _nei_log_atomic64_t published_seq; /**< Absolute sequence + 1 once this reservation is fully published. */
   uint8_t data[_NEI_LOG_EVENT_BUFFER_SIZE];
+  char _pad[_NEI_LOG_CACHELINE - ((sizeof(_nei_log_atomic32_t) + sizeof(uint32_t) + sizeof(_nei_log_atomic64_t) + _NEI_LOG_EVENT_BUFFER_SIZE) % _NEI_LOG_CACHELINE)];
 } nei_log_ring_slot_st;
 
 /**
@@ -194,21 +199,47 @@ typedef struct {
  *          the consumer advances `consumer_pos` sequentially.
  *          Both positions are monotonically increasing uint64_t counters;
  *          the actual slot index is `pos % _NEI_LOG_RING_SLOTS`.
- */
+ *
+ * Each position counter is isolated to its own cache line (64 B padding)
+ * to prevent false sharing: `write_pos` is hot-written by all producers,
+ * `committed_pos` is CAS'd by producers after publish, and `consumer_pos`
+ * is written by the consumer on every drain cycle. */
 typedef struct {
   nei_log_ring_slot_st slots[_NEI_LOG_RING_SLOTS];
-  _nei_log_atomic64_t write_pos;     /**< Next slot to reserve (producers). */
-  _nei_log_atomic64_t committed_pos; /**< One-past-last contiguous fully published reservation. */
-  _nei_log_atomic64_t consumer_pos;  /**< Next slot to consume (consumer + flush readers). */
+  _nei_log_atomic64_t write_pos;
+  char _pad1[_NEI_LOG_CACHELINE - sizeof(_nei_log_atomic64_t)];
+  _nei_log_atomic64_t committed_pos;
+  char _pad2[_NEI_LOG_CACHELINE - sizeof(_nei_log_atomic64_t)];
+  _nei_log_atomic64_t consumer_pos;
+  char _pad3[_NEI_LOG_CACHELINE - sizeof(_nei_log_atomic64_t)];
 } nei_log_ring_st;
 
 typedef struct _nei_log_runtime_st {
   nei_log_ring_st ring;
+
+  /* ── Stats: producer-written group (24 B + 40 B pad = 64 B cache line) ── */
   _nei_log_atomic64_t stat_producer_spin_loops;
-  _nei_log_atomic64_t stat_flush_wait_loops;
-  _nei_log_atomic64_t stat_consumer_wakeups;
+  _nei_log_atomic64_t stat_producer_spin_total_ns;
   _nei_log_atomic64_t stat_ring_high_watermark;
+  char _pad_stats_p[_NEI_LOG_CACHELINE - 3U * sizeof(_nei_log_atomic64_t)];
+
+  /* ── Stats: consumer-written group (48 B + 16 B pad = 64 B cache line) ── */
+  _nei_log_atomic64_t stat_consumer_wakeups;
+  _nei_log_atomic64_t stat_consumer_drain_total_ns;
+  _nei_log_atomic64_t stat_consumer_sync_total_ns;
+  _nei_log_atomic64_t stat_consumer_fast_retry_hits;
+  _nei_log_atomic64_t stat_consumer_fast_retry_misses;
+  _nei_log_atomic64_t stat_consumer_drain_batches;
+  char _pad_stats_c[_NEI_LOG_CACHELINE - 6U * sizeof(_nei_log_atomic64_t)];
+
+  /* ── Stats: flush-written (8 B + 56 B pad = 64 B cache line) ── */
+  _nei_log_atomic64_t stat_flush_wait_loops;
+  char _pad_stats_f[_NEI_LOG_CACHELINE - sizeof(_nei_log_atomic64_t)];
+
+  /* ── consumer_sleeping: hot read by producers, isolated to own cache line ── */
   _nei_log_atomic32_t consumer_sleeping;
+  char _pad_cs[_NEI_LOG_CACHELINE - sizeof(_nei_log_atomic32_t)];
+
   int stop_requested;
   int initialized;
 #if defined(_WIN32)
