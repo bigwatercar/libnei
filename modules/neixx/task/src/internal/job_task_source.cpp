@@ -1,4 +1,4 @@
-#include <neixx/task/internal/job_task_source.h>
+#include "job_task_source.h"
 #include <algorithm>
 #include <atomic>
 #include <limits>

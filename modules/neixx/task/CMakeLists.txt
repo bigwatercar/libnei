@@ -23,6 +23,7 @@
   src/internal/delayed_task_manager.cpp
   src/internal/delayed_task_manager.h
   src/internal/job_task_source.cpp
+  src/internal/job_task_source.h
   src/internal/pooled_task_runner_utils.cpp
   src/internal/pooled_task_runner_utils.h
   src/internal/pooled_task_source.cpp

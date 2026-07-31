@@ -2,7 +2,7 @@
 
 #include <nei/debug/check.h>
 #include <neixx/memory/ref_counted.h>
-#include <neixx/task/internal/job_task_source.h>
+#include "internal/job_task_source.h"
 #include <neixx/task/thread_pool_instance.h>
 
 namespace nei {

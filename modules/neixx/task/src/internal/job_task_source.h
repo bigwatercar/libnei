@@ -69,4 +69,4 @@ private:
 } // namespace internal
 } // namespace nei
 
-#endif // NEIXX_TASK_INTERNAL_JOB_TASK_SOURCE_H_
+#endif  // NEIXX_TASK_INTERNAL_JOB_TASK_SOURCE_H_
