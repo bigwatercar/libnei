@@ -1,7 +1,7 @@
 # PostJob 调试修复总结
 
-**日期**: 2026-07-30 ~ 2026-07-31  
-**分支**: `post_job_implement`  
+**日期**: 2026-07-30 ~ 2026-07-31
+**分支**: `post_job_implement`
 **关联提交**: 9442bb3e (基线), c0a3b73 (PIMPL 重构), b941a17 (clang-format)
 
 ---
