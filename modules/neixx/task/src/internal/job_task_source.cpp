@@ -1,9 +1,9 @@
 #include "job_task_source.h"
 #include <algorithm>
 #include <atomic>
-#include <limits>
-#include <thread>
+
 #include <nei/debug/check.h>
+#include <neixx/threading/thread_local_storage.h>
 
 namespace nei {
 namespace internal {
@@ -59,15 +59,16 @@ void JobTaskSource::NotifyConcurrencyIncrease(std::int32_t count) {
 }
 
 std::size_t JobTaskSource::GetTaskId() const {
-  static thread_local std::size_t tls_id = std::numeric_limits<std::size_t>::max();
-  static thread_local const JobTaskSource *tls_src = nullptr;
-  if (tls_src != this) {
-    tls_src = this;
-    // next_task_id_ is mutable so AssignTaskId() can be called on a
-    // const JobTaskSource without a const_cast.
-    tls_id = AssignTaskId();
+  static ThreadLocalStorage::Slot tls_src;
+  static ThreadLocalStorage::Slot tls_id;
+  void *raw_src = tls_src.Get();
+  if (raw_src != this) {
+    tls_src.Set(const_cast<JobTaskSource *>(this));
+    std::size_t id = AssignTaskId();
+    tls_id.Set(reinterpret_cast<void *>(static_cast<std::uintptr_t>(id)));
+    return id;
   }
-  return tls_id;
+  return static_cast<std::size_t>(reinterpret_cast<std::uintptr_t>(tls_id.Get()));
 }
 
 void JobTaskSource::RunWorkerLoop() {
@@ -87,13 +88,35 @@ void JobTaskSource::PostWorkers(int count) {
   if (!runner_ || count <= 0)
     return;
 
+  int pending = pending_concurrency_increases_.load(std::memory_order_acquire);
+
+  // Fast path: single worker, no pending concurrency increases.
+  // The majority of PostJob calls use initial_workers=1 with no
+  // concurrent NotifyConcurrencyIncrease.  Skip the TOCTOU guard
+  // and rollback logic — the sole PostTask return-value check
+  // (below) is sufficient for the fast path.
+  if (count == 1 && pending == 0) {
+    if (is_completed_.load(std::memory_order_acquire))
+      return;
+    if (is_cancelled_.load(std::memory_order_acquire))
+      return;
+    assigned_workers_.fetch_add(1, std::memory_order_release);
+    scoped_refptr<JobTaskSource> self(this);
+    if (!runner_->PostTask(FROM_HERE, [self]() { self->RunWorkerLoop(); })) {
+      assigned_workers_.fetch_sub(1, std::memory_order_release);
+    }
+    return;
+  }
+
+  // Slow path: concurrent NotifyConcurrencyIncrease, shutdown, or
+  // multi-worker posting.  Full TOCTOU guards and rollback logic.
+
   // Consume pending concurrency increases BEFORE the is_completed_ /
   // is_cancelled_ checks below.  This is load-bearing: if
   // NotifyConcurrencyIncrease() incremented |pending| and then another
   // thread set is_completed_ before we reach this function, we must
   // still consume the pending count.  Otherwise |pending| would stay
   // permanently > 0, blocking all future completion signals.
-  int pending = pending_concurrency_increases_.load(std::memory_order_acquire);
   if (pending > 0) {
     int consume = (count < pending) ? count : pending;
     pending_concurrency_increases_.fetch_sub(consume, std::memory_order_release);

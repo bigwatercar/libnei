@@ -10,12 +10,12 @@ namespace nei {
 struct JobHandle::Impl {
   scoped_refptr<internal::JobTaskSource> source;
   bool detached = false;
+  bool joined = false;
 };
-
 JobHandle::JobHandle() = default;
 
 JobHandle::~JobHandle() {
-  if (impl_ && !impl_->detached && impl_->source)
+  if (impl_ && !impl_->detached && !impl_->joined && impl_->source)
     impl_->source->Join(true);
 }
 
@@ -23,15 +23,14 @@ JobHandle::JobHandle(JobHandle &&) noexcept = default;
 JobHandle &JobHandle::operator=(JobHandle &&) noexcept = default;
 
 void JobHandle::Join() {
-  // DCHECK that the handle hasn't been detached — calling Join() on a
-  // detached handle is a programming error because the caller has
-  // explicitly relinquished ownership of the job's lifetime.
   DCHECK_MSG(!impl_ || !impl_->detached,
              "JobHandle::Join() called on a detached handle. "
              "Detach() transfers lifecycle ownership away from the handle; "
              "calling Join() afterwards is almost certainly a bug.");
-  if (impl_ && impl_->source)
+  if (impl_ && impl_->source) {
     impl_->source->Join(true);
+    impl_->joined = true;
+  }
 }
 
 void JobHandle::Cancel() {
@@ -45,6 +44,7 @@ void JobHandle::CancelAndSync() {
   if (impl_ && impl_->source) {
     impl_->source->Cancel();
     impl_->source->Join(true);
+    impl_->joined = true;
   }
 }
 
@@ -67,6 +67,31 @@ void JobHandle::Detach() {
     impl_->detached = true;
 }
 
+namespace {
+
+// Returns a ParallelTaskRunner for PostJob workers via round-robin assignment
+// across a small fixed pool.  Multiple runners prevent FIFO head-of-line
+// blocking between unrelated PostJob instances: workers from different jobs
+// land on different TaskQueues, and the PooledTaskSource's priority heap
+// interleaves them fairly.
+scoped_refptr<TaskRunner> GetJobRunner() {
+  static constexpr int kNumRunners = 8;
+  static scoped_refptr<TaskRunner> runners[kNumRunners];
+  static std::atomic<int> next_runner{0};
+  static bool initialized = false;
+  if (!initialized) {
+    ThreadPoolInstance *pool = ThreadPoolInstance::Get();
+    DCHECK(pool);
+    for (int i = 0; i < kNumRunners; ++i)
+      runners[i] = pool->CreateParallelTaskRunner(TaskTraits());
+    initialized = true;
+  }
+  int idx = next_runner.fetch_add(1, std::memory_order_relaxed) & (kNumRunners - 1);
+  return runners[idx];
+}
+
+}  // namespace
+
 // static
 JobHandle JobHandle::PostJob(const Location &from_here,
                              TaskTraits traits,
@@ -79,25 +104,7 @@ JobHandle JobHandle::PostJob(const Location &from_here,
   DCHECK(max_concurrency_cb);
   scoped_refptr<internal::JobTaskSource> source(
       new internal::JobTaskSource(std::move(task), std::move(max_concurrency_cb), initial_workers));
-  ThreadPoolInstance *pool = ThreadPoolInstance::Get();
-  DCHECK(pool);
-  // Use a small fixed pool of ParallelTaskRunners (round-robin assignment)
-  // instead of a single shared runner.  This prevents FIFO head-of-line
-  // blocking between unrelated PostJob instances: workers from different
-  // jobs land on different TaskQueues, and the PooledTaskSource's priority
-  // heap interleaves them fairly.  The pool size is bounded so we do not
-  // leak TaskQueues (each lives for the process lifetime).
-  static constexpr int kNumRunners = 8;
-  static scoped_refptr<TaskRunner> runners[kNumRunners];
-  static std::atomic<int> next_runner{0};
-  static bool initialized = false;
-  if (!initialized) {
-    for (int i = 0; i < kNumRunners; ++i)
-      runners[i] = pool->CreateParallelTaskRunner(TaskTraits());
-    initialized = true;
-  }
-  int idx = next_runner.fetch_add(1, std::memory_order_relaxed) % kNumRunners;
-  source->SetRunner(runners[idx]);
+  source->SetRunner(GetJobRunner());
   source->PostInitialWorkers(initial_workers);
   JobHandle handle;
   handle.impl_.reset(new Impl{std::move(source)});
