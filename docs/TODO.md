@@ -1,6 +1,6 @@
 ﻿# libnei — TODO & Roadmap
 
-**Updated**: 2026-07-27
+**Updated**: 2026-07-31
 
 ---
 
@@ -24,12 +24,31 @@ the factory is destroyed.  Low priority.
 
 ---
 
-## Log Module
+## Log Module ✅ Comprehensive optimization completed 2026-07-31
 
-All critical issues resolved (lock-free MPSC ring buffer, snapshot-based config, adaptive signal/broadcast).
-Remaining P3 items:
-- #7 Cache-line false sharing (long-term)
-- #9 User callback lock ordering docs (long-term)
+### Consumer-path throughput optimization (+46% cumulative)
+
+| Stage | Commit | Improvement |
+|-------|--------|-------------|
+| Deadlock fix: `_nei_log_notify_waiters_after_drain` always broadcasts | `50cf4a3` | Correctness |
+| False-sharing isolation: cache-line padding for ring counters, stats groups, `consumer_sleeping`, slot structs | `50cf4a3` | +8% |
+| Consumer acquire/release batching: config cached across same-batch events | `50cf4a3` | ~flat |
+| **Timestamp sub-second table**: `kMillisDigits[1000][4]` replaces `snprintf` with `memcpy` on cache-hit path, all 4 timestamp styles covered | `71a117c` | **+36%** |
+| Ring slot sizing experiment: 256 (default) confirmed as best balance | N/A | 128←256→1024 tested |
+
+### NEI vs spdlog benchmark (2026-07-31)
+
+| Scenario | NEI (optimized) | spdlog | Winner |
+|----------|----------------|--------|--------|
+| Memory simple printf/fmt | **2.35 M/s** | 1.65 M/s | NEI +42% |
+| Memory literal | **2.67 M/s** | 2.58 M/s | NEI +3% |
+| Memory multi param | 1.13 M/s | **1.16 M/s** | spdlog +2% |
+| File simple | 1.34 M/s | **1.79 M/s** | spdlog +33% |
+| File multi | **1.71 M/s** | 1.40 M/s | NEI +22% |
+| Strict sync | 73 K/s | 75 K/s | ≈ tie |
+
+### Remaining P3 items
+
 - Crash handler: non-async-signal-safe in POSIX signal handlers (accepted limitation)
 
 ---
