@@ -608,15 +608,29 @@ void nei_log_flush(void) {
     spin_limit = _NEI_LOG_FLUSH_SPIN_BASE_ITERS;
   }
 
-  /* Adaptive spin fast path: aggressive for tiny backlog (typical per-call flush). */
-  for (spin = 0U; spin < spin_limit; ++spin) {
-    if (_NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos) >= flush_target) {
-      return;
-    }
-    if ((spin & 31U) == 31U) {
-      _NEI_LOG_THREAD_YIELD();
-    } else {
-      _NEI_LOG_CPU_YIELD();
+  /* Adaptive spin fast path: aggressive for tiny backlog (typical per-call flush).
+   *
+   * Phase 1 (first half): pure CPU_YIELD — the consumer is draining concurrently
+   *   and will typically finish within microseconds.
+   * Phase 2 (second half): mix in THREAD_YIELD every 256 iterations — the
+   *   remaining backlog is small but the consumer has not yet caught up; give
+   *   the OS scheduler a hint without a full context-switch storm.
+   *
+   * The yield interval is deliberately wide (256, not 32) to avoid turning
+   * a sub-microsecond wait into a kernel trip. */
+  {
+    uint32_t phase2_start = spin_limit / 2U;
+    for (spin = 0U; spin < spin_limit; ++spin) {
+      if (_NEI_LOG_ATOMIC_LOAD64(&s_runtime.ring.consumer_pos) >= flush_target) {
+        return;
+      }
+      if (spin < phase2_start) {
+        _NEI_LOG_CPU_YIELD();
+      } else if ((spin & 255U) == 255U) {
+        _NEI_LOG_THREAD_YIELD();
+      } else {
+        _NEI_LOG_CPU_YIELD();
+      }
     }
   }
 
