@@ -346,43 +346,45 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
   /* Spin-wait for the reserved slot to be released by the consumer.
    * IMPORTANT: once write_pos is incremented we must eventually publish this
    * exact sequence number. Dropping here would leave a "hole" and stall flush
-   * forever because consumer_pos can only advance in order. */  {
+   * forever because consumer_pos can only advance in order. */
+  {
     uint64_t spin_start_ns = 0U;
     if (spins == 0U) {
       spin_start_ns = _nei_log_time_ns(); /* snapshot before first potential spin */
-    }  while (_NEI_LOG_ATOMIC_LOAD32(&slot->state) != 0U) {
-    spins += 1U;
-    if (spins <= _NEI_LOG_RING_WAIT_RELAX_ITERS) {
-      _NEI_LOG_CPU_YIELD();
-      continue;
     }
-    if (spins <= _NEI_LOG_RING_WAIT_YIELD_ITERS) {
-      _NEI_LOG_THREAD_YIELD();
-      continue;
-    }
+    while (_NEI_LOG_ATOMIC_LOAD32(&slot->state) != 0U) {
+      spins += 1U;
+      if (spins <= _NEI_LOG_RING_WAIT_RELAX_ITERS) {
+        _NEI_LOG_CPU_YIELD();
+        continue;
+      }
+      if (spins <= _NEI_LOG_RING_WAIT_YIELD_ITERS) {
+        _NEI_LOG_THREAD_YIELD();
+        continue;
+      }
 
 #if defined(_WIN32)
-    EnterCriticalSection(&s_runtime.mutex);
-    while (_NEI_LOG_ATOMIC_LOAD32(&slot->state) != 0U && !s_runtime.stop_requested) {
-      SleepConditionVariableCS(&s_runtime.cond, &s_runtime.mutex, INFINITE);
-    }
-    LeaveCriticalSection(&s_runtime.mutex);
+      EnterCriticalSection(&s_runtime.mutex);
+      while (_NEI_LOG_ATOMIC_LOAD32(&slot->state) != 0U && !s_runtime.stop_requested) {
+        SleepConditionVariableCS(&s_runtime.cond, &s_runtime.mutex, INFINITE);
+      }
+      LeaveCriticalSection(&s_runtime.mutex);
 #else
-    pthread_mutex_lock(&s_runtime.mutex);
-    while (_NEI_LOG_ATOMIC_LOAD32(&slot->state) != 0U && !s_runtime.stop_requested) {
-      pthread_cond_wait(&s_runtime.cond, &s_runtime.mutex);
-    }
-    pthread_mutex_unlock(&s_runtime.mutex);
+      pthread_mutex_lock(&s_runtime.mutex);
+      while (_NEI_LOG_ATOMIC_LOAD32(&slot->state) != 0U && !s_runtime.stop_requested) {
+        pthread_cond_wait(&s_runtime.cond, &s_runtime.mutex);
+      }
+      pthread_mutex_unlock(&s_runtime.mutex);
 #endif
-  }
+    }
 
-  if (spins > 0U) {
-    (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&s_runtime.stat_producer_spin_loops, spins);
-  }
-  if (spins > 0U && spin_start_ns > 0U) {
-    uint64_t spin_ns = _nei_log_time_ns() - spin_start_ns;
-    (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&s_runtime.stat_producer_spin_total_ns, spin_ns);
-  }
+    if (spins > 0U) {
+      (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&s_runtime.stat_producer_spin_loops, spins);
+    }
+    if (spins > 0U && spin_start_ns > 0U) {
+      uint64_t spin_ns = _nei_log_time_ns() - spin_start_ns;
+      (void)_NEI_LOG_ATOMIC_FETCH_ADD64(&s_runtime.stat_producer_spin_total_ns, spin_ns);
+    }
   } /* end spin block */
 
   /* Write the serialized event, then publish with a store-release. */
@@ -535,25 +537,25 @@ static void *_nei_log_consumer_thread(void *arg) {
          * flush). */
         uint64_t sync_start_ns = _nei_log_time_ns();
         {
-        uint32_t adaptive_iters;
-        if (drained >= 16U) {
-          adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 4U; /* 128: burst */
-        } else if (drained >= 4U) {
-          adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 2U; /* 256: medium */
-        } else {
-          adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS; /* 512: sync/quiet */
-        }
-        _nei_log_notify_waiters_after_drain(rt);
-        for (idle_spin = 0U; idle_spin < adaptive_iters; ++idle_spin) {
-          if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
-            break;
-          }
-          if ((idle_spin & 63U) == 63U) {
-            _NEI_LOG_THREAD_YIELD();
+          uint32_t adaptive_iters;
+          if (drained >= 16U) {
+            adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 4U; /* 128: burst */
+          } else if (drained >= 4U) {
+            adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 2U; /* 256: medium */
           } else {
-            _NEI_LOG_CPU_YIELD();
+            adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS; /* 512: sync/quiet */
           }
-        }
+          _nei_log_notify_waiters_after_drain(rt);
+          for (idle_spin = 0U; idle_spin < adaptive_iters; ++idle_spin) {
+            if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
+              break;
+            }
+            if ((idle_spin & 63U) == 63U) {
+              _NEI_LOG_THREAD_YIELD();
+            } else {
+              _NEI_LOG_CPU_YIELD();
+            }
+          }
         }
         {
           uint64_t sync_elapsed_ns = _nei_log_time_ns() - sync_start_ns;
@@ -623,25 +625,25 @@ static void *_nei_log_consumer_thread(void *arg) {
 
         uint64_t sync_start_ns = _nei_log_time_ns();
         {
-        uint32_t adaptive_iters;
-        if (drained >= 16U) {
-          adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 4U;
-        } else if (drained >= 4U) {
-          adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 2U;
-        } else {
-          adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS;
-        }
-        _nei_log_notify_waiters_after_drain(rt);
-        for (idle_spin = 0U; idle_spin < adaptive_iters; ++idle_spin) {
-          if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
-            break;
-          }
-          if ((idle_spin & 63U) == 63U) {
-            _NEI_LOG_THREAD_YIELD();
+          uint32_t adaptive_iters;
+          if (drained >= 16U) {
+            adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 4U;
+          } else if (drained >= 4U) {
+            adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS / 2U;
           } else {
-            _NEI_LOG_CPU_YIELD();
+            adaptive_iters = _NEI_LOG_CONSUMER_IDLE_SPIN_ITERS;
           }
-        }
+          _nei_log_notify_waiters_after_drain(rt);
+          for (idle_spin = 0U; idle_spin < adaptive_iters; ++idle_spin) {
+            if (_nei_log_ring_has_ready_slot(&rt->ring) || rt->stop_requested) {
+              break;
+            }
+            if ((idle_spin & 63U) == 63U) {
+              _NEI_LOG_THREAD_YIELD();
+            } else {
+              _NEI_LOG_CPU_YIELD();
+            }
+          }
         }
         {
           uint64_t sync_elapsed_ns = _nei_log_time_ns() - sync_start_ns;

@@ -185,12 +185,16 @@ typedef struct _nei_log_event_header_st {
  * adjacent slots never share a cache line, avoiding false sharing between
  * producers writing to different slots. */
 #define _NEI_LOG_CACHELINE 64U
+
 typedef struct {
   _nei_log_atomic32_t state;         /**< 0 = empty; 1 = committed. */
   uint32_t size;                     /**< Valid byte count in @ref data. */
   _nei_log_atomic64_t published_seq; /**< Absolute sequence + 1 once this reservation is fully published. */
   uint8_t data[_NEI_LOG_EVENT_BUFFER_SIZE];
-  char _pad[_NEI_LOG_CACHELINE - ((sizeof(_nei_log_atomic32_t) + sizeof(uint32_t) + sizeof(_nei_log_atomic64_t) + _NEI_LOG_EVENT_BUFFER_SIZE) % _NEI_LOG_CACHELINE)];
+  char _pad[_NEI_LOG_CACHELINE
+            - ((sizeof(_nei_log_atomic32_t) + sizeof(uint32_t) + sizeof(_nei_log_atomic64_t)
+                + _NEI_LOG_EVENT_BUFFER_SIZE)
+               % _NEI_LOG_CACHELINE)];
 } nei_log_ring_slot_st;
 
 /**

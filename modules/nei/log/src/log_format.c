@@ -268,9 +268,9 @@ void _nei_log_format_timestamp(uint64_t timestamp_ns, nei_log_timestamp_style_e 
           if (total < out_size) {
             size_t pos = cache->datetime_len;
             memcpy(out, cache->datetime, pos);
-            memcpy(out + pos, digits, 3U);     /* mmm */
-            memcpy(out + pos + 3U, us, 3U);    /* uuu */
-            memcpy(out + pos + 6U, ns, 3U);    /* nnn */
+            memcpy(out + pos, digits, 3U);  /* mmm */
+            memcpy(out + pos + 3U, us, 3U); /* uuu */
+            memcpy(out + pos + 6U, ns, 3U); /* nnn */
             pos += 9U;
             memcpy(out + pos, cache->tz, tz_len + 1U);
           }
