@@ -10,12 +10,12 @@
 #include <nei/macros/nei_export.h>
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/ref_counted.h>
+#include <neixx/task/task_runner.h>
 
 namespace nei {
 
 class AsyncInputStream;
 class AsyncOutputStream;
-class TaskRunner;
 
 // ---------------------------------------------------------------------------
 // MessageChannel  --  structured message framing over async byte streams
@@ -82,8 +82,8 @@ public:
   // |write_stream|        --  underlying async output stream (not owned).
   //
   // Both runners must be non-null.  The streams must outlive this object.
-  MessageChannel(scoped_refptr<TaskRunner> io_task_runner,
-                 scoped_refptr<TaskRunner> client_task_runner,
+  MessageChannel(scoped_refptr<SingleThreadTaskRunner> io_task_runner,
+                 scoped_refptr<SequencedTaskRunner> client_task_runner,
                  AsyncInputStream *read_stream,
                  AsyncOutputStream *write_stream);
   ~MessageChannel();

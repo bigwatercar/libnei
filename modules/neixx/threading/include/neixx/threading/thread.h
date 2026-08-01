@@ -62,7 +62,7 @@ public:
 
   void Stop();
 
-  scoped_refptr<TaskRunner> GetTaskRunner() const;
+  scoped_refptr<SingleThreadTaskRunner> GetTaskRunner() const;
   bool IsRunning() const;
   PlatformThread::PlatformThreadId GetThreadId() const;
 
@@ -76,7 +76,7 @@ private:
   mutable Lock lock_;
   PlatformThread::Handle handle_;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
-  scoped_refptr<TaskRunner> task_runner_;
+  scoped_refptr<SingleThreadTaskRunner> task_runner_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
   // Non-owning pointer to a WaitableEvent on the call stack of
   // StartWithOptions().  Must only be read/written under |lock_|.

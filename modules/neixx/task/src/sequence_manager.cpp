@@ -111,23 +111,23 @@ public:
     (void)BindToCurrentThread();
   }
 
-  scoped_refptr<TaskRunner> CreateTaskRunner(const TaskTraits &traits) {
+  scoped_refptr<SequencedTaskRunner> CreateTaskRunner(const TaskTraits &traits) {
     AutoLock lock(lock_);
     return CreateTaskRunnerLocked(traits);
   }
 
-  scoped_refptr<TaskRunner> GetDefaultTaskRunner() {
+  scoped_refptr<SingleThreadTaskRunner> GetDefaultTaskRunner() {
     AutoLock lock(lock_);
     if (is_shutdown_) {
       return nullptr;
     }
     if (!default_task_runner_) {
-      default_task_runner_ = CreateTaskRunnerLocked(TaskTraits());
+      default_task_runner_ = CreateDefaultTaskRunnerLocked();
     }
     return default_task_runner_;
   }
 
-  scoped_refptr<TaskRunner> CreateTaskRunnerLocked(const TaskTraits &traits) {
+  scoped_refptr<SequencedTaskRunner> CreateTaskRunnerLocked(const TaskTraits &traits) {
     if (is_shutdown_) {
       return nullptr;
     }
@@ -152,7 +152,36 @@ public:
     queues_.push_back(std::move(queue));
     RebuildQueueViewLocked();
 
-    return TaskRunner::Create(raw_queue, traits);
+    return SequencedTaskRunner::Create(raw_queue, traits);
+  }
+
+  // Creates the default task runner as a SingleThreadTaskRunner because
+  // the SequenceManager is always driven by a single dedicated thread.
+  scoped_refptr<SingleThreadTaskRunner> CreateDefaultTaskRunnerLocked() {
+    if (is_shutdown_) {
+      return nullptr;
+    }
+
+    std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(TaskTraits());
+    internal::TaskQueue *raw_queue = queue.get();
+    WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
+    queue->SetOnTaskPostedCallback([this, weak_queue]() {
+      pump_->ScheduleWork();
+
+      internal::TaskQueue *queue = weak_queue.get();
+      if (queue == nullptr) {
+        return;
+      }
+      const TimeTicks next_delayed = queue->PeekNextDelayedRunTime();
+      if (!next_delayed.is_null()) {
+        pump_->ScheduleDelayedWork(next_delayed);
+      }
+    });
+
+    queues_.push_back(std::move(queue));
+    RebuildQueueViewLocked();
+
+    return SingleThreadTaskRunner::Create(raw_queue, TaskTraits());
   }
 
   void Run(MessagePump::Delegate *delegate) {
@@ -562,7 +591,7 @@ private:
   std::size_t next_priority_index_ = 0;
   bool is_shutdown_ = false;
   bool in_shutdown_processing_ = false;
-  scoped_refptr<TaskRunner> default_task_runner_;
+  scoped_refptr<SingleThreadTaskRunner> default_task_runner_;
 };
 
 SequenceManager::SequenceManager(std::unique_ptr<MessagePump> pump)
@@ -578,11 +607,11 @@ SequenceManager *SequenceManager::Current() {
   return Impl::Current();
 }
 
-scoped_refptr<TaskRunner> SequenceManager::CreateTaskRunner(const TaskTraits &traits) {
+scoped_refptr<SequencedTaskRunner> SequenceManager::CreateTaskRunner(const TaskTraits &traits) {
   return impl_->CreateTaskRunner(traits);
 }
 
-scoped_refptr<TaskRunner> SequenceManager::GetDefaultTaskRunner() {
+scoped_refptr<SingleThreadTaskRunner> SequenceManager::GetDefaultTaskRunner() {
   return impl_->GetDefaultTaskRunner();
 }
 

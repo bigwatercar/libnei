@@ -12,11 +12,11 @@
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/ref_counted.h>
 #include <nei/macros/suppress_compiler_warnings.h>
+#include <neixx/task/task_runner.h>
 
 namespace nei {
 
 class PlatformHandle;
-class TaskRunner;
 
 // ---------------------------------------------------------------------------
 // PipeInputStream  --  async read stream backed by a pipe or socket handle
@@ -40,7 +40,7 @@ class NEI_API PipeInputStream final : public AsyncInputStream {
 public:
   // |io_task_runner|  --  where all I/O state transitions and user callbacks
   //   execute.  Must be non-null.
-  explicit PipeInputStream(scoped_refptr<TaskRunner> io_task_runner);
+  explicit PipeInputStream(scoped_refptr<SingleThreadTaskRunner> io_task_runner);
   ~PipeInputStream() override;
 
   PipeInputStream(const PipeInputStream &) = delete;
@@ -76,7 +76,7 @@ private:
 // ---------------------------------------------------------------------------
 class NEI_API PipeOutputStream final : public AsyncOutputStream {
 public:
-  explicit PipeOutputStream(scoped_refptr<TaskRunner> io_task_runner);
+  explicit PipeOutputStream(scoped_refptr<SingleThreadTaskRunner> io_task_runner);
   ~PipeOutputStream() override;
 
   PipeOutputStream(const PipeOutputStream &) = delete;

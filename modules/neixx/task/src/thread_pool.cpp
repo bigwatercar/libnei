@@ -217,11 +217,55 @@ private:
 
     InstallBlockingCallback();
 
+    // Dedicated (single-thread) queue that this worker owns.  When non-null,
+    // the worker processes this queue exclusively, guaranteeing same-thread
+    // execution for SingleThreadTaskRunner tasks.
+    internal::TaskQueue *dedicated_queue_ = nullptr;
+
     for (;;) {
-      // Fetch the next ready task queue.  If a reclaim timeout is configured,
-      // use the timed variant so idle workers eventually self-terminate.
-      // The timed wait does NOT hold any pool lock - it only waits on the
-      // PooledTaskSource's internal condvar, keeping the pool lock free.
+      // ---- Dedicated queue path ----
+      // If this worker owns a dedicated queue, process it directly without
+      // going through the global ready heap.  This guarantees that ALL tasks
+      // from this queue execute on this thread.
+      if (dedicated_queue_ != nullptr) {
+        // Process the dedicated queue
+        internal::SetCurrentPooledTaskQueue(dedicated_queue_);
+        ProcessTaskBatch(dedicated_queue_);
+
+        // Check if more work is available
+        if (dedicated_queue_->HasImmediateWork()) {
+          internal::SetCurrentPooledTaskQueue(nullptr);
+          if (delayed_task_manager_ != nullptr) {
+            delayed_task_manager_->OnQueueUpdated(dedicated_queue_);
+          }
+          continue; // More work — process immediately
+        }
+
+        // Queue is empty — wait for new tasks or timeout
+        bool timed_out = false;
+        source_->WaitForDedicatedWork(dedicated_queue_, reclaim_time_, timed_out);
+
+        if (timed_out || dedicated_queue_->is_shutdown()) {
+          // Reclaim timeout or shutdown — release the dedicated assignment.
+          source_->ReleaseDedicatedQueue(dedicated_queue_);
+          dedicated_queue_ = nullptr;
+          internal::SetCurrentPooledTaskQueue(nullptr);
+          if (delayed_task_manager_ != nullptr) {
+            delayed_task_manager_->OnQueueUpdated(nullptr);
+          }
+          // Fall through to normal path to check for shutdown or pick up
+          // another queue.
+        } else {
+          // Woken by new task — process it
+          internal::SetCurrentPooledTaskQueue(nullptr);
+          if (delayed_task_manager_ != nullptr) {
+            delayed_task_manager_->OnQueueUpdated(dedicated_queue_);
+          }
+          continue;
+        }
+      }
+
+      // ---- Normal path: fetch next ready queue from global heap ----
       bool timed_out = false;
       internal::TaskQueue *queue = reclaim_time_.is_positive()
                                        ? source_->GetNextTaskQueueTimed(reclaim_time_, timed_out)
@@ -229,8 +273,6 @@ private:
 
       if (queue == nullptr) {
         // Either Shutdown() was called or the idle reclaim timeout elapsed.
-        // Restore to baseline before exiting so that OS resources are
-        // released in a clean state.
         TRACE_EVENT_END("nei.scheduling", "WorkerThread");
         RestoreBaseline();
         internal::SetCurrentBlockingCallback(nullptr);
@@ -239,129 +281,27 @@ private:
         return;
       }
 
-      // Publish the current queue via TLS so RunsTasksInCurrentSequence()
-      // can detect sequence affinity for pool-backed TaskRunners.
+      // ---- Dedicated queue: claim ownership ----
+      if (queue->is_dedicated()) {
+        if (source_->AssignDedicatedWorker(queue)) {
+          dedicated_queue_ = queue;
+          internal::SetCurrentPooledTaskQueue(dedicated_queue_);
+          ProcessTaskBatch(dedicated_queue_);
+          internal::SetCurrentPooledTaskQueue(nullptr);
+          if (delayed_task_manager_ != nullptr) {
+            delayed_task_manager_->OnQueueUpdated(dedicated_queue_);
+          }
+          continue; // Next iteration: dedicated path processes remaining work
+        }
+        // Another worker owns this queue — skip and try again.
+        continue;
+      }
+
+      // ---- Normal path: process regular or parallel queue ----
       internal::SetCurrentPooledTaskQueue(queue);
-
-      std::size_t remaining_budget = dynamic_turn_budget_;
-
-      // For parallel queues, use a separate (smaller) dynamic budget
-      // instead of the hard-coded 1-task limit.  This amortizes the
-      // shard-lock and TaskQueue-lock overhead across multiple tasks
-      // while still keeping the handoff short enough for other workers
-      // to interleave.
-      //
-      // WillRunTask() was already called inside GetNextTaskQueueTimed(),
-      // which atomically reserved a worker slot for us.  We hold that
-      // slot until DidProcessTask() releases it below.
-      if (queue->is_parallel()) {
-        remaining_budget = dynamic_parallel_budget_;
-      }
-
-      while (remaining_budget > 0) {
-        const std::size_t request_count = std::min(kTaskBatchSize, remaining_budget);
-        std::array<internal::Task, kTaskBatchSize> batch;
-        const std::size_t task_count = queue->TakeImmediateTasks(batch.data(), request_count);
-        if (queue->is_parallel()) {
-          AdaptParallelBudget(task_count, request_count);
-        } else {
-          AdaptTurnBudget(task_count, request_count);
-        }
-        if (task_count == 0) {
-          break;
-        }
-
-        for (std::size_t i = 0; i < task_count; ++i) {
-          internal::Task &task = batch[i];
-
-          source_->NotifyTaskConsumed();
-          const TaskShutdownBehavior shutdown_behavior = task.traits.shutdown_behavior();
-
-          if (!task.task) {
-            if (on_task_finalized_) {
-              on_task_finalized_(shutdown_behavior);
-            }
-            continue;
-          }
-
-          const TimeDelta queue_delay =
-              task.enqueue_time.is_null() ? TimeDelta() : TimeTicks::Now() - task.enqueue_time;
-
-          const bool may_block = task.traits.may_block();
-          if (may_block && on_blocking_begin_) {
-            // InstallBlockingCallback() already called at ThreadMain start;
-            // on_blocking_begin_() triggers OnWorkerBeganBlocking which may
-            // spawn a compensation worker.
-            on_blocking_begin_();
-          }
-
-          // -- Priority Backgrounding ---------------------------------------
-          // Dynamically set the OS thread priority to match this task's class.
-          // Crucially, this syscall is issued OUTSIDE any pool lock, satisfying
-          // the "no syscall under lock_" constraint stated in the design brief.
-          ApplyTaskPriority(task.traits.priority());
-          // ----------------------------------------------------------------
-
-          internal::RecordTaskExecutionStarted(task);
-
-          TRACE_EVENT0("nei.scheduling", "ThreadPool::RunTask");
-
-          TaskObserver *observer = task_observer_ ? task_observer_->load(std::memory_order_acquire) : nullptr;
-          if (observer) {
-            const ObservedTask observed{task.posted_from,
-                                        task.enqueue_time,
-                                        task.delayed_run_time,
-                                        task.sequence_num,
-                                        task.sequence_token,
-                                        task.traits};
-            observer->OnTaskStarted(observed, queue_delay);
-          }
-
-          const TimeTicks run_start = TimeTicks::Now();
-          std::move(task.task).Run();
-          const TimeDelta run_duration = TimeTicks::Now() - run_start;
-
-          internal::RecordTaskExecutionCompleted();
-
-          if (observer) {
-            const ObservedTask observed{task.posted_from,
-                                        task.enqueue_time,
-                                        task.delayed_run_time,
-                                        task.sequence_num,
-                                        task.sequence_token,
-                                        task.traits};
-            observer->OnTaskCompleted(observed, run_duration);
-          }
-
-          // -- Restore Baseline Priority ------------------------------------
-          // Restore before the next dequeue attempt so that:
-          //  - The next task's ApplyTaskPriority() starts from a known state.
-          //  - The idle-wait (if no more tasks arrive) runs at baseline weight.
-          // Again: no lock is held during this syscall.
-          RestoreBaseline();
-          // ----------------------------------------------------------------
-
-          if (may_block && on_blocking_end_) {
-            on_blocking_end_();
-          }
-
-          if (on_task_finalized_) {
-            on_task_finalized_(shutdown_behavior);
-          }
-        }
-
-        remaining_budget -= task_count;
-        if (task_count < request_count) {
-          break;
-        }
-      }
+      ProcessTaskBatch(queue);
 
       // ---- Chromium-aligned DidProcessTask ----
-      // Release the worker slot reserved by WillRunTask() and re-enqueue
-      // the queue if it was saturated and now has capacity again.
-      // This pixel-mirrors TaskTracker::RunAndPopNextTask() in chromium:
-      //   const bool task_source_must_be_queued = task_source.DidProcessTask();
-      //   if (task_source_must_be_queued) return task_source;
       if (queue->is_parallel()) {
         if (queue->DidProcessTask()) {
           source_->ReEnqueueTaskQueue(queue);
@@ -372,6 +312,113 @@ private:
       internal::SetCurrentPooledTaskQueue(nullptr);
       if (delayed_task_manager_ != nullptr) {
         delayed_task_manager_->OnQueueUpdated(queue);
+      }
+    }
+  }
+
+  /// Processes a batch of tasks from |queue|.  Handles budgeting, priority
+  /// backgrounding, task observation, and blocking callbacks for both regular
+  /// and parallel queues.
+  void ProcessTaskBatch(internal::TaskQueue *queue) {
+    std::size_t remaining_budget = dynamic_turn_budget_;
+
+    // For parallel queues, use a separate (smaller) dynamic budget
+    // instead of the hard-coded 1-task limit.  This amortizes the
+    // shard-lock and TaskQueue-lock overhead across multiple tasks
+    // while still keeping the handoff short enough for other workers
+    // to interleave.
+    //
+    // WillRunTask() was already called inside GetNextTaskQueueTimed(),
+    // which atomically reserved a worker slot for us.  We hold that
+    // slot until DidProcessTask() releases it below.
+    if (queue->is_parallel()) {
+      remaining_budget = dynamic_parallel_budget_;
+    }
+
+    while (remaining_budget > 0) {
+      const std::size_t request_count = std::min(kTaskBatchSize, remaining_budget);
+      std::array<internal::Task, kTaskBatchSize> batch;
+      const std::size_t task_count = queue->TakeImmediateTasks(batch.data(), request_count);
+      if (queue->is_parallel()) {
+        AdaptParallelBudget(task_count, request_count);
+      } else {
+        AdaptTurnBudget(task_count, request_count);
+      }
+      if (task_count == 0) {
+        break;
+      }
+
+      for (std::size_t i = 0; i < task_count; ++i) {
+        internal::Task &task = batch[i];
+
+        source_->NotifyTaskConsumed();
+        const TaskShutdownBehavior shutdown_behavior = task.traits.shutdown_behavior();
+
+        if (!task.task) {
+          if (on_task_finalized_) {
+            on_task_finalized_(shutdown_behavior);
+          }
+          continue;
+        }
+
+        const TimeDelta queue_delay = task.enqueue_time.is_null() ? TimeDelta() : TimeTicks::Now() - task.enqueue_time;
+
+        const bool may_block = task.traits.may_block();
+        if (may_block && on_blocking_begin_) {
+          on_blocking_begin_();
+        }
+
+        // -- Priority Backgrounding ---------------------------------------
+        ApplyTaskPriority(task.traits.priority());
+        // ----------------------------------------------------------------
+
+        internal::RecordTaskExecutionStarted(task);
+
+        TRACE_EVENT0("nei.scheduling", "ThreadPool::RunTask");
+
+        TaskObserver *observer = task_observer_ ? task_observer_->load(std::memory_order_acquire) : nullptr;
+        if (observer) {
+          const ObservedTask observed{task.posted_from,
+                                      task.enqueue_time,
+                                      task.delayed_run_time,
+                                      task.sequence_num,
+                                      task.sequence_token,
+                                      task.traits};
+          observer->OnTaskStarted(observed, queue_delay);
+        }
+
+        const TimeTicks run_start = TimeTicks::Now();
+        std::move(task.task).Run();
+        const TimeDelta run_duration = TimeTicks::Now() - run_start;
+
+        internal::RecordTaskExecutionCompleted();
+
+        if (observer) {
+          const ObservedTask observed{task.posted_from,
+                                      task.enqueue_time,
+                                      task.delayed_run_time,
+                                      task.sequence_num,
+                                      task.sequence_token,
+                                      task.traits};
+          observer->OnTaskCompleted(observed, run_duration);
+        }
+
+        // -- Restore Baseline Priority ------------------------------------
+        RestoreBaseline();
+        // ----------------------------------------------------------------
+
+        if (may_block && on_blocking_end_) {
+          on_blocking_end_();
+        }
+
+        if (on_task_finalized_) {
+          on_task_finalized_(shutdown_behavior);
+        }
+      }
+
+      remaining_budget -= task_count;
+      if (task_count < request_count) {
+        break;
       }
     }
   }
@@ -437,7 +484,7 @@ public:
     task_observer_.store(observer, std::memory_order_release);
   }
 
-  scoped_refptr<TaskRunner> CreateSequencedTaskRunner(const TaskTraits &traits) {
+  scoped_refptr<SequencedTaskRunner> CreateSequencedTaskRunner(const TaskTraits &traits) {
     AutoLock lock(lock_);
     if (is_shutdown_) {
       return nullptr;
@@ -478,7 +525,55 @@ public:
     });
 
     queues_.push_back(std::move(queue));
-    return TaskRunner::CreateForThreadPool(raw_queue, traits);
+    return SequencedTaskRunner::CreateForThreadPool(raw_queue, traits);
+  }
+
+  scoped_refptr<SingleThreadTaskRunner> CreateSingleThreadTaskRunner(const TaskTraits &traits) {
+    AutoLock lock(lock_);
+    if (is_shutdown_) {
+      return nullptr;
+    }
+
+    std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(traits);
+    internal::TaskQueue *raw_queue = queue.get();
+    WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
+
+    // Mark as dedicated so PooledTaskSource assigns a single worker
+    // exclusively to this queue, guaranteeing same-thread execution.
+    raw_queue->set_dedicated(true);
+
+    task_source_.RegisterTaskQueue(raw_queue);
+    delayed_task_manager_.AddQueue(raw_queue);
+
+    raw_queue->SetOnTaskEnqueuedCallback([this](TaskShutdownBehavior shutdown_behavior) {
+      task_source_.NotifyTaskPosted();
+
+      if (shutdown_behavior == TaskShutdownBehavior::BLOCK_SHUTDOWN) {
+        AutoLock lock(lock_);
+        ++shutdown_blocking_tasks_count_;
+      }
+
+      const std::int64_t count = task_source_.GetTotalTaskCount();
+      if (count >= kBackpressureWarningThreshold
+          && !backpressure_warning_emitted_.exchange(true, std::memory_order_relaxed)) {
+        NEI_LOG_WARN("[ThreadPool] Backpressure: %lld pending tasks "
+                     "(threshold=%lld). Producer may be outpacing consumers.",
+                     static_cast<long long>(count),
+                     static_cast<long long>(kBackpressureWarningThreshold));
+      }
+    });
+
+    raw_queue->SetOnTaskPostedCallback([this, weak_queue]() {
+      internal::TaskQueue *queue = weak_queue.get();
+      if (queue == nullptr) {
+        return;
+      }
+      task_source_.ReEnqueueTaskQueue(queue);
+      delayed_task_manager_.OnQueueUpdated(queue);
+    });
+
+    queues_.push_back(std::move(queue));
+    return SingleThreadTaskRunner::CreateForThreadPool(raw_queue, traits);
   }
 
   scoped_refptr<TaskRunner> CreateParallelTaskRunner(const TaskTraits &traits) {
@@ -728,8 +823,12 @@ ThreadPool::ThreadPool(const InitParams &params)
 
 ThreadPool::~ThreadPool() = default;
 
-scoped_refptr<TaskRunner> ThreadPool::CreateSequencedTaskRunner(const TaskTraits &traits) {
+scoped_refptr<SequencedTaskRunner> ThreadPool::CreateSequencedTaskRunner(const TaskTraits &traits) {
   return impl_->CreateSequencedTaskRunner(traits);
+}
+
+scoped_refptr<SingleThreadTaskRunner> ThreadPool::CreateSingleThreadTaskRunner(const TaskTraits &traits) {
+  return impl_->CreateSingleThreadTaskRunner(traits);
 }
 
 scoped_refptr<TaskRunner> ThreadPool::CreateParallelTaskRunner(const TaskTraits &traits) {

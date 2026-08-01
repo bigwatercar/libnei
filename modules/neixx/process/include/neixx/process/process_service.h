@@ -10,9 +10,9 @@
 #include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/memory/ref_counted.h>
 
-namespace nei {
+#include <neixx/task/task_runner.h>
 
-class TaskRunner;
+namespace nei {
 
 class NEI_API ProcessService final : public RefCountedThreadSafe<ProcessService> {
 public:
@@ -22,7 +22,7 @@ public:
   bool Start();
   bool IsRunning() const;
   bool IsOnServiceThread() const;
-  scoped_refptr<TaskRunner> GetTaskRunner() const;
+  scoped_refptr<SingleThreadTaskRunner> GetTaskRunner() const;
 
 private:
   template <typename T, typename... Args>

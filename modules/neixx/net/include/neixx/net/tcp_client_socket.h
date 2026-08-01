@@ -17,8 +17,6 @@
 
 namespace nei {
 
-class TaskRunner;
-
 namespace net {
 
 class TLSServerSocket;
@@ -89,7 +87,7 @@ public:
   // |callback| is invoked on |io_runner| with the connect result.
   // Returns false if the socket could not be created or the connect
   // request could not be submitted.
-  bool Connect(const IPEndPoint &addr, ConnectCallback callback, scoped_refptr<TaskRunner> io_runner);
+  bool Connect(const IPEndPoint &addr, ConnectCallback callback, scoped_refptr<SingleThreadTaskRunner> io_runner);
 
   // ---- AsyncInputStream ------------------------------------------------
 
@@ -152,7 +150,7 @@ private:
   friend class TLSServerSocket;
 
   // Returns the IO TaskRunner this socket is bound to.
-  scoped_refptr<TaskRunner> io_task_runner() const;
+  scoped_refptr<SingleThreadTaskRunner> io_task_runner() const;
 
   Impl *impl_ = nullptr; // Raw pointer  --  lifetime managed by RefCountedThreadSafe
 };

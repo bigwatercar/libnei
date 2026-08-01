@@ -5,24 +5,25 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
 
 #include <nei/macros/nei_export.h>
 #include <neixx/memory/ref_counted.h>
+#include <neixx/task/task_runner.h>
+
+#include <filesystem>
 
 namespace nei {
 
 class IOBuffer;
-class TaskRunner;
 
 class NEI_API AsyncFile {
 public:
   // AsyncFile is a byte-stream abstraction. It intentionally does not expose
   // a text/binary file mode; any text handling belongs in a higher layer.
-  static std::unique_ptr<AsyncFile> Create(scoped_refptr<TaskRunner> io_task_runner);
+  static std::unique_ptr<AsyncFile> Create(scoped_refptr<SingleThreadTaskRunner> io_task_runner);
 
   enum class OpenMode {
     kReadOnly,
@@ -91,7 +92,7 @@ public:
   virtual void OpenAsync(const std::string &path,
                          OpenMode mode,
                          OpenDisposition disposition,
-                         const scoped_refptr<TaskRunner> &background_runner,
+                         const scoped_refptr<SequencedTaskRunner> &background_runner,
                          OpenCallback callback) = 0;
 
   // Convenience overload accepting std::filesystem::path.
@@ -101,7 +102,7 @@ public:
   void OpenAsync(const std::filesystem::path &path,
                  OpenMode mode,
                  OpenDisposition disposition,
-                 const scoped_refptr<TaskRunner> &background_runner,
+                 const scoped_refptr<SequencedTaskRunner> &background_runner,
                  OpenCallback callback) {
     auto u8 = path.u8string();
     OpenAsync(std::string(reinterpret_cast<const char *>(u8.data()), u8.size()),

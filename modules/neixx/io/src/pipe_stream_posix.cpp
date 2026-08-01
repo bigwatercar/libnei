@@ -18,7 +18,7 @@ namespace nei {
 // PipeInputStream::Impl
 // ===========================================================================
 
-PipeInputStream::Impl::Impl(scoped_refptr<TaskRunner> io_task_runner)
+PipeInputStream::Impl::Impl(scoped_refptr<SingleThreadTaskRunner> io_task_runner)
     : io_task_runner_(std::move(io_task_runner))
     , weak_factory_(this, FROM_HERE) {
   DCHECK(io_task_runner_ != nullptr);
@@ -197,7 +197,7 @@ void PipeInputStream::Impl::DeliverReadResult(bool success, std::size_t bytes) {
 // PipeOutputStream::Impl
 // ===========================================================================
 
-PipeOutputStream::Impl::Impl(scoped_refptr<TaskRunner> io_task_runner)
+PipeOutputStream::Impl::Impl(scoped_refptr<SingleThreadTaskRunner> io_task_runner)
     : io_task_runner_(std::move(io_task_runner))
     , weak_factory_(this, FROM_HERE) {
   DCHECK(io_task_runner_ != nullptr);

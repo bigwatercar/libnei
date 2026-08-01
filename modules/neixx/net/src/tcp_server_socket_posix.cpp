@@ -35,7 +35,7 @@ TCPServerSocket::Impl::~Impl() {
 bool TCPServerSocket::Impl::Listen(const IPEndPoint &addr,
                                    int backlog,
                                    TCPServerSocket::AcceptCallback callback,
-                                   scoped_refptr<TaskRunner> acceptor_runner,
+                                   scoped_refptr<SingleThreadTaskRunner> acceptor_runner,
                                    TCPServerSocket::RunnerSelector worker_selector) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(acceptor_runner);
@@ -229,7 +229,7 @@ void TCPServerSocket::Impl::OnFileCanReadWithoutBlocking(NativeIOHandle /*handle
     setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
     // Build a TCPClientSocket from the accepted fd.
-    scoped_refptr<TaskRunner> worker_runner = worker_selector_ ? worker_selector_() : nullptr;
+    scoped_refptr<SingleThreadTaskRunner> worker_runner = worker_selector_ ? worker_selector_() : nullptr;
     if (!worker_runner)
       worker_runner = io_runner_;
     auto *client_impl = new TCPClientSocket::Impl(client_fd, worker_runner);

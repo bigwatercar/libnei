@@ -168,7 +168,7 @@ HANDLE OpenNullDevice(bool for_input) {
 
 class WinChildProcessCore final : public MessagePumpForIO::Watcher {
 public:
-  explicit WinChildProcessCore(ChildProcessListener *listener, scoped_refptr<TaskRunner> io_runner)
+  explicit WinChildProcessCore(ChildProcessListener *listener, scoped_refptr<SingleThreadTaskRunner> io_runner)
       : listener_(listener)
       , io_runner_(std::move(io_runner))
       , dispatch_state_(std::make_shared<DispatchState>()) {
@@ -888,7 +888,7 @@ private:
   OVERLAPPED control_overlapped_{};
   std::array<std::uint8_t, 64> control_read_buffer_{};
   ProcessLaunchOptions options_;
-  scoped_refptr<TaskRunner> origin_runner_;
+  scoped_refptr<SingleThreadTaskRunner> origin_runner_;
   std::shared_ptr<DispatchState> dispatch_state_;
   MessagePumpForIO::FdWatchController control_controller_;
   TimeDelta heartbeat_timeout_ = TimeDelta::Max();
@@ -900,7 +900,7 @@ private:
   std::unique_ptr<AsyncInputStream> stdout_stream_;
   std::unique_ptr<AsyncInputStream> stderr_stream_;
   std::unique_ptr<AsyncOutputStream> stdin_stream_;
-  scoped_refptr<TaskRunner> io_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_runner_;
 };
 
 } // namespace
@@ -946,7 +946,7 @@ public:
 
   bool LaunchOnIoThread(const CommandLine &command_line,
                         const ProcessLaunchOptions &options,
-                        const scoped_refptr<TaskRunner> &io_runner) {
+                        const scoped_refptr<SingleThreadTaskRunner> &io_runner) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
     stdout_proxy_->ResetBinding();
     stderr_proxy_->ResetBinding();

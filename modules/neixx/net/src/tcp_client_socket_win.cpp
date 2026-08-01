@@ -49,7 +49,7 @@ TCPClientSocket::Impl::Impl()
   DETACH_FROM_THREAD(thread_checker_); // Lazy-bind on first IO-thread use.
 }
 
-TCPClientSocket::Impl::Impl(SOCKET accepted_socket, scoped_refptr<TaskRunner> io_runner)
+TCPClientSocket::Impl::Impl(SOCKET accepted_socket, scoped_refptr<SingleThreadTaskRunner> io_runner)
     : socket_(accepted_socket)
     , bound_(true)
     , connected_(true)
@@ -226,7 +226,7 @@ void TCPClientSocket::Impl::ReleaseSelfHoldIfNeeded() {
 
 bool TCPClientSocket::Impl::Connect(const IPEndPoint &addr,
                                     TCPClientSocket::ConnectCallback callback,
-                                    scoped_refptr<TaskRunner> io_runner) {
+                                    scoped_refptr<SingleThreadTaskRunner> io_runner) {
   DCHECK(io_runner);
   DCHECK_MSG(!connected_, "Connect: socket already connected  --  cannot reconnect");
   DCHECK_MSG(!io_runner_, "Connect: io_runner_ already set");

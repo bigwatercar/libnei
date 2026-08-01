@@ -24,7 +24,7 @@ TCPServerSocket::~TCPServerSocket() {
 bool TCPServerSocket::Listen(const IPEndPoint &addr,
                              int backlog,
                              AcceptCallback callback,
-                             scoped_refptr<TaskRunner> acceptor_runner,
+                             scoped_refptr<SingleThreadTaskRunner> acceptor_runner,
                              RunnerSelector worker_selector) {
   return impl_->Listen(addr, backlog, std::move(callback), std::move(acceptor_runner), std::move(worker_selector));
 }

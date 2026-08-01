@@ -25,8 +25,8 @@ public:
   SequenceManager(SequenceManager &&) = delete;
   SequenceManager &operator=(SequenceManager &&) = delete;
 
-  scoped_refptr<TaskRunner> CreateTaskRunner(const TaskTraits &traits = TaskTraits());
-  scoped_refptr<TaskRunner> GetDefaultTaskRunner();
+  scoped_refptr<SequencedTaskRunner> CreateTaskRunner(const TaskTraits &traits = TaskTraits());
+  scoped_refptr<SingleThreadTaskRunner> GetDefaultTaskRunner();
 
   void Run();
   void Quit();

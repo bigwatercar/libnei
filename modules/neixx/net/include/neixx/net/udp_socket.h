@@ -11,6 +11,7 @@
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/net/ip_end_point.h>
+#include <neixx/task/task_runner.h>
 
 namespace nei {
 
@@ -61,7 +62,7 @@ public:
   // (DCHECK).  Returns true on success.  Must be called before SendTo/RecvFrom.
   //
   // |io_runner| is the TaskRunner on which all I/O callbacks will execute.
-  bool Bind(const IPEndPoint &local_addr, scoped_refptr<TaskRunner> io_runner);
+  bool Bind(const IPEndPoint &local_addr, scoped_refptr<SingleThreadTaskRunner> io_runner);
 
   // Send a datagram to |dest|.
   //

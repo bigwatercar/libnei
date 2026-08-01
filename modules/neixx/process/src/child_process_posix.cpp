@@ -153,7 +153,7 @@ ProcessState ClassifySignaledTermination(int sig, int requested_signal) {
 
 class PosixChildProcessCore final : public MessagePumpForIO::Watcher {
 public:
-  explicit PosixChildProcessCore(ChildProcessListener *listener, scoped_refptr<TaskRunner> io_runner)
+  explicit PosixChildProcessCore(ChildProcessListener *listener, scoped_refptr<SingleThreadTaskRunner> io_runner)
       : listener_(listener)
       , io_runner_(std::move(io_runner)) {
   }
@@ -828,7 +828,7 @@ private:
   int control_fd_ = -1;
   MessagePumpForIO::FdWatchController pid_controller_;
   MessagePumpForIO::FdWatchController control_controller_;
-  scoped_refptr<TaskRunner> origin_runner_;
+  scoped_refptr<SingleThreadTaskRunner> origin_runner_;
   TimeDelta heartbeat_timeout_ = TimeDelta::Max();
   bool heartbeat_enabled_ = false;
   std::uint64_t heartbeat_generation_ = 0;
@@ -838,7 +838,7 @@ private:
   std::unique_ptr<AsyncInputStream> stdout_stream_;
   std::unique_ptr<AsyncInputStream> stderr_stream_;
   std::unique_ptr<AsyncOutputStream> stdin_stream_;
-  scoped_refptr<TaskRunner> io_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_runner_;
 };
 
 } // namespace
@@ -884,7 +884,7 @@ public:
 
   bool LaunchOnIoThread(const CommandLine &command_line,
                         const ProcessLaunchOptions &options,
-                        const scoped_refptr<TaskRunner> &io_runner) {
+                        const scoped_refptr<SingleThreadTaskRunner> &io_runner) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
     stdout_proxy_->ResetBinding();
     stderr_proxy_->ResetBinding();

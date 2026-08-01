@@ -25,7 +25,7 @@ public:
   bool Listen(const IPEndPoint &addr,
               int backlog,
               AcceptCallback callback,
-              scoped_refptr<TaskRunner> runner,
+              scoped_refptr<SingleThreadTaskRunner> runner,
               RunnerSelector selector = {});
   void Close();
 

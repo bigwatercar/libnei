@@ -78,14 +78,14 @@ public:
     return service_thread_id != 0 && PlatformThread::CurrentId() == service_thread_id;
   }
 
-  scoped_refptr<TaskRunner> GetTaskRunner() const {
+  scoped_refptr<SingleThreadTaskRunner> GetTaskRunner() const {
     std::lock_guard<std::mutex> lock(lock_);
     return io_runner_;
   }
 
 private:
   void Shutdown() {
-    scoped_refptr<TaskRunner> runner;
+    scoped_refptr<SingleThreadTaskRunner> runner;
     {
       std::lock_guard<std::mutex> lock(lock_);
       runner = io_runner_;
@@ -99,7 +99,7 @@ private:
 
   mutable std::mutex lock_;
   Thread io_thread_;
-  scoped_refptr<TaskRunner> io_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_runner_;
   bool start_failed_ = false;
 };
 
@@ -153,7 +153,7 @@ bool ProcessService::IsOnServiceThread() const {
   return impl_->IsOnServiceThread();
 }
 
-scoped_refptr<TaskRunner> ProcessService::GetTaskRunner() const {
+scoped_refptr<SingleThreadTaskRunner> ProcessService::GetTaskRunner() const {
   return impl_->GetTaskRunner();
 }
 

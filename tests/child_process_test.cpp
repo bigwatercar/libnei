@@ -182,7 +182,7 @@ TEST(ChildProcessTest, LaunchFromProcessServiceIoThreadDoesNotDeadlock) {
   const scoped_refptr<ProcessService> service = ProcessService::Create();
   ASSERT_TRUE(service);
   ASSERT_TRUE(service->Start());
-  const scoped_refptr<TaskRunner> io_runner = service->GetTaskRunner();
+  const scoped_refptr<SingleThreadTaskRunner> io_runner = service->GetTaskRunner();
   ASSERT_TRUE(io_runner);
 
   WaitableEvent launch_done(WaitableEvent::ResetPolicy::kAutomatic, false);

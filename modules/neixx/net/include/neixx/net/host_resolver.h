@@ -19,10 +19,9 @@
 #include <neixx/memory/ref_counted.h>
 #include <neixx/net/address_list.h>
 #include <nei/macros/suppress_compiler_warnings.h>
+#include <neixx/task/task_runner.h>
 
 namespace nei {
-
-class TaskRunner;
 
 namespace net {
 
@@ -111,7 +110,7 @@ public:
   //                  Must not be null.
   //
   // Returns true if the request was successfully queued.
-  bool Resolve(const std::string &host, ResolveCallback callback, scoped_refptr<TaskRunner> target_runner);
+  bool Resolve(const std::string &host, ResolveCallback callback, scoped_refptr<SequencedTaskRunner> target_runner);
 
 private:
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN

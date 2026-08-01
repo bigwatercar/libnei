@@ -86,7 +86,7 @@ public:
     UpdateMax(peak_pending_, pending_now);
   }
 
-  void OnTaskStarted(const nei::internal::Task &task, nei::TimeDelta queue_delay) override {
+  void OnTaskStarted(const nei::ObservedTask &task, nei::TimeDelta queue_delay) override {
     const std::size_t index = PriorityIndex(task.traits.priority());
     auto &stats = stats_[index];
 
@@ -105,7 +105,7 @@ public:
     }
   }
 
-  void OnTaskCompleted(const nei::internal::Task &task, nei::TimeDelta run_duration) override {
+  void OnTaskCompleted(const nei::ObservedTask &task, nei::TimeDelta run_duration) override {
     const std::size_t index = PriorityIndex(task.traits.priority());
     auto &stats = stats_[index];
 
@@ -221,7 +221,7 @@ private:
     }
   }
 
-  void MaybePrintSlowTask(const nei::internal::Task &task, nei::TimeDelta queue_delay, nei::TimeDelta run_duration) {
+  void MaybePrintSlowTask(const nei::ObservedTask &task, nei::TimeDelta queue_delay, nei::TimeDelta run_duration) {
     const std::size_t index = PriorityIndex(task.traits.priority());
     if (printed_slow_samples_[index].fetch_add(1, std::memory_order_relaxed) >= 1) {
       return;

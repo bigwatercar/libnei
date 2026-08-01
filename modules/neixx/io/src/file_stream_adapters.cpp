@@ -28,7 +28,7 @@ FileInputStreamAdapter::FileInputStreamAdapter(AsyncFile *file, std::uint64_t st
 }
 
 FileInputStreamAdapter::FileInputStreamAdapter(AsyncFile *file,
-                                               scoped_refptr<TaskRunner> target_task_runner,
+                                               scoped_refptr<SequencedTaskRunner> target_task_runner,
                                                std::uint64_t start_offset)
     : file_(file)
     , position_(start_offset)
@@ -155,7 +155,7 @@ FileOutputStreamAdapter::FileOutputStreamAdapter(AsyncFile *file, std::uint64_t 
 }
 
 FileOutputStreamAdapter::FileOutputStreamAdapter(AsyncFile *file,
-                                                 scoped_refptr<TaskRunner> target_task_runner,
+                                                 scoped_refptr<SequencedTaskRunner> target_task_runner,
                                                  std::uint64_t start_offset)
     : file_(file)
     , position_(start_offset)

@@ -190,8 +190,8 @@ TEST(AsyncFileWinTest, OpenMissingFileReturnsGenericNoSuchFile) {
   Thread background_thread("async-file-win-open-missing-bg");
   ASSERT_TRUE(background_thread.Start());
 
-  scoped_refptr<TaskRunner> io_runner = io_thread.GetTaskRunner();
-  scoped_refptr<TaskRunner> bg_runner = background_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> bg_runner = background_thread.GetTaskRunner();
   ASSERT_TRUE(io_runner);
   ASSERT_TRUE(bg_runner);
 
@@ -240,8 +240,8 @@ TEST(AsyncFileWinTest, LargeReadWriteCallbackDeterminismOnIoThread) {
   Thread background_thread("async-file-bg");
   ASSERT_TRUE(background_thread.Start());
 
-  scoped_refptr<TaskRunner> io_runner = io_thread.GetTaskRunner();
-  scoped_refptr<TaskRunner> bg_runner = background_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> bg_runner = background_thread.GetTaskRunner();
   ASSERT_TRUE(io_runner);
   ASSERT_TRUE(bg_runner);
 
@@ -390,8 +390,8 @@ TEST(AsyncFileWinTest, RepeatedStressMaintainsCallbackThreadDeterminism) {
   Thread background_thread("async-file-bg-stress");
   ASSERT_TRUE(background_thread.Start());
 
-  scoped_refptr<TaskRunner> io_runner = io_thread.GetTaskRunner();
-  scoped_refptr<TaskRunner> bg_runner = background_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> bg_runner = background_thread.GetTaskRunner();
   ASSERT_TRUE(io_runner);
   ASSERT_TRUE(bg_runner);
 
@@ -544,8 +544,8 @@ TEST(AsyncFileWinTest, AppendModeAppendsIgnoringCallerOffsetInOrder) {
   Thread background_thread("async-file-append-bg");
   ASSERT_TRUE(background_thread.Start());
 
-  scoped_refptr<TaskRunner> io_runner = io_thread.GetTaskRunner();
-  scoped_refptr<TaskRunner> bg_runner = background_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> bg_runner = background_thread.GetTaskRunner();
   ASSERT_TRUE(io_runner);
   ASSERT_TRUE(bg_runner);
 
@@ -657,8 +657,8 @@ TEST(AsyncFileWinTest, ConcurrentAppendPreservesWholeWriteBlocks) {
   Thread background_thread("async-file-append-concurrent-bg");
   ASSERT_TRUE(background_thread.Start());
 
-  scoped_refptr<TaskRunner> io_runner = io_thread.GetTaskRunner();
-  scoped_refptr<TaskRunner> bg_runner = background_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> bg_runner = background_thread.GetTaskRunner();
   ASSERT_TRUE(io_runner);
   ASSERT_TRUE(bg_runner);
 
@@ -796,8 +796,8 @@ TEST(AsyncFileWinTest, FileReadParsesLinesWithAsyncLineReader) {
   Thread background_thread("async-file-line-reader-bg");
   ASSERT_TRUE(background_thread.Start());
 
-  scoped_refptr<TaskRunner> io_runner = io_thread.GetTaskRunner();
-  scoped_refptr<TaskRunner> bg_runner = background_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> bg_runner = background_thread.GetTaskRunner();
   ASSERT_TRUE(io_runner);
   ASSERT_TRUE(bg_runner);
 
@@ -890,8 +890,8 @@ TEST(AsyncFileWinTest, RaiiDestructionDoesNotHangAndDataIsFlushed) {
   Thread background_thread("async-file-raii-bg");
   ASSERT_TRUE(background_thread.Start());
 
-  scoped_refptr<TaskRunner> io_runner = io_thread.GetTaskRunner();
-  scoped_refptr<TaskRunner> bg_runner = background_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> bg_runner = background_thread.GetTaskRunner();
   ASSERT_TRUE(io_runner);
   ASSERT_TRUE(bg_runner);
 

@@ -95,7 +95,7 @@ bool RunChild(const std::string &read_pipe_name, const std::string &write_pipe_n
     return false;
   }
 
-  const nei::scoped_refptr<nei::TaskRunner> io_runner = io_thread.GetTaskRunner();
+  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
   nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> ok{false};
 
@@ -217,7 +217,7 @@ bool RunParent() {
     return false;
   }
 
-  const nei::scoped_refptr<nei::TaskRunner> io_runner = io_thread.GetTaskRunner();
+  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
   nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   std::string response;
   std::atomic<bool> ok{false};

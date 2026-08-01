@@ -39,7 +39,7 @@ public:
       return false;
     }
 
-    const scoped_refptr<TaskRunner> io_runner = process_service_->GetTaskRunner();
+    const scoped_refptr<SingleThreadTaskRunner> io_runner = process_service_->GetTaskRunner();
     if (io_runner.get() == nullptr) {
       NotifyLaunchFailedOnCallerThread();
       return false;
@@ -68,7 +68,7 @@ public:
     if (process_service_.get() == nullptr) {
       return false;
     }
-    const scoped_refptr<TaskRunner> io_runner = process_service_->GetTaskRunner();
+    const scoped_refptr<SingleThreadTaskRunner> io_runner = process_service_->GetTaskRunner();
     if (io_runner.get() == nullptr) {
       return false;
     }
@@ -97,7 +97,7 @@ public:
       return;
     }
 
-    const scoped_refptr<TaskRunner> io_runner = process_service_->GetTaskRunner();
+    const scoped_refptr<SingleThreadTaskRunner> io_runner = process_service_->GetTaskRunner();
     if (io_runner.get() == nullptr) {
       return;
     }

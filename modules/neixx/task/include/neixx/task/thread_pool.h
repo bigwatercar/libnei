@@ -56,7 +56,18 @@ public:
   ThreadPool(ThreadPool &&) = delete;
   ThreadPool &operator=(ThreadPool &&) = delete;
 
-  scoped_refptr<TaskRunner> CreateSequencedTaskRunner(const TaskTraits &traits = TaskTraits());
+  scoped_refptr<SequencedTaskRunner> CreateSequencedTaskRunner(const TaskTraits &traits = TaskTraits());
+
+  /// Creates a SingleThreadTaskRunner on this thread pool.  The pool
+  /// dedicates one worker thread to this runner's queue, guaranteeing
+  /// that all tasks posted to this runner execute on the same physical
+  /// thread (in FIFO order).  This is the strictest pool-backed runner
+  /// type.
+  ///
+  /// NOTE: Dedicated workers count against the pool's max_num_workers
+  /// ceiling.  Creating many SingleThreadTaskRunners on a small pool
+  /// may saturate the worker limit and cause priority inversion.
+  scoped_refptr<SingleThreadTaskRunner> CreateSingleThreadTaskRunner(const TaskTraits &traits = TaskTraits());
 
   /// Creates a TaskRunner whose tasks may run in parallel on different
   /// worker threads.  Unlike sequenced runners, there is no guarantee of

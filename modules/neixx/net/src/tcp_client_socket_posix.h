@@ -37,15 +37,17 @@ public:
   Impl();
   // From TCPServerSocket accept  --  socket is already connected, io_runner
   // is bound immediately to prevent accidental Connect() misuse.
-  Impl(int accepted_fd, scoped_refptr<TaskRunner> io_runner);
+  Impl(int accepted_fd, scoped_refptr<SingleThreadTaskRunner> io_runner);
 
-  bool Connect(const IPEndPoint &addr, TCPClientSocket::ConnectCallback callback, scoped_refptr<TaskRunner> io_runner);
+  bool Connect(const IPEndPoint &addr,
+               TCPClientSocket::ConnectCallback callback,
+               scoped_refptr<SingleThreadTaskRunner> io_runner);
   void ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, AsyncInputStream::IOReadCallback callback);
   void WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, AsyncOutputStream::IOWriteCallback callback);
   void Close();
   void ShutdownWrite();
 
-  scoped_refptr<TaskRunner> io_task_runner() const {
+  scoped_refptr<SingleThreadTaskRunner> io_task_runner() const {
     return io_runner_;
   }
 
@@ -110,7 +112,7 @@ private:
   std::size_t write_buf_len_ = 0;
   std::size_t write_offset_ = 0;
 
-  scoped_refptr<TaskRunner> io_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_runner_;
   std::mutex mutex_;
 
   // Thread safety validation.

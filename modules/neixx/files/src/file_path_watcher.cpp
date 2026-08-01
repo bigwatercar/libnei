@@ -8,7 +8,7 @@
 
 namespace nei {
 
-FilePathWatcher::FilePathWatcher(scoped_refptr<TaskRunner> task_runner)
+FilePathWatcher::FilePathWatcher(scoped_refptr<SingleThreadTaskRunner> task_runner)
     : impl_(std::make_unique<Impl>(std::move(task_runner))) {
 }
 

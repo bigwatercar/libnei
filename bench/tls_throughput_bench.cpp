@@ -155,13 +155,13 @@ public:
     thread_->Stop();
   }
 
-  nei::scoped_refptr<nei::TaskRunner> runner() const {
+  nei::scoped_refptr<nei::SingleThreadTaskRunner> runner() const {
     return runner_;
   }
 
 private:
   std::unique_ptr<nei::Thread> thread_;
-  nei::scoped_refptr<nei::TaskRunner> runner_;
+  nei::scoped_refptr<nei::SingleThreadTaskRunner> runner_;
 };
 
 static uint16_t FindFreePort() {

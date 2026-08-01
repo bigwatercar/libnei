@@ -57,7 +57,10 @@ public:
   static void ResetForTesting();
 
   /// Creates a sequenced TaskRunner on the global pool.
-  scoped_refptr<TaskRunner> CreateSequencedTaskRunner(const TaskTraits &traits = TaskTraits());
+  scoped_refptr<SequencedTaskRunner> CreateSequencedTaskRunner(const TaskTraits &traits = TaskTraits());
+
+  /// Creates a SingleThreadTaskRunner on the global pool.
+  scoped_refptr<SingleThreadTaskRunner> CreateSingleThreadTaskRunner(const TaskTraits &traits = TaskTraits());
 
   /// Creates a parallel TaskRunner on the global pool (for PostJob).
   scoped_refptr<TaskRunner> CreateParallelTaskRunner(const TaskTraits &traits = TaskTraits());

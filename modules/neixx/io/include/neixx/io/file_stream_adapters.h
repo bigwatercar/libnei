@@ -47,7 +47,9 @@ public:
   // Constructs a sequential input adapter wrapping |file|.
   // |start_offset| is the initial read position in the file.
   explicit FileInputStreamAdapter(AsyncFile *file, std::uint64_t start_offset = 0);
-  FileInputStreamAdapter(AsyncFile *file, scoped_refptr<TaskRunner> target_task_runner, std::uint64_t start_offset = 0);
+  FileInputStreamAdapter(AsyncFile *file,
+                         scoped_refptr<SequencedTaskRunner> target_task_runner,
+                         std::uint64_t start_offset = 0);
   ~FileInputStreamAdapter() override;
 
   FileInputStreamAdapter(const FileInputStreamAdapter &) = delete;
@@ -65,7 +67,7 @@ private:
   AsyncFile *file_ = nullptr;  // Non-owning.
   std::uint64_t position_ = 0; // Current read offset in the file.
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
-  scoped_refptr<TaskRunner> target_task_runner_;
+  scoped_refptr<SequencedTaskRunner> target_task_runner_;
   NEI_SUPPRESS_MSC_WARNING_END
   bool closed_ = false;
 
@@ -118,7 +120,7 @@ public:
   // |start_offset| is the initial write position in the file.
   explicit FileOutputStreamAdapter(AsyncFile *file, std::uint64_t start_offset = 0);
   FileOutputStreamAdapter(AsyncFile *file,
-                          scoped_refptr<TaskRunner> target_task_runner,
+                          scoped_refptr<SequencedTaskRunner> target_task_runner,
                           std::uint64_t start_offset = 0);
   ~FileOutputStreamAdapter() override;
 
@@ -145,7 +147,7 @@ private:
   AsyncFile *file_ = nullptr; // Non-owning.
   std::uint64_t position_ = 0;
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
-  scoped_refptr<TaskRunner> target_task_runner_;
+  scoped_refptr<SequencedTaskRunner> target_task_runner_;
   NEI_SUPPRESS_MSC_WARNING_END
   bool closed_ = false;
 

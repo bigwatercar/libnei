@@ -145,7 +145,7 @@ public:
   void OpenAsync(const std::string &path,
                  OpenMode mode,
                  OpenDisposition disposition,
-                 const scoped_refptr<TaskRunner> &background_runner,
+                 const scoped_refptr<SequencedTaskRunner> &background_runner,
                  OpenCallback callback) {
     if (!io_task_runner_) {
       if (callback) {
@@ -274,7 +274,7 @@ private:
   void OpenAsyncOnIoThread(const std::string &path,
                            OpenMode mode,
                            OpenDisposition disposition,
-                           const scoped_refptr<TaskRunner> &background_runner,
+                           const scoped_refptr<SequencedTaskRunner> &background_runner,
                            OpenCallback callback) {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
     TRACE_EVENT0("nei.io", "AsyncFilePosix::Open");
@@ -869,7 +869,7 @@ AsyncFilePosix::~AsyncFilePosix() {
 void AsyncFilePosix::OpenAsync(const std::string &path,
                                OpenMode mode,
                                OpenDisposition disposition,
-                               const scoped_refptr<TaskRunner> &background_runner,
+                               const scoped_refptr<SequencedTaskRunner> &background_runner,
                                OpenCallback callback) {
   impl_->OpenAsync(path, mode, disposition, background_runner, std::move(callback));
 }

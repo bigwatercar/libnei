@@ -12,6 +12,7 @@
 #include <neixx/common/time.h>
 #include <neixx/synchronization/condition_variable.h>
 #include <neixx/synchronization/lock.h>
+#include <neixx/threading/platform_thread.h>
 #include "task_queue.h"
 
 namespace nei {
@@ -52,6 +53,31 @@ public:
   // flight, queue is pushed back automatically.
   void OnTaskQueueProcessed(TaskQueue *queue);
 
+  // ---- Dedicated (single-thread) queue support ----
+
+  /// Attempts to assign the calling worker thread as the dedicated owner of
+  /// |queue|.  Returns true if the assignment succeeded (no other worker owns
+  /// it).  Once assigned, the queue is removed from the global ready heap and
+  /// the owning worker is responsible for polling it directly.
+  bool AssignDedicatedWorker(TaskQueue *queue);
+
+  /// Called by WorkerThread::ThreadMain() to block until new work arrives on
+  /// the dedicated queue, shutdown is signaled, or |timeout| elapses.
+  /// On timeout sets |timed_out| = true and returns.  Must only be called by
+  /// the owning worker.
+  void WaitForDedicatedWork(TaskQueue *queue, TimeDelta timeout, bool &timed_out);
+
+  /// Awakens the owning worker when new work is posted to a dedicated queue.
+  void WakeDedicatedWorker(TaskQueue *queue);
+
+  /// Releases the dedicated assignment.  The queue may re-enter the global
+  /// heap for other workers to pick up.
+  void ReleaseDedicatedQueue(TaskQueue *queue);
+
+  /// Returns true if |queue| is a dedicated queue that is owned by a worker
+  /// OTHER than the calling thread.
+  bool IsDedicatedOwnedByOther(TaskQueue *queue);
+
   void Shutdown();
 
   // Called once per task posted to any registered queue (from the
@@ -72,6 +98,9 @@ private:
     bool queued = false;
     bool in_flight = false;
     bool reenqueue_requested = false;
+    // For dedicated (single-thread) queues: the PlatformThreadId of the
+    // worker that owns this queue.  0 means unowned.
+    PlatformThread::PlatformThreadId dedicated_owner = 0;
   };
 
   struct QueueEntry {

@@ -67,8 +67,8 @@ class MessageChannel::Impl final {
 public:
   // Explicit dependency injection: both TaskRunners are supplied by the
   // caller.  No implicit thread-environment capture.
-  Impl(scoped_refptr<TaskRunner> io_task_runner,
-       scoped_refptr<TaskRunner> client_task_runner,
+  Impl(scoped_refptr<SingleThreadTaskRunner> io_task_runner,
+       scoped_refptr<SequencedTaskRunner> client_task_runner,
        AsyncInputStream *read_stream,
        AsyncOutputStream *write_stream)
       : io_task_runner_(std::move(io_task_runner))
@@ -194,7 +194,7 @@ private:
     scoped_refptr<IOBuffer> base_buf(sized_buf.get());
 
     auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-    scoped_refptr<TaskRunner> io_runner = io_task_runner_;
+    scoped_refptr<SingleThreadTaskRunner> io_runner = io_task_runner_;
 
     // Raw I/O callback may fire on any thread  --  trampoline to
     // io_task_runner_ via BindPostTask where the state machine lives.
@@ -464,7 +464,7 @@ private:
     scoped_refptr<WrappedIOBuffer> write_slice(new WrappedIOBuffer(write_buf->data() + current_write_offset_));
 
     auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-    scoped_refptr<TaskRunner> io_runner = io_task_runner_;
+    scoped_refptr<SingleThreadTaskRunner> io_runner = io_task_runner_;
 
     write_stream_->WriteAsync(
         scoped_refptr<IOBuffer>(write_slice.get()),
@@ -592,8 +592,8 @@ private:
   // Explicitly-injected TaskRunners.
   // io_task_runner_      --  all I/O operations + state machine execute here.
   // client_task_runner_  --  all user callbacks are posted here.
-  const scoped_refptr<TaskRunner> io_task_runner_;
-  const scoped_refptr<TaskRunner> client_task_runner_;
+  const scoped_refptr<SingleThreadTaskRunner> io_task_runner_;
+  const scoped_refptr<SequencedTaskRunner> client_task_runner_;
 
   // Underlying streams (not owned).
   AsyncInputStream *const read_stream_;
@@ -649,8 +649,8 @@ private:
 // MessageChannel  --  public forwarding
 // ===========================================================================
 
-MessageChannel::MessageChannel(scoped_refptr<TaskRunner> io_task_runner,
-                               scoped_refptr<TaskRunner> client_task_runner,
+MessageChannel::MessageChannel(scoped_refptr<SingleThreadTaskRunner> io_task_runner,
+                               scoped_refptr<SequencedTaskRunner> client_task_runner,
                                AsyncInputStream *read_stream,
                                AsyncOutputStream *write_stream)
     : impl_(

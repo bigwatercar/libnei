@@ -74,13 +74,13 @@ public:
     thread_->Stop();
   }
 
-  nei::scoped_refptr<nei::TaskRunner> runner() const {
+  nei::scoped_refptr<nei::SingleThreadTaskRunner> runner() const {
     return runner_;
   }
 
 private:
   std::unique_ptr<nei::Thread> thread_;
-  nei::scoped_refptr<nei::TaskRunner> runner_;
+  nei::scoped_refptr<nei::SingleThreadTaskRunner> runner_;
 };
 
 // ---------------------------------------------------------------------------
@@ -108,7 +108,7 @@ void RunServer(uint16_t port, bool hold) {
   auto t_start = Clock::now();
 
   // Round-robin worker selector
-  auto selector = [&, next = 0]() mutable -> nei::scoped_refptr<nei::TaskRunner> {
+  auto selector = [&, next = 0]() mutable -> nei::scoped_refptr<nei::SingleThreadTaskRunner> {
     return workers[next++ % kWorkers]->runner();
   };
 

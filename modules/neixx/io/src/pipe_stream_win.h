@@ -25,7 +25,7 @@ namespace nei {
 namespace pipe_detail {
 
 template <typename Callback>
-void PostError(const scoped_refptr<TaskRunner> &runner, Callback &&cb) {
+void PostError(const scoped_refptr<SequencedTaskRunner> &runner, Callback &&cb) {
   if (!cb)
     return;
   if (runner) {
@@ -36,7 +36,7 @@ void PostError(const scoped_refptr<TaskRunner> &runner, Callback &&cb) {
 }
 
 template <typename Callback>
-void PostResult(const scoped_refptr<TaskRunner> &runner, Callback &&cb, bool success, std::size_t bytes) {
+void PostResult(const scoped_refptr<SequencedTaskRunner> &runner, Callback &&cb, bool success, std::size_t bytes) {
   if (!cb)
     return;
   if (runner) {
@@ -96,7 +96,7 @@ struct WriteContext {
 
 class PipeInputStream::Impl final : public MessagePumpForIO::CompletionWatcher {
 public:
-  explicit Impl(scoped_refptr<TaskRunner> io_task_runner);
+  explicit Impl(scoped_refptr<SingleThreadTaskRunner> io_task_runner);
   ~Impl() override;
 
   bool BindPlatformHandle(PlatformHandle handle);
@@ -118,7 +118,7 @@ public:
 
   void ShutdownAndSelfDestruct();
 
-  scoped_refptr<TaskRunner> io_task_runner() const {
+  scoped_refptr<SingleThreadTaskRunner> io_task_runner() const {
     return io_task_runner_;
   }
 
@@ -126,7 +126,7 @@ private:
   void IssueRead(std::size_t buf_len);
   void MaybeCloseHandle();
 
-  scoped_refptr<TaskRunner> io_task_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_task_runner_;
   HANDLE handle_ = INVALID_HANDLE_VALUE;
   bool closed_ = false;
   bool shutting_down_ = false;
@@ -144,7 +144,7 @@ private:
 
 class PipeOutputStream::Impl final : public MessagePumpForIO::CompletionWatcher {
 public:
-  explicit Impl(scoped_refptr<TaskRunner> io_task_runner);
+  explicit Impl(scoped_refptr<SingleThreadTaskRunner> io_task_runner);
   ~Impl() override;
 
   bool BindPlatformHandle(PlatformHandle handle);
@@ -168,7 +168,7 @@ public:
 
   void ShutdownAndSelfDestruct();
 
-  scoped_refptr<TaskRunner> io_task_runner() const {
+  scoped_refptr<SingleThreadTaskRunner> io_task_runner() const {
     return io_task_runner_;
   }
 
@@ -176,7 +176,7 @@ private:
   void IssueWrite(std::size_t buf_len);
   void MaybeCloseHandle();
 
-  scoped_refptr<TaskRunner> io_task_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_task_runner_;
   HANDLE handle_ = INVALID_HANDLE_VALUE;
   bool closed_ = false;
   bool shutting_down_ = false;

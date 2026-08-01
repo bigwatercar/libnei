@@ -11,12 +11,12 @@
 #include <neixx/common/time.h>
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/ref_counted.h>
+#include <neixx/task/task_runner.h>
 
 namespace nei {
 
 class AsyncInputStream;
 class AsyncOutputStream;
-class TaskRunner;
 
 // ---------------------------------------------------------------------------
 // RpcEndpoint  --  asynchronous RPC proxy engine over MessageChannel
@@ -72,8 +72,8 @@ public:
   // |client_task_runner|  --  where all user callbacks are delivered.
   // |read_stream|         --  underlying async input stream (not owned).
   // |write_stream|        --  underlying async output stream (not owned).
-  RpcEndpoint(scoped_refptr<TaskRunner> io_task_runner,
-              scoped_refptr<TaskRunner> client_task_runner,
+  RpcEndpoint(scoped_refptr<SingleThreadTaskRunner> io_task_runner,
+              scoped_refptr<SequencedTaskRunner> client_task_runner,
               AsyncInputStream *read_stream,
               AsyncOutputStream *write_stream);
   ~RpcEndpoint();

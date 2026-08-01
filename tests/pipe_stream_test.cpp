@@ -227,7 +227,7 @@ protected:
   }
 
   Thread io_thread_{"pipe-stream-test-io"};
-  scoped_refptr<TaskRunner> io_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_runner_;
 };
 
 // ===========================================================================

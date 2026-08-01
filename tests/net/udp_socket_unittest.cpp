@@ -48,7 +48,7 @@ protected:
   }
 
   // Bind a socket to 127.0.0.1:0; return assigned endpoint.  IO-thread only.
-  static IPEndPoint BindToLoopback(UDPSocket *sock, scoped_refptr<TaskRunner> runner) {
+  static IPEndPoint BindToLoopback(UDPSocket *sock, scoped_refptr<SingleThreadTaskRunner> runner) {
     IPEndPoint local(IPAddress::FromIPv4(127, 0, 0, 1), 0);
     EXPECT_TRUE(sock->Bind(local, std::move(runner)));
     IPEndPoint bound;
@@ -58,7 +58,7 @@ protected:
 
   std::unique_ptr<SequenceManager> main_mgr_;
   Thread io_thread_{"udp-io"};
-  scoped_refptr<TaskRunner> io_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_runner_;
 };
 
 // =============================================================================

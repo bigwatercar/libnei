@@ -52,13 +52,11 @@ public:
   virtual bool
   PostDelayedTaskWithTraits(const Location &from_here, const TaskTraits &traits, OnceClosure task, TimeDelta delay) = 0;
 
-  static scoped_refptr<TaskRunner> Create(internal::TaskQueue *task_queue, const TaskTraits &traits = TaskTraits());
-
-  // Creates a TaskRunner for thread-pool queues.  Differs from Create() in
-  // that BelongsToCurrentThread() always returns false and
-  // RunsTasksInCurrentSequence() uses TLS-based detection to determine
-  // whether the calling thread is currently executing a task from this
-  // runner's queue.
+  // Convenience factory: creates a TaskRunner for thread-pool queues.
+  // Differs from SequencedTaskRunner in that BelongsToCurrentThread()
+  // always returns false and RunsTasksInCurrentSequence() uses TLS-based
+  // detection to determine whether the calling thread is executing a task
+  // from this runner's queue.
   static scoped_refptr<TaskRunner> CreateForThreadPool(internal::TaskQueue *task_queue,
                                                        const TaskTraits &traits = TaskTraits());
 
@@ -105,6 +103,125 @@ private:
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   TaskTraits traits_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
+};
+
+// =============================================================================
+// SequencedTaskRunner
+// =============================================================================
+//
+// A TaskRunner that provides guaranteed ordering: tasks posted to it are
+// executed in posting order.  SequencedTaskRunner tasks may run on different
+// threads (e.g. thread-pool workers), but the sequencing guarantee is
+// maintained through the TaskQueue.
+//
+// This is the return type of SequenceManager::CreateTaskRunner() and
+// Thread::CreateTaskRunner() for dedicated-thread runners.
+//
+// Mirrors Chromium's base::SequencedTaskRunner.
+class NEI_API SequencedTaskRunner : public TaskRunner {
+public:
+  ~SequencedTaskRunner() override;
+
+  SequencedTaskRunner(const SequencedTaskRunner &) = delete;
+  SequencedTaskRunner &operator=(const SequencedTaskRunner &) = delete;
+
+  // Convenience factory for SequenceManager-backed runners.  The created
+  // runner is bound to the calling thread at construction time.
+  // BelongsToCurrentThread() and RunsTasksInCurrentSequence() both return
+  // true when called from that thread.
+  static scoped_refptr<SequencedTaskRunner> Create(internal::TaskQueue *task_queue,
+                                                   const TaskTraits &traits = TaskTraits());
+
+  // Convenience factory for thread-pool sequenced runners.  Unlike
+  // Create(), this variant does NOT bind to the calling thread.
+  // BelongsToCurrentThread() always returns false, while
+  // RunsTasksInCurrentSequence() uses TLS-based detection to determine
+  // whether the calling thread is currently executing a task from this
+  // runner's queue.
+  static scoped_refptr<SequencedTaskRunner> CreateForThreadPool(internal::TaskQueue *task_queue,
+                                                                const TaskTraits &traits = TaskTraits());
+
+  bool PostTaskWithTraits(const Location &from_here, const TaskTraits &traits, OnceClosure task) override;
+  bool PostDelayedTaskWithTraits(const Location &from_here,
+                                 const TaskTraits &traits,
+                                 OnceClosure task,
+                                 TimeDelta delay) override;
+
+  // A SequencedTaskRunner only guarantees FIFO ordering, NOT thread affinity.
+  // BelongsToCurrentThread() returns false unconditionally.  Callers that
+  // need same-thread guarantees should accept SingleThreadTaskRunner*.
+  // RunsTasksInCurrentSequence() checks whether the current thread is
+  // executing a task from this runner's queue (thread ID or TLS, depending
+  // on whether this runner was created via Create() or CreateForThreadPool()).
+  bool BelongsToCurrentThread() const override;
+  bool RunsTasksInCurrentSequence() const override;
+
+private:
+  struct Impl;
+  // Visible to SingleThreadTaskRunner so it can reuse the same Impl.
+  friend class SingleThreadTaskRunner;
+  // Protected so SingleThreadTaskRunner can delegate.
+protected:
+  SequencedTaskRunner(std::unique_ptr<Impl> impl, const TaskTraits &traits);
+
+private:
+  std::unique_ptr<Impl> impl_;
+};
+
+// =============================================================================
+// SingleThreadTaskRunner
+// =============================================================================
+//
+// A SequencedTaskRunner that guarantees ALL tasks run on the SAME physical
+// thread.  This is the strictest runner type — it provides both sequencing
+// and thread-affinity guarantees.
+//
+// Use this when your code requires thread-local state (TLS, thread-local
+// statics) or must interact with thread-bound APIs (UI thread, IO thread).
+//
+// Implementation note: SingleThreadTaskRunner reuses SequencedTaskRunner::Impl
+// internally because the thread-binding semantics are identical.  The type
+// distinction exists purely for compile-time guarantees — callers that accept
+// SingleThreadTaskRunner* document that they require same-thread execution,
+// while callers accepting SequencedTaskRunner* only require FIFO ordering.
+//
+// Mirrors Chromium's base::SingleThreadTaskRunner.
+class NEI_API SingleThreadTaskRunner : public SequencedTaskRunner {
+public:
+  ~SingleThreadTaskRunner() override;
+
+  SingleThreadTaskRunner(const SingleThreadTaskRunner &) = delete;
+  SingleThreadTaskRunner &operator=(const SingleThreadTaskRunner &) = delete;
+
+  // Creates a SingleThreadTaskRunner bound to the calling thread.
+  // BelongsToCurrentThread() returns true only when called from the
+  // creating thread.  Use this factory for dedicated-thread runners
+  // (e.g. the IO thread or a custom MessagePump-driven thread).
+  static scoped_refptr<SingleThreadTaskRunner> Create(internal::TaskQueue *task_queue,
+                                                      const TaskTraits &traits = TaskTraits());
+
+  // Creates a pool-backed SingleThreadTaskRunner.  Unlike Create(), this
+  // variant does NOT bind to the calling thread.  BelongsToCurrentThread()
+  // always returns false, while RunsTasksInCurrentSequence() uses TLS-based
+  // detection.  All tasks posted to this runner are guaranteed to execute
+  // on the same pool worker thread — the pool dedicates one worker to this
+  // runner's TaskQueue for the lifetime of the runner.
+  static scoped_refptr<SingleThreadTaskRunner> CreateForThreadPool(internal::TaskQueue *task_queue,
+                                                                   const TaskTraits &traits = TaskTraits());
+
+  // All task-posting methods are inherited from SequencedTaskRunner.
+  //
+  // Thread-affinity checks are OVERRIDDEN to provide the strictest guarantee:
+  // BelongsToCurrentThread() returns true iff called from the creating thread.
+  // RunsTasksInCurrentSequence() delegates to BelongsToCurrentThread().
+
+  bool BelongsToCurrentThread() const override;
+  bool RunsTasksInCurrentSequence() const override;
+
+protected:
+  // For thread-bound runners (Create): forwards to SequencedTaskRunner(impl, traits).
+  // For pool-backed runners (CreateForThreadPool): passes nullptr for TLS-based dispatch.
+  SingleThreadTaskRunner(std::unique_ptr<SequencedTaskRunner::Impl> impl, const TaskTraits &traits);
 };
 
 } // namespace nei

@@ -21,7 +21,7 @@ namespace nei {
 // PipeInputStream  --  public forwarding
 // ===========================================================================
 
-PipeInputStream::PipeInputStream(scoped_refptr<TaskRunner> io_task_runner)
+PipeInputStream::PipeInputStream(scoped_refptr<SingleThreadTaskRunner> io_task_runner)
     : impl_(std::make_unique<Impl>(std::move(io_task_runner))) {
 }
 
@@ -56,7 +56,7 @@ void PipeInputStream::Close() {
 // PipeOutputStream  --  public forwarding
 // ===========================================================================
 
-PipeOutputStream::PipeOutputStream(scoped_refptr<TaskRunner> io_task_runner)
+PipeOutputStream::PipeOutputStream(scoped_refptr<SingleThreadTaskRunner> io_task_runner)
     : impl_(std::make_unique<Impl>(std::move(io_task_runner))) {
 }
 

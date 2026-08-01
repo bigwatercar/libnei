@@ -46,7 +46,7 @@ public:
                const struct ares_addrinfo_hints *hints,
                ResolveCallback callback,
                void *arg,
-               scoped_refptr<TaskRunner> target_runner);
+               scoped_refptr<SequencedTaskRunner> target_runner);
 
 private:
   struct ChannelEntry {

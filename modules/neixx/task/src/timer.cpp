@@ -250,7 +250,7 @@ OneShotTimer::OneShotTimer()
     : impl_(new Impl()) {
 }
 
-OneShotTimer::OneShotTimer(scoped_refptr<TaskRunner> task_runner)
+OneShotTimer::OneShotTimer(scoped_refptr<SequencedTaskRunner> task_runner)
     : impl_(new Impl(std::move(task_runner))) {
 }
 
@@ -280,7 +280,7 @@ RepeatingTimer::RepeatingTimer()
     : impl_(new Impl()) {
 }
 
-RepeatingTimer::RepeatingTimer(scoped_refptr<TaskRunner> task_runner)
+RepeatingTimer::RepeatingTimer(scoped_refptr<SequencedTaskRunner> task_runner)
     : impl_(new Impl(std::move(task_runner))) {
 }
 

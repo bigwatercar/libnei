@@ -55,7 +55,7 @@ public:
   // Constructs a watcher that dispatches callbacks on |task_runner|.
   // The task_runner must be backed by a MessagePumpForIO on platforms that
   // require an I/O pump (Windows IOCP, Linux epoll).
-  explicit FilePathWatcher(scoped_refptr<TaskRunner> task_runner);
+  explicit FilePathWatcher(scoped_refptr<SingleThreadTaskRunner> task_runner);
 
   ~FilePathWatcher();
 

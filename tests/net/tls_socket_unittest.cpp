@@ -212,9 +212,9 @@ protected:
   }
 
   Thread io_thread_{"tls-test-io"};
-  scoped_refptr<TaskRunner> io_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_runner_;
   Thread srv_thread_{"tls-test-srv"};
-  scoped_refptr<TaskRunner> srv_runner_;
+  scoped_refptr<SingleThreadTaskRunner> srv_runner_;
   std::string cert_pem_;
   std::string key_pem_;
   std::unique_ptr<SSLContext> server_ctx_;

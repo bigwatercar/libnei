@@ -96,13 +96,14 @@ public:
     mbedtls_ssl_free(&ssl_);
   }
 
-  void Connect(const IPEndPoint &addr, TLSClientSocket::ConnectCallback cb, scoped_refptr<TaskRunner> runner) {
+  void
+  Connect(const IPEndPoint &addr, TLSClientSocket::ConnectCallback cb, scoped_refptr<SingleThreadTaskRunner> runner) {
     runner_ = std::move(runner);
     connect_cb_ = std::move(cb);
     transport_->Connect(addr, [self = scoped_refptr<Impl>(this)](bool ok) { self->OnTcpConnect(ok); }, runner_);
   }
 
-  void StartHandshake(TLSClientSocket::ConnectCallback cb, scoped_refptr<TaskRunner> runner) {
+  void StartHandshake(TLSClientSocket::ConnectCallback cb, scoped_refptr<SingleThreadTaskRunner> runner) {
     DCHECK_MSG(state_ == State::Idle, "StartHandshake: must be idle");
     runner_ = std::move(runner);
     connect_cb_ = std::move(cb);
@@ -386,7 +387,7 @@ private:
   std::unique_ptr<TCPClientSocket> transport_;
   mbedtls_ssl_context ssl_;
   TlsBioCtx bio_;
-  scoped_refptr<TaskRunner> runner_;
+  scoped_refptr<SingleThreadTaskRunner> runner_;
 
   TLSClientSocket::ConnectCallback connect_cb_;
   scoped_refptr<IOBuffer> read_buf_;
@@ -432,11 +433,13 @@ TLSClientSocket &TLSClientSocket::operator=(TLSClientSocket &&other) noexcept {
   return *this;
 }
 
-void TLSClientSocket::Connect(const IPEndPoint &addr, ConnectCallback cb, scoped_refptr<TaskRunner> runner) {
+void TLSClientSocket::Connect(const IPEndPoint &addr,
+                              ConnectCallback cb,
+                              scoped_refptr<SingleThreadTaskRunner> runner) {
   impl_->Connect(addr, std::move(cb), std::move(runner));
 }
 
-void TLSClientSocket::StartHandshake(ConnectCallback cb, scoped_refptr<TaskRunner> runner) {
+void TLSClientSocket::StartHandshake(ConnectCallback cb, scoped_refptr<SingleThreadTaskRunner> runner) {
   impl_->StartHandshake(std::move(cb), std::move(runner));
 }
 

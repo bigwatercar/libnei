@@ -44,7 +44,7 @@ public:
   bool Listen(const IPEndPoint &addr,
               int backlog,
               TCPServerSocket::AcceptCallback callback,
-              scoped_refptr<TaskRunner> acceptor_runner,
+              scoped_refptr<SingleThreadTaskRunner> acceptor_runner,
               TCPServerSocket::RunnerSelector worker_selector);
   void Close();
   void Shutdown();
@@ -89,7 +89,7 @@ private:
 
   // Callback + runner stored for re-issuing accepts.
   TCPServerSocket::AcceptCallback accept_callback_;
-  scoped_refptr<TaskRunner> io_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_runner_;
   TCPServerSocket::RunnerSelector worker_selector_;
 
   // Thread safety validation.

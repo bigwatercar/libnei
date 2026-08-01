@@ -84,7 +84,7 @@ protected:
   }
 
   Thread test_thread_{"test-thread"};
-  scoped_refptr<TaskRunner> test_runner_;
+  scoped_refptr<SingleThreadTaskRunner> test_runner_;
 };
 
 // =============================================================================

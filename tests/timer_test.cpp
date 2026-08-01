@@ -39,7 +39,7 @@ public:
     return manager_.get();
   }
 
-  TaskRunner *runner() {
+  SequencedTaskRunner *runner() {
     return runner_.get();
   }
 
@@ -61,7 +61,7 @@ public:
 
 private:
   std::unique_ptr<SequenceManager> manager_;
-  scoped_refptr<TaskRunner> runner_;
+  scoped_refptr<SequencedTaskRunner> runner_;
 };
 
 // =============================================================================
@@ -271,7 +271,7 @@ TEST(TimerTest, RepeatingTimerStopPreventsFurtherFires) {
 TEST(TimerTest, ExplicitTaskRunnerBinding) {
   ScopedSequenceManager mgr;
   std::atomic<bool> fired{false};
-  OneShotTimer timer(scoped_refptr<TaskRunner>(mgr.runner()));
+  OneShotTimer timer(scoped_refptr<SequencedTaskRunner>(mgr.runner()));
 
   mgr.runner()->PostTask(
       FROM_HERE, [&] { timer.Start(FROM_HERE, TimeDelta::FromMilliseconds(5), BindOnce([&] { fired.store(true); })); });

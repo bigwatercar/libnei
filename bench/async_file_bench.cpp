@@ -79,7 +79,7 @@ struct BenchEntry {
 };
 
 BenchEntry BenchWrite(nei::AsyncFile &file,
-                      const nei::scoped_refptr<nei::TaskRunner> &bg,
+                      const nei::scoped_refptr<nei::SequencedTaskRunner> &bg,
                       const std::filesystem::path &path,
                       std::size_t chunk_size,
                       std::size_t total_bytes,
@@ -158,7 +158,7 @@ BenchEntry BenchWrite(nei::AsyncFile &file,
 }
 
 BenchEntry BenchRead(nei::AsyncFile &file,
-                     const nei::scoped_refptr<nei::TaskRunner> &bg,
+                     const nei::scoped_refptr<nei::SequencedTaskRunner> &bg,
                      const std::filesystem::path &path,
                      std::size_t chunk_size,
                      std::size_t total_bytes) {

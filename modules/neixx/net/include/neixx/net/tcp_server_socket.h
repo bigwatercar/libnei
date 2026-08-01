@@ -9,10 +9,9 @@
 #include <nei/macros/nei_export.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/net/ip_end_point.h>
+#include <neixx/task/task_runner.h>
 
 namespace nei {
-
-class TaskRunner;
 
 namespace net {
 
@@ -53,7 +52,7 @@ public:
   // Called for each accepted connection to select which IO thread the
   // client socket will run on.  Return nullptr to use the server's own
   // IO runner (backward-compatible default).
-  using RunnerSelector = std::function<scoped_refptr<TaskRunner>()>;
+  using RunnerSelector = std::function<scoped_refptr<SingleThreadTaskRunner>()>;
 
   TCPServerSocket();
   ~TCPServerSocket();
@@ -68,7 +67,7 @@ public:
   bool Listen(const IPEndPoint &addr,
               int backlog,
               AcceptCallback callback,
-              scoped_refptr<TaskRunner> acceptor_runner,
+              scoped_refptr<SingleThreadTaskRunner> acceptor_runner,
               RunnerSelector worker_selector = {});
 
   // Stops listening and cancels all pending accept operations.

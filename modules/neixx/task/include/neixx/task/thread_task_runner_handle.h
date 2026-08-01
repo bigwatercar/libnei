@@ -5,10 +5,9 @@
 
 #include <nei/macros/nei_export.h>
 #include <neixx/memory/ref_counted.h>
+#include <neixx/task/task_runner.h>
 
 namespace nei {
-
-class TaskRunner;
 
 // ThreadTaskRunnerHandle provides a static interface to post tasks to the
 // default TaskRunner on the current thread via the bound SequenceManager.
@@ -28,7 +27,7 @@ public:
 
   // Returns the default TaskRunner for the current thread's SequenceManager.
   // Returns nullptr if no SequenceManager is bound to the current thread.
-  static scoped_refptr<TaskRunner> Get();
+  static scoped_refptr<SingleThreadTaskRunner> Get();
 
 private:
 };

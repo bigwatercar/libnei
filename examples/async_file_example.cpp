@@ -42,7 +42,7 @@ std::filesystem::path MakeTempPath() {
 // Runs the demo using the platform-agnostic AsyncFile interface.
 // Returns true on success.
 bool RunDemo(nei::AsyncFile &file,
-             const nei::scoped_refptr<nei::TaskRunner> &background_runner,
+             const nei::scoped_refptr<nei::SequencedTaskRunner> &background_runner,
              const std::filesystem::path &path) {
   const std::string path_str = PathToUTF8(path);
   const std::string payload_text = "Hello from AsyncFile demo (cross-platform).";
@@ -164,8 +164,8 @@ int main() {
     return 1;
   }
 
-  const nei::scoped_refptr<nei::TaskRunner> io_runner = io_thread.GetTaskRunner();
-  const nei::scoped_refptr<nei::TaskRunner> background_runner = background_thread.GetTaskRunner();
+  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
+  const nei::scoped_refptr<nei::SequencedTaskRunner> background_runner = background_thread.GetTaskRunner();
   if (!io_runner || !background_runner) {
     std::cerr << "Failed to acquire task runners." << std::endl;
     background_thread.Stop();

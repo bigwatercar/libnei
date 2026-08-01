@@ -67,7 +67,7 @@ IPEndPoint SockAddrToIPEndPoint(const struct sockaddr *addr, socklen_t addr_len)
 struct QueryContext {
   WeakPtr<HostResolver::Impl> weak_self;
   ResolveCallback user_callback;
-  scoped_refptr<TaskRunner> target_runner;
+  scoped_refptr<SequencedTaskRunner> target_runner;
 };
 
 } // namespace
@@ -137,7 +137,9 @@ HostResolver::HostResolver(const HostResolverOptions &options)
 
 HostResolver::~HostResolver() = default;
 
-bool HostResolver::Resolve(const std::string &host, ResolveCallback callback, scoped_refptr<TaskRunner> target_runner) {
+bool HostResolver::Resolve(const std::string &host,
+                           ResolveCallback callback,
+                           scoped_refptr<SequencedTaskRunner> target_runner) {
   return impl_->Resolve(host, std::move(callback), std::move(target_runner));
 }
 
@@ -158,7 +160,7 @@ HostResolver::Impl::~Impl() = default;
 
 bool HostResolver::Impl::Resolve(const std::string &host,
                                  ResolveCallback callback,
-                                 scoped_refptr<TaskRunner> target_runner) {
+                                 scoped_refptr<SequencedTaskRunner> target_runner) {
   DCHECK(target_runner);
 
   if (host.empty()) {

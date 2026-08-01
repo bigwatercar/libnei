@@ -126,8 +126,8 @@ protected:
 
   Thread io_thread_{"async-file-posix-io"};
   Thread background_thread_{"async-file-posix-bg"};
-  scoped_refptr<TaskRunner> io_runner_;
-  scoped_refptr<TaskRunner> bg_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_runner_;
+  scoped_refptr<SingleThreadTaskRunner> bg_runner_;
   std::vector<std::filesystem::path> cleanup_files_;
 };
 

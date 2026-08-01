@@ -15,7 +15,7 @@ TEST(ThreadTest, StartWaitsUntilSequenceManagerAndTlsAreReady) {
   Thread thread("nei-thread-test");
   ASSERT_TRUE(thread.Start());
 
-  scoped_refptr<TaskRunner> runner = thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> runner = thread.GetTaskRunner();
   ASSERT_TRUE(runner);
 
   std::atomic<bool> current_is_valid{false};

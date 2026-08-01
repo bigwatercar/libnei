@@ -47,10 +47,9 @@
 #include <neixx/common/time.h>
 #include <neixx/functional/callback.h>
 #include <neixx/memory/ref_counted.h>
+#include <neixx/task/task_runner.h>
 
 namespace nei {
-
-class TaskRunner;
 
 // =============================================================================
 // OneShotTimer  --  单次高精度定时器
@@ -62,7 +61,7 @@ public:
   OneShotTimer();
 
   // Creates a timer that posts delayed tasks to |task_runner|.
-  explicit OneShotTimer(scoped_refptr<TaskRunner> task_runner);
+  explicit OneShotTimer(scoped_refptr<SequencedTaskRunner> task_runner);
 
   ~OneShotTimer();
 
@@ -98,7 +97,7 @@ private:
 class NEI_API RepeatingTimer final {
 public:
   RepeatingTimer();
-  explicit RepeatingTimer(scoped_refptr<TaskRunner> task_runner);
+  explicit RepeatingTimer(scoped_refptr<SequencedTaskRunner> task_runner);
   ~RepeatingTimer();
 
   RepeatingTimer(const RepeatingTimer &) = delete;

@@ -286,6 +286,14 @@ public:
     parallel_ = parallel;
   }
 
+  bool is_dedicated() const {
+    return dedicated_;
+  }
+
+  void set_dedicated(bool dedicated) {
+    dedicated_ = dedicated;
+  }
+
   // ---- Chromium-aligned WillRunTask / DidProcessTask ----
 
   TaskQueue::RunStatus WillRunTask() {
@@ -399,6 +407,7 @@ private:
   bool shut_down_ = false;
   bool reject_new_tasks_ = false;
   bool parallel_ = false;
+  bool dedicated_ = false;
   std::deque<Task> immediate_fifo_queue_;
   std::int64_t immediate_sequence_num_ = 0;
   std::int64_t delayed_sequence_num_ = 0;
@@ -500,6 +509,14 @@ bool TaskQueue::is_parallel() const {
 
 void TaskQueue::set_parallel(bool parallel) {
   impl_->set_parallel(parallel);
+}
+
+bool TaskQueue::is_dedicated() const {
+  return impl_->is_dedicated();
+}
+
+void TaskQueue::set_dedicated(bool dedicated) {
+  impl_->set_dedicated(dedicated);
 }
 
 TaskQueue::RunStatus TaskQueue::WillRunTask() {

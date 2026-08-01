@@ -84,8 +84,12 @@ void ThreadPoolInstance::ResetForTesting() {
   g_shutdown_registered = false;
 }
 
-scoped_refptr<TaskRunner> ThreadPoolInstance::CreateSequencedTaskRunner(const TaskTraits &traits) {
+scoped_refptr<SequencedTaskRunner> ThreadPoolInstance::CreateSequencedTaskRunner(const TaskTraits &traits) {
   return pool_.CreateSequencedTaskRunner(traits);
+}
+
+scoped_refptr<SingleThreadTaskRunner> ThreadPoolInstance::CreateSingleThreadTaskRunner(const TaskTraits &traits) {
+  return pool_.CreateSingleThreadTaskRunner(traits);
 }
 
 scoped_refptr<TaskRunner> ThreadPoolInstance::CreateParallelTaskRunner(const TaskTraits &traits) {

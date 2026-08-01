@@ -9,8 +9,10 @@
 
 #include <neixx/common/time.h>
 #include <neixx/synchronization/lock.h>
+#include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/message_loop/message_pump_default.h>
 #include <neixx/task/sequence_manager.h>
+#include <neixx/threading/thread.h>
 
 namespace nei {
 namespace {
@@ -66,7 +68,7 @@ private:
 
 TEST(SequenceManagerTest, RunsImmediateTask) {
   SequenceManager manager(std::make_unique<MessagePumpDefault>());
-  scoped_refptr<TaskRunner> runner = manager.CreateTaskRunner();
+  scoped_refptr<SequencedTaskRunner> runner = manager.CreateTaskRunner();
   ASSERT_TRUE(runner);
 
   std::atomic<int> executed{0};
@@ -83,7 +85,7 @@ TEST(SequenceManagerTest, RunsImmediateTask) {
 
 TEST(SequenceManagerTest, RunsDelayedTaskAfterDeadline) {
   SequenceManager manager(std::make_unique<MessagePumpDefault>());
-  scoped_refptr<TaskRunner> runner = manager.CreateTaskRunner();
+  scoped_refptr<SequencedTaskRunner> runner = manager.CreateTaskRunner();
   ASSERT_TRUE(runner);
 
   std::atomic<bool> executed{false};
@@ -109,7 +111,7 @@ TEST(SequenceManagerTest, RunsDelayedTaskAfterDeadline) {
 
 TEST(SequenceManagerTest, DelayedTaskFollowsRealPumpWakeupPath) {
   SequenceManager manager(std::make_unique<MessagePumpDefault>());
-  scoped_refptr<TaskRunner> runner = manager.CreateTaskRunner();
+  scoped_refptr<SequencedTaskRunner> runner = manager.CreateTaskRunner();
   ASSERT_TRUE(runner);
 
   std::atomic<bool> executed{false};
@@ -139,8 +141,8 @@ TEST(SequenceManagerTest, DelayedTaskFollowsRealPumpWakeupPath) {
 
 TEST(SequenceManagerTest, RunsTasksFromMultipleQueues) {
   SequenceManager manager(std::make_unique<MessagePumpDefault>());
-  scoped_refptr<TaskRunner> runner_a = manager.CreateTaskRunner();
-  scoped_refptr<TaskRunner> runner_b = manager.CreateTaskRunner();
+  scoped_refptr<SequencedTaskRunner> runner_a = manager.CreateTaskRunner();
+  scoped_refptr<SequencedTaskRunner> runner_b = manager.CreateTaskRunner();
   ASSERT_TRUE(runner_a);
   ASSERT_TRUE(runner_b);
 
@@ -165,7 +167,7 @@ TEST(SequenceManagerTest, RunsImmediateTaskWhenSingleQueueFastPathDisabled) {
   ScopedSingleQueueFastPathToggle disable_fast_path(false);
 
   SequenceManager manager(std::make_unique<MessagePumpDefault>());
-  scoped_refptr<TaskRunner> runner = manager.CreateTaskRunner();
+  scoped_refptr<SequencedTaskRunner> runner = manager.CreateTaskRunner();
   ASSERT_TRUE(runner);
 
   std::atomic<int> executed{0};
@@ -182,7 +184,7 @@ TEST(SequenceManagerTest, RunsImmediateTaskWhenSingleQueueFastPathDisabled) {
 
 TEST(SequenceManagerTest, CurrentThreadBindingIsClearedAfterRunReturns) {
   SequenceManager manager(std::make_unique<MessagePumpDefault>());
-  scoped_refptr<TaskRunner> runner = manager.CreateTaskRunner();
+  scoped_refptr<SequencedTaskRunner> runner = manager.CreateTaskRunner();
   ASSERT_TRUE(runner);
 
   std::atomic<SequenceManager *> current_inside_run{nullptr};
@@ -218,8 +220,8 @@ TEST(SequenceManagerTest, ConstructorBindsCurrentThreadWhenTlsIsEmpty) {
 TEST(SequenceManagerTest, DefaultTaskRunnerIsCached) {
   SequenceManager manager(std::make_unique<MessagePumpDefault>());
 
-  scoped_refptr<TaskRunner> first = manager.GetDefaultTaskRunner();
-  scoped_refptr<TaskRunner> second = manager.GetDefaultTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> first = manager.GetDefaultTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> second = manager.GetDefaultTaskRunner();
 
   ASSERT_TRUE(first);
   ASSERT_TRUE(second);
@@ -231,8 +233,8 @@ TEST(SequenceManagerTest, HighPriorityQueuesReceiveMoreSelectorSlotsThanLowPrior
   TaskTraits low_traits(TaskPriority::BEST_EFFORT);
 
   SequenceManager manager(std::make_unique<MessagePumpDefault>());
-  scoped_refptr<TaskRunner> high_runner = manager.CreateTaskRunner(high_traits);
-  scoped_refptr<TaskRunner> low_runner = manager.CreateTaskRunner(low_traits);
+  scoped_refptr<SequencedTaskRunner> high_runner = manager.CreateTaskRunner(high_traits);
+  scoped_refptr<SequencedTaskRunner> low_runner = manager.CreateTaskRunner(low_traits);
   ASSERT_TRUE(high_runner);
   ASSERT_TRUE(low_runner);
 
@@ -263,7 +265,7 @@ TEST(SequenceManagerTest, EarlierDelayedTaskSchedulesEarlierWakeup) {
   auto pump = std::make_unique<RecordingPump>();
   RecordingPump *pump_raw = pump.get();
   SequenceManager manager(std::move(pump));
-  scoped_refptr<TaskRunner> runner = manager.CreateTaskRunner();
+  scoped_refptr<SequencedTaskRunner> runner = manager.CreateTaskRunner();
   ASSERT_TRUE(runner);
 
   runner->PostDelayedTask(FROM_HERE, []() {}, TimeDelta::FromMilliseconds(500));
@@ -277,8 +279,8 @@ TEST(SequenceManagerTest, EarlierDelayedTaskSchedulesEarlierWakeup) {
 
 TEST(SequenceManagerTest, MultiQueueBurstDoesNotStarveAnyQueue) {
   SequenceManager manager(std::make_unique<MessagePumpDefault>());
-  scoped_refptr<TaskRunner> runner_a = manager.CreateTaskRunner();
-  scoped_refptr<TaskRunner> runner_b = manager.CreateTaskRunner();
+  scoped_refptr<SequencedTaskRunner> runner_a = manager.CreateTaskRunner();
+  scoped_refptr<SequencedTaskRunner> runner_b = manager.CreateTaskRunner();
   ASSERT_TRUE(runner_a);
   ASSERT_TRUE(runner_b);
 
@@ -326,7 +328,7 @@ TEST(SequenceManagerTest, ShutdownDuringConcurrentPostingDoesNotDeadlockOrCrash)
   constexpr int kIterations = 10;
   for (int i = 0; i < kIterations; ++i) {
     SequenceManager manager(std::make_unique<MessagePumpDefault>());
-    scoped_refptr<TaskRunner> runner = manager.CreateTaskRunner();
+    scoped_refptr<SequencedTaskRunner> runner = manager.CreateTaskRunner();
     ASSERT_TRUE(runner);
 
     std::atomic<bool> keep_posting{true};
@@ -398,8 +400,8 @@ TEST(SequenceManagerTest, EmptyHighPriorityBucketDoesNotInflateLowPriorityQuota)
   TaskTraits uv_traits(TaskPriority::USER_VISIBLE);
 
   SequenceManager manager(std::make_unique<MessagePumpDefault>());
-  scoped_refptr<TaskRunner> ub_runner = manager.CreateTaskRunner(ub_traits);
-  scoped_refptr<TaskRunner> uv_runner = manager.CreateTaskRunner(uv_traits);
+  scoped_refptr<SequencedTaskRunner> ub_runner = manager.CreateTaskRunner(ub_traits);
+  scoped_refptr<SequencedTaskRunner> uv_runner = manager.CreateTaskRunner(uv_traits);
   ASSERT_TRUE(ub_runner);
   ASSERT_TRUE(uv_runner);
 
@@ -446,6 +448,145 @@ TEST(SequenceManagerTest, EmptyHighPriorityBucketDoesNotInflateLowPriorityQuota)
 
   EXPECT_GT(uv_ran, 0) << "UV tasks should have run";
   EXPECT_GT(ub_ran, 0) << "UB tasks should have run";
+}
+
+// =============================================================================
+// Runner type identity — contracts verified via dynamic_cast
+// =============================================================================
+
+// SequenceManager::GetDefaultTaskRunner() must return a SingleThreadTaskRunner.
+// The SequenceManager is always driven by a single dedicated thread.
+TEST(SequenceManagerTest, DefaultTaskRunnerIsSingleThreadTaskRunner) {
+  Thread thread("TestSeqMgr");
+  ASSERT_TRUE(thread.Start());
+  auto *raw = thread.GetTaskRunner().get();
+  ASSERT_NE(raw, nullptr);
+  // The default runner returned by a Thread's SequenceManager MUST be a
+  // SingleThreadTaskRunner — the strongest guarantee.
+  EXPECT_NE(dynamic_cast<SingleThreadTaskRunner *>(raw), nullptr);
+  thread.Stop();
+}
+
+// SequenceManager::CreateTaskRunner() must return a SequencedTaskRunner
+// (NOT a SingleThreadTaskRunner — weaker guarantee, FIFO only).
+TEST(SequenceManagerTest, CreateTaskRunnerIsSequencedNotSingleThread) {
+  Thread thread("TestSeqMgr");
+  ASSERT_TRUE(thread.Start());
+  scoped_refptr<SingleThreadTaskRunner> runner = thread.GetTaskRunner();
+  ASSERT_TRUE(runner);
+
+  // Create an additional runner on the same SequenceManager.  It must be a
+  // SequencedTaskRunner (FIFO guarantee), NOT a SingleThreadTaskRunner.
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  scoped_refptr<SequencedTaskRunner> extra_runner;
+  runner->PostTask(FROM_HERE, [&extra_runner, &done]() {
+    SequenceManager *mgr = SequenceManager::Current();
+    ASSERT_NE(mgr, nullptr);
+    extra_runner = mgr->CreateTaskRunner();
+    done.Signal();
+  });
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  ASSERT_NE(extra_runner.get(), nullptr);
+
+  EXPECT_NE(dynamic_cast<SequencedTaskRunner *>(extra_runner.get()), nullptr);
+  // Must NOT be upgradable to SingleThreadTaskRunner — the weaker type
+  // should not carry the stronger guarantee.
+  EXPECT_EQ(dynamic_cast<SingleThreadTaskRunner *>(extra_runner.get()), nullptr);
+  thread.Stop();
+}
+
+// =============================================================================
+// SequencedTaskRunner semantic contract
+// =============================================================================
+
+// SequencedTaskRunner::BelongsToCurrentThread() MUST return false even when
+// called from the SequenceManager's own thread.  SequencedTaskRunner only
+// guarantees FIFO ordering, NOT thread affinity.
+TEST(SequenceManagerTest, SequencedTaskRunnerBelongsToCurrentThreadIsFalse) {
+  Thread thread("TestSeqMgr");
+  ASSERT_TRUE(thread.Start());
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  scoped_refptr<SequencedTaskRunner> runner;
+  thread.GetTaskRunner()->PostTask(FROM_HERE, [&runner, &done]() {
+    SequenceManager *mgr = SequenceManager::Current();
+    ASSERT_NE(mgr, nullptr);
+    runner = mgr->CreateTaskRunner();
+    ASSERT_NE(runner.get(), nullptr);
+
+    // On the SequenceManager's own thread, BelongsToCurrentThread() must
+    // NOT return true for a SequencedTaskRunner.  Only SingleThreadTaskRunner
+    // promises thread affinity.
+    EXPECT_FALSE(runner->BelongsToCurrentThread());
+    done.Signal();
+  });
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  thread.Stop();
+}
+
+// SequencedTaskRunner::RunsTasksInCurrentSequence() MUST return true when
+// called from the SequenceManager's thread.  The SequenceManager's thread
+// IS the sequence for runners it creates.
+TEST(SequenceManagerTest, SequencedTaskRunnerRunsTasksInCurrentSequence) {
+  Thread thread("TestSeqMgr");
+  ASSERT_TRUE(thread.Start());
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  scoped_refptr<SequencedTaskRunner> runner;
+  thread.GetTaskRunner()->PostTask(FROM_HERE, [&runner, &done]() {
+    SequenceManager *mgr = SequenceManager::Current();
+    ASSERT_NE(mgr, nullptr);
+    runner = mgr->CreateTaskRunner();
+    ASSERT_NE(runner.get(), nullptr);
+
+    // On the SequenceManager's thread, RunsTasksInCurrentSequence() must
+    // return true — this thread runs the sequence.
+    EXPECT_TRUE(runner->RunsTasksInCurrentSequence());
+    done.Signal();
+  });
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  thread.Stop();
+}
+
+// =============================================================================
+// SingleThreadTaskRunner semantic contract (Thread-bound)
+// =============================================================================
+
+// SingleThreadTaskRunner::BelongsToCurrentThread() MUST return true when
+// called from the thread that owns the runner.
+TEST(SequenceManagerTest, SingleThreadTaskRunnerBelongsToCurrentThreadIsTrue) {
+  Thread thread("TestSeqMgr");
+  ASSERT_TRUE(thread.Start());
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  scoped_refptr<SingleThreadTaskRunner> runner = thread.GetTaskRunner();
+  ASSERT_NE(runner.get(), nullptr);
+
+  runner->PostTask(FROM_HERE, [&runner, &done]() {
+    // On the Thread's own thread, BelongsToCurrentThread() MUST return true.
+    EXPECT_TRUE(runner->BelongsToCurrentThread());
+    done.Signal();
+  });
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  thread.Stop();
+}
+
+// SingleThreadTaskRunner::RunsTasksInCurrentSequence() MUST return true
+// when called from the owning thread.
+TEST(SequenceManagerTest, SingleThreadTaskRunnerRunsTasksInCurrentSequence) {
+  Thread thread("TestSeqMgr");
+  ASSERT_TRUE(thread.Start());
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  scoped_refptr<SingleThreadTaskRunner> runner = thread.GetTaskRunner();
+  ASSERT_NE(runner.get(), nullptr);
+
+  runner->PostTask(FROM_HERE, [&runner, &done]() {
+    EXPECT_TRUE(runner->RunsTasksInCurrentSequence());
+    done.Signal();
+  });
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  thread.Stop();
 }
 
 } // namespace

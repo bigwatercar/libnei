@@ -68,7 +68,7 @@ TEST(MessagePumpForIOStressTest, ManyCrossThreadPostTasksAllExecute) {
     opts.message_pump_type = MessagePumpType::IO;
     io_thread.StartWithOptions(opts);
   }
-  scoped_refptr<TaskRunner> runner = io_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> runner = io_thread.GetTaskRunner();
   ASSERT_TRUE(runner != nullptr);
 
   std::atomic<std::size_t> executed{0};

@@ -133,7 +133,7 @@ struct BenchResult {
 };
 
 struct PipeBenchState {
-  explicit PipeBenchState(nei::scoped_refptr<nei::TaskRunner> runner,
+  explicit PipeBenchState(nei::scoped_refptr<nei::SingleThreadTaskRunner> runner,
                           std::size_t chunk,
                           std::size_t total,
                           nei::WaitableEvent *done_event)
@@ -214,7 +214,7 @@ struct PipeBenchState {
     });
   }
 
-  nei::scoped_refptr<nei::TaskRunner> io_runner;
+  nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner;
   std::size_t chunk_size = 0;
   std::size_t total_bytes = 0;
   std::size_t bytes_written = 0;
@@ -228,8 +228,9 @@ struct PipeBenchState {
   nei::WaitableEvent *done = nullptr;
 };
 
-BenchResult
-RunBench(const nei::scoped_refptr<nei::TaskRunner> &io_runner, std::size_t chunk_size, std::size_t total_bytes) {
+BenchResult RunBench(const nei::scoped_refptr<nei::SingleThreadTaskRunner> &io_runner,
+                     std::size_t chunk_size,
+                     std::size_t total_bytes) {
   nei::PlatformHandle read_handle;
   nei::PlatformHandle write_handle;
   if (!CreateAsyncPipePair(read_handle, write_handle)) {
@@ -306,7 +307,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  const nei::scoped_refptr<nei::TaskRunner> io_runner = io_thread.GetTaskRunner();
+  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
   if (!io_runner) {
     std::cerr << "Failed to acquire IO task runner." << std::endl;
     io_thread.Stop();

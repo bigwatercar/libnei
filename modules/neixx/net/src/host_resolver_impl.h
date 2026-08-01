@@ -49,7 +49,7 @@ public:
   Impl(const Impl &) = delete;
   Impl &operator=(const Impl &) = delete;
 
-  bool Resolve(const std::string &host, ResolveCallback callback, scoped_refptr<TaskRunner> target_runner);
+  bool Resolve(const std::string &host, ResolveCallback callback, scoped_refptr<SequencedTaskRunner> target_runner);
 
 private:
   HostResolverOptions options_;

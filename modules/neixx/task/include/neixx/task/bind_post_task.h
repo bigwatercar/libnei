@@ -99,7 +99,7 @@ struct is_repeating_callback<RepeatingCallback<R(Args...)>> : std::true_type {};
 template <typename CallbackType>
 class BindPostTaskTrampoline : public RefCountedThreadSafe<BindPostTaskTrampoline<CallbackType>> {
 public:
-  BindPostTaskTrampoline(scoped_refptr<TaskRunner> task_runner, CallbackType callback)
+  BindPostTaskTrampoline(scoped_refptr<SequencedTaskRunner> task_runner, CallbackType callback)
       : task_runner_(std::move(task_runner))
       , callback_(std::move(callback)) {
     DCHECK(task_runner_);
@@ -184,7 +184,7 @@ private:
     }
 
     // 判断当前线程是否为目标线程
-    const scoped_refptr<TaskRunner> current = ThreadTaskRunnerHandle::Get();
+    const scoped_refptr<SingleThreadTaskRunner> current = ThreadTaskRunnerHandle::Get();
 
     if (current.get() != task_runner_.get()) {
       // * 不在目标线程 -> 弹射回目标线程析构
@@ -199,7 +199,7 @@ private:
     // else: 在目标线程上 -> callback_ 在此内联析构 (高效路径)
   }
 
-  scoped_refptr<TaskRunner> task_runner_;
+  scoped_refptr<SequencedTaskRunner> task_runner_;
   CallbackType callback_;
 
   // OnceCallback 语义标志: Run() 调用后设置为 true, 析构函数据此跳过
@@ -229,7 +229,8 @@ private:
 //   std::move(safe).Run(addresses);  // cb(addresses) runs on runner
 // ---------------------------------------------------------------------------
 template <typename... Args>
-OnceCallback<void(Args...)> BindPostTask(scoped_refptr<TaskRunner> task_runner, OnceCallback<void(Args...)> callback) {
+OnceCallback<void(Args...)> BindPostTask(scoped_refptr<SequencedTaskRunner> task_runner,
+                                         OnceCallback<void(Args...)> callback) {
   DCHECK(task_runner);
   auto trampoline = MakeRefCounted<internal::BindPostTaskTrampoline<OnceCallback<void(Args...)>>>(
       std::move(task_runner), std::move(callback));
@@ -242,7 +243,7 @@ OnceCallback<void(Args...)> BindPostTask(scoped_refptr<TaskRunner> task_runner, 
 // RepeatingCallback<void()>  --  void() only.  Parameterized RepeatingCallback will
 // be added when needed.
 // ---------------------------------------------------------------------------
-inline RepeatingCallback<void()> BindPostTask(scoped_refptr<TaskRunner> task_runner,
+inline RepeatingCallback<void()> BindPostTask(scoped_refptr<SequencedTaskRunner> task_runner,
                                               RepeatingCallback<void()> callback) {
   DCHECK(task_runner);
   auto trampoline = MakeRefCounted<internal::BindPostTaskTrampoline<RepeatingCallback<void()>>>(std::move(task_runner),

@@ -24,7 +24,7 @@ namespace pipe_detail {
 constexpr std::size_t kMaxBytesPerDrain = 64 * 1024; // 64 KiB
 
 template <typename Callback>
-void PostError(const scoped_refptr<TaskRunner> &runner, Callback &&cb) {
+void PostError(const scoped_refptr<SequencedTaskRunner> &runner, Callback &&cb) {
   if (!cb)
     return;
   if (runner) {
@@ -35,7 +35,7 @@ void PostError(const scoped_refptr<TaskRunner> &runner, Callback &&cb) {
 }
 
 template <typename Callback>
-void PostResult(const scoped_refptr<TaskRunner> &runner, Callback &&cb, bool success, std::size_t bytes) {
+void PostResult(const scoped_refptr<SequencedTaskRunner> &runner, Callback &&cb, bool success, std::size_t bytes) {
   if (!cb)
     return;
   if (runner) {
@@ -62,7 +62,7 @@ struct WeakPtrThreadSafe<PipeOutputStream::Impl> : std::true_type {};
 
 class PipeInputStream::Impl final : public MessagePumpForIO::Watcher {
 public:
-  explicit Impl(scoped_refptr<TaskRunner> io_task_runner);
+  explicit Impl(scoped_refptr<SingleThreadTaskRunner> io_task_runner);
   ~Impl() override;
 
   bool BindPlatformHandle(PlatformHandle handle);
@@ -78,7 +78,7 @@ public:
 
   void ShutdownAndSelfDestruct();
 
-  scoped_refptr<TaskRunner> io_task_runner() const {
+  scoped_refptr<SingleThreadTaskRunner> io_task_runner() const {
     return io_task_runner_;
   }
 
@@ -86,7 +86,7 @@ private:
   void DrainRead();
   void DeliverReadResult(bool success, std::size_t bytes);
 
-  scoped_refptr<TaskRunner> io_task_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_task_runner_;
   int fd_ = -1;
   bool closed_ = false;
   bool read_in_flight_ = false;
@@ -107,7 +107,7 @@ private:
 
 class PipeOutputStream::Impl final : public MessagePumpForIO::Watcher {
 public:
-  explicit Impl(scoped_refptr<TaskRunner> io_task_runner);
+  explicit Impl(scoped_refptr<SingleThreadTaskRunner> io_task_runner);
   ~Impl() override;
 
   bool BindPlatformHandle(PlatformHandle handle);
@@ -123,7 +123,7 @@ public:
 
   void ShutdownAndSelfDestruct();
 
-  scoped_refptr<TaskRunner> io_task_runner() const {
+  scoped_refptr<SingleThreadTaskRunner> io_task_runner() const {
     return io_task_runner_;
   }
 
@@ -138,7 +138,7 @@ private:
     IOWriteCallback callback;
   };
 
-  scoped_refptr<TaskRunner> io_task_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_task_runner_;
   int fd_ = -1;
   bool closed_ = false;
   bool write_in_flight_ = false;

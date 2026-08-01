@@ -59,6 +59,12 @@ public:
   bool is_parallel() const;
   void set_parallel(bool parallel);
 
+  // When true, the pool dedicates a single worker to this queue, guaranteeing
+  // that all tasks run on the same physical thread.  The PooledTaskSource
+  // reserves a worker exclusively for this queue.
+  bool is_dedicated() const;
+  void set_dedicated(bool dedicated);
+
   // ---- Chromium-aligned concurrency control ----
   //
   // Pixel-level mirror of TaskSource / RegisteredTaskSource from

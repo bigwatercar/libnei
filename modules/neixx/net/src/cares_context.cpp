@@ -160,7 +160,7 @@ void CaresContext::Resolve(const std::string &host,
                            const struct ares_addrinfo_hints *hints,
                            ResolveCallback callback,
                            void *arg,
-                           scoped_refptr<TaskRunner> target_runner) {
+                           scoped_refptr<SequencedTaskRunner> target_runner) {
   // Acquire a raw pointer to the channel entry under lock.  ares_getaddrinfo
   // is async and must not be called under our mutex to avoid blocking
   // concurrent resolves on the same context.  The ChannelEntry is owned by

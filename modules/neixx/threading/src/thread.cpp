@@ -84,7 +84,7 @@ bool Thread::StartWithOptions(const Options &options) {
 }
 
 void Thread::Stop() {
-  scoped_refptr<TaskRunner> runner;
+  scoped_refptr<SingleThreadTaskRunner> runner;
   {
     AutoLock lock(lock_);
     if (!started_) {
@@ -116,7 +116,7 @@ void Thread::Stop() {
   start_event_ = nullptr;
 }
 
-scoped_refptr<TaskRunner> Thread::GetTaskRunner() const {
+scoped_refptr<SingleThreadTaskRunner> Thread::GetTaskRunner() const {
   AutoLock lock(lock_);
   return task_runner_;
 }
@@ -145,7 +145,7 @@ void Thread::ThreadMain() {
   std::unique_ptr<MessagePump> pump = CreateMessagePumpForType(options_.message_pump_type);
 
   SequenceManager sequence_manager(std::move(pump));
-  scoped_refptr<TaskRunner> default_task_runner = sequence_manager.GetDefaultTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> default_task_runner = sequence_manager.GetDefaultTaskRunner();
 
   WaitableEvent *start_event = nullptr;
   {

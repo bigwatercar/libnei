@@ -30,7 +30,7 @@ struct AcceptContext {
 
   // The callback to fire on the target runner.
   TCPServerSocket::AcceptCallback callback;
-  scoped_refptr<TaskRunner> io_runner;
+  scoped_refptr<SingleThreadTaskRunner> io_runner;
 
   // Strong reference to Impl — keeps the server alive until this
   // AcceptEx completion is processed by the IOCP pump.
@@ -89,7 +89,7 @@ TCPServerSocket::Impl::~Impl() {
 bool TCPServerSocket::Impl::Listen(const IPEndPoint &addr,
                                    int backlog,
                                    TCPServerSocket::AcceptCallback callback,
-                                   scoped_refptr<TaskRunner> acceptor_runner,
+                                   scoped_refptr<SingleThreadTaskRunner> acceptor_runner,
                                    TCPServerSocket::RunnerSelector worker_selector) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(acceptor_runner);
@@ -342,7 +342,7 @@ void TCPServerSocket::Impl::OnIOCompleted(NativeIOHandle /*handle*/,
   setsockopt(
       client, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, reinterpret_cast<char *>(&listen_socket_), sizeof(listen_socket_));
 
-  scoped_refptr<TaskRunner> worker_runner = worker_selector_ ? worker_selector_() : nullptr;
+  scoped_refptr<SingleThreadTaskRunner> worker_runner = worker_selector_ ? worker_selector_() : nullptr;
   if (!worker_runner)
     worker_runner = io_runner_;
   auto *client_impl = new TCPClientSocket::Impl(client, worker_runner);

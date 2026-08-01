@@ -77,7 +77,7 @@ void SleepMs(int ms) {
   std::this_thread::sleep_for(milliseconds(ms));
 }
 
-void DestroyWatcherOnIO(scoped_refptr<TaskRunner> io_runner, std::unique_ptr<FilePathWatcher> &watcher) {
+void DestroyWatcherOnIO(scoped_refptr<SingleThreadTaskRunner> io_runner, std::unique_ptr<FilePathWatcher> &watcher) {
   WaitableEvent done(WaitableEvent::ResetPolicy::kManual);
   io_runner->PostTask(FROM_HERE, [&]() {
     watcher.reset();
@@ -110,13 +110,13 @@ protected:
     }
   }
 
-  scoped_refptr<TaskRunner> io_runner() const {
+  scoped_refptr<SingleThreadTaskRunner> io_runner() const {
     return io_runner_;
   }
 
   std::string temp_dir_;
   Thread io_thread_{"fpw_io_thread"};
-  scoped_refptr<TaskRunner> io_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_runner_;
 };
 
 // =============================================================================
@@ -374,7 +374,7 @@ TEST_F(FilePathWatcherTest, CancelPreventsPendingCallbacks) {
   Thread::Options cb_opts;
   cb_opts.message_pump_type = MessagePumpType::DEFAULT;
   ASSERT_TRUE(cb_thread.StartWithOptions(cb_opts));
-  scoped_refptr<TaskRunner> cb_runner = cb_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> cb_runner = cb_thread.GetTaskRunner();
 
   // Gate: block cb_thread from processing anything until we say so.
   WaitableEvent cb_gate(WaitableEvent::ResetPolicy::kManual);

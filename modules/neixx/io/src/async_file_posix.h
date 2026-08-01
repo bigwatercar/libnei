@@ -28,7 +28,7 @@ public:
   void OpenAsync(const std::string &path,
                  OpenMode mode,
                  OpenDisposition disposition,
-                 const scoped_refptr<TaskRunner> &background_runner,
+                 const scoped_refptr<SequencedTaskRunner> &background_runner,
                  OpenCallback callback) override;
 
   void ReadAsync(scoped_refptr<IOBuffer> buf,

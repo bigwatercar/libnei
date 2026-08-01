@@ -170,7 +170,7 @@ TEST(TaskQueueTest, ShutdownBlockKeepsBlockingTasksOnly) {
 
 TEST(TaskQueueTest, ConcurrentPostTaskFromMultipleThreads) {
   internal::TaskQueue queue;
-  auto runner = TaskRunner::Create(&queue);
+  auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
   std::atomic<int> executed{0};
@@ -243,7 +243,7 @@ TEST(TaskQueueTest, OnTaskPostedCallbackNotCalledWhenQueueNonEmpty) {
 
 TEST(TaskRunnerTest, PostTaskEnqueuesImmediateTask) {
   internal::TaskQueue queue;
-  auto runner = TaskRunner::Create(&queue);
+  auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
   std::atomic<int> executed{0};
@@ -258,7 +258,7 @@ TEST(TaskRunnerTest, PostTaskEnqueuesImmediateTask) {
 
 TEST(TaskRunnerTest, PostDelayedTaskEnqueuesDelayedTask) {
   internal::TaskQueue queue;
-  auto runner = TaskRunner::Create(&queue);
+  auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
   runner->PostDelayedTask(FROM_HERE, []() {}, TimeDelta::FromSeconds(1));
@@ -270,7 +270,7 @@ TEST(TaskRunnerTest, PostDelayedTaskEnqueuesDelayedTask) {
 
 TEST(TaskRunnerTest, PostDelayedTaskZeroDelayExecutesImmediately) {
   internal::TaskQueue queue;
-  auto runner = TaskRunner::Create(&queue);
+  auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
   runner->PostDelayedTask(FROM_HERE, []() {}, TimeDelta());
@@ -281,7 +281,7 @@ TEST(TaskRunnerTest, PostDelayedTaskZeroDelayExecutesImmediately) {
 
 TEST(TaskRunnerTest, PostDelayedTaskNegativeDelayExecutesImmediately) {
   internal::TaskQueue queue;
-  auto runner = TaskRunner::Create(&queue);
+  auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
   runner->PostDelayedTask(FROM_HERE, []() {}, TimeDelta::FromMilliseconds(-1));
@@ -292,7 +292,7 @@ TEST(TaskRunnerTest, PostDelayedTaskNegativeDelayExecutesImmediately) {
 
 TEST(TaskRunnerTest, PostDelayedTaskExtremeDelayFallsBackToImmediate) {
   internal::TaskQueue queue;
-  auto runner = TaskRunner::Create(&queue);
+  auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
   runner->PostDelayedTask(FROM_HERE, []() {}, TimeDelta::FromMicroseconds(std::numeric_limits<std::int64_t>::max()));
@@ -305,7 +305,7 @@ TEST(TaskRunnerTest, DelayedOverflowFallbackCounterIncrements) {
   TaskRunner::ResetDelayedOverflowFallbackCountForTesting();
 
   internal::TaskQueue queue;
-  auto runner = TaskRunner::Create(&queue);
+  auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
   EXPECT_EQ(TaskRunner::GetDelayedOverflowFallbackCountForTesting(), 0);
@@ -317,7 +317,7 @@ TEST(TaskRunnerTest, DelayedOverflowFallbackCounterIncrements) {
 
 TEST(TaskRunnerTest, SequenceNumbersIncreaseMonotonically) {
   internal::TaskQueue queue;
-  auto runner = TaskRunner::Create(&queue);
+  auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
   runner->PostTask(FROM_HERE, []() {});
@@ -338,7 +338,7 @@ TEST(TaskRunnerTest, SequenceNumbersIncreaseMonotonically) {
 
 TEST(TaskRunnerTest, PostTaskAfterQueueShutdownIsIgnored) {
   internal::TaskQueue queue;
-  auto runner = TaskRunner::Create(&queue);
+  auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
   queue.Shutdown();
@@ -352,7 +352,7 @@ TEST(TaskRunnerTest, PostTaskAfterQueueDestroyedDoesNotCrash) {
   TaskRunner::ResetTracingStatsForTesting();
 
   auto queue = std::make_unique<internal::TaskQueue>();
-  auto runner = TaskRunner::Create(queue.get());
+  auto runner = SequencedTaskRunner::Create(queue.get());
   ASSERT_TRUE(runner);
 
   queue.reset();

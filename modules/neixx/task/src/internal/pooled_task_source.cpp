@@ -134,6 +134,16 @@ TaskQueue *PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout, bool &time
           }
         }
 
+        // Dedicated (single-thread) queues: skip if owned by another worker.
+        // The owning worker polls its queue directly and never goes through
+        // the global heap.  If the owner's thread has exited or released the
+        // queue, the queue may be picked up by a new worker.
+        if (entry.queue->is_dedicated() && state.dedicated_owner != 0) {
+          // Owned by some worker — skip.  Do NOT re-push to the heap;
+          // the owning worker will re-enqueue if it releases the queue.
+          continue;
+        }
+
         state.in_flight = true;
         return entry.queue;
       }
@@ -189,6 +199,14 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue *queue) {
     }
 
     QueueState &state = it->second;
+
+    // Dedicated queues with an owner: wake the owning worker directly
+    // rather than putting the queue back in the global heap.  The owner
+    // will pick up the new work on its next dedicated-loop iteration.
+    if (queue->is_dedicated() && state.dedicated_owner != 0) {
+      NotifyWorkAvailable();
+      return true;
+    }
 
     // Parallel queues: ensure the queue is in the heap if it has work,
     // then notify workers so they pick it up.
@@ -292,6 +310,7 @@ void PooledTaskSource::OnTaskQueueProcessed(TaskQueue *queue) {
     if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
       state.queued = false;
       state.reenqueue_requested = false;
+      state.dedicated_owner = 0;
       shard.states.erase(it);
       return;
     }
@@ -300,6 +319,16 @@ void PooledTaskSource::OnTaskQueueProcessed(TaskQueue *queue) {
     // re-enqueue logic to unwind.
     if (queue->is_parallel()) {
       state.reenqueue_requested = false;
+      return;
+    }
+
+    // Dedicated queues: do NOT put back in heap — the owning worker
+    // polls directly.  Just clear in_flight so the owner can continue.
+    if (queue->is_dedicated()) {
+      state.in_flight = false;
+      state.reenqueue_requested = false;
+      // Wake the owner so it picks up any remaining work.
+      NotifyWorkAvailable();
       return;
     }
 
@@ -386,6 +415,141 @@ void PooledTaskSource::NotifyTaskConsumed() {
 
 std::int64_t PooledTaskSource::GetTotalTaskCount() const {
   return total_task_count_.load(std::memory_order_relaxed);
+}
+
+// =============================================================================
+// Dedicated (single-thread) queue support
+// =============================================================================
+
+bool PooledTaskSource::AssignDedicatedWorker(TaskQueue *queue) {
+  if (queue == nullptr || !queue->is_dedicated()) {
+    return false;
+  }
+
+  const PlatformThread::PlatformThreadId my_tid = PlatformThread::CurrentId();
+
+  std::size_t shard_index = GetShardIndex(queue);
+  Shard &shard = shards_[shard_index];
+
+  AutoLock lock(shard.lock);
+  auto it = shard.states.find(queue);
+  if (it == shard.states.end()) {
+    return false;
+  }
+
+  QueueState &state = it->second;
+  if (state.dedicated_owner != 0) {
+    // Already owned by another worker (or us — re-entry, fine)
+    return state.dedicated_owner == my_tid;
+  }
+
+  // First worker to claim this dedicated queue becomes the owner.
+  state.dedicated_owner = my_tid;
+  state.queued = false;
+  // Remove from heap — only the owner processes this queue from now on.
+  return true;
+}
+
+bool PooledTaskSource::IsDedicatedOwnedByOther(TaskQueue *queue) {
+  if (queue == nullptr || !queue->is_dedicated()) {
+    return false;
+  }
+
+  const PlatformThread::PlatformThreadId my_tid = PlatformThread::CurrentId();
+  std::size_t shard_index = GetShardIndex(queue);
+  Shard &shard = shards_[shard_index];
+
+  AutoLock lock(shard.lock);
+  auto it = shard.states.find(queue);
+  if (it == shard.states.end()) {
+    return false;
+  }
+
+  const QueueState &state = it->second;
+  return state.dedicated_owner != 0 && state.dedicated_owner != my_tid;
+}
+
+void PooledTaskSource::ReleaseDedicatedQueue(TaskQueue *queue) {
+  if (queue == nullptr) {
+    return;
+  }
+
+  std::size_t shard_index = GetShardIndex(queue);
+  Shard &shard = shards_[shard_index];
+
+  AutoLock lock(shard.lock);
+  auto it = shard.states.find(queue);
+  if (it == shard.states.end()) {
+    return;
+  }
+
+  QueueState &state = it->second;
+  state.dedicated_owner = 0;
+  state.in_flight = false;
+  state.reenqueue_requested = false;
+
+  // If the queue still has work, put it back in the global heap so other
+  // workers can pick it up (or a new dedicated worker can claim it).
+  if (!is_shutdown_.load(std::memory_order_acquire) && !queue->is_shutdown() && queue->HasImmediateWork()) {
+    (void)EnqueueLocked(queue, shard_index);
+  }
+}
+
+void PooledTaskSource::WakeDedicatedWorker(TaskQueue *queue) {
+  // For simplicity, we broadcast to all workers.  The dedicated owner will
+  // wake up and find its queue has work; other workers will see no work in
+  // the global heap and go back to sleep.  This avoids the complexity of
+  // per-queue condvars while still giving correct (if slightly noisy) wake
+  // behavior.  Can be optimized later with per-worker events.
+  NotifyWorkAvailable();
+}
+
+void PooledTaskSource::WaitForDedicatedWork(TaskQueue *queue, TimeDelta timeout, bool &timed_out) {
+  timed_out = false;
+  const bool has_timeout = timeout.is_positive();
+  const TimeTicks deadline = has_timeout ? TimeTicks::Now() + timeout : TimeTicks();
+
+  for (;;) {
+    // Check if work is available without holding any lock.
+    if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
+      return;
+    }
+    if (queue->HasImmediateWork()) {
+      return;
+    }
+
+    // Check if we still own this queue.
+    {
+      std::size_t shard_index = GetShardIndex(queue);
+      Shard &shard = shards_[shard_index];
+      AutoLock lock(shard.lock);
+      auto it = shard.states.find(queue);
+      if (it == shard.states.end() || it->second.dedicated_owner != PlatformThread::CurrentId()) {
+        // Lost ownership — exit the dedicated loop.
+        return;
+      }
+    }
+
+    AutoLock wait_lock(wait_lock_);
+    if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
+      return;
+    }
+    if (queue->HasImmediateWork()) {
+      return;
+    }
+
+    if (has_timeout) {
+      const TimeDelta remaining = deadline - TimeTicks::Now();
+      if (!remaining.is_positive()) {
+        timed_out = true;
+        return;
+      }
+      const auto wait_ms = std::max<std::int64_t>(1, remaining.InMilliseconds());
+      wait_cv_.TimedWait(std::chrono::milliseconds(wait_ms));
+    } else {
+      wait_cv_.Wait();
+    }
+  }
 }
 
 } // namespace internal

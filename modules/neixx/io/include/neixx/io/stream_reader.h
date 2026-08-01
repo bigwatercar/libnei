@@ -44,7 +44,7 @@ public:
 private:
   AsyncInputStream *stream_ = nullptr; // Non-owning.
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
-  scoped_refptr<TaskRunner> target_task_runner_;
+  scoped_refptr<SequencedTaskRunner> target_task_runner_;
   WeakPtrFactory<StreamReader> weak_factory_{this, FROM_HERE_MEMBER};
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };

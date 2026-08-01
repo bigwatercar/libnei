@@ -54,13 +54,13 @@ public:
   // Initiates the TCP connection and, on success, performs the TLS
   // handshake.  The callback fires once (with true/false) on completion.
   // Must be called on `runner`.
-  void Connect(const IPEndPoint &addr, ConnectCallback callback, scoped_refptr<TaskRunner> runner);
+  void Connect(const IPEndPoint &addr, ConnectCallback callback, scoped_refptr<SingleThreadTaskRunner> runner);
 
   // Starts the TLS handshake on an already-connected transport.
   // Use this when the transport was obtained via accept() rather than
   // connect() (i.e., server-side TLS).  `runner` is the IO thread for
   // the handshake and subsequent I/O.
-  void StartHandshake(ConnectCallback callback, scoped_refptr<TaskRunner> runner);
+  void StartHandshake(ConnectCallback callback, scoped_refptr<SingleThreadTaskRunner> runner);
 
   // -------------------------------------------------------------------------
   // AsyncInputStream / AsyncOutputStream

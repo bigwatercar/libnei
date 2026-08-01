@@ -103,7 +103,7 @@ protected:
   }
 
   Thread io_thread_{"tcp-test-io"};
-  scoped_refptr<TaskRunner> io_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_runner_;
 };
 
 // ===========================================================================
@@ -567,7 +567,9 @@ TEST_F(TcpSocketTest, MultiReactorRoundRobin) {
         },
         io_runner_,
         // Round-robin across the 4 worker threads.
-        [&]() -> scoped_refptr<TaskRunner> { return workers[next_worker++ % workers.size()]->GetTaskRunner(); });
+        [&]() -> scoped_refptr<SingleThreadTaskRunner> {
+          return workers[next_worker++ % workers.size()]->GetTaskRunner();
+        });
     ASSERT_TRUE(ok);
   });
 

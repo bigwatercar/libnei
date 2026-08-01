@@ -34,7 +34,7 @@ UDPSocket::Impl::~Impl() {
 // Bind
 // =============================================================================
 
-bool UDPSocket::Impl::Bind(const IPEndPoint &local_addr, scoped_refptr<TaskRunner> io_runner) {
+bool UDPSocket::Impl::Bind(const IPEndPoint &local_addr, scoped_refptr<SingleThreadTaskRunner> io_runner) {
   DCHECK(io_runner);
 
   // Atomic test-and-set prevents double-Bind from concurrent threads.

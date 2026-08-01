@@ -92,8 +92,8 @@ ParseRpcFrame(scoped_refptr<IOBufferWithSize> buf, uint8_t *out_type, uint64_t *
 
 class RpcEndpoint::Impl final {
 public:
-  Impl(scoped_refptr<TaskRunner> io_task_runner,
-       scoped_refptr<TaskRunner> client_task_runner,
+  Impl(scoped_refptr<SingleThreadTaskRunner> io_task_runner,
+       scoped_refptr<SequencedTaskRunner> client_task_runner,
        AsyncInputStream *read_stream,
        AsyncOutputStream *write_stream)
       : io_task_runner_(std::move(io_task_runner))
@@ -335,8 +335,8 @@ private:
   // Member fields
   // =========================================================================
 
-  scoped_refptr<TaskRunner> io_task_runner_;
-  scoped_refptr<TaskRunner> client_task_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_task_runner_;
+  scoped_refptr<SequencedTaskRunner> client_task_runner_;
   std::unique_ptr<MessageChannel> channel_;
 
   // ---- Shared state (protected by lock_) ----
@@ -359,8 +359,8 @@ private:
 // RpcEndpoint  --  public forwarding
 // ===========================================================================
 
-RpcEndpoint::RpcEndpoint(scoped_refptr<TaskRunner> io_task_runner,
-                         scoped_refptr<TaskRunner> client_task_runner,
+RpcEndpoint::RpcEndpoint(scoped_refptr<SingleThreadTaskRunner> io_task_runner,
+                         scoped_refptr<SequencedTaskRunner> client_task_runner,
                          AsyncInputStream *read_stream,
                          AsyncOutputStream *write_stream)
     : impl_(

@@ -14,7 +14,7 @@ public:
   bool Listen(const IPEndPoint &addr,
               int backlog,
               AcceptCallback cb,
-              scoped_refptr<TaskRunner> runner,
+              scoped_refptr<SingleThreadTaskRunner> runner,
               RunnerSelector selector) {
     cb_ = std::move(cb);
     selector_ = std::move(selector);
@@ -38,7 +38,7 @@ public:
   }
 
 private:
-  scoped_refptr<TaskRunner> PickWorker() {
+  scoped_refptr<SingleThreadTaskRunner> PickWorker() {
     return selector_ ? selector_() : runner_;
   }
 
@@ -52,7 +52,7 @@ private:
     // thread (via TCPServerSocket's RunnerSelector during accept).  The
     // TLS state machine MUST run on the same thread — extracting the
     // runner from the TCP socket guarantees thread affinity.
-    scoped_refptr<TaskRunner> io_runner = tcp->io_task_runner();
+    scoped_refptr<SingleThreadTaskRunner> io_runner = tcp->io_task_runner();
 
     // Apply keep-alive configuration before TLS handshake.
     if (keep_alive_config_.enable)
@@ -72,7 +72,7 @@ private:
   std::shared_ptr<TCPServerSocket> server_;
   AcceptCallback cb_;
   RunnerSelector selector_;
-  scoped_refptr<TaskRunner> runner_;
+  scoped_refptr<SingleThreadTaskRunner> runner_;
   KeepAliveConfig keep_alive_config_;
 };
 
@@ -88,7 +88,7 @@ TLSServerSocket::~TLSServerSocket() {
 }
 
 bool TLSServerSocket::Listen(
-    const IPEndPoint &a, int b, AcceptCallback cb, scoped_refptr<TaskRunner> r, RunnerSelector s) {
+    const IPEndPoint &a, int b, AcceptCallback cb, scoped_refptr<SingleThreadTaskRunner> r, RunnerSelector s) {
   return impl_->Listen(a, b, std::move(cb), std::move(r), std::move(s));
 }
 

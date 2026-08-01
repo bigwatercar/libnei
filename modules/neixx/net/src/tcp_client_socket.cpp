@@ -26,7 +26,9 @@ TCPClientSocket::~TCPClientSocket() {
   }
 }
 
-bool TCPClientSocket::Connect(const IPEndPoint &addr, ConnectCallback callback, scoped_refptr<TaskRunner> io_runner) {
+bool TCPClientSocket::Connect(const IPEndPoint &addr,
+                              ConnectCallback callback,
+                              scoped_refptr<SingleThreadTaskRunner> io_runner) {
   return impl_->Connect(addr, std::move(callback), std::move(io_runner));
 }
 
@@ -38,7 +40,7 @@ void TCPClientSocket::WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_le
   impl_->WriteAsync(std::move(buf), buf_len, std::move(callback));
 }
 
-scoped_refptr<TaskRunner> TCPClientSocket::io_task_runner() const {
+scoped_refptr<SingleThreadTaskRunner> TCPClientSocket::io_task_runner() const {
   return impl_ ? impl_->io_task_runner() : nullptr;
 }
 

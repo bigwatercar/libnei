@@ -21,7 +21,7 @@ UDPSocket::~UDPSocket() {
   }
 }
 
-bool UDPSocket::Bind(const IPEndPoint &local_addr, scoped_refptr<TaskRunner> io_runner) {
+bool UDPSocket::Bind(const IPEndPoint &local_addr, scoped_refptr<SingleThreadTaskRunner> io_runner) {
   return impl_->Bind(local_addr, std::move(io_runner));
 }
 

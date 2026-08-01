@@ -52,8 +52,8 @@ TEST(FileInputStreamAdapterTest, BridgesAsyncFileAndAsyncLineReader) {
   Thread background_thread("file-stream-adapter-bg");
   ASSERT_TRUE(background_thread.Start());
 
-  scoped_refptr<TaskRunner> io_runner = io_thread.GetTaskRunner();
-  scoped_refptr<TaskRunner> bg_runner = background_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
+  scoped_refptr<SingleThreadTaskRunner> bg_runner = background_thread.GetTaskRunner();
   ASSERT_TRUE(io_runner);
   ASSERT_TRUE(bg_runner);
 

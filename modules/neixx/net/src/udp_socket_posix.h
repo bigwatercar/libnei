@@ -48,7 +48,7 @@ public:
   Impl();
   ~Impl();
 
-  bool Bind(const IPEndPoint &local_addr, scoped_refptr<TaskRunner> io_runner);
+  bool Bind(const IPEndPoint &local_addr, scoped_refptr<SingleThreadTaskRunner> io_runner);
   void
   SendTo(scoped_refptr<IOBuffer> buf, std::size_t buf_len, const IPEndPoint &dest, UDPSocket::SendToCallback callback);
   void RecvFrom(scoped_refptr<IOBuffer> buf, std::size_t buf_len, UDPSocket::RecvFromCallback callback);
@@ -112,7 +112,7 @@ private:
   std::deque<PendingSendTo> pending_sends_;
   std::deque<PendingRecvFrom> pending_recvs_;
 
-  scoped_refptr<TaskRunner> io_runner_;
+  scoped_refptr<SingleThreadTaskRunner> io_runner_;
   std::mutex mutex_;
   DECLARE_THREAD_CHECKER(thread_checker_);
   bool has_self_ref_ = false;
