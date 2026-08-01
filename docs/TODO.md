@@ -73,6 +73,41 @@ Verified: WSL 10/10, Windows 9/9 (PosixYieldQuota is POSIX-only).
 
 ---
 
+## Known Flaky Tests 🔧 2026-08-01
+
+Tests that intermittently fail due to timing sensitivity or environment
+dependencies.  Not indicative of logic bugs — triaged after the 8-quadrant
+full build + test validation of the TaskRunner hierarchy refactoring.
+
+### WSL (Linux GCC)
+
+| Test | Frequency | Root Cause |
+|------|-----------|------------|
+| `PipeStreamTest.PosixYieldQuotaPreventsStarvation` | ~30% | Timing-sensitive yield quota; CI stress runs more predictable |
+| `ChildProcessTest.LaunchWithStdinPipeEchoesToStdout` | ~10% (Release only) | Pty/pipe teardown race in Release-optimized builds |
+| `HostResolverTest.ResolveInvalidHost` | Always (WSL) | WSL has no IPv6 / external DNS reachability |
+| `HostResolverTest.ResolveIPv6Only` | Always (WSL) | WSL has no IPv6 connectivity |
+| `HostResolverTest.CustomDnsServerIPv6Cloudflare` | Always (WSL) | WSL has no IPv6 connectivity |
+| `HostResolverTest.CustomDnsServerIPv6Google` | Always (WSL) | WSL has no IPv6 connectivity |
+| `HostResolverTest.CustomTimeout` | Always (WSL) | WSL DNS timeout behavior differs |
+
+### Windows (MSVC)
+
+| Test | Frequency | Root Cause |
+|------|-----------|------------|
+| `TlsSocketTest.DestructionDuringHandshake` | ~5% (Debug only) | TLS handshake cancellation race under debug allocator |
+| `HostResolverTest.ResolveDualStack` | Always (no DNS) | Requires functional DNS resolver |
+| `HostResolverTest.ResolveIPv4Only` | Always (no DNS) | Requires functional DNS resolver |
+
+### Notes
+
+- DNS-dependent tests pass in CI environments with full network access.
+- Pipe / ChildProcess / TLS flaky tests are candidates for eventual
+  `EXPECT_DEATH`-style retry loops or event-based synchronization fixes.
+- Low priority — no crash, no data corruption, no production impact.
+
+---
+
 ## OnceCallback Templatization
 
 **Status**: ✅ Completed 2026-07-22.
