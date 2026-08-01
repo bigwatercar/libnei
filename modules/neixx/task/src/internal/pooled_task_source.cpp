@@ -1,7 +1,11 @@
 #include "pooled_task_source.h"
 
 #include <chrono>
+#include <deque>
 #include <utility>
+
+#include "pooled_task_runner_utils.h"
+#include "task_queue.h"
 
 namespace nei {
 namespace internal {
@@ -181,6 +185,14 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue *queue) {
 
   if (shutdown_fast_path_.load(std::memory_order_acquire)) {
     return false;
+  }
+
+  // Phase 2.2: If the caller is a pool worker, inject into its local
+  // WorkQueue instead of the global shard heap.
+  LocalWorkQueue *local_queue = GetLocalWorkQueue();
+  if (local_queue != nullptr) {
+    local_queue->push_back(queue);
+    return true;
   }
 
   std::size_t shard_index = GetShardIndex(queue);

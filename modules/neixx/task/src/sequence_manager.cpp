@@ -1,23 +1,57 @@
 #include <neixx/task/sequence_manager.h>
 
 #include <algorithm>
-#include <memory>
 #include <atomic>
+#include <memory>
 #include <utility>
 #include <vector>
 
 #include <nei/debug/check.h>
 #include <neixx/synchronization/lock.h>
+#include <neixx/task/message_loop/message_pump_default.h>
+#include <neixx/task/task_tracing.h>
+#include <neixx/threading/thread_local_storage.h>
+#include <neixx/trace_event/trace_event.h>
+
 #include "internal/task.h"
 #include "internal/task_queue.h"
-#include <neixx/trace_event/trace_event.h>
-#include <neixx/task/task_tracing.h>
+#include "internal/task_queue_selector.h"
 #include "internal/task_tracing_internal.h"
-#include <neixx/task/message_loop/message_pump_default.h>
-#include <neixx/threading/thread_local_storage.h>
 
 namespace nei {
 namespace {
+
+// TLS slot for ImmediateWorkQueue optimisation (Phase 1).
+// Non-null → currently inside SequenceManager::DoWork().
+ThreadLocalStorage::Slot &GetDoingWorkSlot() {
+  static ThreadLocalStorage::Slot slot(nullptr);
+  return slot;
+}
+
+bool IsDoingWork() {
+  return GetDoingWorkSlot().Get() != nullptr;
+}
+
+void SetDoingWork(bool value) {
+  GetDoingWorkSlot().Set(value ? reinterpret_cast<void *>(1) : nullptr);
+}
+
+// RAII guard: sets the "doing work" flag on construction, clears on
+// destruction.  Ensures the flag is correctly reset on ALL exit paths
+// (including early returns from the single-queue fast path).
+class ScopedDoingWork {
+public:
+  ScopedDoingWork() {
+    SetDoingWork(true);
+  }
+
+  ~ScopedDoingWork() {
+    SetDoingWork(false);
+  }
+
+  ScopedDoingWork(const ScopedDoingWork &) = delete;
+  ScopedDoingWork &operator=(const ScopedDoingWork &) = delete;
+};
 
 // Larger batch reduces message-pump round trips and improves throughput for
 // task-heavy single-thread runners while preserving bounded fairness.
@@ -136,10 +170,24 @@ public:
     internal::TaskQueue *raw_queue = queue.get();
     WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
     queue->SetOnTaskPostedCallback([this, weak_queue]() {
-      pump_->ScheduleWork();
+      internal::TaskQueue *queue = weak_queue.get();
+      if (queue != nullptr && queue->HasImmediateWork()) {
+        // Only mark as ready for immediate dispatch.  Delayed tasks are
+        // promoted by DoDelayedWork → PromoteReadyDelayedTasks, which
+        // will call SetQueueHasWork when the task becomes runnable.
+        selector_.SetQueueHasWork(queue, true);
+      }
+
+      // ImmediateWorkQueue optimisation: when a task posts another task
+      // during DoWork(), skip the pump wake-up — the current DoWork batch
+      // will naturally pick up the newly-posted task on its next iteration.
+      // This avoids an unnecessary eventfd write / IOCP post per same-sequence
+      // continuation, reducing PostTask fast-path overhead.
+      if (!IsDoingWork()) {
+        pump_->ScheduleWork();
+      }
 
       // If delayed head moved earlier, wake pump's delayed wait path too.
-      internal::TaskQueue *queue = weak_queue.get();
       if (queue == nullptr) {
         return;
       }
@@ -150,6 +198,7 @@ public:
     });
 
     queues_.push_back(std::move(queue));
+    selector_.AddQueue(raw_queue, traits.priority());
     RebuildQueueViewLocked();
 
     return SequencedTaskRunner::Create(raw_queue, traits);
@@ -166,9 +215,16 @@ public:
     internal::TaskQueue *raw_queue = queue.get();
     WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
     queue->SetOnTaskPostedCallback([this, weak_queue]() {
-      pump_->ScheduleWork();
-
       internal::TaskQueue *queue = weak_queue.get();
+      if (queue != nullptr && queue->HasImmediateWork()) {
+        selector_.SetQueueHasWork(queue, true);
+      }
+
+      // ImmediateWorkQueue optimisation (see CreateTaskRunnerLocked).
+      if (!IsDoingWork()) {
+        pump_->ScheduleWork();
+      }
+
       if (queue == nullptr) {
         return;
       }
@@ -179,6 +235,7 @@ public:
     });
 
     queues_.push_back(std::move(queue));
+    selector_.AddQueue(raw_queue, TaskPriority::USER_VISIBLE);
     RebuildQueueViewLocked();
 
     return SingleThreadTaskRunner::Create(raw_queue, TaskTraits());
@@ -220,7 +277,6 @@ public:
       in_shutdown_processing_ = true;
       is_shutdown_ = true;
       default_task_runner_ = nullptr;
-      next_priority_index_ = 0;
 
       // Keep queue objects alive after shutdown to avoid a use-after-free race:
       // concurrent PostTask callers may have already observed a raw queue
@@ -238,6 +294,7 @@ public:
       if (queue == nullptr) {
         continue;
       }
+      selector_.RemoveQueue(queue);
       queue->SetOnTaskPostedCallback(nullptr);
       queue->Shutdown();
     }
@@ -252,38 +309,51 @@ public:
   }
 
   bool DoWork() {
-    // Keep the first version conservative; we can make this dynamic later.
+    // ImmediateWorkQueue: set the TLS flag so PostTask callbacks within
+    // this DoWork batch skip pump_->ScheduleWork().  RAII guard ensures
+    // the flag is cleared on ALL exit paths (early return, exception, etc.).
+    ScopedDoingWork scoped_doing_work;
+
     bool ran_any = false;
     const bool tracing_enabled = internal::IsTaskTracingEnabled();
 
+    // ---- Single-queue fast path (unchanged) ----
     auto single_queue_fast_path_eligible_locked = [this]() -> bool {
-      return g_single_queue_fast_path_enabled.load(std::memory_order_relaxed) && user_blocking_priority_queues_.empty()
-             && best_effort_priority_queues_.empty() && user_visible_priority_queues_.size() == 1;
+      if (!g_single_queue_fast_path_enabled.load(std::memory_order_relaxed)) {
+        return false;
+      }
+      // Fast path: exactly one USER_VISIBLE queue, no other priorities.
+      // The selector's HasWork() suffices; we check the specific condition.
+      return selector_.queue_count() == 1;
     };
 
     bool single_queue_fast_path_enabled = false;
+    internal::TaskQueue *fast_path_queue = nullptr;
     {
       AutoLock lock(lock_);
-      single_queue_fast_path_enabled = single_queue_fast_path_eligible_locked();
+      if (single_queue_fast_path_eligible_locked()) {
+        single_queue_fast_path_enabled = true;
+        // SelectNextQueue() returns the sole queue (may be nullptr if no work).
+        fast_path_queue = selector_.SelectNextQueue();
+        if (fast_path_queue == nullptr) {
+          single_queue_fast_path_enabled = false;
+        }
+      }
     }
 
-    if (single_queue_fast_path_enabled) {
+    if (single_queue_fast_path_enabled && fast_path_queue != nullptr) {
       internal::Task tasks[kSingleQueueTakeBatchSize];
       std::size_t processed = 0;
-      // Capture current time once for the whole DoWork batch. Passed to
-      // RecordTaskExecutionStarted to avoid a TimeTicks::Now() call per task.
       const TimeTicks batch_now = tracing_enabled ? TimeTicks::Now() : TimeTicks();
       while (processed < kSingleQueueMaxTasksPerDoWork) {
         const std::size_t take_count = std::min(kSingleQueueTakeBatchSize, kSingleQueueMaxTasksPerDoWork - processed);
         std::size_t count = 0;
         {
-          // Hold lock_ while taking tasks so queue lifetime is protected against
-          // concurrent Shutdown() that swaps/destroys queues_.
           AutoLock lock(lock_);
-          if (!single_queue_fast_path_eligible_locked()) {
-            break;
+          count = fast_path_queue->TakeImmediateTasks(tasks, take_count);
+          if (count == 0) {
+            selector_.SetQueueHasWork(fast_path_queue, false);
           }
-          count = user_visible_priority_queues_[0]->TakeImmediateTasks(tasks, take_count);
         }
         if (count == 0) {
           break;
@@ -311,11 +381,25 @@ public:
       }
     }
 
+    // ---- General path: O(1) bitmask-based selection ----
     for (std::size_t i = 0; i < kMaxTasksPerDoWork; ++i) {
       internal::Task task;
-      if (!TakeNextImmediateTask(&task)) {
-        break;
+      internal::TaskQueue *selected_queue = nullptr;
+
+      {
+        AutoLock lock(lock_);
+        selected_queue = selector_.SelectNextQueue();
+        if (selected_queue == nullptr) {
+          break;
+        }
+        if (!selected_queue->TakeImmediateTask(&task)) {
+          // Queue was marked as having work but is now empty.
+          selector_.SetQueueHasWork(selected_queue, false);
+          continue;
+        }
+        selector_.DidProcessTask(selected_queue);
       }
+
       if (!task.task) {
         continue;
       }
@@ -329,6 +413,7 @@ public:
         internal::RecordTaskExecutionCompleted();
       }
     }
+
     return ran_any;
   }
 
@@ -351,6 +436,12 @@ public:
     for (internal::TaskQueue *queue : *queues_view) {
       if (queue->PromoteReadyDelayedTasks(now) > 0) {
         promoted_any = true;
+        // Delayed tasks have been promoted to the immediate queue.
+        // Notify the selector so DoWork can pick them up.
+        if (queue->HasImmediateWork()) {
+          AutoLock lock(lock_);
+          selector_.SetQueueHasWork(queue, true);
+        }
       }
 
       const TimeTicks next_run_time = queue->PeekNextDelayedRunTime();
@@ -413,66 +504,12 @@ private:
   void RebuildQueueViewLocked() {
     auto new_view = std::make_shared<std::vector<internal::TaskQueue *>>();
     new_view->reserve(queues_.size());
-    std::vector<internal::TaskQueue *> user_blocking_priority_queues;
-    std::vector<internal::TaskQueue *> user_visible_priority_queues;
-    std::vector<internal::TaskQueue *> best_effort_priority_queues;
 
     for (const auto &queue : queues_) {
-      internal::TaskQueue *raw_queue = queue.get();
-      new_view->push_back(raw_queue);
-
-      switch (GetPriorityBucket(raw_queue->traits().priority())) {
-      case PriorityBucket::kUserBlocking:
-        user_blocking_priority_queues.push_back(raw_queue);
-        break;
-      case PriorityBucket::kBestEffort:
-        best_effort_priority_queues.push_back(raw_queue);
-        break;
-      case PriorityBucket::kUserVisible:
-      default:
-        user_visible_priority_queues.push_back(raw_queue);
-        break;
-      }
+      new_view->push_back(queue.get());
     }
-
-    // Weighted round-robin priority schedule: 4:2:1 ratio.
-    // UserBlocking tasks get 4× the dispatch slots of BestEffort tasks,
-    // ensuring low-latency work is serviced proportionally faster.
-    constexpr std::size_t kUserBlockingSlots = 4;
-    constexpr std::size_t kUserVisibleSlots = 2;
-    constexpr std::size_t kBestEffortSlots = 1;
 
     queues_view_ = new_view;
-    user_blocking_priority_queues_ = std::move(user_blocking_priority_queues);
-    user_visible_priority_queues_ = std::move(user_visible_priority_queues);
-    best_effort_priority_queues_ = std::move(best_effort_priority_queues);
-
-    priority_schedule_.clear();
-    for (std::size_t i = 0; i < kUserBlockingSlots; ++i) {
-      priority_schedule_.push_back(PriorityBucket::kUserBlocking);
-    }
-    for (std::size_t i = 0; i < kUserVisibleSlots; ++i) {
-      priority_schedule_.push_back(PriorityBucket::kUserVisible);
-    }
-    for (std::size_t i = 0; i < kBestEffortSlots; ++i) {
-      priority_schedule_.push_back(PriorityBucket::kBestEffort);
-    }
-
-    if (priority_schedule_.empty()) {
-      next_priority_index_ = 0;
-    } else {
-      next_priority_index_ %= priority_schedule_.size();
-    }
-
-    if (user_blocking_priority_queue_index_ >= user_blocking_priority_queues_.size()) {
-      user_blocking_priority_queue_index_ = 0;
-    }
-    if (user_visible_priority_queue_index_ >= user_visible_priority_queues_.size()) {
-      user_visible_priority_queue_index_ = 0;
-    }
-    if (best_effort_priority_queue_index_ >= best_effort_priority_queues_.size()) {
-      best_effort_priority_queue_index_ = 0;
-    }
   }
 
   std::shared_ptr<const std::vector<internal::TaskQueue *>> GetQueuesView() const {
@@ -480,100 +517,13 @@ private:
     return queues_view_;
   }
 
-  // Takes the next immediate task according to the weighted round-robin
-  // priority schedule defined in priority_schedule_.
-  //
-  // Design rationale  --  why next_priority_index_ must always advance:
-  //
-  // priority_schedule_ is a static slot array, e.g.:
-  //   [UB, UB, UB, UB, UV, UV, BE]  (4 : 2 : 1 ratio)
-  //
-  // The outer loop scans slots starting from next_priority_index_, looking for
-  // a bucket that has a runnable task. The key invariant is:
-  //
-  //   Each slot represents ONE "time slice" consumed by exactly ONE task pick.
-  //   Whether or not the slot's bucket has any tasks, the pointer must advance
-  //   to the NEXT slot before this function returns.
-  //
-  // Without this invariant (the original "continue" bug):
-  //   When USER_BLOCKING buckets are empty, all four UB slots are silently
-  //   skipped, and the first UV slot is consumed. On the next call the pointer
-  //   sits at UV slot #2, again consuming it without paying any UB tax. In a
-  //   steady state of UV-only tasks, UV effectively gets 7/7 of all slots
-  //   instead of the intended 2/7  --  a 3.5× quota inflation. BEST_EFFORT suffers
-  //   the symmetric starvation problem in reverse.
-  //
-  // Fix: advance next_priority_index_ unconditionally to (schedule_index + 1)
-  // after inspecting each slot, regardless of whether a task was found. An
-  // empty high-priority bucket "burns" its allocated quota rather than silently
-  // handing it to the next lower bucket.
-  bool TakeNextImmediateTask(internal::Task *out_task) {
-    if (out_task == nullptr) {
-      return false;
-    }
-
-    AutoLock lock(lock_);
-    if (priority_schedule_.empty()) {
-      return false;
-    }
-
-    const std::size_t schedule_size = priority_schedule_.size();
-    for (std::size_t offset = 0; offset < schedule_size; ++offset) {
-      const std::size_t schedule_index = (next_priority_index_ + offset) % schedule_size;
-      const PriorityBucket bucket = priority_schedule_[schedule_index];
-
-      std::vector<internal::TaskQueue *> *queues = nullptr;
-      std::size_t *queue_index = nullptr;
-      switch (bucket) {
-      case PriorityBucket::kUserBlocking:
-        queues = &user_blocking_priority_queues_;
-        queue_index = &user_blocking_priority_queue_index_;
-        break;
-      case PriorityBucket::kBestEffort:
-        queues = &best_effort_priority_queues_;
-        queue_index = &best_effort_priority_queue_index_;
-        break;
-      case PriorityBucket::kUserVisible:
-      default:
-        queues = &user_visible_priority_queues_;
-        queue_index = &user_visible_priority_queue_index_;
-        break;
-      }
-
-      // Always advance the pointer past this slot. An empty bucket "burns" its
-      // allocated quota rather than silently inflating lower-priority quotas.
-      next_priority_index_ = (schedule_index + 1) % schedule_size;
-
-      if (queues == nullptr || queues->empty()) {
-        // This priority level has no registered queues; slot quota consumed.
-        continue;
-      }
-
-      const std::size_t queue_count = queues->size();
-      const std::size_t start_index = *queue_index % queue_count;
-      for (std::size_t queue_offset = 0; queue_offset < queue_count; ++queue_offset) {
-        const std::size_t queue_index_to_try = (start_index + queue_offset) % queue_count;
-        if (!(*queues)[queue_index_to_try]->TakeImmediateTask(out_task)) {
-          continue;
-        }
-
-        *queue_index = (queue_index_to_try + 1) % queue_count;
-        return true;
-      }
-      // All queues in this priority bucket were empty; slot quota consumed,
-      // continue to the next slot in case a lower-priority bucket has work.
-    }
-
-    return false;
-  }
-
   SequenceManager *owner_;
   mutable Lock lock_;
   std::unique_ptr<MessagePump> pump_;
   std::vector<std::unique_ptr<internal::TaskQueue>> queues_;
   std::vector<std::unique_ptr<internal::TaskQueue>> shutdown_queues_;
-  // Snapshot of raw queue pointers for lock-free read access from DoWork
-  // and DoDelayedWork.  Rebuilt under lock_ when queues are added/removed.
+  // Snapshot of raw queue pointers for lock-free read access from
+  // DoDelayedWork.  Rebuilt under lock_ when queues are added/removed.
   //
   // Lifetime: shared_ptr ensures the vector outlives any inflight reader
   // even after Shutdown() swaps queues_ into shutdown_queues_.  The raw
@@ -581,14 +531,12 @@ private:
   // keeps queue objects alive in shutdown_queues_ until Impl destruction.
   std::shared_ptr<const std::vector<internal::TaskQueue *>> queues_view_ =
       std::make_shared<std::vector<internal::TaskQueue *>>();
-  std::vector<internal::TaskQueue *> user_blocking_priority_queues_;
-  std::vector<internal::TaskQueue *> user_visible_priority_queues_;
-  std::vector<internal::TaskQueue *> best_effort_priority_queues_;
-  std::vector<PriorityBucket> priority_schedule_;
-  std::size_t user_blocking_priority_queue_index_ = 0;
-  std::size_t user_visible_priority_queue_index_ = 0;
-  std::size_t best_effort_priority_queue_index_ = 0;
-  std::size_t next_priority_index_ = 0;
+
+  // O(1) bitmask-based queue selector.  Replaces the previous weighted
+  // round-robin priority_schedule_ vector with per-priority bitmasks and
+  // 4:2:1 quota enforcement via a packed schedule counter.
+  TaskQueueSelector selector_;
+
   bool is_shutdown_ = false;
   bool in_shutdown_processing_ = false;
   scoped_refptr<SingleThreadTaskRunner> default_task_runner_;

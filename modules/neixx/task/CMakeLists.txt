@@ -1,4 +1,4 @@
-﻿set(NEIXX_TASK_SOURCES
+set(NEIXX_TASK_SOURCES
   include/neixx/task/bind_post_task.h
   include/neixx/task/task_tracing.h
   include/neixx/task/message_loop/message_pump_default.h
@@ -31,6 +31,10 @@
   src/internal/task.h
   src/internal/task_queue.cpp
   src/internal/task_queue.h
+  src/internal/task_queue_selector.cpp
+  src/internal/task_queue_selector.h
+  src/internal/task_source.cpp
+  src/internal/task_source.h
   src/internal/task_tracing.cpp
   src/internal/task_tracing_internal.h
   src/message_loop/message_pump_default.cpp

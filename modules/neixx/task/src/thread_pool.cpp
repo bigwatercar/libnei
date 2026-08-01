@@ -217,6 +217,9 @@ private:
 
     InstallBlockingCallback();
 
+    // Phase 2.2: Register this worker's local queue for TLS-based injection.
+    internal::SetLocalWorkQueue(&local_work_queue_);
+
     // Dedicated (single-thread) queue that this worker owns.  When non-null,
     // the worker processes this queue exclusively, guaranteeing same-thread
     // execution for SingleThreadTaskRunner tasks.
@@ -265,6 +268,49 @@ private:
         }
       }
 
+      // ---- Normal path: drain local WorkQueue first ----
+      // Check the per-worker local queue before falling back to the global
+      // shard heap.  This avoids lock contention when tasks posted from
+      // within this worker's tasks are routed here via TLS.
+      {
+        internal::TaskQueue *local_queue = nullptr;
+        {
+          AutoLock lock(local_queue_lock_);
+          if (!local_work_queue_.empty()) {
+            local_queue = local_work_queue_.front();
+            local_work_queue_.pop_front();
+          }
+        } // Release lock before processing tasks.
+
+        if (local_queue != nullptr) {
+          if (local_queue->is_dedicated()) {
+            if (source_->AssignDedicatedWorker(local_queue)) {
+              dedicated_queue_ = local_queue;
+              internal::SetCurrentPooledTaskQueue(dedicated_queue_);
+              ProcessTaskBatch(dedicated_queue_);
+              internal::SetCurrentPooledTaskQueue(nullptr);
+              if (delayed_task_manager_ != nullptr) {
+                delayed_task_manager_->OnQueueUpdated(dedicated_queue_);
+              }
+              continue;
+            }
+            continue;
+          }
+
+          internal::SetCurrentPooledTaskQueue(local_queue);
+          ProcessTaskBatch(local_queue);
+          if (local_queue->is_parallel() && local_queue->DidProcessTask()) {
+            source_->ReEnqueueTaskQueue(local_queue);
+          }
+          source_->OnTaskQueueProcessed(local_queue);
+          internal::SetCurrentPooledTaskQueue(nullptr);
+          if (delayed_task_manager_ != nullptr) {
+            delayed_task_manager_->OnQueueUpdated(local_queue);
+          }
+          continue;
+        }
+      }
+
       // ---- Normal path: fetch next ready queue from global heap ----
       bool timed_out = false;
       internal::TaskQueue *queue = reclaim_time_.is_positive()
@@ -277,6 +323,7 @@ private:
         RestoreBaseline();
         internal::SetCurrentBlockingCallback(nullptr);
         internal::SetCurrentPooledTaskQueue(nullptr);
+        internal::SetLocalWorkQueue(nullptr);
         exit_event_.Signal();
         return;
       }
@@ -443,6 +490,19 @@ private:
   /// Adaptive per-queue processing budget for parallel queues.
   std::size_t dynamic_parallel_budget_ = kMinParallelTasksPerTurn;
   std::size_t consecutive_parallel_saturated_batches_ = 0;
+
+  // ---- Per-worker local WorkQueue (Phase 2.2) ----
+  //
+  // Reduces contention on PooledTaskSource's global shard heap by caching
+  // recently-posted TaskQueues locally.  When a task running on this worker
+  // posts another task, ReEnqueueTaskQueue() routes it here (via TLS) instead
+  // of the global heap.  ThreadMain drains the local queue before falling
+  // back to the global heap.
+  //
+  // The TLS slot (internal::tls_local_work_queue) points to this member.
+  // ReEnqueueTaskQueue() writes into it; ThreadMain drains from it.
+  mutable Lock local_queue_lock_;
+  std::deque<internal::TaskQueue *> local_work_queue_;
 
   std::string name_;
   PlatformThread::Handle handle_;
