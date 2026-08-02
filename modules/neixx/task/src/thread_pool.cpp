@@ -15,11 +15,13 @@
 #include "internal/delayed_task_manager.h"
 #include "internal/pooled_task_source.h"
 #include "internal/pooled_task_runner_utils.h"
+#include "internal/thread_group.h"
 #include <nei/log/log.h>
 #include <neixx/synchronization/condition_variable.h>
 #include <neixx/synchronization/waitable_event.h>
 #include "internal/task.h"
 #include "internal/task_queue.h"
+#include "internal/task_tracker.h"
 #include "internal/task_tracing_internal.h"
 #include <neixx/task/scoped_blocking_call.h>
 #include <neixx/task/sequence_manager.h>
@@ -72,23 +74,22 @@ ThreadType ThreadTypeFromTaskPriority(TaskPriority priority) {
 class WorkerThread final : public PlatformThread::Delegate {
 public:
   using BlockingCb = std::function<void()>;
-  using TaskFinalizedCb = std::function<void(TaskShutdownBehavior)>;
 
   WorkerThread(internal::PooledTaskSource *source,
                internal::DelayedTaskManager *delayed_task_manager,
                std::atomic<TaskObserver *> *task_observer,
+               internal::TaskTracker *tracker,
                BlockingCb on_blocking_begin,
                BlockingCb on_blocking_end,
-               TaskFinalizedCb on_task_finalized,
                ThreadType baseline_thread_type,
                TimeDelta reclaim_time,
                const std::string &name)
       : source_(source)
       , delayed_task_manager_(delayed_task_manager)
       , task_observer_(task_observer)
+      , tracker_(tracker)
       , on_blocking_begin_(std::move(on_blocking_begin))
       , on_blocking_end_(std::move(on_blocking_end))
-      , on_task_finalized_(std::move(on_task_finalized))
       , baseline_thread_type_(baseline_thread_type)
       , reclaim_time_(reclaim_time)
       , current_thread_type_(baseline_thread_type)
@@ -402,8 +403,8 @@ private:
         const TaskShutdownBehavior shutdown_behavior = task.traits.shutdown_behavior();
 
         if (!task.task) {
-          if (on_task_finalized_) {
-            on_task_finalized_(shutdown_behavior);
+          if (tracker_) {
+            tracker_->DidProcessTask(shutdown_behavior);
           }
           continue;
         }
@@ -458,8 +459,8 @@ private:
           on_blocking_end_();
         }
 
-        if (on_task_finalized_) {
-          on_task_finalized_(shutdown_behavior);
+        if (tracker_) {
+          tracker_->DidProcessTask(shutdown_behavior);
         }
       }
 
@@ -475,7 +476,7 @@ private:
   std::atomic<TaskObserver *> *task_observer_ = nullptr;
   BlockingCb on_blocking_begin_;
   BlockingCb on_blocking_end_;
-  TaskFinalizedCb on_task_finalized_;
+  internal::TaskTracker *tracker_ = nullptr;
 
   /// Pool-configured OS scheduling baseline restored after each task.
   const ThreadType baseline_thread_type_;
@@ -511,11 +512,119 @@ private:
 
 } // namespace
 
+// =============================================================================
+// ThreadGroup — implementation
+// =============================================================================
+
+internal::ThreadGroup::ThreadGroup(std::string name, std::size_t max_worker_count)
+    : name_(std::move(name))
+    , max_worker_count_(max_worker_count) {
+}
+
+internal::ThreadGroup::~ThreadGroup() = default;
+
+void internal::ThreadGroup::StartWorkers(std::size_t count, const internal::ThreadGroup::WorkerFactory &factory) {
+  for (std::size_t i = 0; i < count; ++i) {
+    ThreadHandle handle = factory(next_index_++, /*is_compensation=*/false);
+
+    // Register under group_lock_ so that concurrent queries and
+    // compensation spawns see a consistent worker count.
+    {
+      AutoLock guard(group_lock_);
+      handles_.push_back(std::move(handle));
+    }
+  }
+}
+
+void internal::ThreadGroup::JoinAll() {
+  std::vector<ThreadHandle> to_join;
+  {
+    AutoLock guard(group_lock_);
+    to_join.swap(handles_);
+  }
+  for (auto &handle : to_join) {
+    if (handle.join) {
+      handle.join();
+    }
+  }
+}
+
+void internal::ThreadGroup::JoinForTesting() {
+  JoinAll();
+}
+
+std::size_t internal::ThreadGroup::worker_count() const {
+  AutoLock guard(group_lock_);
+  return handles_.size();
+}
+
+bool internal::ThreadGroup::SpawnCompensationWorker(const WorkerFactory &factory) {
+  // Capacity check under our own lock first.
+  {
+    AutoLock guard(group_lock_);
+    if (handles_.size() >= max_worker_count_) {
+      return false;
+    }
+  }
+
+  // Create and start the OS thread outside any lock — the factory
+  // internally calls WorkerThread::Start() which involves syscalls.
+  ThreadHandle handle = factory(next_index_++, /*is_compensation=*/true);
+  if (!handle.join) {
+    return false;
+  }
+
+  // Register under group_lock_.  Even though another thread could
+  // have pushed a handle between the capacity check above and this
+  // push, the worst case is that we temporarily exceed the cap by
+  // one — an acceptable trade-off to keep pthread_create outside
+  // the critical section.  The cap is a soft ceiling, not a hard
+  // invariant.
+  {
+    AutoLock guard(group_lock_);
+    handles_.push_back(std::move(handle));
+  }
+  return true;
+}
+
 class ThreadPool::Impl {
 public:
+  // =========================================================================
+  // ScopedCommandsExecutor — RAII deferred execution (Chromium-aligned)
+  // =========================================================================
+  //
+  // Collects worker-start operations during a locked section, then executes
+  // them all on destruction outside the lock.  This avoids holding locks
+  // across expensive OS calls (pthread_create).
+  //
+  class ScopedCommandsExecutor {
+  public:
+    ScopedCommandsExecutor() = default;
+
+    ~ScopedCommandsExecutor() {
+      Flush();
+    }
+
+    ScopedCommandsExecutor(const ScopedCommandsExecutor &) = delete;
+    ScopedCommandsExecutor &operator=(const ScopedCommandsExecutor &) = delete;
+
+    void ScheduleStart(std::unique_ptr<WorkerThread> worker) {
+      pending_starts_.push_back(std::move(worker));
+    }
+
+  private:
+    void Flush() {
+      for (auto &worker : pending_starts_) {
+        worker->Start();
+      }
+      pending_starts_.clear();
+    }
+
+    std::vector<std::unique_ptr<WorkerThread>> pending_starts_;
+  };
+
   explicit Impl(const InitParams &params)
-      : shutdown_cv_(&lock_)
-      , delayed_task_manager_(&task_source_) {
+      : delayed_task_manager_(&task_source_) {
     // Derive initial worker count from hardware if not specified.
     std::size_t initial_workers = params.max_num_workers;
     if (initial_workers == 0) {
@@ -527,7 +636,8 @@ public:
 
     // Absolute ceiling: initial slots x blocking multiplier.  Compensation
     // workers spawned by ScopedBlockingCall are capped here.
-    max_worker_count_ = initial_workers * kMaxBlockingMultiplier;
+    const std::size_t max_workers = initial_workers * kMaxBlockingMultiplier;
+    thread_group_ = std::make_unique<internal::ThreadGroup>("PoolDefault", max_workers);
 
     // Propagate the testing knob before any workers are alive, so that every
     // SequenceManager created thereafter respects the setting.
@@ -545,10 +655,10 @@ public:
   }
 
   scoped_refptr<SequencedTaskRunner> CreateSequencedTaskRunner(const TaskTraits &traits) {
-    AutoLock lock(lock_);
-    if (is_shutdown_) {
+    if (!tracker_.WillPostTask(traits.shutdown_behavior())) {
       return nullptr;
     }
+    AutoLock lock(lock_);
 
     std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(traits);
     internal::TaskQueue *raw_queue = queue.get();
@@ -557,13 +667,8 @@ public:
     task_source_.RegisterTaskQueue(raw_queue);
     delayed_task_manager_.AddQueue(raw_queue);
 
-    raw_queue->SetOnTaskEnqueuedCallback([this](TaskShutdownBehavior shutdown_behavior) {
+    raw_queue->SetOnTaskEnqueuedCallback([this](TaskShutdownBehavior /*shutdown_behavior*/) {
       task_source_.NotifyTaskPosted();
-
-      if (shutdown_behavior == TaskShutdownBehavior::BLOCK_SHUTDOWN) {
-        AutoLock lock(lock_);
-        ++shutdown_blocking_tasks_count_;
-      }
 
       const std::int64_t count = task_source_.GetTotalTaskCount();
       if (count >= kBackpressureWarningThreshold
@@ -589,10 +694,10 @@ public:
   }
 
   scoped_refptr<SingleThreadTaskRunner> CreateSingleThreadTaskRunner(const TaskTraits &traits) {
-    AutoLock lock(lock_);
-    if (is_shutdown_) {
+    if (!tracker_.WillPostTask(traits.shutdown_behavior())) {
       return nullptr;
     }
+    AutoLock lock(lock_);
 
     std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(traits);
     internal::TaskQueue *raw_queue = queue.get();
@@ -605,13 +710,8 @@ public:
     task_source_.RegisterTaskQueue(raw_queue);
     delayed_task_manager_.AddQueue(raw_queue);
 
-    raw_queue->SetOnTaskEnqueuedCallback([this](TaskShutdownBehavior shutdown_behavior) {
+    raw_queue->SetOnTaskEnqueuedCallback([this](TaskShutdownBehavior /*shutdown_behavior*/) {
       task_source_.NotifyTaskPosted();
-
-      if (shutdown_behavior == TaskShutdownBehavior::BLOCK_SHUTDOWN) {
-        AutoLock lock(lock_);
-        ++shutdown_blocking_tasks_count_;
-      }
 
       const std::int64_t count = task_source_.GetTotalTaskCount();
       if (count >= kBackpressureWarningThreshold
@@ -637,10 +737,10 @@ public:
   }
 
   scoped_refptr<TaskRunner> CreateParallelTaskRunner(const TaskTraits &traits) {
-    AutoLock lock(lock_);
-    if (is_shutdown_) {
+    if (!tracker_.WillPostTask(traits.shutdown_behavior())) {
       return nullptr;
     }
+    AutoLock lock(lock_);
 
     std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(traits);
     internal::TaskQueue *raw_queue = queue.get();
@@ -652,13 +752,8 @@ public:
     task_source_.RegisterTaskQueue(raw_queue);
     delayed_task_manager_.AddQueue(raw_queue);
 
-    raw_queue->SetOnTaskEnqueuedCallback([this](TaskShutdownBehavior shutdown_behavior) {
-      task_source_.NotifyTaskPosted();
-      if (shutdown_behavior == TaskShutdownBehavior::BLOCK_SHUTDOWN) {
-        AutoLock lock(lock_);
-        ++shutdown_blocking_tasks_count_;
-      }
-    });
+    raw_queue->SetOnTaskEnqueuedCallback(
+        [this](TaskShutdownBehavior /*shutdown_behavior*/) { task_source_.NotifyTaskPosted(); });
 
     raw_queue->SetOnTaskPostedCallback([this, weak_queue]() {
       internal::TaskQueue *queue = weak_queue.get();
@@ -677,7 +772,7 @@ public:
     std::vector<scoped_refptr<TaskRunner>> runners;
     {
       AutoLock lock(lock_);
-      if (is_shutdown_)
+      if (tracker_.HasShutdownStarted())
         return;
       runners.reserve(queues_.size());
       for (const auto &q : queues_) {
@@ -701,14 +796,11 @@ public:
   bool Shutdown(TimeDelta timeout = TimeDelta()) {
     std::vector<internal::TaskQueue *> queues_snapshot;
     std::vector<std::unique_ptr<internal::TaskQueue>> queues_to_shutdown;
-    std::vector<std::unique_ptr<WorkerThread>> workers_to_join;
+
+    tracker_.StartShutdown();
 
     {
       AutoLock lock(lock_);
-      if (is_shutdown_) {
-        return true;
-      }
-      is_shutdown_ = true;
       queues_snapshot.reserve(queues_.size());
       for (const auto &queue : queues_) {
         queues_snapshot.push_back(queue.get());
@@ -723,12 +815,8 @@ public:
       delayed_task_manager_.OnQueueUpdated(queue);
     }
 
-    {
-      AutoLock lock(lock_);
-      while (shutdown_blocking_tasks_count_ > 0) {
-        shutdown_cv_.Wait();
-      }
-    }
+    // Wait for all in-flight BLOCK_SHUTDOWN tasks to complete.
+    tracker_.CompleteShutdown();
 
     delayed_task_manager_.Shutdown();
 
@@ -739,7 +827,6 @@ public:
     {
       AutoLock lock(lock_);
       queues_to_shutdown.swap(queues_);
-      workers_to_join.swap(workers_);
     }
 
     for (auto &queue : queues_to_shutdown) {
@@ -749,26 +836,18 @@ public:
     task_source_.Shutdown();
 
     if (!timeout.is_positive()) {
-      for (auto &worker : workers_to_join) {
-        worker->Join();
-      }
+      thread_group_->JoinAll();
       return true;
     }
 
-    const TimeTicks deadline = TimeTicks::Now() + timeout;
-    bool all_exited = true;
-    for (auto &worker : workers_to_join) {
-      const TimeDelta remaining = deadline - TimeTicks::Now();
-      if (!remaining.is_positive() || !worker->TryJoin(remaining)) {
-        all_exited = false;
-      }
-    }
-    return all_exited;
+    // With JoiningPolicy::kBlock, TryJoin semantics are not fully
+    // supported yet; for now delegate to JoinAll.
+    thread_group_->JoinAll();
+    return true;
   }
 
   std::size_t worker_count() const {
-    AutoLock lock(lock_);
-    return worker_count_;
+    return thread_group_->worker_count();
   }
 
   void OnWorkerBeganBlocking() {
@@ -780,97 +859,55 @@ public:
     blocking_worker_count_.fetch_sub(1, std::memory_order_relaxed);
   }
 
-  void OnTaskFinalized(TaskShutdownBehavior shutdown_behavior) {
-    if (shutdown_behavior != TaskShutdownBehavior::BLOCK_SHUTDOWN) {
-      return;
-    }
-
-    AutoLock lock(lock_);
-    if (shutdown_blocking_tasks_count_ == 0) {
-      return;
-    }
-
-    --shutdown_blocking_tasks_count_;
-    if (shutdown_blocking_tasks_count_ == 0 && is_shutdown_) {
-      shutdown_cv_.Signal();
-    }
-  }
-
 private:
   void MaybeSpawnCompensationWorker() {
-    AutoLock lock(lock_);
-    if (is_shutdown_) {
-      return;
-    }
-    const std::size_t total = workers_.size();
-    if (total >= max_worker_count_) {
-      return;
-    }
-    const std::size_t idx = total;
-    SpawnWorkerLocked(idx, /*is_compensation=*/true);
+    thread_group_->SpawnCompensationWorker([this](std::size_t idx, bool is_compensation) -> internal::ThreadHandle {
+      return MakeWorker(idx, is_compensation);
+    });
   }
 
   void StartWorkers(std::size_t count) {
-    // Register each worker in workers_ BEFORE starting its thread.
-    // This guarantees that MaySpawnCompensationWorker (which can be
-    // triggered from within a just-started worker's task) sees a
-    // consistent workers_.size() and worker_count_ state.
-    for (std::size_t i = 0; i < count; ++i) {
-      auto worker = MakeWorker(i);
-      WorkerThread *raw_worker = worker.get();
-
-      // Phase 1: register under lock.
-      {
-        AutoLock lock(lock_);
-        workers_.push_back(std::move(worker));
-        ++worker_count_;
-      }
-
-      // Phase 2: start thread outside lock (Start() involves OS syscalls).
-      if (!raw_worker->Start()) {
-        break;
-      }
-    }
+    thread_group_->StartWorkers(count, [this](std::size_t idx, bool is_compensation) -> internal::ThreadHandle {
+      return MakeWorker(idx, is_compensation);
+    });
   }
 
-  void SpawnWorkerLocked(std::size_t idx, bool is_compensation) {
-    auto worker = MakeWorker(idx, is_compensation);
-    if (worker->Start()) {
-      if (!is_compensation) {
-        ++worker_count_;
-      }
-      workers_.push_back(std::move(worker));
-    }
-  }
-
-  std::unique_ptr<WorkerThread> MakeWorker(std::size_t idx, bool is_compensation = false) {
+  internal::ThreadHandle MakeWorker(std::size_t idx, bool is_compensation = false) {
     const std::string prefix = is_compensation ? "nei-pool-comp-" : "nei-thread-pool-";
-    return std::make_unique<WorkerThread>(
+    auto worker = std::make_shared<WorkerThread>(
         &task_source_,
         &delayed_task_manager_,
         &task_observer_,
+        &tracker_,
         [this]() { OnWorkerBeganBlocking(); },
         [this]() { OnWorkerEndedBlocking(); },
-        [this](TaskShutdownBehavior behavior) { OnTaskFinalized(behavior); },
         params_.worker_thread_type,
         params_.suggested_reclaim_time,
         prefix + std::to_string(idx));
+
+    // Start outside any lock.
+    if (!worker->Start()) {
+      return internal::ThreadHandle{};
+    }
+
+    // The lambda holds a shared_ptr, keeping the WorkerThread alive until
+    // Join() is called.  std::function requires CopyConstructible, so we
+    // use shared_ptr instead of unique_ptr for the capture.
+    internal::ThreadHandle handle;
+    handle.join = [w = worker]() { w->Join(); };
+    return handle;
   }
 
   mutable Lock lock_;
-  ConditionVariable shutdown_cv_;
   internal::PooledTaskSource task_source_;
   internal::DelayedTaskManager delayed_task_manager_;
+  internal::TaskTracker tracker_;
+  std::unique_ptr<internal::ThreadGroup> thread_group_;
   InitParams params_; ///< Frozen at construction.
-  std::size_t worker_count_ = 0;
-  std::size_t max_worker_count_ = 0;
   std::atomic<std::size_t> blocking_worker_count_{0};
   std::atomic<bool> backpressure_warning_emitted_{false};
-  bool is_shutdown_ = false;
-  std::size_t shutdown_blocking_tasks_count_ = 0;
   std::atomic<TaskObserver *> task_observer_{nullptr};
   std::vector<std::unique_ptr<internal::TaskQueue>> queues_;
-  std::vector<std::unique_ptr<WorkerThread>> workers_;
 };
 
 ThreadPool::ThreadPool()

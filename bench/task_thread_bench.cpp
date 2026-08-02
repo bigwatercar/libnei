@@ -17,7 +17,10 @@
 
 namespace {
 
-constexpr std::uint32_t kDefaultTaskCount = 100000;
+constexpr std::uint32_t kDefaultTaskCount = 1000000;
+// Delayed-task path uses a smaller count to avoid pathological min-heap
+// behaviour with millions of 1ms-delayed entries in std::priority_queue.
+constexpr std::uint32_t kDelayedTaskCountCap = 100000;
 std::atomic<std::uint64_t> g_sum_sink{0};
 std::atomic<std::uint64_t> g_executed_task_count{0};
 
@@ -290,10 +293,12 @@ int main(int argc, char *argv[]) {
   BenchmarkResult result_standard = RunAddBenchmark(*runner, task_count);
   all_results.push_back({"Standard PostTask (fast-path)", result_standard});
 
-  // Scenario 2: Delayed tasks (non-fast-path)
+  // Scenario 2: Delayed tasks (non-fast-path).
+  // Cap at kDelayedTaskCountCap to avoid pathological min-heap slowdown.
+  const std::uint32_t delayed_count = std::min(task_count, kDelayedTaskCountCap);
   g_sum_sink.store(0, std::memory_order_relaxed);
   g_executed_task_count.store(0, std::memory_order_relaxed);
-  BenchmarkResult result_delayed = RunDelayedBenchmark(*runner, task_count);
+  BenchmarkResult result_delayed = RunDelayedBenchmark(*runner, delayed_count);
   all_results.push_back({"Delayed PostTask (non-fast-path)", result_delayed});
 
   // Scenario 3: Multi-threaded posting
