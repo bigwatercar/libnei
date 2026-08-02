@@ -3,6 +3,7 @@
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/task_tracing.h>
 #include <neixx/task/thread_pool.h>
+#include <neixx/threading/thread.h>
 
 #include <algorithm>
 #include <atomic>
@@ -18,7 +19,10 @@
 
 namespace {
 
-constexpr std::uint32_t kDefaultTaskCount = 100000;
+constexpr std::uint32_t kDefaultTaskCount = 1000000;
+// Delayed-task path uses a smaller count to avoid pathological min-heap
+// behaviour with millions of 1ms-delayed entries in std::priority_queue.
+constexpr std::uint32_t kDelayedTaskCountCap = 100000;
 std::atomic<std::uint64_t> g_sum_sink{0};
 std::atomic<std::uint64_t> g_executed_task_count{0};
 
@@ -276,7 +280,8 @@ int main(int argc, char *argv[]) {
 
   g_sum_sink.store(0, std::memory_order_relaxed);
   g_executed_task_count.store(0, std::memory_order_relaxed);
-  BenchmarkResult result_delayed = RunDelayedBenchmark(*runner, task_count);
+  const std::uint32_t delayed_count = std::min(task_count, kDelayedTaskCountCap);
+  BenchmarkResult result_delayed = RunDelayedBenchmark(*runner, delayed_count);
   all_results.push_back({"Delayed PostTask (non-fast-path)", result_delayed});
 
   g_sum_sink.store(0, std::memory_order_relaxed);
@@ -300,6 +305,35 @@ int main(int argc, char *argv[]) {
   g_executed_task_count.store(0, std::memory_order_relaxed);
   BenchmarkResult result_parallel_mt = RunMultiThreadPostBenchmark(*parallel_runner, task_count);
   all_results.push_back({"Parallel Multi-threaded PostTask (4 threads)", result_parallel_mt});
+
+  // ---- SingleThreadTaskRunner (dedicated thread pump) ----
+  // Baseline 0731 comparison: measure scheduling throughput of a standalone
+  // SequenceManager-backed runner vs ThreadPool-backed runners.
+  {
+    nei::Thread pump_thread("sttr-bench");
+    if (!pump_thread.Start()) {
+      std::cerr << "Thread::Start failed for SingleThreadTaskRunner bench." << '\n';
+    } else {
+      nei::scoped_refptr<nei::TaskRunner> single_runner = pump_thread.GetTaskRunner();
+      if (single_runner) {
+        g_sum_sink.store(0, std::memory_order_relaxed);
+        g_executed_task_count.store(0, std::memory_order_relaxed);
+        BenchmarkResult result_single_std = RunAddBenchmark(*single_runner, task_count);
+        all_results.push_back({"SingleThread — Standard PostTask (fast-path)", result_single_std});
+
+        g_sum_sink.store(0, std::memory_order_relaxed);
+        g_executed_task_count.store(0, std::memory_order_relaxed);
+        BenchmarkResult result_single_delayed = RunDelayedBenchmark(*single_runner, delayed_count);
+        all_results.push_back({"SingleThread — Delayed PostTask (non-fast-path)", result_single_delayed});
+
+        g_sum_sink.store(0, std::memory_order_relaxed);
+        g_executed_task_count.store(0, std::memory_order_relaxed);
+        BenchmarkResult result_single_mt = RunMultiThreadPostBenchmark(*single_runner, task_count);
+        all_results.push_back({"SingleThread — Multi-threaded PostTask (4 threads)", result_single_mt});
+      }
+      pump_thread.Stop();
+    }
+  }
 
   nei::internal::SetTaskTracingEnabled(previous_tracing_enabled);
   (void)pool.Shutdown();
