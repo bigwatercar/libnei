@@ -29,6 +29,7 @@ public:
   WaitableEvent &operator=(WaitableEvent &&) noexcept;
 
   void Signal();
+  void Reset();
   void Wait();
   bool TimedWait(std::chrono::milliseconds timeout);
 
