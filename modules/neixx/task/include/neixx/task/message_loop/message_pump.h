@@ -74,6 +74,23 @@ public:
   // May be called from any thread.
   virtual void ScheduleDelayedWork(const TimeTicks &delayed_run_time) = 0;
 
+  // Atomically sets both the work-scheduled flag and the delayed deadline.
+  // This prevents a race where the pump's Run() loop drains the wake-up
+  // signal from ScheduleWork() before seeing the updated deadline from
+  // ScheduleDelayedWork(), or vice-versa.
+  //
+  // Default implementation calls both individually; subclasses should
+  // override to perform both updates under a single internal lock.
+  //
+  // |delayed_run_time| may be TimeTicks() if no delayed task is pending.
+  // May be called from any thread.
+  virtual void ScheduleWorkAndDelayedWork(const TimeTicks &delayed_run_time) {
+    ScheduleWork();
+    if (!delayed_run_time.is_null()) {
+      ScheduleDelayedWork(delayed_run_time);
+    }
+  }
+
 protected:
   MessagePump() = default;
 };

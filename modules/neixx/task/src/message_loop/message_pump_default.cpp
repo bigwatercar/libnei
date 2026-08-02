@@ -14,7 +14,7 @@ namespace nei {
 class MessagePumpDefault::Impl {
 public:
   Impl()
-      : wake_up_event_(WaitableEvent::ResetPolicy::kAutomatic, false) {
+      : wake_up_event_(WaitableEvent::ResetPolicy::kManual, false) {
   }
 
   int EnterRunLoopAndGetDepth(PlatformThread::PlatformThreadId current_thread_id) {
@@ -83,6 +83,24 @@ public:
     }
   }
 
+  // Atomically sets work_scheduled_ and updates the delayed deadline
+  // under a single lock acquisition.  Eliminates the race window between
+  // the pump's DrainPendingWakeups / GetDelayedRunTime and the callback's
+  // back-to-back ScheduleWork + ScheduleDelayedWork calls.
+  void ScheduleWorkAndDelayedWork(const TimeTicks &delayed_run_time) {
+    {
+      AutoLock lock(state_lock_);
+      work_scheduled_ = true;
+      if (!delayed_run_time.is_null()) {
+        if (!has_delayed_run_time_ || delayed_run_time < delayed_run_time_) {
+          delayed_run_time_ = delayed_run_time;
+          has_delayed_run_time_ = true;
+        }
+      }
+    }
+    wake_up_event_.Signal();
+  }
+
   void UpdateDelayedWorkFromDelegate(const Delegate::NextWorkInfo &next_work_info) {
     AutoLock lock(state_lock_);
     if (next_work_info.next_run_time == Delegate::NextWorkInfo::kNoScheduledRunTime) {
@@ -118,6 +136,10 @@ public:
     if (has_delayed_run_time_ && delayed_run_time_ <= now) {
       has_delayed_run_time_ = false;
     }
+  }
+
+  void ResetWakeUpEvent() {
+    wake_up_event_.Reset();
   }
 
   void Wait() {
@@ -176,8 +198,7 @@ void MessagePumpDefault::Run(Delegate *delegate) {
     }
 
     // Delegate can return both delayed-work execution result and the next
-    // delayed deadline. This allows pump-side wait calculations to reuse
-    // delegate-side scheduling knowledge and reduce extra clock queries.
+    // delayed deadline.
     Delegate::NextWorkInfo next_work_info;
     {
       TRACE_EVENT0("nei.message_pump", "MessagePumpDefault::DoDelayedWork");
@@ -200,51 +221,44 @@ void MessagePumpDefault::Run(Delegate *delegate) {
       break;
     }
 
-    // If another thread scheduled immediate work while callbacks were running,
-    // do not sleep.
+    // If another thread scheduled immediate work, do not sleep.
     if (impl_->ConsumeWorkScheduled()) {
       continue;
     }
 
-    // Before going to sleep, drain any stale wake-up signals that can be left
-    // behind by nested run-loop transitions.
-    impl_->DrainPendingWakeups();
-    if (impl_->ConsumeWorkScheduled()) {
-      continue;
-    }
-
+    // Manual-reset event: Reset() clears any stale signal so that only new
+    // work wakes us.  The re-check after Reset closes the race window — if a
+    // callback fires Signal() between Reset and Wait/TimedWait, the event
+    // stays signaled and Wait returns immediately.
     TimeTicks delayed_run_time;
-    if (!impl_->GetDelayedRunTime(&delayed_run_time)) {
-      // No delayed deadline exists. Sleep until explicit ScheduleWork/Quit.
+    const bool has_delayed = impl_->GetDelayedRunTime(&delayed_run_time);
+
+    if (!has_delayed) {
+      impl_->ResetWakeUpEvent();
+      if (impl_->ConsumeWorkScheduled()) {
+        continue;
+      }
       impl_->Wait();
       continue;
     }
 
     const TimeTicks now = !next_work_info.recent_now.is_null() ? next_work_info.recent_now : TimeTicks::Now();
     if (delayed_run_time <= now) {
-      // Deadline already reached; let next iteration call DoDelayedWork().
       impl_->ClearExpiredDelayedRunTime(now);
       continue;
     }
 
     TimeDelta wait_delta = delayed_run_time - now;
-    // Ceiling division to avoid busy-loop when wait_delta < 1ms.
-    // E.g., 500µs should wait 1ms, not 0ms.
     int64_t wait_ms = (wait_delta.InMicroseconds() + 999) / 1000;
     if (wait_ms < 0) {
       wait_ms = 0;
     }
 
-    // Run another non-blocking drain before timed wait to reduce stale signal
-    // carry-over into this wait interval.
-    impl_->DrainPendingWakeups();
+    impl_->ResetWakeUpEvent();
     if (impl_->ConsumeWorkScheduled()) {
       continue;
     }
 
-    // Wait until either:
-    // 1) ScheduleWork/Quit signals the event, or
-    // 2) The delayed deadline timeout elapses.
     const bool woke_by_signal = impl_->TimedWait(std::chrono::milliseconds(wait_ms));
     if (!woke_by_signal) {
       impl_->ClearExpiredDelayedRunTime(TimeTicks::Now());
@@ -263,10 +277,11 @@ void MessagePumpDefault::ScheduleWork() {
 }
 
 void MessagePumpDefault::ScheduleDelayedWork(const TimeTicks &delayed_run_time) {
-  // This API is called by task-queue owners when the queue head delayed task
-  // changes. The pump records the earliest known deadline and will wake earlier
-  // if the new deadline is sooner than the previous one.
   impl_->ScheduleDelayedWork(delayed_run_time);
+}
+
+void MessagePumpDefault::ScheduleWorkAndDelayedWork(const TimeTicks &delayed_run_time) {
+  impl_->ScheduleWorkAndDelayedWork(delayed_run_time);
 }
 
 } // namespace nei

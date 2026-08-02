@@ -29,6 +29,7 @@ public:
   void Quit() override;
   void ScheduleWork() override;
   void ScheduleDelayedWork(const TimeTicks &delayed_run_time) override;
+  void ScheduleWorkAndDelayedWork(const TimeTicks &delayed_run_time) override;
 
 private:
   class Impl;
