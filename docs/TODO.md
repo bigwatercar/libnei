@@ -95,16 +95,40 @@ full build + test validation of the TaskRunner hierarchy refactoring.
 
 | Test | Frequency | Root Cause |
 |------|-----------|------------|
-| `TlsSocketTest.DestructionDuringHandshake` | ~5% (Debug only) | TLS handshake cancellation race under debug allocator |
+| `TlsSocketTest.DestructionDuringHandshake` | ✅ Fixed `b0061e0` | Serialized Orphan() to IO sequence, transport destroyed on owning thread |
 | `HostResolverTest.ResolveDualStack` | Always (no DNS) | Requires functional DNS resolver |
 | `HostResolverTest.ResolveIPv4Only` | Always (no DNS) | Requires functional DNS resolver |
 
 ### Notes
 
 - DNS-dependent tests pass in CI environments with full network access.
-- Pipe / ChildProcess / TLS flaky tests are candidates for eventual
+- Pipe / ChildProcess flaky tests are candidates for eventual
   `EXPECT_DEATH`-style retry loops or event-based synchronization fixes.
 - Low priority — no crash, no data corruption, no production impact.
+
+---
+
+## OnceCallback SBO Move Fence — Root Cause Unresolved 🔧 2026-08-02
+
+**Symptom**: `ParallelTaskRunner` drops ~4-17 tasks per 1M (0.0004%-0.0017%),
+Windows MSVC only.  ASAN 0/50 reproductions; WSL GCC 0 failures.
+
+**Fix**: Added `std::atomic_thread_fence(acquire/release)` around
+`OnceCallback` move constructor/assignment `std::memcpy` of the 48-byte SBO
+storage (`callback.h`).  200/200 stress rounds pass after the fix.
+
+**Why it works is unclear**: the `OnceCallback` SBO payload is moved under
+`TaskQueue::lock_` protection and each copy lives on a per-worker stack —
+there should be no concurrent reader of the same storage.  The fence likely
+suppresses a compiler reordering or subtle UB in the closure pipeline
+(`BindOnce` lambda → `Task` struct move → queue → worker batch → `Run()`).
+
+**Next steps**:
+1. Replace `std::memcpy` with `std::copy_n` or element-wise copy, re-test to
+   isolate whether the UB is in the memcpy itself.
+2. Try WSL with `-fsanitize=thread` (TSan) under CPU stress to reproduce on
+   Linux.
+3. If TSan catches nothing, the issue may be MSVC-specific codegen bug.
 
 ---
 

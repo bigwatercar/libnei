@@ -406,6 +406,7 @@ private:
           if (tracker_) {
             tracker_->DidProcessTask(shutdown_behavior);
           }
+          internal::RecordParallelEmptyTaskSkipped();
           continue;
         }
 

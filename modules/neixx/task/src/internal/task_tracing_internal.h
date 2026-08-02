@@ -19,6 +19,10 @@ void RecordTaskExecutionStarted(const Task &task, TimeTicks batch_now);
 void RecordTaskExecutionCompleted();
 void RecordTaskCancelledBeforeRun();
 
+// Incremented when a parallel-queue task is dequeued but skipped because
+// its OnceClosure is empty (was already moved / double-dequeued).
+void RecordParallelEmptyTaskSkipped();
+
 } // namespace internal
 } // namespace nei
 

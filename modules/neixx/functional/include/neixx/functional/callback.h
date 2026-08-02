@@ -159,19 +159,23 @@ public:
 
   OnceCallback(OnceCallback &&other) noexcept
       : vtable_(other.vtable_) {
+    std::atomic_thread_fence(std::memory_order_acquire);
     std::memcpy(storage_, other.storage_, detail::ONCE_SBO_SIZE);
     other.vtable_ = {nullptr, nullptr};
     std::memset(other.storage_, 0, detail::ONCE_SBO_SIZE);
+    std::atomic_thread_fence(std::memory_order_release);
   }
 
   OnceCallback &operator=(OnceCallback &&other) noexcept {
     if (this != &other) {
       if (vtable_.destroy)
         vtable_.destroy(storage_);
+      std::atomic_thread_fence(std::memory_order_acquire);
       vtable_ = other.vtable_;
       std::memcpy(storage_, other.storage_, detail::ONCE_SBO_SIZE);
       other.vtable_ = {nullptr, nullptr};
       std::memset(other.storage_, 0, detail::ONCE_SBO_SIZE);
+      std::atomic_thread_fence(std::memory_order_release);
     }
     return *this;
   }

@@ -27,6 +27,24 @@ NEI_API void SetTaskTracingEnabled(bool enabled);
 NEI_API TaskTracingStats GetTaskTracingStatsForTesting();
 NEI_API void ResetTaskTracingStatsForTesting();
 
+// ---- Parallel-scheduler drop diagnostics ----
+// Incremented atomically by the parallel dispatch pipeline so benchmarks
+// can distinguish "PostTask rejected" from "scheduler accepted but never
+// ran" at a finer granularity.
+
+struct ParallelPipelineDiag {
+  std::uint64_t pushed = 0;                // PushImmediateTask (parallel queues)
+  std::uint64_t taken = 0;                 // TakeImmediateTasks  (parallel queues)
+  std::uint64_t willrun_disallowed = 0;    // WillRunTask -> kDisallowed
+  std::uint64_t willrun_saturated = 0;     // WillRunTask -> kAllowedSaturated
+  std::uint64_t willrun_not_saturated = 0; // WillRunTask -> kAllowedNotSaturated
+  std::uint64_t empty_task_skipped = 0;    // ProcessTaskBatch: !task.task skipped
+};
+
+NEI_API ParallelPipelineDiag GetParallelPipelineDiag();
+NEI_API void ResetParallelPipelineDiag();
+NEI_API void RecordParallelEmptyTaskSkipped();
+
 } // namespace internal
 } // namespace nei
 

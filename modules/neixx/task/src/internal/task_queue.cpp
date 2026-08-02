@@ -8,10 +8,22 @@
 #include <vector>
 
 #include <neixx/synchronization/lock.h>
+#include <neixx/task/task_tracing.h>
+#include <neixx/trace_event/trace_event.h>
 
 namespace nei {
 namespace internal {
 namespace {
+
+// ---- Parallel-drop diagnostic counters ----
+// Incremented atomically so they can be read from any thread without
+// holding any queue or shard locks.
+std::atomic<std::uint64_t> g_parallel_pushed{0};
+std::atomic<std::uint64_t> g_parallel_taken{0};
+std::atomic<std::uint64_t> g_parallel_willrun_disallowed{0};
+std::atomic<std::uint64_t> g_parallel_willrun_saturated{0};
+std::atomic<std::uint64_t> g_parallel_willrun_not_saturated{0};
+std::atomic<std::uint64_t> g_parallel_empty_task_skipped{0};
 
 using TaskMinHeap = std::priority_queue<Task, std::vector<Task>, std::greater<Task>>;
 
@@ -104,6 +116,10 @@ public:
       posted_callback_to_call();
     }
 
+    if (parallel_) {
+      g_parallel_pushed.fetch_add(1, std::memory_order_relaxed);
+    }
+
     return true;
   }
 
@@ -184,6 +200,10 @@ public:
       if (IsShutdownBlockingTask(tasks[count - 1])) {
         break;
       }
+    }
+    if (parallel_ && count > 0) {
+      g_parallel_taken.fetch_add(count, std::memory_order_relaxed);
+      TRACE_EVENT_INSTANT("nei.scheduling", "TakeImmediateTasksParallel");
     }
     return count;
   }
@@ -313,17 +333,22 @@ public:
     // Shut down?  Revert and disallow.
     if (shut_down_) {
       running_worker_count_.fetch_sub(1, std::memory_order_release);
+      g_parallel_willrun_disallowed.fetch_add(1, std::memory_order_relaxed);
+      TRACE_EVENT_INSTANT("nei.scheduling", "WillRunTaskShutdown");
       return TaskQueue::RunStatus::kDisallowed;
     }
 
     if (current >= TaskQueue::kMaxParallelWorkers) {
       // Last (or beyond-last) slot taken: saturated.
       // The caller must remove this queue from the ready heap.
+      g_parallel_willrun_saturated.fetch_add(1, std::memory_order_relaxed);
+      TRACE_EVENT_INSTANT("nei.scheduling", "WillRunTaskSaturated");
       return TaskQueue::RunStatus::kAllowedSaturated;
     }
 
     // Slot reserved with headroom: not saturated.
     // The queue should stay in the ready heap.
+    g_parallel_willrun_not_saturated.fetch_add(1, std::memory_order_relaxed);
     return TaskQueue::RunStatus::kAllowedNotSaturated;
   }
 
@@ -353,7 +378,11 @@ public:
       // Re-enqueue if work remains so idle workers can pick it up.
       // Use HasImmediateWork() (acquires lock_) rather than
       // HasImmediateTasksLocked() because we do not hold lock_ here.
-      return HasImmediateWork();
+      const bool has_work = HasImmediateWork();
+      if (has_work) {
+        TRACE_EVENT_INSTANT("nei.scheduling", "DidProcessTaskReenqueue");
+      }
+      return has_work;
     }
 
     return false;
@@ -529,6 +558,30 @@ bool TaskQueue::DidProcessTask() {
 
 size_t TaskQueue::GetRemainingParallelism() const {
   return impl_->GetRemainingParallelism();
+}
+
+// ---- Public parallel-pipeline diagnostic wrappers ----
+
+ParallelPipelineDiag GetParallelPipelineDiag() {
+  return {g_parallel_pushed.load(std::memory_order_relaxed),
+          g_parallel_taken.load(std::memory_order_relaxed),
+          g_parallel_willrun_disallowed.load(std::memory_order_relaxed),
+          g_parallel_willrun_saturated.load(std::memory_order_relaxed),
+          g_parallel_willrun_not_saturated.load(std::memory_order_relaxed),
+          g_parallel_empty_task_skipped.load(std::memory_order_relaxed)};
+}
+
+void ResetParallelPipelineDiag() {
+  g_parallel_pushed.store(0, std::memory_order_relaxed);
+  g_parallel_taken.store(0, std::memory_order_relaxed);
+  g_parallel_willrun_disallowed.store(0, std::memory_order_relaxed);
+  g_parallel_willrun_saturated.store(0, std::memory_order_relaxed);
+  g_parallel_willrun_not_saturated.store(0, std::memory_order_relaxed);
+  g_parallel_empty_task_skipped.store(0, std::memory_order_relaxed);
+}
+
+void RecordParallelEmptyTaskSkipped() {
+  g_parallel_empty_task_skipped.fetch_add(1, std::memory_order_relaxed);
 }
 
 } // namespace internal

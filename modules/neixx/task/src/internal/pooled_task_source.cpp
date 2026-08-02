@@ -6,6 +6,7 @@
 
 #include "pooled_task_runner_utils.h"
 #include "task_queue.h"
+#include <neixx/trace_event/trace_event.h>
 
 namespace nei {
 namespace internal {
@@ -113,6 +114,7 @@ TaskQueue *PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout, bool &time
           case TaskQueue::RunStatus::kDisallowed:
             // Shutdown or max-concurrency reached.  Discard this
             // heap entry and scan for the next ready queue.
+            TRACE_EVENT_INSTANT("nei.scheduling", "ParallelWillRunDisallowed");
             continue;
 
           case TaskQueue::RunStatus::kAllowedNotSaturated: {
@@ -127,6 +129,7 @@ TaskQueue *PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout, bool &time
               state.queued = true;
               NotifyWorkAvailable();
             }
+            TRACE_EVENT_INSTANT("nei.scheduling", "ParallelWillRunNotSaturated");
             return entry.queue;
           }
 
@@ -134,6 +137,7 @@ TaskQueue *PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout, bool &time
             // Last slot reserved.  Do NOT re-push; the queue is now
             // saturated.  DidProcessTask() will re-enqueue it when
             // a slot frees up.
+            TRACE_EVENT_INSTANT("nei.scheduling", "ParallelWillRunSaturated");
             return entry.queue;
           }
         }
@@ -228,6 +232,11 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue *queue) {
       const bool has_work = queue->HasImmediateWork();
       if (has_work && !state.queued) {
         enqueued = EnqueueLocked(queue, shard_index);
+        TRACE_EVENT_INSTANT("nei.scheduling", "ParallelReEnqueue");
+      } else if (has_work && state.queued) {
+        TRACE_EVENT_INSTANT("nei.scheduling", "ParallelReEnqueueSkippedAlreadyQueued");
+      } else if (!has_work) {
+        TRACE_EVENT_INSTANT("nei.scheduling", "ParallelReEnqueueSkippedNoWork");
       }
       if (has_work) {
         NotifyWorkAvailable();
