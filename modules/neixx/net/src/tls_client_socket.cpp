@@ -149,9 +149,29 @@ public:
   }
 
   void Orphan() {
+    // TLS state, BIO queues, callbacks, and transport_ belong exclusively to
+    // runner_.  The public shell may be destroyed from another thread, so
+    // retain Impl and run the complete orphan transition on its IO sequence.
+    if (runner_ && !runner_->RunsTasksInCurrentSequence()) {
+      runner_->PostTask(FROM_HERE, [self = scoped_refptr<Impl>(this)]() { self->OrphanOnSequence(); });
+      return;
+    }
+    OrphanOnSequence();
+  }
+
+  void OrphanOnSequence() {
+    DCHECK(!runner_ || runner_->RunsTasksInCurrentSequence());
+    if (state_ == State::Closed)
+      return;
     state_ = State::Closed;
-    transport_->Close();
     ClearPending();
+
+    // Destroy the TCP shell on its owning sequence. Its destructor enters
+    // TCPClientSocket::Impl::Orphan(), which marks in-flight IOCP callbacks
+    // orphaned and suppresses late connect/read/write dispatch. Close() is
+    // insufficient here: it sets closed_ while a previously queued write can
+    // still reach TCPClientSocket::WriteAsync and trip its DCHECK.
+    transport_.reset();
   }
 
   // Called by Close() and by FlushBio's completion callback.
@@ -195,6 +215,8 @@ private:
 
   // ----- Handshake -----
   void OnTcpConnect(bool ok) {
+    if (state_ == State::Closed || state_ == State::Closing)
+      return;
     if (!ok) {
       NotifyConnect(false);
       return;

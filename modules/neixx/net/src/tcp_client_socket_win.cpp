@@ -462,6 +462,13 @@ void TCPClientSocket::Impl::ReadAsync(scoped_refptr<IOBuffer> buf,
 void TCPClientSocket::Impl::WriteAsync(scoped_refptr<IOBuffer> buf,
                                        std::size_t buf_len,
                                        AsyncOutputStream::IOWriteCallback callback) {
+  // Orphan() may run after a cross-thread caller has queued this operation
+  // but before its trampoline executes on io_runner_.  Orphaned sockets drop
+  // late work and callbacks to protect their owning high-level state machine.
+  if (orphaned_) {
+    return;
+  }
+
   // If called from a thread other than the designated IO thread,
   // trampoline the call there (same reasoning as ReadAsync).
   if (!io_runner_->BelongsToCurrentThread()) {
@@ -480,8 +487,10 @@ void TCPClientSocket::Impl::WriteAsync(scoped_refptr<IOBuffer> buf,
 
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   EnsurePumpRegistered();
-  DCHECK_MSG(!closed_ && socket_ != INVALID_SOCKET, "WriteAsync: socket closed or invalid");
 
+  // Close may overtake a queued cross-thread WriteAsync trampoline.  The
+  // established failure path below reports that operation asynchronously;
+  // asserting first turns this valid cancellation race into a Debug crash.
   if (closed_ || socket_ == INVALID_SOCKET) {
     if (callback) {
       DCHECK_MSG(io_runner_, "WriteAsync on closed socket without io_runner_");
