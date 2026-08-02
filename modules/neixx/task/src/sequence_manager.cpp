@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <nei/debug/check.h>
+#include <neixx/memory/weak_ptr.h>
 #include <neixx/synchronization/lock.h>
 #include <neixx/task/message_loop/message_pump_default.h>
 #include <neixx/task/task_tracing.h>
@@ -22,37 +23,6 @@ namespace nei {
 namespace {
 
 // TLS slot for ImmediateWorkQueue optimisation (Phase 1).
-// Non-null → currently inside SequenceManager::DoWork().
-ThreadLocalStorage::Slot &GetDoingWorkSlot() {
-  static ThreadLocalStorage::Slot slot(nullptr);
-  return slot;
-}
-
-bool IsDoingWork() {
-  return GetDoingWorkSlot().Get() != nullptr;
-}
-
-void SetDoingWork(bool value) {
-  GetDoingWorkSlot().Set(value ? reinterpret_cast<void *>(1) : nullptr);
-}
-
-// RAII guard: sets the "doing work" flag on construction, clears on
-// destruction.  Ensures the flag is correctly reset on ALL exit paths
-// (including early returns from the single-queue fast path).
-class ScopedDoingWork {
-public:
-  ScopedDoingWork() {
-    SetDoingWork(true);
-  }
-
-  ~ScopedDoingWork() {
-    SetDoingWork(false);
-  }
-
-  ScopedDoingWork(const ScopedDoingWork &) = delete;
-  ScopedDoingWork &operator=(const ScopedDoingWork &) = delete;
-};
-
 // Larger batch reduces message-pump round trips and improves throughput for
 // task-heavy single-thread runners while preserving bounded fairness.
 constexpr std::size_t kMaxTasksPerDoWork = 64;
@@ -122,7 +92,8 @@ class SequenceManager::Impl {
 public:
   explicit Impl(SequenceManager *owner, std::unique_ptr<MessagePump> pump)
       : owner_(owner)
-      , pump_(std::move(pump)) {
+      , pump_(std::move(pump))
+      , weak_impl_factory_(this) {
     if (!pump_) {
       pump_ = std::make_unique<MessagePumpDefault>();
     }
@@ -169,32 +140,32 @@ public:
     std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(traits);
     internal::TaskQueue *raw_queue = queue.get();
     WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
-    queue->SetOnTaskPostedCallback([this, weak_queue]() {
-      internal::TaskQueue *queue = weak_queue.get();
-      if (queue != nullptr && queue->HasImmediateWork()) {
-        // Only mark as ready for immediate dispatch.  Delayed tasks are
-        // promoted by DoDelayedWork → PromoteReadyDelayedTasks, which
-        // will call SetQueueHasWork when the task becomes runnable.
-        selector_.SetQueueHasWork(queue, true);
-      }
-
-      // ImmediateWorkQueue optimisation: when a task posts another task
-      // during DoWork(), skip the pump wake-up — the current DoWork batch
-      // will naturally pick up the newly-posted task on its next iteration.
-      // This avoids an unnecessary eventfd write / IOCP post per same-sequence
-      // continuation, reducing PostTask fast-path overhead.
-      if (!IsDoingWork()) {
-        pump_->ScheduleWork();
-      }
-
-      // If delayed head moved earlier, wake pump's delayed wait path too.
-      if (queue == nullptr) {
+    queue->SetOnTaskPostedCallback([this, weak_self = weak_impl_factory_.GetWeakPtr(), weak_queue]() {
+      // Lifetime: once weak_self.get() succeeds, `this` is guaranteed valid
+      // because weak_impl_factory_ is the *last* member of Impl (destroyed
+      // first in the reverse construction order).  No other thread can be
+      // mid-destruction while we hold a live WeakPtr.
+      if (!weak_self.get()) {
         return;
       }
-      const TimeTicks next_delayed = queue->PeekNextDelayedRunTime();
-      if (!next_delayed.is_null()) {
-        pump_->ScheduleDelayedWork(next_delayed);
+
+      internal::TaskQueue *queue = weak_queue.get();
+      if (queue != nullptr && queue->HasImmediateWork()) {
+        // Defer the selector update: set a flag that DoWork will flush
+        // under lock_ at the start of its next invocation.  This avoids
+        // acquiring lock_ on the hot PostTask path while still preventing
+        // the lost-wakeup race (the flag is atomic; the flush inside DoWork
+        // is serialized with SetQueueHasWork(false) by the same lock_).
+        pending_work_notification_.store(true, std::memory_order_release);
       }
+
+      // Wake the pump so DoWork / DoDelayedWork pick up the newly-posted
+      // task.  ScheduleWorkAndDelayedWork atomically updates both the
+      // work-scheduled flag and the delayed deadline under the pump's
+      // internal lock, eliminating the race window between the pump's
+      // DrainPendingWakeups / GetDelayedRunTime and the callback's
+      // back-to-back ScheduleWork + ScheduleDelayedWork calls.
+      pump_->ScheduleWorkAndDelayedWork(queue != nullptr ? queue->PeekNextDelayedRunTime() : TimeTicks());
     });
 
     queues_.push_back(std::move(queue));
@@ -214,24 +185,20 @@ public:
     std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(TaskTraits());
     internal::TaskQueue *raw_queue = queue.get();
     WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
-    queue->SetOnTaskPostedCallback([this, weak_queue]() {
-      internal::TaskQueue *queue = weak_queue.get();
-      if (queue != nullptr && queue->HasImmediateWork()) {
-        selector_.SetQueueHasWork(queue, true);
-      }
-
-      // ImmediateWorkQueue optimisation (see CreateTaskRunnerLocked).
-      if (!IsDoingWork()) {
-        pump_->ScheduleWork();
-      }
-
-      if (queue == nullptr) {
+    queue->SetOnTaskPostedCallback([this, weak_self = weak_impl_factory_.GetWeakPtr(), weak_queue]() {
+      // Lifetime: see CreateTaskRunnerLocked for rationale.
+      if (!weak_self.get()) {
         return;
       }
-      const TimeTicks next_delayed = queue->PeekNextDelayedRunTime();
-      if (!next_delayed.is_null()) {
-        pump_->ScheduleDelayedWork(next_delayed);
+
+      internal::TaskQueue *queue = weak_queue.get();
+      if (queue != nullptr && queue->HasImmediateWork()) {
+        // Deferred flush via atomic flag — see CreateTaskRunnerLocked.
+        pending_work_notification_.store(true, std::memory_order_release);
       }
+
+      // Wake the pump (see CreateTaskRunnerLocked for rationale).
+      pump_->ScheduleWorkAndDelayedWork(queue != nullptr ? queue->PeekNextDelayedRunTime() : TimeTicks());
     });
 
     queues_.push_back(std::move(queue));
@@ -309,15 +276,17 @@ public:
   }
 
   bool DoWork() {
-    // ImmediateWorkQueue: set the TLS flag so PostTask callbacks within
-    // this DoWork batch skip pump_->ScheduleWork().  RAII guard ensures
-    // the flag is cleared on ALL exit paths (early return, exception, etc.).
-    ScopedDoingWork scoped_doing_work;
-
+    // ImmediateWorkQueue: drain immediate tasks.  The callback always calls
+    // pump_->ScheduleWork() to ensure the pump never sleeps through a task.
     bool ran_any = false;
     const bool tracing_enabled = internal::IsTaskTracingEnabled();
 
-    // ---- Single-queue fast path (unchanged) ----
+    // Flush any cross-thread work notifications that arrived since the last
+    // DoWork invocation.  Producers set pending_work_notification_ atomically
+    // instead of acquiring lock_ directly; we resolve them here under lock_,
+    // where SetQueueHasWork(true) is serialized with SetQueueHasWork(false).
+    // Merged into the same lock scope as the fast-path eligibility check to
+    // avoid a redundant lock/unlock pair.
     auto single_queue_fast_path_eligible_locked = [this]() -> bool {
       if (!g_single_queue_fast_path_enabled.load(std::memory_order_relaxed)) {
         return false;
@@ -331,6 +300,7 @@ public:
     internal::TaskQueue *fast_path_queue = nullptr;
     {
       AutoLock lock(lock_);
+      FlushPendingWorkNotificationLocked();
       if (single_queue_fast_path_eligible_locked()) {
         single_queue_fast_path_enabled = true;
         // SelectNextQueue() returns the sole queue (may be nullptr if no work).
@@ -537,10 +507,41 @@ private:
   // 4:2:1 quota enforcement via a packed schedule counter.
   TaskQueueSelector selector_;
 
+  // Deferred work-bit notification: cross-thread producers set this flag
+  // instead of acquiring lock_ and calling SetQueueHasWork directly.
+  // DoWork flushes it under lock_ at the beginning of each invocation,
+  // batching multiple producer notifications into a single lock-protected
+  // scan.  This eliminates lock_ acquisition from the hot PostTask path.
+  std::atomic<bool> pending_work_notification_{false};
+
+  // Flush deferred work notifications: scan all queues and set work bits
+  // for any that have immediate tasks.  Must be called under lock_.
+  void FlushPendingWorkNotificationLocked() {
+    if (!pending_work_notification_.exchange(false, std::memory_order_acquire)) {
+      return;
+    }
+    for (const auto &q : queues_) {
+      if (q->HasImmediateWork()) {
+        selector_.SetQueueHasWork(q.get(), true);
+      }
+    }
+  }
+
   bool is_shutdown_ = false;
   bool in_shutdown_processing_ = false;
   scoped_refptr<SingleThreadTaskRunner> default_task_runner_;
+
+  // MUST be the last member — WeakPtrFactory must be destroyed first so
+  // that all outstanding WeakPtrs are invalidated before other members
+  // (selector_, pump_, etc.) are torn down.  OnTaskPostedCallback uses
+  // WeakPtr<Impl> instead of raw `this` to safely detect destruction.
+  WeakPtrFactory<Impl> weak_impl_factory_;
 };
+
+// Allow cross-thread WeakPtr<Impl> access — OnTaskPostedCallback may fire
+// from any thread that calls PostTask.
+template <>
+struct WeakPtrThreadSafe<SequenceManager::Impl> : std::true_type {};
 
 SequenceManager::SequenceManager(std::unique_ptr<MessagePump> pump)
     : impl_(std::make_unique<Impl>(this, std::move(pump))) {
