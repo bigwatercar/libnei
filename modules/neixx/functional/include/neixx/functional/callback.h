@@ -4,6 +4,7 @@
 #define NEI_TASK_CALLBACK_H
 
 #include <atomic>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -15,6 +16,22 @@
 #include <neixx/functional/callback_internal.h>
 
 namespace nei {
+
+// Global counter incremented by OnceCallback::Run() for diagnostics.
+// Defined in callback.cpp so it has a single address across DLL boundaries.
+namespace detail {
+extern NEI_API std::atomic<std::uint64_t> g_once_callback_run_count;
+} // namespace detail
+
+/// Returns the total number of OnceCallback::Run() calls across all types.
+inline std::uint64_t GetOnceCallbackRunCount() {
+  return detail::g_once_callback_run_count.load(std::memory_order_relaxed);
+}
+
+/// Resets the Run() counter.
+inline void ResetOnceCallbackRunCount() {
+  detail::g_once_callback_run_count.store(0, std::memory_order_relaxed);
+}
 
 template <typename Signature>
 class OnceCallback;
@@ -31,6 +48,10 @@ template <typename R, typename... Args>
 struct OnceCallbackVTable {
   R (*invoke_and_destroy)(char *storage, Args... args);
   void (*destroy)(char *storage);
+  // Move the SBO-functor from src to dst using its real C++ move constructor,
+  // then destroy the source object.  Heap-backed callbacks leave this null
+  // (the move is just copying the 8-byte heap pointer).
+  void (*move_construct_and_destroy)(char *dst_storage, char *src_storage);
 };
 
 template <typename R, typename F, typename... Args>
@@ -51,6 +72,15 @@ void InitOnceCallbackFromFunctor(OnceCallback<R(Args...)> &cb, F &&functor) {
       }
     };
     cb.vtable_.destroy = [](char *storage) { std::destroy_at(reinterpret_cast<Fn *>(storage)); };
+    // Real C++ move: placement-new + move-constructor instead of blind memcpy.
+    // Fixes MSVC SSO self-referential pointer corruption when the functor
+    // captures std::string or similar types whose internal pointers alias
+    // their own storage location.
+    cb.vtable_.move_construct_and_destroy = [](char *dst, char *src) {
+      auto *src_fn = reinterpret_cast<Fn *>(src);
+      new (dst) Fn(std::move(*src_fn));
+      std::destroy_at(src_fn);
+    };
     new (cb.storage_) Fn(std::forward<F>(functor));
   } else {
     struct HeapLayout {
@@ -77,6 +107,7 @@ void InitOnceCallbackFromFunctor(OnceCallback<R(Args...)> &cb, F &&functor) {
       std::destroy_at(&ptr->fn);
       callback_free(ptr, alignof(HeapLayout));
     };
+    h->vt.move_construct_and_destroy = nullptr;
     new (&h->fn) Fn(std::forward<F>(functor));
     *reinterpret_cast<HeapLayout **>(cb.storage_) = h;
     cb.vtable_ = h->vt;
@@ -148,7 +179,7 @@ template <typename R, typename... Args>
 class OnceCallback<R(Args...)> : public CallbackBase {
 public:
   OnceCallback() noexcept
-      : vtable_{nullptr, nullptr} {
+      : vtable_{nullptr, nullptr, nullptr} {
     std::memset(storage_, 0, detail::ONCE_SBO_SIZE);
   }
 
@@ -159,23 +190,25 @@ public:
 
   OnceCallback(OnceCallback &&other) noexcept
       : vtable_(other.vtable_) {
-    std::atomic_thread_fence(std::memory_order_acquire);
-    std::memcpy(storage_, other.storage_, detail::ONCE_SBO_SIZE);
-    other.vtable_ = {nullptr, nullptr};
-    std::memset(other.storage_, 0, detail::ONCE_SBO_SIZE);
-    std::atomic_thread_fence(std::memory_order_release);
+    if (vtable_.move_construct_and_destroy) {
+      vtable_.move_construct_and_destroy(storage_, other.storage_);
+    } else if (vtable_.destroy) {
+      std::memcpy(storage_, other.storage_, sizeof(void *));
+    }
+    other.vtable_ = {nullptr, nullptr, nullptr};
   }
 
   OnceCallback &operator=(OnceCallback &&other) noexcept {
     if (this != &other) {
       if (vtable_.destroy)
         vtable_.destroy(storage_);
-      std::atomic_thread_fence(std::memory_order_acquire);
       vtable_ = other.vtable_;
-      std::memcpy(storage_, other.storage_, detail::ONCE_SBO_SIZE);
-      other.vtable_ = {nullptr, nullptr};
-      std::memset(other.storage_, 0, detail::ONCE_SBO_SIZE);
-      std::atomic_thread_fence(std::memory_order_release);
+      if (vtable_.move_construct_and_destroy) {
+        vtable_.move_construct_and_destroy(storage_, other.storage_);
+      } else if (vtable_.destroy) {
+        std::memcpy(storage_, other.storage_, sizeof(void *));
+      }
+      other.vtable_ = {nullptr, nullptr, nullptr};
     }
     return *this;
   }
@@ -193,23 +226,31 @@ public:
 
   R Run(Args... args) && {
     if (vtable_.invoke_and_destroy) {
+      // Detach ownership BEFORE invoking the functor.  If the functor
+      // throws, the destructor must not double-destroy — the vtable
+      // is already cleared at that point.
+      auto vt = vtable_;
+      vtable_ = {nullptr, nullptr, nullptr};
+      detail::g_once_callback_run_count.fetch_add(1, std::memory_order_relaxed);
       if constexpr (std::is_void_v<R>) {
-        vtable_.invoke_and_destroy(storage_, std::forward<Args>(args)...);
+        vt.invoke_and_destroy(storage_, std::forward<Args>(args)...);
       } else {
-        R result = vtable_.invoke_and_destroy(storage_, std::forward<Args>(args)...);
-        vtable_ = {nullptr, nullptr};
+        R result = vt.invoke_and_destroy(storage_, std::forward<Args>(args)...);
         std::memset(storage_, 0, detail::ONCE_SBO_SIZE);
         return result;
       }
-      vtable_ = {nullptr, nullptr};
       std::memset(storage_, 0, detail::ONCE_SBO_SIZE);
     }
     if constexpr (!std::is_void_v<R>)
       return R{};
   }
 
-  template <typename F, typename = std::enable_if_t<!std::is_same_v<std::decay_t<F>, OnceCallback>>>
+  template <typename F,
+            typename = std::enable_if_t<!std::is_same_v<std::decay_t<F>, OnceCallback>
+                                        && std::is_invocable_r_v<R, std::decay_t<F> &, Args...>>>
   /*implicit*/ OnceCallback(F &&functor) {
+    vtable_ = {nullptr, nullptr, nullptr};
+    std::memset(storage_, 0, detail::ONCE_SBO_SIZE);
     detail::InitOnceCallbackFromFunctor<R>(*this, std::forward<F>(functor));
   }
 
@@ -308,8 +349,11 @@ public:
 
   template <typename F,
             typename = std::enable_if_t<!std::is_same_v<std::decay_t<F>, RepeatingCallback>
-                                        && !std::is_null_pointer_v<std::decay_t<F>>>>
+                                        && !std::is_null_pointer_v<std::decay_t<F>>
+                                        && std::is_invocable_r_v<R, std::decay_t<F> &, Args...>>>
   /*implicit*/ RepeatingCallback(F &&functor) {
+    vtable_ = {nullptr, nullptr, nullptr};
+    std::memset(storage_, 0, detail::REPEATING_SBO_SIZE);
     detail::InitRepeatingCallbackFromFunctor<R>(*this, std::forward<F>(functor));
   }
 

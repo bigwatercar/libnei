@@ -323,17 +323,21 @@ int main(int argc, char *argv[]) {
   g_sum_sink.store(0, std::memory_order_relaxed);
   g_executed_task_count.store(0, std::memory_order_relaxed);
   g_post_succeeded.store(0, std::memory_order_relaxed);
+  nei::ResetOnceCallbackRunCount();
   BenchmarkResult result_parallel = RunAddBenchmark(*parallel_runner, task_count);
   all_results.push_back({"Parallel PostTask (single-thread post)", result_parallel});
   auto diag_parallel_single = nei::internal::GetParallelPipelineDiag();
+  auto run_count_single = nei::GetOnceCallbackRunCount();
 
   nei::internal::ResetParallelPipelineDiag();
   g_sum_sink.store(0, std::memory_order_relaxed);
   g_executed_task_count.store(0, std::memory_order_relaxed);
   g_post_succeeded.store(0, std::memory_order_relaxed);
+  nei::ResetOnceCallbackRunCount();
   BenchmarkResult result_parallel_mt = RunMultiThreadPostBenchmark(*parallel_runner, task_count);
   all_results.push_back({"Parallel Multi-threaded PostTask (4 threads)", result_parallel_mt});
   auto diag_parallel_mt = nei::internal::GetParallelPipelineDiag();
+  auto run_count_mt = nei::GetOnceCallbackRunCount();
 
   // nei::TraceLog::GetInstance().SetEnabled(false);
 
@@ -427,16 +431,19 @@ int main(int argc, char *argv[]) {
       // Print per-scenario parallel-pipeline diagnostic counters.
       // Look up the diag snapshot that was captured right after this scenario.
       nei::internal::ParallelPipelineDiag diag;
+      std::uint64_t cb_run_count = 0;
       if (scenario.name.find("(single-thread post)") != std::string::npos) {
         diag = diag_parallel_single;
+        cb_run_count = run_count_single;
       } else if (scenario.name.find("(4 threads)") != std::string::npos) {
         diag = diag_parallel_mt;
+        cb_run_count = run_count_mt;
       }
       std::cout << '\n'
                 << "  [ParallelDiag] pushed=" << diag.pushed << " taken=" << diag.taken
                 << " willrun_disallowed=" << diag.willrun_disallowed << " willrun_saturated=" << diag.willrun_saturated
                 << " willrun_not_saturated=" << diag.willrun_not_saturated
-                << " empty_skipped=" << diag.empty_task_skipped
+                << " empty_skipped=" << diag.empty_task_skipped << " once_cb_run=" << cb_run_count
                 << " (push-take gap=" << (diag.pushed > diag.taken ? diag.pushed - diag.taken : 0) << ")";
     }
     std::cout << '\n' << '\n';
