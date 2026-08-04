@@ -132,8 +132,10 @@ TEST(TaskCallbackTest, RepeatingCallbackSupportsReferenceBinding) {
 
 TEST(TaskCallbackTest, RepeatingCallbackCanHoldMoveOnlyState) {
   int sum = 0;
-  nei::RepeatingCallback<void()> cb = nei::BindRepeating(
-      [](std::unique_ptr<int> &value, int &sum_ref) { sum_ref += *value; }, std::make_unique<int>(7), std::ref(sum));
+  nei::RepeatingCallback<void()> cb =
+      nei::BindRepeating([](const std::unique_ptr<int> &value, int &sum_ref) { sum_ref += *value; },
+                         std::make_unique<int>(7),
+                         std::ref(sum));
 
   cb.Run();
   cb.Run();

@@ -245,7 +245,7 @@ TEST_F(FilePathWatcherTest, WatchFailsWithNullCallback) {
   WaitableEvent done(WaitableEvent::ResetPolicy::kManual);
 
   io_runner()->PostTask(FROM_HERE, [&]() {
-    bool ok = watcher->Watch(temp_dir_, false, nullptr);
+    bool ok = watcher->Watch(temp_dir_, false, nei::FilePathWatcher::Callback());
     EXPECT_FALSE(ok);
     done.Signal();
   });
