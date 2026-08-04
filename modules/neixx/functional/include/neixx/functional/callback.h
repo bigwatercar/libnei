@@ -17,20 +17,34 @@
 
 namespace nei {
 
-// Global counter incremented by OnceCallback::Run() for diagnostics.
-// Defined in callback.cpp so it has a single address across DLL boundaries.
 namespace detail {
 extern NEI_API std::atomic<std::uint64_t> g_once_callback_run_count;
+extern NEI_API std::atomic<std::uint64_t> g_once_callback_sbo_count;
+extern NEI_API std::atomic<std::uint64_t> g_once_callback_heap_count;
 } // namespace detail
 
-/// Returns the total number of OnceCallback::Run() calls across all types.
 inline std::uint64_t GetOnceCallbackRunCount() {
   return detail::g_once_callback_run_count.load(std::memory_order_relaxed);
 }
 
-/// Resets the Run() counter.
 inline void ResetOnceCallbackRunCount() {
   detail::g_once_callback_run_count.store(0, std::memory_order_relaxed);
+}
+
+inline std::uint64_t GetOnceCallbackSboCount() {
+  return detail::g_once_callback_sbo_count.load(std::memory_order_relaxed);
+}
+
+inline void ResetOnceCallbackSboCount() {
+  detail::g_once_callback_sbo_count.store(0, std::memory_order_relaxed);
+}
+
+inline std::uint64_t GetOnceCallbackHeapCount() {
+  return detail::g_once_callback_heap_count.load(std::memory_order_relaxed);
+}
+
+inline void ResetOnceCallbackHeapCount() {
+  detail::g_once_callback_heap_count.store(0, std::memory_order_relaxed);
 }
 
 template <typename Signature>
@@ -48,10 +62,13 @@ template <typename R, typename... Args>
 struct OnceCallbackVTable {
   R (*invoke_and_destroy)(char *storage, Args... args);
   void (*destroy)(char *storage);
-  // Move the SBO-functor from src to dst using its real C++ move constructor,
-  // then destroy the source object.  Heap-backed callbacks leave this null
-  // (the move is just copying the 8-byte heap pointer).
-  void (*move_construct_and_destroy)(char *dst_storage, char *src_storage);
+  /// Move the SBO-functor from src to dst using placement-new + move-constructor,
+  /// then destroy the source.  Heap-backed callbacks leave this null (the move
+  /// is just copying the 8-byte heap pointer).
+  ///
+  /// Marked noexcept to guarantee OnceCallback move operations never throw —
+  /// essential for exception-safe task posting and container reallocation.
+  void (*move_construct_and_destroy)(char *dst_storage, char *src_storage) noexcept;
 };
 
 template <typename R, typename F, typename... Args>
@@ -59,29 +76,44 @@ void InitOnceCallbackFromFunctor(OnceCallback<R(Args...)> &cb, F &&functor) {
   using Fn = std::decay_t<F>;
   using VTable = OnceCallbackVTable<R, Args...>;
 
-  if constexpr (is_sbo_eligible_v<Fn, ONCE_SBO_SIZE, ONCE_SBO_ALIGN>) {
+  static_assert(std::is_move_constructible_v<Fn>, "OnceCallback functor must be move constructible");
+  static_assert(std::is_destructible_v<Fn>, "OnceCallback functor must be destructible");
+
+  // once_sbo_eligible_v is stricter than is_sbo_eligible_v: it additionally
+  // requires nothrow move-constructibility.  A throwing move constructor is
+  // forced to the heap path so a failed move cannot leave the SBO storage in
+  // an inconsistent state.
+  if constexpr (once_sbo_eligible_v<Fn, ONCE_SBO_SIZE, ONCE_SBO_ALIGN>) {
     cb.vtable_.invoke_and_destroy = [](char *storage, Args... args) -> R {
-      auto *fn = reinterpret_cast<Fn *>(storage);
+      auto *fn = std::launder(reinterpret_cast<Fn *>(storage));
       if constexpr (std::is_void_v<R>) {
-        std::invoke(std::move(*fn), std::forward<Args>(args)...);
+        // Drop std::move: the "one-shot" semantic comes from OnceCallback
+        // ownership (vtable detached before invoke), not from forcing an
+        // rvalue invoke on the callable.  A moved-from lambda may have
+        // its captures in an unspecified state, which matters when the
+        // callable is invoked through multiple layers of BindOnce wrappers.
+        std::invoke(*fn, std::forward<Args>(args)...);
         std::destroy_at(fn);
       } else {
-        R r = std::invoke(std::move(*fn), std::forward<Args>(args)...);
+        R r = std::invoke(*fn, std::forward<Args>(args)...);
         std::destroy_at(fn);
         return r;
       }
     };
-    cb.vtable_.destroy = [](char *storage) { std::destroy_at(reinterpret_cast<Fn *>(storage)); };
+    cb.vtable_.destroy = [](char *storage) { std::destroy_at(std::launder(reinterpret_cast<Fn *>(storage))); };
     // Real C++ move: placement-new + move-constructor instead of blind memcpy.
     // Fixes MSVC SSO self-referential pointer corruption when the functor
     // captures std::string or similar types whose internal pointers alias
     // their own storage location.
-    cb.vtable_.move_construct_and_destroy = [](char *dst, char *src) {
-      auto *src_fn = reinterpret_cast<Fn *>(src);
+    cb.vtable_.move_construct_and_destroy = [](char *dst, char *src) noexcept {
+      auto *src_fn = std::launder(reinterpret_cast<Fn *>(src));
       new (dst) Fn(std::move(*src_fn));
       std::destroy_at(src_fn);
     };
     new (cb.storage_) Fn(std::forward<F>(functor));
+#ifndef NDEBUG
+    g_once_callback_sbo_count.fetch_add(1, std::memory_order_relaxed);
+#endif
   } else {
     struct HeapLayout {
       VTable vt;
@@ -111,6 +143,9 @@ void InitOnceCallbackFromFunctor(OnceCallback<R(Args...)> &cb, F &&functor) {
     new (&h->fn) Fn(std::forward<F>(functor));
     *reinterpret_cast<HeapLayout **>(cb.storage_) = h;
     cb.vtable_ = h->vt;
+#ifndef NDEBUG
+    g_once_callback_heap_count.fetch_add(1, std::memory_order_relaxed);
+#endif
   }
 }
 
@@ -196,12 +231,20 @@ public:
       std::memcpy(storage_, other.storage_, sizeof(void *));
     }
     other.vtable_ = {nullptr, nullptr, nullptr};
+#ifndef NDEBUG
+    // Poison source storage to catch use-after-move bugs.
+    std::memset(other.storage_, 0xDD, detail::ONCE_SBO_SIZE);
+#endif
   }
 
   OnceCallback &operator=(OnceCallback &&other) noexcept {
     if (this != &other) {
-      if (vtable_.destroy)
+      if (vtable_.destroy) {
         vtable_.destroy(storage_);
+#ifndef NDEBUG
+        std::memset(storage_, 0xDD, detail::ONCE_SBO_SIZE);
+#endif
+      }
       vtable_ = other.vtable_;
       if (vtable_.move_construct_and_destroy) {
         vtable_.move_construct_and_destroy(storage_, other.storage_);
@@ -209,6 +252,9 @@ public:
         std::memcpy(storage_, other.storage_, sizeof(void *));
       }
       other.vtable_ = {nullptr, nullptr, nullptr};
+#ifndef NDEBUG
+      std::memset(other.storage_, 0xDD, detail::ONCE_SBO_SIZE);
+#endif
     }
     return *this;
   }
@@ -231,7 +277,9 @@ public:
       // is already cleared at that point.
       auto vt = vtable_;
       vtable_ = {nullptr, nullptr, nullptr};
+#ifndef NDEBUG
       detail::g_once_callback_run_count.fetch_add(1, std::memory_order_relaxed);
+#endif
       if constexpr (std::is_void_v<R>) {
         vt.invoke_and_destroy(storage_, std::forward<Args>(args)...);
       } else {

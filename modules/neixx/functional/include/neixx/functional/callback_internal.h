@@ -55,6 +55,13 @@ inline void callback_free(void *ptr, std::size_t alignment = alignof(std::max_al
 template <typename T, std::size_t SboSize, std::size_t SboAlign>
 constexpr bool is_sbo_eligible_v = sizeof(T) <= SboSize && alignof(T) <= SboAlign;
 
+/// OnceCallback-specific SBO check: same size/alignment as is_sbo_eligible_v,
+/// but additionally requires nothrow move-constructibility.  Throwing move
+/// constructors fall back to the heap path so a failed move cannot corrupt
+/// the inline storage buffer.
+template <typename T, std::size_t SboSize, std::size_t SboAlign>
+constexpr bool once_sbo_eligible_v = is_sbo_eligible_v<T, SboSize, SboAlign> && std::is_nothrow_move_constructible_v<T>;
+
 // --- WeakPtr detection -------------------------------------------------------
 //
 // Used by BindOnce / BindRepeating to detect when the first bound argument is

@@ -8,6 +8,10 @@
 #include <type_traits>
 #include <utility>
 
+#ifndef NDEBUG
+#include <cassert>
+#endif
+
 #include <neixx/functional/callback.h>
 
 namespace nei {
@@ -24,7 +28,20 @@ OnceCallback<void()> BindOnce(F &&functor, Args &&...args) {
                 "BindOnce: functor is not callable with the provided argument types.");
 
   auto bound_lambda = [fn = Fn(std::forward<F>(functor)),
-                       args = BoundArgs(detail::StoreBoundArg(std::forward<Args>(args))...)]() mutable {
+                       args = BoundArgs(detail::StoreBoundArg(std::forward<Args>(args))...)
+#ifndef NDEBUG
+                           ,
+                       __magic = std::uint64_t{0x4E4549426E644F6E} // "NEIBndOn"
+#endif
+  ]() mutable {
+#ifndef NDEBUG
+    // Detect SBO storage corruption: if the magic cookie was clobbered,
+    // the lambda's capture block was overwritten (use-after-free, memcpy
+    // across object boundary, or MSVC SSO aliasing bug).
+    if (__magic != 0x4E4549426E644F6E) {
+      assert(!"BindOnce magic cookie corrupted — SBO storage overwrite detected");
+    }
+#endif
     // WeakPtr safety: if the first bound arg is a WeakPtr and has expired,
     // silently skip invocation - no external null-check required.
     if constexpr (sizeof...(Args) > 0) {
