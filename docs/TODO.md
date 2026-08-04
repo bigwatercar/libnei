@@ -1,6 +1,6 @@
 ﻿# libnei — TODO & Roadmap
 
-**Updated**: 2026-07-31
+**Updated**: 2026-08-05
 
 ---
 
@@ -108,27 +108,36 @@ full build + test validation of the TaskRunner hierarchy refactoring.
 
 ---
 
-## OnceCallback SBO Move Fence — Root Cause Unresolved 🔧 2026-08-02
+## OnceCallback SBO Move Fence — ✅ Superseded by Chromium-style Rewrite 2026-08-04
 
-**Symptom**: `ParallelTaskRunner` drops ~4-17 tasks per 1M (0.0004%-0.0017%),
-Windows MSVC only.  ASAN 0/50 reproductions; WSL GCC 0 failures.
+**Root cause**: MSVC SSO `std::string` self-referential pointers were corrupted
+by `std::memcpy` of the 48-byte SBO storage.  `std::launder` + real C++ move
+constructor (commit `87036c1`) fixed 99.5% of losses; dropping `std::move(*fn)`
+to `std::invoke(*fn)` (commit `bac38e7`) further reduced losses to ~1/200 rounds.
 
-**Fix**: Added `std::atomic_thread_fence(acquire/release)` around
-`OnceCallback` move constructor/assignment `std::memcpy` of the 48-byte SBO
-storage (`callback.h`).  200/200 stress rounds pass after the fix.
+**Resolution**: Full Chromium-style heap-only callback rewrite (commit `1949dc5`):
+- Eliminated SBO entirely — all callbacks heap-allocated via `BindState<Fn, BArgs...>`
+- `Invoker<Storage, Sig, IsOnce>` dispatches via `std::apply` + `std::index_sequence`
+- Split `UnwindOnce` (move) / `UnwindRepeat` (const T&) policies with `reference_wrapper` specializations
+- Null-safe `Run()` guards against double-invoke on consumed `OnceCallback`
 
-**Why it works is unclear**: the `OnceCallback` SBO payload is moved under
-`TaskQueue::lock_` protection and each copy lives on a per-worker stack —
-there should be no concurrent reader of the same storage.  The fence likely
-suppresses a compiler reordering or subtle UB in the closure pipeline
-(`BindOnce` lambda → `Task` struct move → queue → worker batch → `Run()`).
+**Four-quadrant verification (2026-08-05)**:
 
-**Next steps**:
-1. Replace `std::memcpy` with `std::copy_n` or element-wise copy, re-test to
-   isolate whether the UB is in the memcpy itself.
-2. Try WSL with `-fsanitize=thread` (TSan) under CPU stress to reproduce on
-   Linux.
-3. If TSan catches nothing, the issue may be MSVC-specific codegen bug.
+| Quadrant | Compile | Tests (26) | Stress (100×500K) |
+|---|---|---|---|
+| Windows Debug (MSVC) | ✅ | ✅ 100% | FAIL=1/100 ⚠️ |
+| Windows Release (MSVC) | ✅ | ✅ 100% | FAIL=1/100 ⚠️ |
+| WSL Debug (GCC) | ✅ | ✅ 100% | **FAIL=0/100** ✅ |
+| WSL Release (GCC) | ✅ | ✅ 100% | **FAIL=0/100** ✅ |
+
+**Key finding**: Linux (GCC) has **zero** task loss across 100M task postings.
+Windows (MSVC) ~1% round failure (5/500K tasks dropped per failure) is a
+**ParallelTaskRunner scheduler-level issue**, not a callback mechanism bug.
+Diagnosed as `scheduler_dropped=5` with `pushed==taken` and `once_cb_run` matching
+— tasks vanish between pipeline dequeue and execution.
+
+**Next steps**: Investigate Windows-specific race in `ParallelTaskRunner` pipeline
+(batch dequeuing, worker wake-up, or `WillRunTask` filtering).
 
 ---
 
