@@ -61,6 +61,11 @@ option(NEI_BUILD_NEIXX "Build neixx C++ components" ON)
 option(NEI_ENABLE_TRACE_EVENTS "Enable trace event instrumentation(C++ only)"
        ON
 )
+option(
+  NEI_ENABLE_PARALLEL_DIAGNOSTICS
+  "Enable per-task parallel scheduler diagnostics (g_parallel_* counters + FlushForTesting posted/completed accounting). Disable for ~8-9% higher PostTask throughput on saturated parallel queues."
+  ON
+)
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 
 if(NEI_BUILD_TESTS)
@@ -123,6 +128,15 @@ if(BUILD_SHARED_LIBS)
   endif()
 else()
   target_compile_definitions(nei PUBLIC NEI_STATIC)
+endif()
+
+# Parallel scheduler diagnostics switch.  Public so consumers compiling against
+# the library headers see the same NEI_PARALLEL_DIAGNOSTICS value as the
+# library itself (the macro must be identical across all TUs).
+if(NEI_ENABLE_PARALLEL_DIAGNOSTICS)
+  target_compile_definitions(nei PUBLIC NEI_PARALLEL_DIAGNOSTICS=1)
+else()
+  target_compile_definitions(nei PUBLIC NEI_PARALLEL_DIAGNOSTICS=0)
 endif()
 
 # Non-Windows dependencies
