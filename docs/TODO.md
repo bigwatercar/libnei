@@ -70,6 +70,57 @@ Verified: WSL 10/10, Windows 9/9 (PosixYieldQuota is POSIX-only).
 
 - **PipeStream epoll oneshot**: ✅ Completed 2026-07-22. Level-triggered → `EPOLLONESHOT` with explicit re-arm in `DrainRead`/`DrainWrite`.  See `docs/neixx_io_technical.md` §2.12.
 - **PipeStream direct dispatch continuation**: batch-quota-exhausted path could chain directly instead of going through `PostTask`.  Low priority — current design is correct.
+- **SmallObjectAllocator idle thread-cache purge** ✅ Completed 2026-08-05:
+  Implemented in `modules/neixx/memory/src/small_object_allocator.cpp`:
+  - Chunks are now page-backed (`VirtualAlloc`/`mmap`) and tracked in a global
+    list with per-chunk accounting (`in_use` atomic + `central_count` under lock).
+  - `PurgeSmallObjectAllocator()` (exported) returns fully-free chunks to the
+    OS: flushes the calling thread's cache, walks the chunk list, and reclaims
+    chunks where `central_count == 64 && in_use == 0` (race-free by construction —
+    a chunk can only become reclaimable via a lock-held flush).
+  - Counter-based self-purge (every 1024 allocations, shed half the per-class
+    thread cache) mirrors PartitionAlloc's no-timer approach.
+  - New stats: `chunk_purges`, `reserved_bytes`, `released_bytes`.
+  - Reclamation is explicit/on-demand (memory-pressure style), no internal timer.
+- **MemoryPressureMonitor (independent component)** ✅ Completed 2026-08-05:
+  - New public component `modules/neixx/memory/memory_pressure_monitor.{h,cpp}`
+    (Chromium-style): `MemoryPressureLevel` (kNone/kModerate/kCritical),
+    `GetCurrentMemoryPressureLevel()` (platform strategy: Windows commit-limit
+    polling via GlobalMemoryStatusEx; macOS zero-threshold XNU sysctl
+    kern.memorystatus_vm_pressure_level; Linux MemAvailable + reclaimable
+    page-cache ratio; other POSIX available/total ratio),
+    `MemoryPressureListener` + `MemoryPressureListenerRegistry`
+    (thread-safe Add/Remove/Notify, listeners invoked outside the lock), and a
+    stateful `MemoryPressureMonitor` (PIMPL) whose `PollOnce()` re-samples the
+    level and auto-notifies listeners on change — caller-driven, no internal
+    timer or background thread.
+  - Decoupled from the allocator: the application ("main program") assembles
+    the pipeline — sample the level from its own low-frequency hook, call
+    `Notify()` on change, and a listener drives `PurgeSmallObjectAllocator()`.
+  - SmallObjectAllocator no longer carries any pressure-detection API
+    (watermark/ratio/if-over-watermark removed); it stays a pure alloc/reclaim
+    component with explicit `PurgeSmallObjectAllocator()`.
+- **SmallObjectAllocator Chromium-alignment round 2** ✅ Completed 2026-08-05
+  (freelist hardening, decommit middle-state, committed/per-class stats, partitions):
+  - **Freelist hardening**: every free-list link is XOR-encoded with a per-
+    partition random key (fail-fast on corruption); bytes 8..15 of each block
+    still keep the owning chunk pointer for O(1) free.
+  - **Decommit middle-state** (`DiscardSystemPages` semantics): `PurgeSmallObjectAllocator()`
+    now decommits fully-free chunks (physical pages → OS, virtual address kept)
+    and parks them per size class (cap `kMaxDecommittedPerClass=4`); `AcquireChunk`
+    recommits a parked chunk instead of carving a new one.  Excess parked chunks
+    are released entirely to bound virtual-address growth.
+  - **Stats**: `committed_bytes` added to `SmallObjectAllocatorStats`;
+    `GetSmallObjectAllocatorSizeClassStats()` reports per-class `size`/`in_use`/
+    `central_free`.
+  - **Partition isolation**: `CreateSmallObjectAllocatorPartition()` /
+    `SmallObjectAllocInPartition()` / `PurgeSmallObjectAllocatorPartition()` —
+    each partition owns its own central pool, freelist key, purge and stats
+    (fixed budget `kMaxPartitions=8` incl. default).  Blocks never cross
+    partitions; free routes via the block header.  `SmallObjectFree()` works for
+    any partition.
+  - All exported API additions are on the new (unreleased) component; no impact
+    on the published callback ABI.
 
 ---
 
@@ -98,6 +149,7 @@ full build + test validation of the TaskRunner hierarchy refactoring.
 | `TlsSocketTest.DestructionDuringHandshake` | ✅ Fixed `b0061e0` | Serialized Orphan() to IO sequence, transport destroyed on owning thread |
 | `HostResolverTest.ResolveDualStack` | Always (no DNS) | Requires functional DNS resolver |
 | `HostResolverTest.ResolveIPv4Only` | Always (no DNS) | Requires functional DNS resolver |
+| `TimerTest.RepeatingTimerStopPreventsFurtherFires` | Always (crash) | SEH 0xc0000005 access violation; reproduces on baseline commit too (pre-existing on chromium_callback branch) — likely a sequence-manager/timer teardown race, independent of the allocator |
 
 ### Notes
 

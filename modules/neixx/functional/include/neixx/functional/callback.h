@@ -126,8 +126,7 @@ private:
     using Fn = std::decay_t<F>;
     using State = detail::BindState<Fn>;
     using Inv = detail::Invoker<State, R(Args...), true>;
-    auto *s = static_cast<State *>(detail::callback_alloc(sizeof(State), alignof(State)));
-    new (s) State(std::forward<F>(fn));
+    auto *s = detail::BindStateNew<State>(std::forward<F>(fn));
     s->AddRef(); // Take the initial reference owned by this OnceCallback.
     state_ = s;
     fn_ = &Inv::Run;
@@ -220,8 +219,7 @@ private:
     using Fn = std::decay_t<F>;
     using State = detail::BindState<Fn>;
     using Inv = detail::Invoker<State, R(Args...), false>;
-    auto *s = static_cast<State *>(detail::callback_alloc(sizeof(State), alignof(State)));
-    new (s) State(std::forward<F>(fn));
+    auto *s = detail::BindStateNew<State>(std::forward<F>(fn));
     state_.reset(s);
     fn_ = &Inv::Run;
   }

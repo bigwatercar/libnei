@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <utility>
 #include <neixx/memory/ref_counted.h>
+#include <neixx/memory/small_object_allocator.h>
 #include <neixx/memory/unretained_wrapper.h>
 
 namespace nei {
@@ -17,6 +18,31 @@ template <typename T>
 class PassedWrapper;
 
 namespace detail {
+
+// -----------------------------------------------------------------------------
+// Callback allocation policy switch.
+//
+//   NEI_CALLBACK_ALLOCATOR_USE_PARTITION = 1  -> small-object pool (nei::memory).
+//   NEI_CALLBACK_ALLOCATOR_USE_PARTITION = 0  -> legacy plain operator new.
+//
+// The legacy path is intentionally kept so the two can be compared for
+// stability/performance (flip the macro, rebuild, rerun the bench).
+// NOTE: the macro must be identical across the library and all consumers.
+// -----------------------------------------------------------------------------
+#ifndef NEI_CALLBACK_ALLOCATOR_USE_PARTITION
+#define NEI_CALLBACK_ALLOCATOR_USE_PARTITION 1
+#endif
+
+#if NEI_CALLBACK_ALLOCATOR_USE_PARTITION
+inline void *callback_alloc(size_t bytes, size_t alignment = alignof(std::max_align_t)) {
+  return SmallObjectAlloc(bytes, alignment);
+}
+
+inline void callback_free(void *ptr, size_t alignment = alignof(std::max_align_t)) noexcept {
+  (void)alignment;
+  SmallObjectFree(ptr);
+}
+#else
 inline void *callback_alloc(size_t bytes, size_t alignment = alignof(std::max_align_t)) {
   if (alignment <= alignof(std::max_align_t))
     return ::operator new(bytes);
@@ -30,14 +56,58 @@ inline void callback_free(void *ptr, size_t alignment = alignof(std::max_align_t
   }
   ::operator delete(ptr, std::align_val_t(alignment));
 }
+#endif
 
 // Ref-counted storage base, mirroring Chromium's base/callback_internal.h
 // BindStateBase.  The ref count is thread-safe (atomic) so a BindState can be
 // shared across threads by RepeatingCallback copies, and released by any thread
 // (e.g. the worker thread that runs the task).
+//
+// operator new/delete are overloaded to route through the same partition
+// allocator used by callback_alloc, so a BindState can also be created with a
+// plain `new BindState<...>(...)` and freed with `delete` symmetrically.
 class BindStateBase : public RefCountedThreadSafe<BindStateBase> {
 public:
   virtual ~BindStateBase() = default;
+
+#if NEI_CALLBACK_ALLOCATOR_USE_PARTITION
+  static void *operator new(size_t size) {
+    return SmallObjectAlloc(size, alignof(std::max_align_t));
+  }
+
+  static void operator delete(void *ptr) noexcept {
+    SmallObjectFree(ptr);
+  }
+
+  static void operator delete(void *ptr, std::size_t) noexcept {
+    SmallObjectFree(ptr);
+  }
+
+  // Over-aligned functors (alignof > max_align) are allocated via the aligned
+  // operator new; route it through SmallObjectAlloc so the block header is
+  // always present (the direct path stores it for align > 16).  The delete
+  // side is covered by SmallObjectFree in the plain forms above.
+  static void *operator new(std::size_t size, std::align_val_t align) {
+    return SmallObjectAlloc(size, static_cast<std::size_t>(align));
+  }
+
+  static void operator delete(void *ptr, std::align_val_t) noexcept {
+    SmallObjectFree(ptr);
+  }
+
+  static void operator delete(void *ptr, std::size_t, std::align_val_t) noexcept {
+    SmallObjectFree(ptr);
+  }
+
+  // Declaring class-scope operator new hides the global placement forms, so
+  // restore them for `new (ptr) BindState<...>(...)` placement construction.
+  static void *operator new(std::size_t, void *ptr) noexcept {
+    return ptr;
+  }
+
+  static void operator delete(void *, void *) noexcept {
+  }
+#endif
 };
 
 template <typename Fn, typename... BArgs>
@@ -52,6 +122,35 @@ public:
   Fn fn_;
   std::tuple<BArgs...> args_;
 };
+
+// --- BindState construction / destruction helpers ---------------------------
+// Route through the allocation policy:
+//   Partition path -> plain `new`/`delete` (uses BindStateBase::operator
+//   new/delete -> SmallObjectAlloc/Free).
+//   Legacy path    -> callback_alloc + placement new + explicit dtor + free.
+template <typename State, typename... A>
+State *BindStateNew(A &&...a) {
+#if NEI_CALLBACK_ALLOCATOR_USE_PARTITION
+  return new State(std::forward<A>(a)...);
+#else
+  auto *s = static_cast<State *>(callback_alloc(sizeof(State), alignof(State)));
+  new (s) State(std::forward<A>(a)...);
+  return s;
+#endif
+}
+
+template <typename State>
+void BindStateDelete(State *s) {
+  if (s == nullptr) {
+    return;
+  }
+#if NEI_CALLBACK_ALLOCATOR_USE_PARTITION
+  delete s;
+#else
+  s->~State();
+  callback_free(s, alignof(State));
+#endif
+}
 
 // UnwrapOnce: moves bound args (OnceCallback — args consumed once).
 template <typename T>

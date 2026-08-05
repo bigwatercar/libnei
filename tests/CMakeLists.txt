@@ -47,6 +47,8 @@ add_executable(
   lock_test.cpp
   log_test.cpp
   functional_test.cpp
+  small_object_allocator_test.cpp
+  memory_pressure_monitor_test.cpp
   # ref_counted_compile_fail.cpp
   platform_thread_test.cpp
   pipe_stream_test.cpp
