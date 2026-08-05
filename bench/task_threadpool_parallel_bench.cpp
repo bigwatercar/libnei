@@ -14,6 +14,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -91,6 +92,24 @@ void SignalDone(nei::WaitableEvent *done_event) {
   }
 }
 
+// The sentinel task only guarantees FIFO *dequeue* ordering, NOT that every
+// earlier task's body has completed: with parallel workers, tasks dequeued
+// before the sentinel may still be executing when the sentinel fires.  Reading
+// the executed counter right after the sentinel would therefore undercount
+// in-flight tasks and produce false "scheduler dropped task" failures.
+// Wait for the executed counter to reach the expected value (with a timeout so
+// a genuine stall/deadlock is still reported).
+bool WaitForAllTasksExecuted(std::uint32_t expected, std::chrono::milliseconds timeout) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (g_executed_task_count.load(std::memory_order_acquire) >= expected) {
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return g_executed_task_count.load(std::memory_order_acquire) >= expected;
+}
+
 BenchmarkResult RunAddBenchmark(nei::TaskRunner &runner, std::uint32_t task_count) {
   std::atomic<std::uint32_t> failed_task_posts(0);
   bool sentinel_failed = false;
@@ -117,6 +136,10 @@ BenchmarkResult RunAddBenchmark(nei::TaskRunner &runner, std::uint32_t task_coun
 
   const auto post_finished_at = std::chrono::steady_clock::now();
   all_done.Wait();
+  const std::uint32_t failed_count = failed_task_posts.load(std::memory_order_relaxed);
+  // Sentinel fires when dequeued, not when every earlier task's body finished.
+  // Wait for actual execution completion before verifying counts.
+  (void)WaitForAllTasksExecuted(task_count - failed_count, std::chrono::seconds(30));
   const auto total_finished_at = std::chrono::steady_clock::now();
 
   BenchmarkResult result;
@@ -171,6 +194,10 @@ BenchmarkResult RunMultiThreadPostBenchmark(nei::TaskRunner &runner, std::uint32
   }
 
   all_done.Wait();
+  const std::uint32_t failed_count = failed_task_posts.load(std::memory_order_relaxed);
+  // Sentinel fires when dequeued, not when every earlier task's body finished.
+  // Wait for actual execution completion before verifying counts.
+  (void)WaitForAllTasksExecuted(task_count - failed_count, std::chrono::seconds(30));
   const auto total_finished_at = std::chrono::steady_clock::now();
 
   BenchmarkResult result;

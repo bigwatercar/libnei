@@ -407,6 +407,11 @@ private:
             tracker_->DidProcessTask(shutdown_behavior);
           }
           internal::RecordParallelEmptyTaskSkipped();
+          // A dequeued task is a completed task even when its closure is null;
+          // keep the posted/completed balance used by FlushForTesting aligned.
+#if NEI_PARALLEL_DIAGNOSTICS
+          queue->NotifyTaskCompleted();
+#endif
           continue;
         }
 
@@ -439,6 +444,12 @@ private:
         const TimeTicks run_start = TimeTicks::Now();
         std::move(task.task).Run();
         const TimeDelta run_duration = TimeTicks::Now() - run_start;
+
+        // Mark the task as fully executed (body finished, not merely dequeued)
+        // so FlushForTesting / wait-for-idle can reliably observe completion.
+#if NEI_PARALLEL_DIAGNOSTICS
+        queue->NotifyTaskCompleted();
+#endif
 
         internal::RecordTaskExecutionCompleted();
 
@@ -770,28 +781,55 @@ public:
   }
 
   void FlushForTesting() {
-    std::vector<scoped_refptr<TaskRunner>> runners;
+#if NEI_PARALLEL_DIAGNOSTICS
+    struct QueueWatermark {
+      internal::TaskQueue *queue;
+      std::uint64_t watermark;
+    };
+
+    std::vector<QueueWatermark> snapshots;
     {
       AutoLock lock(lock_);
-      if (tracker_.HasShutdownStarted())
+      if (tracker_.HasShutdownStarted()) {
         return;
-      runners.reserve(queues_.size());
+      }
+      snapshots.reserve(queues_.size());
       for (const auto &q : queues_) {
-        runners.push_back(TaskRunner::CreateForThreadPool(q.get(), q->traits()));
+        internal::TaskQueue *raw = q.get();
+        snapshots.push_back(QueueWatermark{raw, raw->GetPostedTaskCount()});
       }
     }
 
-    WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-    std::atomic<std::size_t> pending{runners.size()};
-    for (auto &runner : runners) {
-      runner->PostTask(FROM_HERE, [&pending, &done]() {
-        if (pending.fetch_sub(1) == 1) {
-          done.Signal();
+    // A FIFO sentinel only guarantees dequeue order, NOT that every earlier
+    // task's body has finished: parallel workers may still be executing tasks
+    // dequeued before the sentinel fires.  Instead, wait until each queue's
+    // completed count reaches its posted watermark at snapshot time — i.e.
+    // every task enqueued before the snapshot has actually finished running.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    for (;;) {
+      bool all_done = true;
+      for (const QueueWatermark &s : snapshots) {
+        if (s.queue->GetCompletedTaskCount() < s.watermark) {
+          all_done = false;
+          break;
         }
-      });
+      }
+      if (all_done) {
+        return;
+      }
+      if (std::chrono::steady_clock::now() >= deadline) {
+        // Do not hang forever on a misbehaving task; surface the stall.
+        NEI_LOG_WARN("[ThreadPool] FlushForTesting timed out waiting for "
+                     "enqueued tasks to finish executing");
+        return;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-
-    done.TimedWait(std::chrono::seconds(30));
+#else
+    // Accounting compiled out — nothing reliable to wait on.  Best effort:
+    // sleep briefly so in-flight tasks have a chance to drain.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#endif
   }
 
   bool Shutdown(TimeDelta timeout = TimeDelta()) {

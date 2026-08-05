@@ -260,6 +260,18 @@ TEST(ThreadPoolTest, TracingCapturesQueueingDelayAndExecutionCounts) {
 
   ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(3000)));
 
+  // The task body signals |done| while it is still executing; the trace
+  // "completed" stat is only incremented after the body returns.  Poll until
+  // the stat is visible so the assertion is not racy (same sentinel-only-
+  // guarantees-dequeue issue as the parallel bench / FlushForTesting).
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (TaskRunner::GetTracingStatsForTesting().completed_tasks >= 1) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+
   const TaskRunnerTracingStats stats = TaskRunner::GetTracingStatsForTesting();
   EXPECT_GE(stats.posted_tasks, 1);
   EXPECT_GE(stats.started_tasks, 1);

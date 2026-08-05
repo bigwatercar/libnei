@@ -78,11 +78,14 @@ public:
   /// parallel runner.
   scoped_refptr<TaskRunner> CreateParallelTaskRunner(const TaskTraits &traits = TaskTraits());
 
-  /// Posts a barrier task to every registered queue and blocks until all
-  /// currently-queued work has been executed.  This is a coarse-grained
-  /// synchronization point intended for test teardown.  New tasks posted
-  /// concurrently with FlushForTesting may or may not be included.
-  /// Must NOT be called from a pool worker thread (would deadlock).
+  /// Blocks until every task enqueued before this call has *finished running*
+  /// (its body has returned), on every registered queue.  Unlike a FIFO
+  /// sentinel — which only guarantees dequeue order and can observe parallel
+  /// workers still executing earlier tasks — this waits on per-queue
+  /// posted/completed accounting, so it is reliable for parallel runners too.
+  /// Tasks enqueued concurrently with FlushForTesting may or may not be
+  /// included.  Intended for test teardown.  Must NOT be called from a pool
+  /// worker thread (would deadlock).
   void FlushForTesting();
 
   /// Shuts down the pool and waits for all workers to exit.

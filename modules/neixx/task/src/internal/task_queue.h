@@ -15,6 +15,23 @@
 #include <neixx/task/sequence_token.h>
 #include <neixx/task/task_traits.h>
 
+// ---------------------------------------------------------------------------
+// Unified parallel-scheduler diagnostics switch.
+//
+// Controls ALL per-task diagnostic bookkeeping on the parallel hot path:
+//   * g_parallel_* counters (pushed / taken / willrun_* / empty-skip) — used
+//     by the benchmark's ParallelPipelineDiag.
+//   * posted_tasks_ / completed_tasks_ accounting — reliable FlushForTesting.
+// Each enabled counter costs one relaxed atomic RMW (plus cross-thread cache
+// contention) per task on a hot parallel queue; measured ~8-9% post throughput
+// on a saturated queue.  Set to 0 to strip them all (FlushForTesting degrades
+// to a best-effort sleep; ParallelDiag reads all zeros).
+// Must be defined identically across the library and consumers.
+// ---------------------------------------------------------------------------
+#ifndef NEI_PARALLEL_DIAGNOSTICS
+#define NEI_PARALLEL_DIAGNOSTICS 1
+#endif
+
 namespace nei {
 namespace internal {
 
@@ -43,6 +60,22 @@ public:
   bool HasImmediateWork() const;
   bool HasDelayedWork() const;
   TimeTicks PeekNextDelayedRunTime() const;
+
+  // ---- Completion accounting (for reliable Flush/wait-for-idle) ----
+  //
+  // posted_tasks_ is incremented on every successful enqueue (immediate and
+  // delayed); completed_tasks_ is incremented by the worker once each task has
+  // finished executing.  A consumer can snapshot GetPostedTaskCount() and wait
+  // until GetCompletedTaskCount() reaches it to know that every task enqueued
+  // before the snapshot has actually finished running — NOT merely been
+  // dequeued (a FIFO sentinel only guarantees dequeue order, so parallel
+  // workers may still be executing tasks dequeued before the sentinel fired).
+  // Compiled out when NEI_PARALLEL_DIAGNOSTICS is 0.
+#if NEI_PARALLEL_DIAGNOSTICS
+  std::uint64_t GetPostedTaskCount() const;
+  std::uint64_t GetCompletedTaskCount() const;
+  void NotifyTaskCompleted();
+#endif
 
   void Shutdown();
   void CancelNonShutdownBlockingTasksLocked();

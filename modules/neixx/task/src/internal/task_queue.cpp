@@ -17,13 +17,16 @@ namespace {
 
 // ---- Parallel-drop diagnostic counters ----
 // Incremented atomically so they can be read from any thread without
-// holding any queue or shard locks.
+// holding any queue or shard locks.  Compiled out entirely when
+// NEI_PARALLEL_DIAGNOSTICS is 0 (see task_queue.h).
+#if NEI_PARALLEL_DIAGNOSTICS
 std::atomic<std::uint64_t> g_parallel_pushed{0};
 std::atomic<std::uint64_t> g_parallel_taken{0};
 std::atomic<std::uint64_t> g_parallel_willrun_disallowed{0};
 std::atomic<std::uint64_t> g_parallel_willrun_saturated{0};
 std::atomic<std::uint64_t> g_parallel_willrun_not_saturated{0};
 std::atomic<std::uint64_t> g_parallel_empty_task_skipped{0};
+#endif
 
 using TaskMinHeap = std::priority_queue<Task, std::vector<Task>, std::greater<Task>>;
 
@@ -117,9 +120,14 @@ public:
     }
 
     if (parallel_) {
+#if NEI_PARALLEL_DIAGNOSTICS
       g_parallel_pushed.fetch_add(1, std::memory_order_relaxed);
+#endif
     }
 
+#if NEI_PARALLEL_DIAGNOSTICS
+    posted_tasks_.fetch_add(1, std::memory_order_relaxed);
+#endif
     return true;
   }
 
@@ -164,6 +172,9 @@ public:
       posted_callback_to_call();
     }
 
+#if NEI_PARALLEL_DIAGNOSTICS
+    posted_tasks_.fetch_add(1, std::memory_order_relaxed);
+#endif
     return true;
   }
 
@@ -202,8 +213,10 @@ public:
       }
     }
     if (parallel_ && count > 0) {
+#if NEI_PARALLEL_DIAGNOSTICS
       g_parallel_taken.fetch_add(count, std::memory_order_relaxed);
       TRACE_EVENT_INSTANT("nei.scheduling", "TakeImmediateTasksParallel");
+#endif
     }
     return count;
   }
@@ -333,22 +346,28 @@ public:
     // Shut down?  Revert and disallow.
     if (shut_down_) {
       running_worker_count_.fetch_sub(1, std::memory_order_release);
+#if NEI_PARALLEL_DIAGNOSTICS
       g_parallel_willrun_disallowed.fetch_add(1, std::memory_order_relaxed);
       TRACE_EVENT_INSTANT("nei.scheduling", "WillRunTaskShutdown");
+#endif
       return TaskQueue::RunStatus::kDisallowed;
     }
 
     if (current >= TaskQueue::kMaxParallelWorkers) {
       // Last (or beyond-last) slot taken: saturated.
       // The caller must remove this queue from the ready heap.
+#if NEI_PARALLEL_DIAGNOSTICS
       g_parallel_willrun_saturated.fetch_add(1, std::memory_order_relaxed);
       TRACE_EVENT_INSTANT("nei.scheduling", "WillRunTaskSaturated");
+#endif
       return TaskQueue::RunStatus::kAllowedSaturated;
     }
 
     // Slot reserved with headroom: not saturated.
     // The queue should stay in the ready heap.
+#if NEI_PARALLEL_DIAGNOSTICS
     g_parallel_willrun_not_saturated.fetch_add(1, std::memory_order_relaxed);
+#endif
     return TaskQueue::RunStatus::kAllowedNotSaturated;
   }
 
@@ -400,6 +419,21 @@ public:
     return static_cast<size_t>(TaskQueue::kMaxParallelWorkers - running);
   }
 
+  // Completion accounting accessors (see TaskQueue::GetPostedTaskCount etc.).
+#if NEI_PARALLEL_DIAGNOSTICS
+  std::uint64_t GetPostedTaskCount() const {
+    return posted_tasks_.load(std::memory_order_relaxed);
+  }
+
+  std::uint64_t GetCompletedTaskCount() const {
+    return completed_tasks_.load(std::memory_order_relaxed);
+  }
+
+  void NotifyTaskCompleted() {
+    completed_tasks_.fetch_add(1, std::memory_order_relaxed);
+  }
+#endif
+
 private:
   void CancelNonShutdownBlockingTasksLockedImpl(std::vector<Task> *dropped_tasks) {
     if (dropped_tasks == nullptr) {
@@ -428,6 +462,14 @@ private:
       }
     }
     delayed_incoming_queue_ = std::move(kept_delayed);
+
+    // Dropped tasks will never execute; account for them as "completed" so the
+    // posted/completed balance (used by FlushForTesting) stays consistent.
+#if NEI_PARALLEL_DIAGNOSTICS
+    if (dropped_tasks != nullptr && !dropped_tasks->empty()) {
+      completed_tasks_.fetch_add(dropped_tasks->size(), std::memory_order_relaxed);
+    }
+#endif
   }
 
   mutable Lock lock_;
@@ -456,6 +498,12 @@ private:
   // Uses acquire/release ordering to synchronize task-enqueue and
   // task-completion effects across workers.
   std::atomic<int> running_worker_count_{0};
+
+  // Completion accounting (see TaskQueue::GetPostedTaskCount etc.).
+#if NEI_PARALLEL_DIAGNOSTICS
+  std::atomic<std::uint64_t> posted_tasks_{0};
+  std::atomic<std::uint64_t> completed_tasks_{0};
+#endif
 };
 
 TaskQueue::TaskQueue(const TaskTraits &traits)
@@ -487,6 +535,20 @@ bool TaskQueue::TakeReadyDelayedTask(const TimeTicks &now, Task *task) {
 std::size_t TaskQueue::PromoteReadyDelayedTasks(const TimeTicks &now) {
   return impl_->PromoteReadyDelayedTasks(now);
 }
+
+#if NEI_PARALLEL_DIAGNOSTICS
+std::uint64_t TaskQueue::GetPostedTaskCount() const {
+  return impl_->GetPostedTaskCount();
+}
+
+std::uint64_t TaskQueue::GetCompletedTaskCount() const {
+  return impl_->GetCompletedTaskCount();
+}
+
+void TaskQueue::NotifyTaskCompleted() {
+  impl_->NotifyTaskCompleted();
+}
+#endif
 
 bool TaskQueue::HasImmediateWork() const {
   return impl_->HasImmediateWork();
@@ -562,6 +624,7 @@ size_t TaskQueue::GetRemainingParallelism() const {
 
 // ---- Public parallel-pipeline diagnostic wrappers ----
 
+#if NEI_PARALLEL_DIAGNOSTICS
 ParallelPipelineDiag GetParallelPipelineDiag() {
   return {g_parallel_pushed.load(std::memory_order_relaxed),
           g_parallel_taken.load(std::memory_order_relaxed),
@@ -583,6 +646,17 @@ void ResetParallelPipelineDiag() {
 void RecordParallelEmptyTaskSkipped() {
   g_parallel_empty_task_skipped.fetch_add(1, std::memory_order_relaxed);
 }
+#else
+ParallelPipelineDiag GetParallelPipelineDiag() {
+  return {};
+}
+
+void ResetParallelPipelineDiag() {
+}
+
+void RecordParallelEmptyTaskSkipped() {
+}
+#endif
 
 } // namespace internal
 } // namespace nei

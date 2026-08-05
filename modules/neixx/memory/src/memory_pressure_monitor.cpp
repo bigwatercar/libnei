@@ -6,6 +6,7 @@
 
 #include <nei/sys/memory_info.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
