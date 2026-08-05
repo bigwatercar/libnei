@@ -8,27 +8,12 @@
 #include <utility>
 #include <nei/macros/nei_export.h>
 #include <neixx/functional/callback_internal.h>
+#include <neixx/memory/ref_counted.h>
 
 namespace nei {
 namespace detail {
 extern NEI_API std::atomic<std::uint64_t> g_once_callback_run_count;
 extern NEI_API std::atomic<std::uint64_t> g_once_callback_heap_count;
-
-struct RefCountedBindState {
-  int ref_count = 1;
-  BindStateBase *bind_state = nullptr;
-
-  void AddRef() {
-    ++ref_count;
-  }
-
-  void Release() {
-    if (--ref_count == 0) {
-      delete bind_state;
-      delete this;
-    }
-  }
-};
 } // namespace detail
 
 inline uint64_t GetOnceCallbackRunCount() {
@@ -62,7 +47,9 @@ public:
   }
 
   ~OnceCallback() {
-    delete state_;
+    if (state_) {
+      state_->Release();
+    }
   }
 
   OnceCallback(OnceCallback &&o) noexcept
@@ -74,7 +61,9 @@ public:
 
   OnceCallback &operator=(OnceCallback &&o) noexcept {
     if (this != &o) {
-      delete state_;
+      if (state_) {
+        state_->Release();
+      }
       state_ = o.state_;
       fn_ = o.fn_;
       o.state_ = nullptr;
@@ -121,6 +110,9 @@ public:
   static OnceCallback FromBindState(detail::BindStateBase *s, InvokeFunc f) noexcept {
     OnceCallback cb;
     cb.state_ = s;
+    if (s) {
+      s->AddRef();
+    }
     cb.fn_ = f;
     return cb;
   }
@@ -136,6 +128,7 @@ private:
     using Inv = detail::Invoker<State, R(Args...), true>;
     auto *s = static_cast<State *>(detail::callback_alloc(sizeof(State), alignof(State)));
     new (s) State(std::forward<F>(fn));
+    s->AddRef(); // Take the initial reference owned by this OnceCallback.
     state_ = s;
     fn_ = &Inv::Run;
 #ifndef NDEBUG
@@ -149,49 +142,31 @@ class RepeatingCallback<R(Args...)> {
 public:
   using InvokeFunc = R (*)(detail::BindStateBase *, Args...);
 
-  RepeatingCallback() noexcept
-      : rc_(nullptr)
-      , fn_(nullptr) {
-  }
-
-  ~RepeatingCallback() {
-    if (rc_)
-      rc_->Release();
-  }
+  RepeatingCallback() noexcept = default;
 
   RepeatingCallback(const RepeatingCallback &o) noexcept
-      : rc_(o.rc_)
+      : state_(o.state_)
       , fn_(o.fn_) {
-    if (rc_)
-      rc_->AddRef();
   }
 
   RepeatingCallback &operator=(const RepeatingCallback &o) noexcept {
     if (this != &o) {
-      if (rc_)
-        rc_->Release();
-      rc_ = o.rc_;
+      state_ = o.state_;
       fn_ = o.fn_;
-      if (rc_)
-        rc_->AddRef();
     }
     return *this;
   }
 
   RepeatingCallback(RepeatingCallback &&o) noexcept
-      : rc_(o.rc_)
+      : state_(std::move(o.state_))
       , fn_(o.fn_) {
-    o.rc_ = nullptr;
     o.fn_ = nullptr;
   }
 
   RepeatingCallback &operator=(RepeatingCallback &&o) noexcept {
     if (this != &o) {
-      if (rc_)
-        rc_->Release();
-      rc_ = o.rc_;
+      state_ = std::move(o.state_);
       fn_ = o.fn_;
-      o.rc_ = nullptr;
       o.fn_ = nullptr;
     }
     return *this;
@@ -212,7 +187,7 @@ public:
       else
         return;
     }
-    return fn_(rc_->bind_state, std::forward<Args>(args)...);
+    return fn_(state_.get(), std::forward<Args>(args)...);
   }
 
   template <typename F,
@@ -224,22 +199,20 @@ public:
   }
 
   RepeatingCallback &operator=(std::nullptr_t) noexcept {
-    if (rc_)
-      rc_->Release();
-    rc_ = nullptr;
+    state_ = nullptr;
     fn_ = nullptr;
     return *this;
   }
 
-  static RepeatingCallback FromRefCountedState(detail::RefCountedBindState *rc, InvokeFunc f) noexcept {
+  static RepeatingCallback FromBindState(detail::BindStateBase *s, InvokeFunc f) noexcept {
     RepeatingCallback cb;
-    cb.rc_ = rc;
+    cb.state_.reset(s); // scoped_refptr acquires one reference.
     cb.fn_ = f;
     return cb;
   }
 
 private:
-  detail::RefCountedBindState *rc_;
+  scoped_refptr<detail::BindStateBase> state_;
   InvokeFunc fn_;
 
   template <typename F>
@@ -249,14 +222,27 @@ private:
     using Inv = detail::Invoker<State, R(Args...), false>;
     auto *s = static_cast<State *>(detail::callback_alloc(sizeof(State), alignof(State)));
     new (s) State(std::forward<F>(fn));
-    auto *r = new detail::RefCountedBindState;
-    r->bind_state = s;
-    rc_ = r;
+    state_.reset(s);
     fn_ = &Inv::Run;
   }
 };
 
 using OnceClosure = OnceCallback<void()>;
 using RepeatingClosure = RepeatingCallback<void()>;
+
+// ---------------------------------------------------------------------------
+// ABI contract for the common void() signatures.
+//
+// These two signatures are explicitly instantiated in callback.cpp and
+// exported from the DLL.  The `extern template` declarations below tell every
+// consumer TU to link against that single exported instantiation instead of
+// inlining its own copy, so upgrading the DLL can binary-replace the library
+// (layout + toolchain held fixed; see docs for the exact requirements).
+//
+// Layout contract (both are 16 bytes on x64):
+//   OnceCallback<void()>   = { BindStateBase* state_; InvokeFunc fn_ }
+//   RepeatingCallback<void()> = { scoped_refptr<BindStateBase> state_; InvokeFunc fn_ }
+extern template class NEI_API OnceCallback<void()>;
+extern template class NEI_API RepeatingCallback<void()>;
 } // namespace nei
 #endif

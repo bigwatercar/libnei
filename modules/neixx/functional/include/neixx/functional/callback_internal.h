@@ -7,6 +7,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <neixx/memory/ref_counted.h>
 #include <neixx/memory/unretained_wrapper.h>
 
 namespace nei {
@@ -30,7 +31,11 @@ inline void callback_free(void *ptr, size_t alignment = alignof(std::max_align_t
   ::operator delete(ptr, std::align_val_t(alignment));
 }
 
-class BindStateBase {
+// Ref-counted storage base, mirroring Chromium's base/callback_internal.h
+// BindStateBase.  The ref count is thread-safe (atomic) so a BindState can be
+// shared across threads by RepeatingCallback copies, and released by any thread
+// (e.g. the worker thread that runs the task).
+class BindStateBase : public RefCountedThreadSafe<BindStateBase> {
 public:
   virtual ~BindStateBase() = default;
 };
@@ -121,6 +126,16 @@ struct Invoker<Storage, R(UA...), true> {
 
   static R Run(BindStateBase *base, UA... ua) {
     auto *s = static_cast<Storage *>(base);
+    // The OnceCallback holds the only reference to the BindState.  Release it
+    // after invoking — even if the functor throws — so the storage is freed.
+    struct ScopedRelease {
+      BindStateBase *state;
+      ~ScopedRelease() {
+        if (state) {
+          state->Release();
+        }
+      }
+    } scoped_release{s};
     return RunImpl(
         s->fn_, s->args_, std::make_index_sequence<std::tuple_size_v<decltype(s->args_)>>{}, std::forward<UA>(ua)...);
   }

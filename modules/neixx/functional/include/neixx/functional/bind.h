@@ -36,10 +36,7 @@ RepeatingCallback<void()> BindRepeating(F &&fn, BA &&...ba) {
   static_assert((!detail::is_passed_wrapper_v<std::decay_t<BA>> && ...), "Passed() not supported for BindRepeating");
   auto *s = static_cast<State *>(detail::callback_alloc(sizeof(State), alignof(State)));
   new (s) State(std::forward<F>(fn), detail::StoreBoundArg(std::forward<BA>(ba))...);
-  auto *r = new detail::RefCountedBindState;
-  r->bind_state = s;
-  return RepeatingCallback<void()>::FromRefCountedState(r,
-                                                        reinterpret_cast<void (*)(detail::BindStateBase *)>(&Inv::Run));
+  return RepeatingCallback<void()>::FromBindState(s, reinterpret_cast<void (*)(detail::BindStateBase *)>(&Inv::Run));
 }
 } // namespace nei
 #endif
