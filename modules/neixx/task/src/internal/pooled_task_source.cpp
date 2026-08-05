@@ -220,7 +220,7 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue *queue) {
     // rather than putting the queue back in the global heap.  The owner
     // will pick up the new work on its next dedicated-loop iteration.
     if (queue->is_dedicated() && state.dedicated_owner != 0) {
-      NotifyWorkAvailable();
+      WakeDedicatedWorker(queue);
       return true;
     }
 
@@ -277,6 +277,7 @@ bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(TaskQueue *queue, const Time
   Shard &shard = shards_[shard_index];
 
   bool enqueued = false;
+  bool wake_dedicated_owner = false;
   {
     AutoLock lock(shard.lock);
     if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
@@ -289,25 +290,40 @@ bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(TaskQueue *queue, const Time
     }
 
     QueueState &state = it->second;
-    if (state.in_flight) {
-      state.reenqueue_requested = true;
-      return false;
-    }
 
-    if (state.queued) {
-      return false;
-    }
+    // Dedicated (SingleThreadTaskRunner) queue owned by a worker: the owner
+    // polls its own queue directly and never reads the global heap, and its
+    // in_flight / queued flags are never cleared by the dedicated loop (which
+    // does not call OnTaskQueueProcessed).  Handle it BEFORE the generic
+    // in_flight/queued guards — otherwise every later promote would bail on
+    // `state.in_flight` and starve the delayed tasks until the owner's reclaim
+    // timeout (30s stall).  Promote and wake the owner instead.
+    if (queue->is_dedicated() && state.dedicated_owner != 0) {
+      (void)queue->PromoteReadyDelayedTasks(now);
+      wake_dedicated_owner = queue->HasImmediateWork();
+    } else {
+      if (state.in_flight) {
+        state.reenqueue_requested = true;
+        return false;
+      }
 
-    (void)queue->PromoteReadyDelayedTasks(now);
-    if (queue->HasImmediateWork()) {
-      enqueued = EnqueueLocked(queue, shard_index);
+      if (state.queued) {
+        return false;
+      }
+
+      (void)queue->PromoteReadyDelayedTasks(now);
+      if (queue->HasImmediateWork()) {
+        enqueued = EnqueueLocked(queue, shard_index);
+      }
     }
   }
 
-  if (enqueued) {
+  if (wake_dedicated_owner) {
+    WakeDedicatedWorker(queue);
+  } else if (enqueued) {
     NotifyWorkAvailable();
   }
-  return enqueued;
+  return enqueued || wake_dedicated_owner;
 }
 
 void PooledTaskSource::OnTaskQueueProcessed(TaskQueue *queue) {
@@ -349,7 +365,7 @@ void PooledTaskSource::OnTaskQueueProcessed(TaskQueue *queue) {
       state.in_flight = false;
       state.reenqueue_requested = false;
       // Wake the owner so it picks up any remaining work.
-      NotifyWorkAvailable();
+      WakeDedicatedWorker(queue);
       return;
     }
 
@@ -423,7 +439,23 @@ bool PooledTaskSource::EnqueueLocked(TaskQueue *queue, std::size_t shard_index) 
 void PooledTaskSource::NotifyWorkAvailable() {
   AutoLock wait_lock(wait_lock_);
   wake_generation_.fetch_add(1, std::memory_order_release);
+  // Single-waiter wakeup for global-heap work: there is usually at least one
+  // idle heap worker, so waking one is enough.  Broadcasting here would make
+  // every task enqueue wake ALL workers, which measurably slows single-threaded
+  // parallel posting (~4x in the bench).
   wait_cv_.Signal();
+}
+
+void PooledTaskSource::NotifyDedicatedWorkAvailable() {
+  AutoLock wait_lock(wait_lock_);
+  wake_generation_.fetch_add(1, std::memory_order_release);
+  // A dedicated (SingleThreadTaskRunner) owner and idle global-heap workers all
+  // wait on this same condvar.  Signal() wakes only ONE waiter — if that is an
+  // idle heap worker instead of the dedicated owner, the owner sleeps until its
+  // reclaim timeout, stalling the dedicated queue for up to 30s.  Broadcast
+  // guarantees the owner wakes (idle heap workers re-check and go back to
+  // sleep; dedicated work is comparatively infrequent, so the noise is small).
+  wait_cv_.Broadcast();
 }
 
 void PooledTaskSource::NotifyTaskPosted() {
@@ -522,7 +554,7 @@ void PooledTaskSource::WakeDedicatedWorker(TaskQueue *queue) {
   // the global heap and go back to sleep.  This avoids the complexity of
   // per-queue condvars while still giving correct (if slightly noisy) wake
   // behavior.  Can be optimized later with per-worker events.
-  NotifyWorkAvailable();
+  NotifyDedicatedWorkAvailable();
 }
 
 void PooledTaskSource::WaitForDedicatedWork(TaskQueue *queue, TimeDelta timeout, bool &timed_out) {

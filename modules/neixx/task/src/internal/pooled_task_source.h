@@ -125,6 +125,12 @@ private:
   // signal-under-lock anti-pattern (hurry-up-and-wait).
   void NotifyWorkAvailable();
 
+  // Wakes a dedicated (SingleThreadTaskRunner) queue owner.  Uses broadcast so
+  // the owner is guaranteed to wake even when idle global-heap workers share
+  // the same wait condvar (a plain Signal may wake an idle heap worker instead,
+  // stalling the owner until its reclaim timeout).
+  void NotifyDedicatedWorkAvailable();
+
   std::size_t GetShardIndex(TaskQueue *queue) const;
 
   static constexpr std::size_t kShardCount = 4;
