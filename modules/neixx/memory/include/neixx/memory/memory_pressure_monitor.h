@@ -3,6 +3,7 @@
 #define NEIXX_MEMORY_MEMORY_PRESSURE_MONITOR_H_
 
 #include <nei/macros/nei_export.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 
 #include <memory>
 
@@ -99,7 +100,9 @@ public:
 
 private:
   class Impl;
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 } // namespace nei

@@ -24,6 +24,7 @@
 #include <memory>
 #include <string>
 
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <spdlog/async.h>
 #include <spdlog/sinks/base_sink.h>
 #include <spdlog/sinks/basic_file_sink.h>
@@ -69,7 +70,9 @@ public:
     if (name_ == nullptr || name_[0] == '\0') {
       return;
     }
+    NEI_SUPPRESS_MSC_WARNING_BEGIN(4996)
     const char *old = std::getenv(name_);
+    NEI_SUPPRESS_MSC_WARNING_END()
     if (old != nullptr) {
       had_old_ = true;
       old_value_ = old;

@@ -2,6 +2,10 @@
 
 #include <nei/debug/check.h>
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4127) // conditional expression is constant
+#endif
 namespace {
 
 // Death test fixture to ensure proper test isolation
@@ -44,3 +48,6 @@ TEST(CheckMacroCTest, DCheckEvaluationFollowsSwitch) {
   EXPECT_EQ(eval_count, 0);
 #endif
 }
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif

@@ -32,7 +32,7 @@ struct NEI_API ShellExecuteOptions {
   std::string parameters;
   /// Optional working directory.  Empty = current directory.
   std::string working_dir;
-  NEI_SUPPRESS_MSC_WARNING_END
+  NEI_SUPPRESS_MSC_WARNING_END()
   /// Whether to show the application window.
   bool show_window = true;
 };

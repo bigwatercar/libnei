@@ -132,9 +132,16 @@ int main() {
     Hdr("Bench 3: Per-worker scaling (10M ops/worker)");
     const uint64_t O = 10000000; // back to 10M
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4324)
+#endif
     struct alignas(64) P {
       std::atomic<uint64_t> v{0};
     };
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
     printf("  %6s  %14s  %10s\n", "Workers", "Total Ops/s", "vs 1-wkr");
     std::vector<double> bases;

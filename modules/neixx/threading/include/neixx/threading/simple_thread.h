@@ -117,7 +117,7 @@ private:
 
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   const std::string name_;
-  NEI_SUPPRESS_MSC_WARNING_END
+  NEI_SUPPRESS_MSC_WARNING_END()
   Options options_;
 
   mutable Lock lock_;

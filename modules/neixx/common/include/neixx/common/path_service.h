@@ -33,12 +33,13 @@
 #ifndef NEIXX_COMMON_PATH_SERVICE_H
 #define NEIXX_COMMON_PATH_SERVICE_H
 
-#include <nei/macros/nei_export.h>
-
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <optional>
+
+#include <nei/macros/nei_export.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 
 namespace nei {
 
@@ -163,7 +164,9 @@ public:
 private:
   PathService();
 
+  NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   static std::unique_ptr<Impl> s_impl_;
+  NEI_SUPPRESS_MSC_WARNING_END()
 };
 
 } // namespace nei

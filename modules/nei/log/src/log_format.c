@@ -261,9 +261,9 @@ void _nei_log_format_timestamp(uint64_t timestamp_ns, nei_log_timestamp_style_e 
         if (style == NEI_LOG_TIMESTAMP_STYLE_RFC3339_FULL_MS_NSEC) {
           /* 9-digit nanosecond: three 3-digit lookups from the same table. */
           unsigned u = (nanos / 1000U) % 1000U;
-          unsigned n = nanos % 1000U;
+          unsigned n_part = nanos % 1000U;
           const char *us = kMillisDigits[u];
-          const char *ns = kMillisDigits[n];
+          const char *ns = kMillisDigits[n_part];
           size_t total = cache->datetime_len + 9U + tz_len;
           if (total < out_size) {
             size_t pos = cache->datetime_len;

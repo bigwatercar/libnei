@@ -1,3 +1,6 @@
+#ifdef _MSC_VER
+#pragma warning(disable: 4244)  // char16_t→char in <xutility> system header
+#endif
 #include <atomic>
 #include <chrono>
 #include <cstdlib>

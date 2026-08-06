@@ -340,6 +340,8 @@ void *DirectAlloc(SmallObjectAllocatorPartition *p, std::size_t size, std::size_
   hdr->chunk_or_raw = raw;
 #if NEI_ALLOCATOR_DIAGNOSTICS
   p->direct_allocs.fetch_add(1, std::memory_order_relaxed);
+#else
+  (void)p;
 #endif
   return returned;
 }

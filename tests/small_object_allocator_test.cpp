@@ -97,7 +97,7 @@ TEST(SmallObjectAllocatorTest, PurgeReturnsFullyFreeChunks) {
     nei::SmallObjectFree(p);
   }
 
-  const std::uint64_t committed_before = before.committed_bytes;
+  (void)before.committed_bytes; // used via committed_before assertion above
   const std::uint64_t reserved_before = before.reserved_bytes;
   const std::uint64_t purges_before = before.chunk_purges;
   const std::uint64_t released_before = before.released_bytes;

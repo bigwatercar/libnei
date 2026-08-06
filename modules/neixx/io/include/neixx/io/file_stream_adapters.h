@@ -68,13 +68,13 @@ private:
   std::uint64_t position_ = 0; // Current read offset in the file.
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   scoped_refptr<SequencedTaskRunner> target_task_runner_;
-  NEI_SUPPRESS_MSC_WARNING_END
+  NEI_SUPPRESS_MSC_WARNING_END()
   bool closed_ = false;
 
   // WeakPtr factory for safe completion callback gating.
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   WeakPtrFactory<FileInputStreamAdapter> weak_factory_{this, FROM_HERE_MEMBER};
-  NEI_SUPPRESS_MSC_WARNING_END
+  NEI_SUPPRESS_MSC_WARNING_END()
 };
 
 // ---------------------------------------------------------------------------
@@ -148,13 +148,13 @@ private:
   std::uint64_t position_ = 0;
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   scoped_refptr<SequencedTaskRunner> target_task_runner_;
-  NEI_SUPPRESS_MSC_WARNING_END
+  NEI_SUPPRESS_MSC_WARNING_END()
   bool closed_ = false;
 
   // WeakPtr factory for safe completion callback gating.
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   WeakPtrFactory<FileOutputStreamAdapter> weak_factory_{this, FROM_HERE_MEMBER};
-  NEI_SUPPRESS_MSC_WARNING_END
+  NEI_SUPPRESS_MSC_WARNING_END()
 };
 
 } // namespace nei

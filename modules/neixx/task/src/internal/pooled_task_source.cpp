@@ -548,7 +548,7 @@ void PooledTaskSource::ReleaseDedicatedQueue(TaskQueue *queue) {
   }
 }
 
-void PooledTaskSource::WakeDedicatedWorker(TaskQueue *queue) {
+void PooledTaskSource::WakeDedicatedWorker(TaskQueue * /*queue*/) {
   // For simplicity, we broadcast to all workers.  The dedicated owner will
   // wake up and find its queue has work; other workers will see no work in
   // the global heap and go back to sleep.  This avoids the complexity of

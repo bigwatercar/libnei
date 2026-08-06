@@ -34,7 +34,7 @@ public:
 private:
   NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
   std::unique_ptr<Impl> impl_;
-  NEI_SUPPRESS_MSC_WARNING_END
+  NEI_SUPPRESS_MSC_WARNING_END()
 };
 
 } // namespace nei

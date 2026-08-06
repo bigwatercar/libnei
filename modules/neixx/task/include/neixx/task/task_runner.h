@@ -165,7 +165,9 @@ protected:
   SequencedTaskRunner(std::unique_ptr<Impl> impl, const TaskTraits &traits);
 
 private:
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 // =============================================================================

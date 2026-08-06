@@ -9,6 +9,7 @@
 #include <memory>
 
 #include <nei/macros/nei_export.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/functional/callback.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/synchronization/waitable_event.h>
@@ -49,6 +50,7 @@ private:
   void MaybeSpawnWorkers();
   std::size_t AssignTaskId() const;
 
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   RepeatingCallback<void(JobDelegate *)> task_;
   MaxConcurrencyCallback max_concurrency_cb_;
   const int initial_workers_;
@@ -64,9 +66,10 @@ private:
   // without a const_cast.  Atomic mutation through a const method is
   // logically const because it does not change observable state.
   mutable std::atomic<std::size_t> next_task_id_{0};
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 } // namespace internal
 } // namespace nei
 
-#endif  // NEIXX_TASK_INTERNAL_JOB_TASK_SOURCE_H_
+#endif // NEIXX_TASK_INTERNAL_JOB_TASK_SOURCE_H_

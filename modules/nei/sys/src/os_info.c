@@ -1,4 +1,3 @@
-#define _CRT_SECURE_NO_WARNINGS
 #include <nei/sys/os_info.h>
 
 #include <stdio.h>
@@ -75,6 +74,10 @@ int nei_get_os_version(char *buf, size_t size) {
 
     char result[64];
     int len = 0;
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4996)  // snprintf
+#endif
     if (vi.szCSDVersion[0] != L'\0') {
       len = snprintf(result,
                      sizeof(result),
@@ -86,6 +89,9 @@ int nei_get_os_version(char *buf, size_t size) {
     } else {
       len = snprintf(result, sizeof(result), "%lu.%lu.%lu", vi.dwMajorVersion, vi.dwMinorVersion, vi.dwBuildNumber);
     }
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
     if (len < 0 || (size_t)len >= sizeof(result)) {
       return -1;
     }

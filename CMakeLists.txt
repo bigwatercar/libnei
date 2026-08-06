@@ -90,6 +90,13 @@ endif()
 if(NEI_ENABLE_WARNINGS)
   if(MSVC)
     add_compile_options(/W4 /permissive-)
+    # /W4 noise: conditional expression is constant (C4127) and structure
+    # padded due to alignment (C4324) are harmless by-design patterns that
+    # trigger pervasively in template and STL-heavy code.
+    # C4710/C4711 are inline-related diagnostics that are noise in C code
+    # compiled with /W4.  C4910: extern template + dllexport incompatibility
+    # is a known MSVC quirk — the instantiation still works correctly.
+    # add_compile_options(/wd4127 /wd4324 /wd4710 /wd4711 /wd4910 /wd4244)
   else()
     add_compile_options(-Wall -Wextra -Wpedantic)
   endif()

@@ -27,6 +27,14 @@ endif()
 set_target_properties(c-ares PROPERTIES C_STANDARD 99)
 set_target_properties(c-ares PROPERTIES C_STANDARD_REQUIRED ON)
 
+# Suppress MSVC warnings from vendored C code.  c-ares is C90-era code
+# that triggers /W4 warnings (C4456 shadowing, C4267 size_t truncation,
+# C4706 assignment-in-conditional, etc.).  These are upstream-accepted
+# patterns; we silence them at the target level rather than patching.
+if(MSVC)
+  target_compile_options(c-ares PRIVATE /W3 /wd4456 /wd4267 /wd4706)
+endif()
+
 # On Linux with CMAKE_BUILD_TYPE=Release, CMake's CheckSymbolExists can
 # lose the C compiler context inside try_compile, causing false negatives
 # for standard POSIX socket symbols.  Pre-set the known results to avoid
@@ -66,12 +74,14 @@ add_subdirectory(mbedtls)
 set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_SAVED})
 
 # mbedTLS vendored C code triggers MSVC warnings that our project promotes
-# to errors (/WX).  Suppress /WX per-target — covers main libs and bundled
-# third-party crypto (p256-m, everest).
+# to errors (/WX).  Suppress both /WX and aggressive /W4 diagnostics
+# per-target — covers main libs and bundled third-party crypto (p256-m,
+# everest).  /W3 is the MSVC default; third-party code should not be
+# subjected to our project's /W4 strictness.
 set(_mbedtls_targets mbedtls mbedx509 mbedcrypto p256m everest)
 foreach(tgt IN LISTS _mbedtls_targets)
   if(TARGET ${tgt})
-    target_compile_options(${tgt} PRIVATE $<$<C_COMPILER_ID:MSVC>:/WX->)
+    target_compile_options(${tgt} PRIVATE $<$<C_COMPILER_ID:MSVC>:/WX- /W3>)
   endif()
 endforeach()
 unset(_mbedtls_targets)

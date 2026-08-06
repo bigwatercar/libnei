@@ -7,6 +7,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/memory/small_object_allocator.h>
 #include <neixx/memory/unretained_wrapper.h>
@@ -119,8 +120,10 @@ public:
       , args_(std::forward<A>(a)...) {
   }
 
+  NEI_SUPPRESS_MSC_WARNING_BEGIN(4324)
   Fn fn_;
   std::tuple<BArgs...> args_;
+  NEI_SUPPRESS_MSC_WARNING_END()
 };
 
 // --- BindState construction / destruction helpers ---------------------------

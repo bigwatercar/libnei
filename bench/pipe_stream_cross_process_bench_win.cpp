@@ -291,7 +291,7 @@ struct ParentLoopState : public std::enable_shared_from_this<ParentLoopState> {
       return;
     }
 
-    ReadExact(input, payload_size, [self = shared_from_this()](bool read_ok, BufferHolder holder) {
+    ReadExact(input, payload_size, [self = shared_from_this()](bool read_ok, BufferHolder /*holder*/) {
       if (!read_ok) {
         self->done->Signal();
         return;

@@ -671,7 +671,14 @@ TEST(ChildProcessTest, LaunchWithWorkingDirectory) {
 #if defined(_WIN32)
   const char *argv[] = {"cmd", "/d", "/c", "cd"};
   // Use %TEMP% instead of hardcoded C:\Windows.
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#endif
   const char *temp = getenv("TEMP");
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
   ASSERT_NE(temp, nullptr) << "TEMP environment variable not set";
   const std::string expected_dir = temp;
 #else

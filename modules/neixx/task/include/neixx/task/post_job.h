@@ -7,6 +7,7 @@
 #include <memory>
 
 #include <nei/macros/nei_export.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/common/location.h>
 #include <neixx/functional/callback.h>
 #include <neixx/task/job_delegate.h>
@@ -39,7 +40,9 @@ public:
 
 private:
   struct Impl;
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 inline JobHandle PostJob(const Location &from_here,

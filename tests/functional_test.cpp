@@ -70,6 +70,10 @@ TEST(TaskCallbackTest, OnceCallbackRunsAtMostOnce) {
 }
 
 TEST(TaskCallbackTest, BindRepeatingSupportsOverAlignedFunctorStorage) {
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4324)  // alignas padding
+#endif
   struct alignas(64) AlignedFunctor {
     bool *aligned = nullptr;
 
@@ -77,6 +81,9 @@ TEST(TaskCallbackTest, BindRepeatingSupportsOverAlignedFunctorStorage) {
       *aligned = (reinterpret_cast<std::uintptr_t>(this) % alignof(AlignedFunctor)) == 0;
     }
   };
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
   bool aligned = false;
   nei::RepeatingCallback<void()> cb = nei::BindRepeating(AlignedFunctor{&aligned});
