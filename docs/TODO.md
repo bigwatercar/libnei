@@ -6,6 +6,32 @@
 
 ## 待办事项（未完成）
 
+### P1
+
+- **单线程 TaskRunner 队列调度开销优化** 🔧 2026-08-06:
+
+  **数据**：i5-10400T 上 PostTask 全链路 524.7 ns/task，其中：
+  | 层 | ns | 占比 |
+  |----|----|------|
+  | 原子操作 | 10.8 | 2.1% |
+  | BindOnce 构造 | 31.5 | 6.0% |
+  | Run() 调用 | 15.0 | 2.9% |
+  | **队列锁+push+DoWork+pop** | **467.4** | **89.0%** |
+
+  89% 开销在队列调度，而非 callback 构造。历史 Ultra 9 185H 可达 6.9M/s（143ns/task），
+  按频率折算后队列开销仍为主要瓶颈。
+
+  **优化方向**：
+  1. **同线程快速路径**：当 `PostTask` 发生在 TaskRunner 绑定的线程上时，
+     跳过 `on_task_posted_callback_` 调度，直接在当前调用栈中执行
+     （类似 Chromium `IncomingTaskQueue::PostTask` 的 `can_run_now` 路径）。
+  2. **无锁批量提交**：利用线程局部缓存累积任务，批量 flush 到队列，
+     减少锁获取次数（参考 SmallObjectAllocator 的 ThreadCache 模式）。
+  3. **SequenceManager 同线程绕过 pump**：当 `DoWork` 发现调用者
+     已在绑定线程上时，直接在 PostTask 返回前 drain 队列。
+
+  **量化目标**：单线程 PostTask 从 1.9M/s → 4M/s 以上（减少 50% 队列开销）。
+
 ### P2
 
 - **PostJob 接口参数对齐 Chromium** 🔧 2026-07-30:
