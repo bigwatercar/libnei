@@ -41,13 +41,19 @@ add_executable(resolve_connect_example resolve_connect_example.cpp)
 target_link_libraries(resolve_connect_example PRIVATE nei::nei)
 
 if(WIN32)
-  add_executable(pipe_stream_cross_process_win_example
-                 pipe_stream_cross_process_win_example.cpp)
+  add_executable(
+    pipe_stream_cross_process_win_example
+    pipe_stream_cross_process_win_example.cpp
+  )
   target_link_libraries(pipe_stream_cross_process_win_example PRIVATE nei::nei)
 elseif(UNIX)
-  add_executable(pipe_stream_cross_process_posix_example
-                 pipe_stream_cross_process_posix_example.cpp)
-  target_link_libraries(pipe_stream_cross_process_posix_example PRIVATE nei::nei)
+  add_executable(
+    pipe_stream_cross_process_posix_example
+    pipe_stream_cross_process_posix_example.cpp
+  )
+  target_link_libraries(
+    pipe_stream_cross_process_posix_example PRIVATE nei::nei
+  )
 endif()
 
 if(WIN32 AND BUILD_SHARED_LIBS)

@@ -15,14 +15,12 @@ target_sources(
 )
 
 if(WIN32)
-  list(APPEND NEIXX_MEMORY_PLATFORM_SRCS
-    src/shared_memory_win.h
-    src/shared_memory_win.cpp
+  list(APPEND NEIXX_MEMORY_PLATFORM_SRCS src/shared_memory_win.h
+       src/shared_memory_win.cpp
   )
 else()
-  list(APPEND NEIXX_MEMORY_PLATFORM_SRCS
-    src/shared_memory_posix.h
-    src/shared_memory_posix.cpp
+  list(APPEND NEIXX_MEMORY_PLATFORM_SRCS src/shared_memory_posix.h
+       src/shared_memory_posix.cpp
   )
 endif()
 
@@ -30,7 +28,7 @@ target_sources(nei PRIVATE ${NEIXX_MEMORY_PLATFORM_SRCS})
 
 target_include_directories(
   nei PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

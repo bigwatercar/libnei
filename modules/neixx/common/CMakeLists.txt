@@ -16,22 +16,25 @@ target_sources(
 )
 
 if(WIN32)
-  target_sources(nei PRIVATE include/neixx/common/scoped_handle.h
-                              src/path_service_win.cpp
-                              src/platform_handle_win.cpp)
+  target_sources(
+    nei PRIVATE include/neixx/common/scoped_handle.h src/path_service_win.cpp
+                src/platform_handle_win.cpp
+  )
 elseif(APPLE)
-  target_sources(nei PRIVATE include/neixx/common/scoped_fd.h
-                              src/path_service_mac.cpp
-                              src/platform_handle_posix.cpp)
+  target_sources(
+    nei PRIVATE include/neixx/common/scoped_fd.h src/path_service_mac.cpp
+                src/platform_handle_posix.cpp
+  )
 elseif(UNIX)
-  target_sources(nei PRIVATE include/neixx/common/scoped_fd.h
-                              src/path_service_linux.cpp
-                              src/platform_handle_posix.cpp)
+  target_sources(
+    nei PRIVATE include/neixx/common/scoped_fd.h src/path_service_linux.cpp
+                src/platform_handle_posix.cpp
+  )
 endif()
 
 target_include_directories(
   nei PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

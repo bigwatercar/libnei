@@ -25,10 +25,10 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# On Linux/Unix, hide all symbols by default.  Public API symbols are
-# explicitly exported via NEI_API (__attribute__((visibility("default")))).
-# This prevents third-party static libraries (mbedtls, c-ares) from leaking
-# their symbols into libnei.so's public ABI.
+# On Linux/Unix, hide all symbols by default.  Public API symbols are explicitly
+# exported via NEI_API (__attribute__((visibility("default")))). This prevents
+# third-party static libraries (mbedtls, c-ares) from leaking their symbols into
+# libnei.so's public ABI.
 if(NOT WIN32)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   set(CMAKE_C_VISIBILITY_PRESET hidden)
@@ -36,10 +36,10 @@ if(NOT WIN32)
   set(CMAKE_VISIBILITY_INLINES_HIDDEN YES)
 endif()
 
-# Treat source and execution character sets as UTF-8 on MSVC.
-# Without this flag, MSVC encodes \uXXXX escapes in narrow string
-# literals using the system ANSI code page (e.g. CP936), producing
-# C4819 warnings and incorrect byte sequences at runtime.
+# Treat source and execution character sets as UTF-8 on MSVC. Without this flag,
+# MSVC encodes \uXXXX escapes in narrow string literals using the system ANSI
+# code page (e.g. CP936), producing C4819 warnings and incorrect byte sequences
+# at runtime.
 if(MSVC)
   add_compile_options(/utf-8)
 endif()
@@ -90,13 +90,6 @@ endif()
 if(NEI_ENABLE_WARNINGS)
   if(MSVC)
     add_compile_options(/W4 /permissive-)
-    # /W4 noise: conditional expression is constant (C4127) and structure
-    # padded due to alignment (C4324) are harmless by-design patterns that
-    # trigger pervasively in template and STL-heavy code.
-    # C4710/C4711 are inline-related diagnostics that are noise in C code
-    # compiled with /W4.  C4910: extern template + dllexport incompatibility
-    # is a known MSVC quirk — the instantiation still works correctly.
-    # add_compile_options(/wd4127 /wd4324 /wd4710 /wd4711 /wd4910 /wd4244)
   else()
     add_compile_options(-Wall -Wextra -Wpedantic)
   endif()
@@ -134,25 +127,23 @@ if(BUILD_SHARED_LIBS)
   if(NOT WIN32)
     # Hide all symbols originating from static libraries (mbedtls, c-ares, etc.)
     # so they don't leak into the public ABI of libnei.so.
-    target_link_options(nei PRIVATE
-      -Wl,--exclude-libs,ALL
-    )
+    target_link_options(nei PRIVATE -Wl,--exclude-libs,ALL)
   endif()
 else()
   target_compile_definitions(nei PUBLIC NEI_STATIC)
 endif()
 
 # Parallel scheduler diagnostics switch.  Public so consumers compiling against
-# the library headers see the same NEI_PARALLEL_DIAGNOSTICS value as the
-# library itself (the macro must be identical across all TUs).
+# the library headers see the same NEI_PARALLEL_DIAGNOSTICS value as the library
+# itself (the macro must be identical across all TUs).
 if(NEI_ENABLE_PARALLEL_DIAGNOSTICS)
   target_compile_definitions(nei PUBLIC NEI_PARALLEL_DIAGNOSTICS=1)
 else()
   target_compile_definitions(nei PUBLIC NEI_PARALLEL_DIAGNOSTICS=0)
 endif()
 
-# SmallObjectAllocator per-allocation diagnostic counters.
-# Turn off to eliminate ~2-3 relaxed atomic RMW per allocation on the hot path.
+# SmallObjectAllocator per-allocation diagnostic counters. Turn off to eliminate
+# ~2-3 relaxed atomic RMW per allocation on the hot path.
 if(NEI_ENABLE_ALLOCATOR_DIAGNOSTICS)
   target_compile_definitions(nei PUBLIC NEI_ALLOCATOR_DIAGNOSTICS=1)
 else()
@@ -197,14 +188,22 @@ if(NEI_BUILD_DEMOS)
   add_subdirectory(examples)
 endif()
 
-# Static builds need the third-party libs in the export set because they
-# are linked into libnei.a and CMake requires all transitive dependencies.
-# Shared builds only export nei — mbedtls/c-ares are PRIVATE and do not
-# leak into the public ABI (visibility hidden + --exclude-libs,ALL).
+# Static builds need the third-party libs in the export set because they are
+# linked into libnei.a and CMake requires all transitive dependencies. Shared
+# builds only export nei — mbedtls/c-ares are PRIVATE and do not leak into the
+# public ABI (visibility hidden + --exclude-libs,ALL).
 if(BUILD_SHARED_LIBS)
   set(_nei_install_targets nei)
 else()
-  set(_nei_install_targets nei c-ares mbedtls mbedx509 mbedcrypto everest p256m)
+  set(_nei_install_targets
+      nei
+      c-ares
+      mbedtls
+      mbedx509
+      mbedcrypto
+      everest
+      p256m
+  )
 endif()
 
 install(

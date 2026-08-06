@@ -9,7 +9,6 @@ target_sources(
           include/nei/sys/disk_info.h
           include/nei/sys/win/utils.h
           include/nei/sys/fs_util.h
-
           src/cpu_info.c
           src/memory_info.c
           src/os_info.c

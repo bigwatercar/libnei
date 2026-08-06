@@ -8,7 +8,7 @@ target_link_libraries(log_bench PRIVATE nei::nei)
 if(NEI_BENCHMARK_FMT)
   FetchContent_Declare(
     fmt URL https://github.com/fmtlib/fmt/archive/refs/tags/11.1.3.zip
-               DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   )
   set(FMT_INSTALL
       OFF
@@ -39,7 +39,9 @@ target_link_libraries(task_thread_bench PRIVATE nei::nei)
 add_executable(task_threadpool_bench task_threadpool_bench.cpp)
 target_link_libraries(task_threadpool_bench PRIVATE nei::nei)
 
-add_executable(task_threadpool_parallel_bench task_threadpool_parallel_bench.cpp)
+add_executable(
+  task_threadpool_parallel_bench task_threadpool_parallel_bench.cpp
+)
 target_link_libraries(task_threadpool_parallel_bench PRIVATE nei::nei)
 
 add_executable(post_job_bench post_job_bench.cpp)
@@ -91,18 +93,22 @@ if(WIN32)
 endif()
 
 add_executable(tls_throughput_bench tls_throughput_bench.cpp)
-target_link_libraries(tls_throughput_bench PRIVATE nei::nei mbedtls mbedx509 mbedcrypto)
+target_link_libraries(
+  tls_throughput_bench PRIVATE nei::nei mbedtls mbedx509 mbedcrypto
+)
 if(WIN32)
   target_link_libraries(tls_throughput_bench PRIVATE ws2_32)
 endif()
 
 if(WIN32)
-  add_executable(pipe_stream_cross_process_bench
-                 pipe_stream_cross_process_bench_win.cpp)
+  add_executable(
+    pipe_stream_cross_process_bench pipe_stream_cross_process_bench_win.cpp
+  )
   target_link_libraries(pipe_stream_cross_process_bench PRIVATE nei::nei)
 elseif(UNIX)
-  add_executable(pipe_stream_cross_process_bench
-                 pipe_stream_cross_process_bench_posix.cpp)
+  add_executable(
+    pipe_stream_cross_process_bench pipe_stream_cross_process_bench_posix.cpp
+  )
   target_link_libraries(pipe_stream_cross_process_bench PRIVATE nei::nei)
 endif()
 
@@ -129,7 +135,9 @@ if(NEI_BENCHMARK_SPDLOG)
   FetchContent_MakeAvailable(spdlog)
 
   add_executable(log_bench_compare log_bench_compare.cpp)
-  target_link_libraries(log_bench_compare PRIVATE nei::nei spdlog::spdlog fmt::fmt)
+  target_link_libraries(
+    log_bench_compare PRIVATE nei::nei spdlog::spdlog fmt::fmt
+  )
 
   if(BUILD_TESTING AND NEI_ENABLE_LONG_BENCH_TESTS)
     add_test(NAME LogBenchCompareLong COMMAND log_bench_compare)

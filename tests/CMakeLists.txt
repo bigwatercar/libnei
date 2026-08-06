@@ -1,4 +1,4 @@
-﻿include(FetchContent)
+include(FetchContent)
 
 if(POLICY CMP0135)
   cmake_policy(SET CMP0135 NEW)
@@ -87,14 +87,16 @@ add_subdirectory(net)
 
 target_link_libraries(nei_tests PRIVATE nei::nei GTest::gtest mbedtls)
 if(MSVC)
-  target_compile_options(nei_tests PRIVATE /FS)  # /FS: force synchronous PDB writes (avoids C1041)
+  target_compile_options(nei_tests PRIVATE /FS) # /FS: force synchronous PDB
+                                                # writes (avoids C1041)
 endif()
 target_include_directories(
-  nei_tests PRIVATE ${PROJECT_SOURCE_DIR}/modules/neixx/io/src
-                    ${PROJECT_SOURCE_DIR}/modules/neixx/process/src
-                    ${PROJECT_SOURCE_DIR}/modules/neixx/net/src
-                    ${PROJECT_SOURCE_DIR}/modules/neixx/task/src
-                    ${PROJECT_SOURCE_DIR}/3rdparty/mbedtls/include
+  nei_tests
+  PRIVATE ${PROJECT_SOURCE_DIR}/modules/neixx/io/src
+          ${PROJECT_SOURCE_DIR}/modules/neixx/process/src
+          ${PROJECT_SOURCE_DIR}/modules/neixx/net/src
+          ${PROJECT_SOURCE_DIR}/modules/neixx/task/src
+          ${PROJECT_SOURCE_DIR}/3rdparty/mbedtls/include
 )
 
 include(GoogleTest)
@@ -112,9 +114,7 @@ add_executable(
 )
 target_link_libraries(ref_counted_compile_fail PRIVATE nei::nei)
 
-add_executable(
-  post_job_smoke_test EXCLUDE_FROM_ALL post_job_smoke_test.cpp
-)
+add_executable(post_job_smoke_test EXCLUDE_FROM_ALL post_job_smoke_test.cpp)
 target_link_libraries(post_job_smoke_test PRIVATE nei::nei)
 
 # MSVC + shared libs: put nei.dll and googletest DLLs next to nei_tests.exe (and
