@@ -59,7 +59,7 @@ constexpr int kFileSyncIters = 10'000;
  * Strict sync mode uses fewer iterations because both sides execute true
  * per-call disk flush behavior.
  */
-constexpr int kFileStrictSyncIters = 5'000;
+constexpr int kFileStrictSyncIters = 10'000;
 
 class ScopedEnvVar {
 public:

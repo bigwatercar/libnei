@@ -166,7 +166,7 @@ TEST(SmallObjectAllocatorTest, DecommittedChunkReused) {
   }
   SmallObjectAllocatorStats reused;
   GetSmallObjectAllocatorStats(&reused);
-  EXPECT_EQ(reused.chunk_allocs, after_purge.chunk_allocs); // no new chunks
+  EXPECT_EQ(reused.chunk_allocs, after_purge.chunk_allocs);       // no new chunks
   EXPECT_GT(reused.committed_bytes, after_purge.committed_bytes); // recommitted
 
   for (void *p : blocks2) {
@@ -186,8 +186,7 @@ TEST(SmallObjectAllocatorTest, ConcurrentAllocFreeWithPurgeNoCrash) {
       std::vector<void *> scratch;
       scratch.reserve(256);
       std::uint32_t seed = static_cast<std::uint32_t>(t) * 2654435761u + 1u;
-      for (int iter = 0; iter < kIters && !stop.load(std::memory_order_relaxed);
-           ++iter) {
+      for (int iter = 0; iter < kIters && !stop.load(std::memory_order_relaxed); ++iter) {
         // Pick a small size class pseudo-randomly.
         const std::size_t sizes[] = {16, 32, 48, 64, 96, 128};
         const std::size_t s = sizes[seed % (sizeof(sizes) / sizeof(sizes[0]))];

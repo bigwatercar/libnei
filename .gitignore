@@ -57,4 +57,5 @@ bench/output/
 /temp/
 /Testing/
 .vscode/
-.agents/
+.agents/bench/results/bench_*/
+bench/results/bench_*/
