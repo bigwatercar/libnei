@@ -103,6 +103,32 @@ void SignalDone(nei::WaitableEvent *done_event) {
   }
 }
 
+// Raw atomic loop: no task system, no BindOnce, no thread switch.
+// Measures the absolute upper bound of AddTaskBodyNoArgs throughput.
+BenchmarkResult RunRawAtomicBenchmark(std::uint32_t task_count) {
+  const auto total_started_at = std::chrono::steady_clock::now();
+  const auto post_started_at = total_started_at;
+
+  for (std::uint32_t i = 0; i < task_count; ++i) {
+    AddTaskBodyNoArgs();
+  }
+
+  const auto post_finished_at = std::chrono::steady_clock::now();
+  const auto total_finished_at = post_finished_at;
+
+  BenchmarkResult result;
+  result.post_elapsed = post_finished_at - post_started_at;
+  result.total_elapsed = total_finished_at - total_started_at;
+  result.failed = 0;
+  result.sentinel_failed = false;
+  result.posted_ok = task_count;
+  result.executed_tasks = task_count;
+  result.expected_sum = static_cast<std::uint64_t>(task_count) * 3;
+  result.sum = g_sum_sink.load(std::memory_order_relaxed);
+  result.verification_ok = (result.sum == result.expected_sum);
+  return result;
+}
+
 BenchmarkResult RunAddBenchmark(nei::TaskRunner &runner, std::uint32_t task_count) {
   std::atomic<std::uint32_t> failed_task_posts(0);
   bool sentinel_failed = false;
@@ -286,6 +312,12 @@ int main(int argc, char *argv[]) {
   };
 
   std::vector<ScenarioResult> all_results;
+
+  // Scenario 0: Raw atomic loop (no task system overhead)
+  g_sum_sink.store(0, std::memory_order_relaxed);
+  g_executed_task_count.store(0, std::memory_order_relaxed);
+  BenchmarkResult result_raw = RunRawAtomicBenchmark(task_count);
+  all_results.push_back({"Raw atomic loop (no task system)", result_raw});
 
   // Scenario 1: Standard fast-path PostTask
   g_sum_sink.store(0, std::memory_order_relaxed);
