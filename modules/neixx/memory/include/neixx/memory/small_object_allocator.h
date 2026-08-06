@@ -40,11 +40,6 @@ namespace nei {
 // after all of its blocks have been freed and no thread is using it.
 // =============================================================================
 
-/// Opaque handle to an isolated allocator partition.  The partition APIs are
-/// internal (src/internal/small_object_allocator_internal.h) and not part of
-/// the public ABI — normal allocation goes through the default partition.
-struct SmallObjectAllocatorPartition;
-
 // ---- Default-partition API --------------------------------------------------
 
 /// Allocates a block of at least `size` bytes aligned to `alignment` from the
