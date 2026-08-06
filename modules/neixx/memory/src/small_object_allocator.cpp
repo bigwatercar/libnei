@@ -21,6 +21,12 @@
 #endif
 #endif
 
+// Allocator diagnostic counters are compiled out by default to eliminate
+// per-allocation atomic RMW overhead on the hot path.
+#ifndef NEI_ALLOCATOR_DIAGNOSTICS
+#define NEI_ALLOCATOR_DIAGNOSTICS 0
+#endif
+
 namespace nei {
 
 // ---- Shared constants and types (visible to the exported API below) ---------
@@ -28,8 +34,7 @@ namespace nei {
 // Usable (returned) sizes.  All multiples of 16 so a block base + the 16-byte
 // header keeps the returned pointer 16-aligned (== max_align on x64).
 constexpr std::size_t kUsableSizes[] = {
-    16,  32,  48,  64,  96,   128,  160,  192,  256,  320,  384,
-    512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 4096,
+    16, 32, 48, 64, 96, 128, 160, 192, 256, 320, 384, 512, 640, 768, 1024, 1280, 1536, 2048, 2560, 3072, 4096,
 };
 constexpr std::size_t kNumSizeClasses = sizeof(kUsableSizes) / sizeof(kUsableSizes[0]);
 
@@ -122,8 +127,7 @@ std::size_t IndexForSize(std::size_t size) {
 }
 
 std::uintptr_t GenerateFreelistKey() {
-  static const auto epoch =
-      std::chrono::high_resolution_clock::now().time_since_epoch().count();
+  static const auto epoch = std::chrono::high_resolution_clock::now().time_since_epoch().count();
   std::uintptr_t key = static_cast<std::uintptr_t>(epoch);
   key ^= reinterpret_cast<std::uintptr_t>(&key);
   key ^= static_cast<std::uintptr_t>(std::uint32_t(key >> 32));
@@ -205,6 +209,7 @@ struct ThreadCache {
   std::uint32_t counts[kNumSizeClasses];
   std::uint32_t alloc_count = 0; // counter for self-purge
 };
+
 thread_local ThreadCache g_tls_cache[kMaxPartitions]{};
 
 // Pushes a block into the thread cache.  Only bytes 0..7 (the encoded free-list
@@ -333,14 +338,15 @@ void *DirectAlloc(SmallObjectAllocatorPartition *p, std::size_t size, std::size_
   hdr->magic = kDirectMagic;
   hdr->size_class = 0;
   hdr->chunk_or_raw = raw;
+#if NEI_ALLOCATOR_DIAGNOSTICS
   p->direct_allocs.fetch_add(1, std::memory_order_relaxed);
+#endif
   return returned;
 }
 
 // Bounds the number of decommitted chunks kept per size class: releases the
 // oldest (tail) until within the cap.  Called with p->m held.
-void TrimDecommitted(SmallObjectAllocatorPartition *p, std::size_t idx,
-                     std::size_t chunk_bytes) {
+void TrimDecommitted(SmallObjectAllocatorPartition *p, std::size_t idx, std::size_t chunk_bytes) {
   std::size_t n = 0;
   for (Chunk *c = p->decommitted_heads[idx]; c != nullptr; c = c->decommitted_next) {
     ++n;
@@ -374,8 +380,7 @@ void PurgePartition(SmallObjectAllocatorPartition *p) {
   Chunk **pp = &p->chunks;
   while (*pp != nullptr) {
     Chunk *chunk = *pp;
-    if (chunk->central_count != kBatchSize ||
-        chunk->in_use.load(std::memory_order_relaxed) != 0) {
+    if (chunk->central_count != kBatchSize || chunk->in_use.load(std::memory_order_relaxed) != 0) {
       pp = &chunk->next;
       continue;
     }
@@ -412,10 +417,8 @@ void PurgePartition(SmallObjectAllocatorPartition *p) {
 
 // ---- Exported API ----------------------------------------------------------
 
-void *SmallObjectAllocInPartition(SmallObjectAllocatorPartition *partition,
-                                  std::size_t size, std::size_t alignment) {
-  SmallObjectAllocatorPartition *p =
-      partition != nullptr ? partition : &DefaultPartition();
+void *SmallObjectAllocInPartition(SmallObjectAllocatorPartition *partition, std::size_t size, std::size_t alignment) {
+  SmallObjectAllocatorPartition *p = partition != nullptr ? partition : &DefaultPartition();
   if (size > kMaxPooledSize || alignment > kMaxAlign) {
     return DirectAlloc(p, size, alignment);
   }
@@ -446,12 +449,16 @@ void *SmallObjectAllocInPartition(SmallObjectAllocatorPartition *partition,
   }
   Chunk *chunk = ChunkOf(block);
   chunk->in_use.fetch_add(1, std::memory_order_relaxed);
+#if NEI_ALLOCATOR_DIAGNOSTICS
   p->in_use_by_class[idx].fetch_add(1, std::memory_order_relaxed);
+#endif
   auto *hdr = static_cast<BlockHeader *>(block);
   hdr->magic = kPooledMagic;
   hdr->size_class = static_cast<std::uint32_t>(idx);
   hdr->chunk_or_raw = chunk;
+#if NEI_ALLOCATOR_DIAGNOSTICS
   p->pooled_allocs.fetch_add(1, std::memory_order_relaxed);
+#endif
   return static_cast<char *>(block) + kHeaderSize;
 }
 
@@ -470,13 +477,17 @@ void SmallObjectFree(void *ptr) noexcept {
     const std::size_t idx = hdr->size_class;
     if (idx < kNumSizeClasses) {
       chunk->in_use.fetch_sub(1, std::memory_order_relaxed);
+#if NEI_ALLOCATOR_DIAGNOSTICS
       p->in_use_by_class[idx].fetch_sub(1, std::memory_order_relaxed);
+#endif
       ThreadCache &tc = g_tls_cache[p->index];
       if (tc.counts[idx] >= kThreadCacheCap) {
         FlushToCentral(p, idx, tc.counts[idx] / 2);
       }
       ThreadCachePush(p, idx, hdr);
+#if NEI_ALLOCATOR_DIAGNOSTICS
       p->pooled_frees.fetch_add(1, std::memory_order_relaxed);
+#endif
     }
   } else if (hdr->magic == kDirectMagic) {
     ::operator delete(hdr->chunk_or_raw);
@@ -537,16 +548,20 @@ void DestroySmallObjectAllocatorPartition(SmallObjectAllocatorPartition *partiti
   delete partition;
 }
 
-void GetSmallObjectAllocatorPartitionStats(SmallObjectAllocatorPartition *partition,
-                                           SmallObjectAllocatorStats *out) {
+void GetSmallObjectAllocatorPartitionStats(SmallObjectAllocatorPartition *partition, SmallObjectAllocatorStats *out) {
   if (out == nullptr) {
     return;
   }
-  SmallObjectAllocatorPartition *p =
-      partition != nullptr ? partition : &DefaultPartition();
+  SmallObjectAllocatorPartition *p = partition != nullptr ? partition : &DefaultPartition();
+#if NEI_ALLOCATOR_DIAGNOSTICS
   out->pooled_allocs = p->pooled_allocs.load(std::memory_order_relaxed);
   out->pooled_frees = p->pooled_frees.load(std::memory_order_relaxed);
   out->direct_allocs = p->direct_allocs.load(std::memory_order_relaxed);
+#else
+  out->pooled_allocs = 0;
+  out->pooled_frees = 0;
+  out->direct_allocs = 0;
+#endif
   out->chunk_allocs = p->chunk_allocs.load(std::memory_order_relaxed);
   out->chunk_purges = p->chunk_purges.load(std::memory_order_relaxed);
   out->reserved_bytes = p->reserved_bytes.load(std::memory_order_relaxed);
@@ -571,32 +586,33 @@ void ResetSmallObjectAllocatorStats() {
   // Note: in_use_by_class holds live counts and is intentionally not reset.
 }
 
-std::size_t GetSmallObjectAllocatorPartitionSizeClassStats(
-    SmallObjectAllocatorPartition *partition, SmallObjectAllocatorSizeClassStats *out,
-    std::size_t capacity) {
+std::size_t GetSmallObjectAllocatorPartitionSizeClassStats(SmallObjectAllocatorPartition *partition,
+                                                           SmallObjectAllocatorSizeClassStats *out,
+                                                           std::size_t capacity) {
   if (out == nullptr || capacity == 0) {
     return 0;
   }
-  SmallObjectAllocatorPartition *p =
-      partition != nullptr ? partition : &DefaultPartition();
+  SmallObjectAllocatorPartition *p = partition != nullptr ? partition : &DefaultPartition();
   std::lock_guard<std::mutex> lock(p->m);
   std::size_t n = 0;
   for (std::size_t i = 0; i < kNumSizeClasses && n < capacity; ++i) {
     std::uint64_t central_free = 0;
-    for (void *b = p->heads[i]; b != nullptr;
-         b = FreelistDecode(p, *reinterpret_cast<std::uintptr_t *>(b))) {
+    for (void *b = p->heads[i]; b != nullptr; b = FreelistDecode(p, *reinterpret_cast<std::uintptr_t *>(b))) {
       ++central_free;
     }
     out[n].size = kUsableSizes[i];
+#if NEI_ALLOCATOR_DIAGNOSTICS
     out[n].in_use = p->in_use_by_class[i].load(std::memory_order_relaxed);
+#else
+    out[n].in_use = 0;
+#endif
     out[n].central_free = central_free;
     ++n;
   }
   return n;
 }
 
-std::size_t GetSmallObjectAllocatorSizeClassStats(SmallObjectAllocatorSizeClassStats *out,
-                                                  std::size_t capacity) {
+std::size_t GetSmallObjectAllocatorSizeClassStats(SmallObjectAllocatorSizeClassStats *out, std::size_t capacity) {
   return GetSmallObjectAllocatorPartitionSizeClassStats(nullptr, out, capacity);
 }
 

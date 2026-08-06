@@ -63,8 +63,13 @@ option(NEI_ENABLE_TRACE_EVENTS "Enable trace event instrumentation(C++ only)"
 )
 option(
   NEI_ENABLE_PARALLEL_DIAGNOSTICS
-  "Enable per-task parallel scheduler diagnostics (g_parallel_* counters + FlushForTesting posted/completed accounting). Disable for ~8-9% higher PostTask throughput on saturated parallel queues."
-  ON
+  "Enable per-task parallel scheduler diagnostics (g_parallel_* counters + FlushForTesting posted/completed accounting). Disable for ~8-22% higher PostTask throughput."
+  OFF
+)
+option(
+  NEI_ENABLE_ALLOCATOR_DIAGNOSTICS
+  "Enable per-allocation SmallObjectAllocator diagnostics (pooled/direct/in_use_by_class atomic counters). Disable to reduce hot-path atomic RMW overhead."
+  OFF
 )
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 
@@ -137,6 +142,14 @@ if(NEI_ENABLE_PARALLEL_DIAGNOSTICS)
   target_compile_definitions(nei PUBLIC NEI_PARALLEL_DIAGNOSTICS=1)
 else()
   target_compile_definitions(nei PUBLIC NEI_PARALLEL_DIAGNOSTICS=0)
+endif()
+
+# SmallObjectAllocator per-allocation diagnostic counters.
+# Turn off to eliminate ~2-3 relaxed atomic RMW per allocation on the hot path.
+if(NEI_ENABLE_ALLOCATOR_DIAGNOSTICS)
+  target_compile_definitions(nei PUBLIC NEI_ALLOCATOR_DIAGNOSTICS=1)
+else()
+  target_compile_definitions(nei PUBLIC NEI_ALLOCATOR_DIAGNOSTICS=0)
 endif()
 
 # Non-Windows dependencies

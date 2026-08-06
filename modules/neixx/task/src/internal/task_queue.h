@@ -29,7 +29,7 @@
 // Must be defined identically across the library and consumers.
 // ---------------------------------------------------------------------------
 #ifndef NEI_PARALLEL_DIAGNOSTICS
-#define NEI_PARALLEL_DIAGNOSTICS 1
+#define NEI_PARALLEL_DIAGNOSTICS 0
 #endif
 
 namespace nei {
