@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [int]$Rounds = 5,
-    [int]$TaskCount = 100000,
+    [int]$TaskCount = 1000000,
     [string]$TracingMode = "off",
     [string]$BuildDir = ""
 )

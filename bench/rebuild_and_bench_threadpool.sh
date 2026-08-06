@@ -5,10 +5,10 @@ set -euo pipefail
 # ThreadPool benchmark (Linux/WSL) - rebuild + run + summarize
 # Usage:
 #   ./bench/rebuild_and_bench_threadpool.sh
-#   ./bench/rebuild_and_bench_threadpool.sh --skip-build --runs-10k 5 --runs-100k 3
+#   ./bench/rebuild_and_bench_threadpool.sh --skip-build --runs-10k 5 --runs-1m 3
 
 RUNS_10K=3
-RUNS_100K=2
+RUNS_1M=2
 SKIP_BUILD=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,7 +39,7 @@ Usage: rebuild_and_bench_threadpool.sh [options]
 
 Options:
   --runs-10k N      Repeat count for 10,000-task suite (default: 3)
-  --runs-100k N     Repeat count for 100,000-task suite (default: 2)
+  --runs-1m N       Repeat count for 1,000,000-task suite (default: 2)
   --skip-build      Skip cmake --build
   --repo-root PATH  Repository root (default: script_dir/..)
   --build-dir PATH  Build directory (default: <repo>/build/linux-ninja-release-shared)
@@ -54,8 +54,8 @@ while [[ $# -gt 0 ]]; do
       RUNS_10K="$2"
       shift 2
       ;;
-    --runs-100k)
-      RUNS_100K="$2"
+    --runs-1m)
+      RUNS_1M="$2"
       shift 2
       ;;
     --skip-build)
@@ -144,7 +144,7 @@ run_suite() {
 }
 
 run_suite 10000 "$RUNS_10K"
-run_suite 100000 "$RUNS_100K"
+run_suite 1000000 "$RUNS_1M"
 
 awk -F'\t' -v OFS='\t' -v scenario_csv="$scenario_csv" '
 BEGIN {
@@ -201,9 +201,9 @@ sort -t $'\t' -k1,1n -k12,12n "$summary_tmp" | cut -f1-11 > "$summary_tsv"
 echo
 printf 'ThreadPool Benchmark  -  %s\n\n' "$(date '+%Y-%m-%d %H:%M:%S')"
 
-for n in 10000 100000; do
+for n in 10000 1000000; do
   label="10 000"
-  [[ "$n" -eq 100000 ]] && label="100 000"
+  [[ "$n" -eq 1000000 ]] && label="1 000 000"
 
   printf -- '-- %s tasks ----------------------------------------------------------------------\n' "$label"
   printf '%-32s  %4s  %7s  %7s  %7s  %7s  %9s  %10s  %5s\n' \
@@ -225,10 +225,10 @@ done
   echo "# ThreadPool Benchmark"
   echo
   echo "Generated: $(date '+%Y-%m-%d %H:%M:%S')"
-  echo "Runs: 10k x $RUNS_10K, 100k x $RUNS_100K"
+  echo "Runs: 10k x $RUNS_10K, 1M x $RUNS_1M"
   echo
 
-  for n in 10000 100000; do
+  for n in 10000 1000000; do
     echo "## $n tasks"
     echo
     echo "| Scenario | W | Enq ms | Drn ms | Tot ms | Stddev | ns/task | Avg TPS | PASS |"

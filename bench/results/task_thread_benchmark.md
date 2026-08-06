@@ -8,7 +8,7 @@ Binary: build/windows-vs2022-release-shared/bench/Release/task_thread_bench.exe
 ## 1. Benchmark Method
 
 ### 1.1 Runtime configuration
-- Task count per round: 100000
+- Task count per round: 1000000
 - Benchmark thread model: nei::Thread + TaskRunner
 - Payload: `AddTaskBodyNoArgs` (one minimal add operation)
 - TaskTracing: forced ON during benchmark run
@@ -26,7 +26,7 @@ Benchmark process exits with non-zero if any check fails.
 
 ### 1.3 Command used
 ```powershell
-& "build/windows-vs2022-release-shared/bench/Release/task_thread_bench.exe" 100000
+& "build/windows-vs2022-release-shared/bench/Release/task_thread_bench.exe" 1000000
 ```
 
 ## 2. Current Baseline Results (30 rounds, TaskTracing ON)

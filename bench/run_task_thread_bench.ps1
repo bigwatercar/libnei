@@ -6,7 +6,7 @@
     Number of rounds per tracing mode. Default: 10
 
 .PARAMETER TaskCount
-    Number of tasks to post per round. Default: 100000
+    Number of tasks to post per round. Default: 1000000
 
 .PARAMETER BenchExe
     Path to task_thread_bench.exe. Auto-detected from build tree if not specified.
@@ -15,13 +15,13 @@
     Directory for log output. Default: bench/output (relative to repo root).
 
 .EXAMPLE
-    .\run_task_thread_bench.ps1 -Rounds 10 -TaskCount 100000
+    .\run_task_thread_bench.ps1 -Rounds 10 -TaskCount 1000000
 #>
 
 [CmdletBinding()]
 param(
     [int]   $Rounds     = 10,
-    [int]   $TaskCount  = 100000,
+    [int]   $TaskCount  = 1000000,
     [string]$BenchExe   = "",
     [string]$OutputDir  = ""
 )
