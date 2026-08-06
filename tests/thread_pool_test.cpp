@@ -871,5 +871,38 @@ TEST(ThreadPoolTest, PooledSingleThreadAllTasksRunOnSameThread) {
   pool.Shutdown();
 }
 
+// Pool-backed SingleThreadTaskRunner: tasks MUST execute in FIFO order.
+TEST(ThreadPoolTest, PooledSingleThreadExecutesTasksInFifoOrder) {
+  ThreadPool pool({4});
+  scoped_refptr<SingleThreadTaskRunner> runner = pool.CreateSingleThreadTaskRunner();
+  ASSERT_TRUE(runner);
+
+  constexpr int kTaskCount = 200;
+  std::vector<int> execution_order(kTaskCount, -1);
+  std::atomic<int> next_expected{0};
+  std::atomic<int> out_of_order{0};
+  std::atomic<int> completed{0};
+  WaitableEvent all_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  for (int i = 0; i < kTaskCount; ++i) {
+    runner->PostTask(FROM_HERE, [i, &execution_order, &next_expected, &out_of_order, &completed, &all_done]() {
+      execution_order[i] = next_expected.load(std::memory_order_relaxed);
+      const int seq = next_expected.fetch_add(1, std::memory_order_relaxed);
+      if (seq != i) {
+        out_of_order.store(1, std::memory_order_relaxed);
+      }
+      if (completed.fetch_add(1) + 1 == kTaskCount) {
+        all_done.Signal();
+      }
+    });
+  }
+
+  ASSERT_TRUE(all_done.TimedWait(std::chrono::seconds(10)));
+  EXPECT_EQ(completed.load(), kTaskCount);
+  EXPECT_EQ(out_of_order.load(), 0) << "Tasks executed out of FIFO order";
+
+  pool.Shutdown();
+}
+
 } // namespace
 } // namespace nei
