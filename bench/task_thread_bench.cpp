@@ -129,6 +129,56 @@ BenchmarkResult RunRawAtomicBenchmark(std::uint32_t task_count) {
   return result;
 }
 
+// BindOnce construction + immediate destruction: no post, no run.
+// Measures SmallObjectAllocator + BindState creation overhead.
+BenchmarkResult RunBindOnceConstructionBenchmark(std::uint32_t task_count) {
+  const auto total_started_at = std::chrono::steady_clock::now();
+  const auto post_started_at = total_started_at;
+
+  // Sink to prevent the optimizer from eliminating the BindOnce call.
+  volatile std::uint64_t sink = 0;
+  for (std::uint32_t i = 0; i < task_count; ++i) {
+    auto cb = nei::BindOnce(&AddTaskBodyNoArgs);
+    sink ^= reinterpret_cast<std::uintptr_t>(&cb);
+  }
+
+  const auto post_finished_at = std::chrono::steady_clock::now();
+  const auto total_finished_at = post_finished_at;
+
+  BenchmarkResult result;
+  result.post_elapsed = post_finished_at - post_started_at;
+  result.total_elapsed = total_finished_at - total_started_at;
+  result.failed = 0;
+  result.posted_ok = task_count;
+  result.verification_ok = (sink != 0); // always true, prevents DCE
+  return result;
+}
+
+// BindOnce + Run: construct callback then immediately Run() on the calling thread.
+// Measures construction + invocation without task queue overhead.
+BenchmarkResult RunBindOnceAndRunBenchmark(std::uint32_t task_count) {
+  const auto total_started_at = std::chrono::steady_clock::now();
+  const auto post_started_at = total_started_at;
+
+  for (std::uint32_t i = 0; i < task_count; ++i) {
+    auto cb = nei::BindOnce(&AddTaskBodyNoArgs);
+    std::move(cb).Run();
+  }
+
+  const auto post_finished_at = std::chrono::steady_clock::now();
+  const auto total_finished_at = post_finished_at;
+
+  BenchmarkResult result;
+  result.post_elapsed = post_finished_at - post_started_at;
+  result.total_elapsed = total_finished_at - total_started_at;
+  result.posted_ok = task_count;
+  result.executed_tasks = g_executed_task_count.load(std::memory_order_relaxed);
+  result.expected_sum = static_cast<std::uint64_t>(task_count) * 3;
+  result.sum = g_sum_sink.load(std::memory_order_relaxed);
+  result.verification_ok = (result.executed_tasks == task_count) && (result.sum == result.expected_sum);
+  return result;
+}
+
 BenchmarkResult RunAddBenchmark(nei::TaskRunner &runner, std::uint32_t task_count) {
   std::atomic<std::uint32_t> failed_task_posts(0);
   bool sentinel_failed = false;
@@ -318,7 +368,17 @@ int main(int argc, char *argv[]) {
   g_executed_task_count.store(0, std::memory_order_relaxed);
   BenchmarkResult result_raw = RunRawAtomicBenchmark(task_count);
   all_results.push_back({"Raw atomic loop (no task system)", result_raw});
+  // Scenario 0b: BindOnce construction only (no post, no run)
+  g_sum_sink.store(0, std::memory_order_relaxed);
+  g_executed_task_count.store(0, std::memory_order_relaxed);
+  BenchmarkResult result_ctor = RunBindOnceConstructionBenchmark(task_count);
+  all_results.push_back({"BindOnce construction (no post/run)", result_ctor});
 
+  // Scenario 0c: BindOnce + Run on calling thread (no queue)
+  g_sum_sink.store(0, std::memory_order_relaxed);
+  g_executed_task_count.store(0, std::memory_order_relaxed);
+  BenchmarkResult result_ctor_run = RunBindOnceAndRunBenchmark(task_count);
+  all_results.push_back({"BindOnce + Run (no queue)", result_ctor_run});
   // Scenario 1: Standard fast-path PostTask
   g_sum_sink.store(0, std::memory_order_relaxed);
   g_executed_task_count.store(0, std::memory_order_relaxed);
