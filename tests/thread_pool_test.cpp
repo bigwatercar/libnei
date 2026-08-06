@@ -834,5 +834,42 @@ TEST(ThreadPoolTest, PooledSequencedRunsTasksInCurrentSequenceWithinTask) {
   pool.Shutdown();
 }
 
+// Pool-backed SingleThreadTaskRunner: all tasks posted to the same runner
+// MUST execute on the SAME physical (OS) thread.
+TEST(ThreadPoolTest, PooledSingleThreadAllTasksRunOnSameThread) {
+  ThreadPool pool({4}); // more workers than needed — should still pin to one
+  scoped_refptr<SingleThreadTaskRunner> runner = pool.CreateSingleThreadTaskRunner();
+  ASSERT_TRUE(runner);
+
+  constexpr int kTaskCount = 50;
+  std::vector<std::thread::id> thread_ids(kTaskCount);
+  std::atomic<int> completed{0};
+  WaitableEvent all_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  for (int i = 0; i < kTaskCount; ++i) {
+    runner->PostTask(FROM_HERE, [i, &thread_ids, &completed, &all_done]() {
+      thread_ids[i] = std::this_thread::get_id();
+      if (completed.fetch_add(1) + 1 == kTaskCount) {
+        all_done.Signal();
+      }
+    });
+  }
+
+  ASSERT_TRUE(all_done.TimedWait(std::chrono::seconds(10)));
+  EXPECT_EQ(completed.load(), kTaskCount);
+
+  // All thread IDs must be identical.
+  const std::thread::id first_id = thread_ids[0];
+  EXPECT_NE(first_id, std::thread::id{}); // must be a real thread
+  for (int i = 1; i < kTaskCount; ++i) {
+    EXPECT_EQ(thread_ids[i], first_id) << "Task " << i << " ran on a different thread";
+  }
+
+  // Verify it's NOT the main test thread (pool workers are distinct).
+  EXPECT_NE(first_id, std::this_thread::get_id());
+
+  pool.Shutdown();
+}
+
 } // namespace
 } // namespace nei
