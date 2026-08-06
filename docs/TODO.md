@@ -60,7 +60,6 @@
 |------|-----------|------------|
 | `HostResolverTest.ResolveDualStack` | Always (no DNS) | 需功能性 DNS |
 | `HostResolverTest.ResolveIPv4Only` | Always (no DNS) | 需功能性 DNS |
-| `TimerTest.RepeatingTimerStopPreventsFurtherFires` | Always (crash) | SEH 0xc0000005；基线复现（chromium_callback 分支既有）— 疑 sequence-manager/timer teardown race，与 allocator 无关 |
 
 ### Notes
 
@@ -91,6 +90,12 @@
   每个先前任务 body 已执行完毕；已由 `d928ba6` 的 `WaitForAllTasksExecuted()` 修复
   （等待 executed 计数达到预期，30s 停滞超时）。scheduler / callback 引用计数 /
   SmallObjectAllocator 均正确。
+- **TimerTest.RepeatingTimerStopPreventsFurtherFires（SEH 0xc0000005）** 2026-08-06 —
+  **根因是 Invoker 缺失 Chromium 的 WeakPtrCheck**：绑定 `WeakPtr` 的延迟任务在目标
+  （timer）已析构后执行时，`std::invoke` 走 `*weak_ptr` 解引用，`get()` 返回 nullptr
+  → `*nullptr` 崩溃。修复：`callback_internal.h` 的 `Invoker::Run` 调用前用
+  `AllBoundArgsValid()`（fold 检查所有绑定 WeakPtr 有效性），任一失效即跳过整个回调
+  （Chromium 语义）。已从 flaky 表移除。
 - **PipeStream WSL 问题** 2026-07-25 — EPOLLONESHOT 显式 re-arm。
 - **IOBuffer::data() 类型** 2026-07-29 — `char*`→`unsigned char*`（符号扩展 bug）。
 - **FilePathWatcher** 2026-07-22 — inotify / ReadDirectoryChangesW。

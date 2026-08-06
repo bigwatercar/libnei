@@ -208,6 +208,32 @@ unwrap_repeat_t<T> UnwrapRepeat(T &&arg) noexcept {
   return UnwindRepeat<std::remove_reference_t<T>>::Unwind(arg);
 }
 
+// -----------------------------------------------------------------------------
+// WeakPtrCheck — mirrors Chromium's base/bind_internal.h WeakPtrCheck.
+//
+// A bound WeakPtr whose target has been destroyed must cancel the whole
+// callback at Run() time, NOT be dereferenced (dereferencing an invalidated
+// WeakPtr yields a null target and an access violation).  Without this, a
+// delayed task that was posted while the target was alive but runs after the
+// target died (e.g. a RepeatingTimer tick whose owning timer was destroyed by
+// another queued task) crashes with 0xc0000005.
+// -----------------------------------------------------------------------------
+template <typename T>
+bool WeakPtrCheck(const T &) {
+  return true;
+}
+
+template <typename T>
+bool WeakPtrCheck(const nei::WeakPtr<T> &weak) {
+  return static_cast<bool>(weak); // WeakPtr::operator bool == IsValid()
+}
+
+template <typename Tuple>
+bool AllBoundArgsValid(const Tuple &args) {
+  return std::apply([](const auto &...a) { return (WeakPtrCheck(a) && ...); },
+                    args);
+}
+
 // Invoker<Storage, Sig, IsOnce> — dispatches to the correct unwind policy.
 template <typename Storage, typename Sig, bool IsOnce>
 struct Invoker;
@@ -235,6 +261,12 @@ struct Invoker<Storage, R(UA...), true> {
         }
       }
     } scoped_release{s};
+    // If any bound WeakPtr target has died, skip the call entirely rather than
+    // dereferencing the invalidated WeakPtr (Chromium semantics).  The state
+    // is still released by scoped_release.
+    if (!AllBoundArgsValid(s->args_)) {
+      return R();
+    }
     return RunImpl(
         s->fn_, s->args_, std::make_index_sequence<std::tuple_size_v<decltype(s->args_)>>{}, std::forward<UA>(ua)...);
   }
@@ -253,6 +285,10 @@ struct Invoker<Storage, R(UA...), false> {
 
   static R Run(BindStateBase *base, UA... ua) {
     auto *s = static_cast<Storage *>(base);
+    // Skip the call if any bound WeakPtr target has died (Chromium semantics).
+    if (!AllBoundArgsValid(s->args_)) {
+      return R();
+    }
     return RunImpl(
         s->fn_, s->args_, std::make_index_sequence<std::tuple_size_v<decltype(s->args_)>>{}, std::forward<UA>(ua)...);
   }
