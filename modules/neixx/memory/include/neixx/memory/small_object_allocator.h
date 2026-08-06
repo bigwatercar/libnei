@@ -40,10 +40,12 @@ namespace nei {
 // after all of its blocks have been freed and no thread is using it.
 // =============================================================================
 
-/// Opaque handle to an isolated allocator partition (Chromium-style partition).
+/// Opaque handle to an isolated allocator partition.  The partition APIs are
+/// internal (src/internal/small_object_allocator_internal.h) and not part of
+/// the public ABI — normal allocation goes through the default partition.
 struct SmallObjectAllocatorPartition;
 
-// ---- Default-partition API (used by SmallObjectAlloc/Free) ------------------
+// ---- Default-partition API --------------------------------------------------
 
 /// Allocates a block of at least `size` bytes aligned to `alignment` from the
 /// default partition.  Throws bad_alloc if the underlying allocation fails.
@@ -60,24 +62,6 @@ NEI_API void SmallObjectFree(void *ptr) noexcept;
 /// from a MemoryPressureMonitor listener).
 NEI_API void PurgeSmallObjectAllocator();
 
-// ---- Partition isolation ----------------------------------------------------
-
-/// Creates a new isolated partition (up to 7 beyond the default).  Returns
-/// nullptr if the partition limit is reached.
-NEI_API SmallObjectAllocatorPartition *CreateSmallObjectAllocatorPartition();
-
-/// Destroys a partition.  The caller must have freed every block allocated in
-/// it and stopped using it (no concurrent access) beforehand.
-NEI_API void DestroySmallObjectAllocatorPartition(SmallObjectAllocatorPartition *partition);
-
-/// Allocates from a specific partition (or the default if partition is null).
-NEI_API void *SmallObjectAllocInPartition(SmallObjectAllocatorPartition *partition,
-                                          std::size_t size,
-                                          std::size_t alignment = alignof(std::max_align_t));
-
-/// Decommits fully-free chunks of a specific partition.
-NEI_API void PurgeSmallObjectAllocatorPartition(SmallObjectAllocatorPartition *partition);
-
 // ---- Diagnostics ------------------------------------------------------------
 
 /// Diagnostic counters for stability/performance comparison.
@@ -92,7 +76,7 @@ struct SmallObjectAllocatorStats {
   std::uint64_t released_bytes;   // cumulative bytes returned to the OS entirely
 };
 
-/// Per-size-class breakdown for a partition.
+/// Per-size-class breakdown for the default partition.
 struct SmallObjectAllocatorSizeClassStats {
   std::uint64_t size;         // usable (returned) size of this class
   std::uint64_t in_use;       // blocks currently handed out
@@ -100,20 +84,12 @@ struct SmallObjectAllocatorSizeClassStats {
 };
 
 NEI_API void GetSmallObjectAllocatorStats(SmallObjectAllocatorStats *out);
-NEI_API void GetSmallObjectAllocatorPartitionStats(SmallObjectAllocatorPartition *partition,
-                                                   SmallObjectAllocatorStats *out);
 NEI_API void ResetSmallObjectAllocatorStats();
 
 /// Fills `out` with up to `capacity` per-size-class stats of the default
 /// partition.  Returns the number of entries written (<= capacity).
 NEI_API std::size_t GetSmallObjectAllocatorSizeClassStats(SmallObjectAllocatorSizeClassStats *out,
                                                           std::size_t capacity);
-
-/// Per-size-class stats of a specific partition (default if null).
-NEI_API std::size_t GetSmallObjectAllocatorPartitionSizeClassStats(
-    SmallObjectAllocatorPartition *partition,
-    SmallObjectAllocatorSizeClassStats *out,
-    std::size_t capacity);
 
 } // namespace nei
 

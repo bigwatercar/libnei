@@ -5,6 +5,7 @@
 // small_object_allocator.h are visible to consumers.
 
 #include <neixx/memory/small_object_allocator.h>
+#include "internal/small_object_allocator_internal.h"
 
 #include <atomic>
 #include <chrono>
