@@ -1,6 +1,7 @@
 #include "pooled_task_runner_utils.h"
 
 #include <deque>
+#include <neixx/threading/thread_local.h>
 
 #include "task_queue.h"
 
@@ -8,20 +9,20 @@ namespace nei {
 namespace internal {
 namespace {
 
-ThreadLocalStorage::Slot &GetCurrentQueueSlot() {
-  static ThreadLocalStorage::Slot slot(nullptr);
+ThreadLocalPointer<TaskQueue> &GetCurrentQueueSlot() {
+  static ThreadLocalPointer<TaskQueue> slot;
   return slot;
 }
 
-ThreadLocalStorage::Slot &GetLocalWorkQueueSlot() {
-  static ThreadLocalStorage::Slot slot(nullptr);
+ThreadLocalPointer<LocalWorkQueue> &GetLocalWorkQueueSlot() {
+  static ThreadLocalPointer<LocalWorkQueue> slot;
   return slot;
 }
 
 } // namespace
 
 TaskQueue *GetCurrentPooledTaskQueue() {
-  return static_cast<TaskQueue *>(GetCurrentQueueSlot().Get());
+  return GetCurrentQueueSlot().Get();
 }
 
 void SetCurrentPooledTaskQueue(TaskQueue *queue) {
@@ -29,7 +30,7 @@ void SetCurrentPooledTaskQueue(TaskQueue *queue) {
 }
 
 LocalWorkQueue *GetLocalWorkQueue() {
-  return static_cast<LocalWorkQueue *>(GetLocalWorkQueueSlot().Get());
+  return GetLocalWorkQueueSlot().Get();
 }
 
 void SetLocalWorkQueue(LocalWorkQueue *queue) {

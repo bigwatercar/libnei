@@ -3,7 +3,7 @@
 #include <atomic>
 
 #include <nei/debug/check.h>
-#include <neixx/threading/thread_local_storage.h>
+#include <neixx/threading/thread_local.h>
 
 namespace nei {
 namespace internal {
@@ -59,13 +59,13 @@ void JobTaskSource::NotifyConcurrencyIncrease(std::int32_t count) {
 }
 
 std::size_t JobTaskSource::GetTaskId() const {
-  static ThreadLocalStorage::Slot tls_src;
-  static ThreadLocalStorage::Slot tls_id;
-  void *raw_src = tls_src.Get();
+  static ThreadLocalPointer<JobTaskSource> tls_src;
+  static ThreadLocalPointer<std::size_t> tls_id;
+  JobTaskSource *raw_src = tls_src.Get();
   if (raw_src != this) {
     tls_src.Set(const_cast<JobTaskSource *>(this));
     std::size_t id = AssignTaskId();
-    tls_id.Set(reinterpret_cast<void *>(static_cast<std::uintptr_t>(id)));
+    tls_id.Set(reinterpret_cast<std::size_t *>(static_cast<std::uintptr_t>(id)));
     return id;
   }
   return static_cast<std::size_t>(reinterpret_cast<std::uintptr_t>(tls_id.Get()));

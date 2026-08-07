@@ -5,7 +5,6 @@
 
 #include <cstddef>
 #include <deque>
-#include <neixx/threading/thread_local_storage.h>
 
 namespace nei {
 namespace internal {

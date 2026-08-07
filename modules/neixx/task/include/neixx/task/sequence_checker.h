@@ -52,7 +52,7 @@
 #include <nei/macros/nei_export.h>
 #include <neixx/task/thread_checker.h>
 #include <neixx/task/sequence_token.h>
-#include <neixx/threading/thread_local_storage.h>
+#include <neixx/threading/thread_local.h>
 
 // ---------------------------------------------------------------------------
 // DCHECK_ALWAYS_ON 支持 (与 thread_checker.h 保持一致)
@@ -92,20 +92,19 @@ namespace internal {
 // 若需 32 位支持，应回退到堆分配方案并添加 #ifdef 分支。
 static_assert(sizeof(void *) >= sizeof(uint64_t), "SequenceChecker TLS zero-alloc storage requires 64-bit platform");
 
-// 获取存储当前线程 SequenceToken 的 TLS Slot。
-// 使用函数级 static 保证线程安全的延迟初始化 (C++11 6.7/4)。
-// 注意：不再注册析构回调  --  --  Token 值直接编码在 void* 中，无需清理。
-inline ThreadLocalStorage::Slot &GetSequenceTokenTLSSlot() {
-  static ThreadLocalStorage::Slot slot;
+// 使用 ThreadLocal<uint64_t> — 零分配，Token 值直接存储。
+// 注意：不再注册析构回调 — Token 值直接编码在 uint64_t 中，无需清理。
+inline ThreadLocal<uint64_t> &GetSequenceTokenTLSSlot() {
+  static ThreadLocal<uint64_t> slot;
   return slot;
 }
 
 // 获取当前线程正在执行的任务的 SequenceToken。
 // 若当前线程未在序列化上下文中运行，返回无效 token。
 inline SequenceToken GetCurrentSequenceToken() {
-  void *ptr = GetSequenceTokenTLSSlot().Get();
-  if (ptr) {
-    return SequenceToken(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ptr)));
+  uint64_t val = *GetSequenceTokenTLSSlot();
+  if (val != 0) {
+    return SequenceToken(val);
   }
   return SequenceToken(); // invalid
 }
@@ -114,16 +113,11 @@ inline SequenceToken GetCurrentSequenceToken() {
 //
 // 调用者：任务调度基础设施。仅在当前线程上调用。
 //
-// * 关键性能特性：此函数完全零分配  --  --  Token 的 uint64_t 值通过
-//    reinterpret_cast 直接嵌入 void* TLS 槽位，无 new/delete，无堆交互。
-//    在高频任务调度（每秒百万次派发）场景下不会触发系统堆分配器锁竞争。
+// * 关键性能特性：ThreadLocal<uint64_t> 基于 C++ thread_local，完全零分配。
+//    无需 new/delete，零堆交互。
 inline void SetCurrentSequenceToken(SequenceToken token) {
-  ThreadLocalStorage::Slot &slot = GetSequenceTokenTLSSlot();
-  if (token.is_valid()) {
-    slot.Set(reinterpret_cast<void *>(static_cast<uintptr_t>(token.value())));
-  } else {
-    slot.Set(nullptr);
-  }
+  auto &slot = GetSequenceTokenTLSSlot();
+  slot.Set(token.is_valid() ? token.value() : 0);
 }
 
 } // namespace internal

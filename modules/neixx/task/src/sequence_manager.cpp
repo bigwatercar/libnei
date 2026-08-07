@@ -11,7 +11,7 @@
 #include <neixx/synchronization/lock.h>
 #include <neixx/task/message_loop/message_pump_default.h>
 #include <neixx/task/task_tracing.h>
-#include <neixx/threading/thread_local_storage.h>
+#include <neixx/threading/thread_local.h>
 #include <neixx/trace_event/trace_event.h>
 
 #include "internal/task.h"
@@ -48,21 +48,13 @@ struct SequenceManagerThreadState {
   std::size_t bind_depth = 0;
 };
 
-#if defined(_WIN32)
-void NTAPI DestroySequenceManagerThreadState(void *state) {
-#else
-void DestroySequenceManagerThreadState(void *state) {
-#endif
-  delete static_cast<SequenceManagerThreadState *>(state);
-}
-
-ThreadLocalStorage::Slot &GetSequenceManagerThreadStateSlot() {
-  static ThreadLocalStorage::Slot slot(&DestroySequenceManagerThreadState);
+ThreadLocalOwnedPointer<SequenceManagerThreadState> &GetSequenceManagerThreadStateSlot() {
+  static ThreadLocalOwnedPointer<SequenceManagerThreadState> slot;
   return slot;
 }
 
 SequenceManagerThreadState *GetSequenceManagerThreadState() {
-  return static_cast<SequenceManagerThreadState *>(GetSequenceManagerThreadStateSlot().Get());
+  return GetSequenceManagerThreadStateSlot().Get();
 }
 
 SequenceManagerThreadState *EnsureSequenceManagerThreadState() {

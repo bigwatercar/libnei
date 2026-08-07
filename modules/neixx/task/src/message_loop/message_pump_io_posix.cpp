@@ -21,16 +21,14 @@
 #include <nei/debug/check.h>
 #include <neixx/synchronization/lock.h>
 #include <neixx/threading/platform_thread.h>
-#include <neixx/threading/thread_local_storage.h>
+#include <neixx/threading/thread_local.h>
 #include <neixx/trace_event/trace_event.h>
 
 namespace nei {
 namespace {
 
-ThreadLocalStorage::Slot &GetCurrentPumpSlot() {
-  static ThreadLocalStorage::Slot slot;
-  static std::once_flag once;
-  std::call_once(once, []() { (void)slot.Initialize(); });
+ThreadLocalPointer<MessagePumpForIO> &GetCurrentPumpSlot() {
+  static ThreadLocalPointer<MessagePumpForIO> slot;
   return slot;
 }
 
@@ -519,7 +517,7 @@ MessagePumpForIO::~MessagePumpForIO() {
 }
 
 MessagePumpForIO *MessagePumpForIO::Current() {
-  return reinterpret_cast<MessagePumpForIO *>(GetCurrentPumpSlot().Get());
+  return GetCurrentPumpSlot().Get();
 }
 
 void MessagePumpForIO::Run(Delegate *delegate) {
