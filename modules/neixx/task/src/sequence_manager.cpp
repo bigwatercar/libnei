@@ -124,7 +124,13 @@ public:
     return default_task_runner_;
   }
 
-  scoped_refptr<SequencedTaskRunner> CreateTaskRunnerLocked(const TaskTraits &traits) {
+  // Shared queue-construction helper used by both CreateTaskRunnerLocked and
+  // CreateDefaultTaskRunnerLocked.  Builds a TaskQueue wired to this
+  // SequenceManager (post callback, selector registration, queue view) and
+  // returns the raw queue pointer (owned by queues_).  Callers wrap it in the
+  // runner type they need.  Must be called under lock_.  Returns nullptr if
+  // the manager is shut down.
+  internal::TaskQueue *CreateTaskQueueLocked(const TaskTraits &traits, TaskPriority priority) {
     if (is_shutdown_) {
       return nullptr;
     }
@@ -161,43 +167,20 @@ public:
     });
 
     queues_.push_back(std::move(queue));
-    selector_.AddQueue(raw_queue, traits.priority());
+    selector_.AddQueue(raw_queue, priority);
     RebuildQueueViewLocked();
+    return raw_queue;
+  }
 
-    return SequencedTaskRunner::Create(raw_queue, traits);
+  scoped_refptr<SequencedTaskRunner> CreateTaskRunnerLocked(const TaskTraits &traits) {
+    return SequencedTaskRunner::Create(CreateTaskQueueLocked(traits, traits.priority()), traits);
   }
 
   // Creates the default task runner as a SingleThreadTaskRunner because
   // the SequenceManager is always driven by a single dedicated thread.
   scoped_refptr<SingleThreadTaskRunner> CreateDefaultTaskRunnerLocked() {
-    if (is_shutdown_) {
-      return nullptr;
-    }
-
-    std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(TaskTraits());
-    internal::TaskQueue *raw_queue = queue.get();
-    WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
-    queue->SetOnTaskPostedCallback([this, weak_self = weak_impl_factory_.GetWeakPtr(), weak_queue]() {
-      // Lifetime: see CreateTaskRunnerLocked for rationale.
-      if (!weak_self.get()) {
-        return;
-      }
-
-      internal::TaskQueue *queue = weak_queue.get();
-      if (queue != nullptr && queue->HasImmediateWork()) {
-        // Deferred flush via atomic flag — see CreateTaskRunnerLocked.
-        pending_work_notification_.store(true, std::memory_order_release);
-      }
-
-      // Wake the pump (see CreateTaskRunnerLocked for rationale).
-      pump_->ScheduleWorkAndDelayedWork(queue != nullptr ? queue->PeekNextDelayedRunTime() : TimeTicks());
-    });
-
-    queues_.push_back(std::move(queue));
-    selector_.AddQueue(raw_queue, TaskPriority::USER_VISIBLE);
-    RebuildQueueViewLocked();
-
-    return SingleThreadTaskRunner::Create(raw_queue, TaskTraits());
+    return SingleThreadTaskRunner::Create(CreateTaskQueueLocked(TaskTraits(), TaskPriority::USER_VISIBLE),
+                                          TaskTraits());
   }
 
   void Run(MessagePump::Delegate *delegate) {
