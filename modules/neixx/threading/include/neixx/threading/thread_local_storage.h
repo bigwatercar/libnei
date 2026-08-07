@@ -29,7 +29,8 @@
 
 namespace nei {
 
-class NEI_API ThreadLocalStorage final {
+class NEI_CPP_DEPRECATED("Use thread_local.h: ThreadLocalPointer<T>, ThreadLocalOwnedPointer<T>, ThreadLocal<T>")
+    NEI_API ThreadLocalStorage final {
 public:
 #if defined(_WIN32)
   using TLSDestructorFunc = void(NTAPI *)(void *);
@@ -37,7 +38,7 @@ public:
   using TLSDestructorFunc = void (*)(void *);
 #endif
 
-  class NEI_API Slot final {
+  class NEI_CPP_DEPRECATED("Use ThreadLocalPointer<T> or ThreadLocalOwnedPointer<T>") NEI_API Slot final {
   public:
     Slot();
     explicit Slot(TLSDestructorFunc destructor);

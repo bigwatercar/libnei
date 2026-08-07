@@ -15,3 +15,11 @@
 #define NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
 #define NEI_SUPPRESS_MSC_WARNING_4251_END
 #endif
+
+// C++14 [[deprecated]] attribute wrapper.
+// Usage: NEI_CPP_DEPRECATED("message") class Foo {};
+#if defined(__cplusplus) && (__cplusplus >= 201402L)
+#define NEI_CPP_DEPRECATED(msg) [[deprecated(msg)]]
+#else
+#define NEI_CPP_DEPRECATED(msg)
+#endif

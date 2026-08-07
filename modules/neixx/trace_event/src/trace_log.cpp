@@ -6,7 +6,7 @@
 #include <utility>
 
 #include <neixx/threading/platform_thread.h>
-#include <neixx/threading/thread_local_storage.h>
+#include <neixx/threading/thread_local.h>
 
 namespace nei {
 
@@ -19,33 +19,23 @@ std::atomic<bool> g_trace_enabled{false};
 // 每线程 TLS: 指向当前线程 TraceBuffer 的裸指针
 // =============================================================================
 //
-// 使用 ThreadLocalStorage::Slot (而非 thread_local):
-//   - 注册析构回调, 线程退出时自动注销 Buffer 并释放所有权
-//   - 避免 thread_local + new 造成的永久内存泄漏
-//   - TraceLog 通过 unique_ptr 持有 Buffer 的所有权
+// 使用 ThreadLocalPointer<ThreadTraceBuffer> 管理每线程 TraceBuffer 指针。
+// 内存由 TraceLog::RegisterBuffer 转移的 unique_ptr 持有, 在线程退出或
+// TraceLog::Clear() 时释放。
 // =============================================================================
 
 namespace {
 
-// TLS 析构回调: 线程退出时通知 TraceLog 释放此线程的 Buffer
-void DestroyThreadTraceBuffer(void *ptr) {
-  auto *buf = static_cast<ThreadTraceBuffer *>(ptr);
-  if (buf) {
-    TraceLog::GetInstance().UnregisterBuffer(buf);
-  }
-}
-
-ThreadLocalStorage::Slot &GetTraceBufferTLSSlot() {
-  static ThreadLocalStorage::Slot slot(&DestroyThreadTraceBuffer);
+ThreadLocalPointer<ThreadTraceBuffer> &GetTraceBufferTLSSlot() {
+  static ThreadLocalPointer<ThreadTraceBuffer> slot;
   return slot;
 }
 
 // 获取或创建当前线程的 TraceBuffer
 ThreadTraceBuffer *GetOrCreateThreadBuffer() {
-  ThreadLocalStorage::Slot &slot = GetTraceBufferTLSSlot();
-  void *ptr = slot.Get();
+  ThreadTraceBuffer *ptr = GetTraceBufferTLSSlot().Get();
   if (ptr) {
-    return static_cast<ThreadTraceBuffer *>(ptr);
+    return ptr;
   }
 
   // 首次访问: 分配 Buffer
@@ -56,7 +46,7 @@ ThreadTraceBuffer *GetOrCreateThreadBuffer() {
   TraceLog::GetInstance().RegisterBuffer(std::move(buf));
 
   // 存入 TLS (裸指针, 生命周期由 TraceLog 管理)
-  slot.Set(raw);
+  GetTraceBufferTLSSlot().Set(raw);
   return raw;
 }
 

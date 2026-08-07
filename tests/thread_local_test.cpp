@@ -6,7 +6,10 @@
 #include <vector>
 
 #include <neixx/threading/thread_local.h>
+#include <nei/macros/suppress_compiler_warnings.h>
 #include <neixx/threading/thread_local_storage.h>
+
+NEI_SUPPRESS_MSC_WARNING_BEGIN(4996)
 
 namespace {
 
@@ -29,11 +32,12 @@ TEST(ThreadLocalTest, ValueOperatorArrow) {
     int a = 7;
     std::string b = "hello";
   };
+
   nei::ThreadLocal<S> g_s;
   S *ptr = g_s.Get();
   EXPECT_EQ(ptr->a, 7);
   EXPECT_EQ(ptr->b, "hello");
-  (void)g_s;  // ThreadLocal exists, uses operator->
+  (void)g_s; // ThreadLocal exists, uses operator->
 }
 
 TEST(ThreadLocalTest, ValueSetAndGet) {
@@ -49,7 +53,8 @@ TEST(ThreadLocalTest, ValuePerThreadIsolation) {
 
   auto thread_fn = [&](int value) {
     g_val.Set(value);
-    if (*g_val != value) differences.fetch_add(1);
+    if (*g_val != value)
+      differences.fetch_add(1);
     // Other threads should NOT see this value
   };
 
@@ -76,9 +81,16 @@ struct TrackedObject {
   static std::atomic<int> alive_count;
   int id;
 
-  TrackedObject(int i) : id(i) { alive_count.fetch_add(1); }
-  ~TrackedObject() { alive_count.fetch_sub(1); }
+  TrackedObject(int i)
+      : id(i) {
+    alive_count.fetch_add(1);
+  }
+
+  ~TrackedObject() {
+    alive_count.fetch_sub(1);
+  }
 };
+
 std::atomic<int> TrackedObject::alive_count{0};
 
 TEST(ThreadLocalPointerTest, SetAndGet) {
@@ -110,12 +122,14 @@ TEST(ThreadLocalPointerTest, PerThreadIsolation) {
   g_obj.Set(t1);
 
   std::thread th1([&] {
-    if (g_obj.Get() == nullptr) t1_ok = true;  // should be null in new thread
+    if (g_obj.Get() == nullptr)
+      t1_ok = true; // should be null in new thread
     g_obj.Set(new TrackedObject(3));
   });
 
   std::thread th2([&] {
-    if (g_obj.Get() == nullptr) t2_ok = true;  // should be null in new thread
+    if (g_obj.Get() == nullptr)
+      t2_ok = true; // should be null in new thread
   });
 
   th1.join();
@@ -140,8 +154,14 @@ static std::atomic<int> g_owned_dtor_count{0};
 struct OwnedObject {
   int id = 0;
   OwnedObject() = default;
-  explicit OwnedObject(int i) : id(i) {}
-  ~OwnedObject() { g_owned_dtor_count.fetch_add(1); }
+
+  explicit OwnedObject(int i)
+      : id(i) {
+  }
+
+  ~OwnedObject() {
+    g_owned_dtor_count.fetch_add(1);
+  }
 };
 
 TEST(ThreadLocalOwnedPointerTest, GetOrCreate) {
@@ -152,7 +172,7 @@ TEST(ThreadLocalOwnedPointerTest, GetOrCreate) {
     EXPECT_NE(a, nullptr);
     a->id = 7;
     auto *b = g_obj.GetOrCreate();
-    EXPECT_EQ(b, a);  // same object
+    EXPECT_EQ(b, a); // same object
     EXPECT_EQ(b->id, 7);
   }
   // ThreadLocalOwnedPointer dtor does NOT call DestroyValue on slot destruction;
@@ -208,13 +228,13 @@ TEST(ThreadLocalBooleanTest, PerThreadIsolation) {
 
   std::atomic<bool> other_thread_saw{false};
   std::thread th([&] {
-    other_thread_saw.store(g_flag.Get());  // should be false in new thread
+    other_thread_saw.store(g_flag.Get()); // should be false in new thread
     g_flag.Set(true);
   });
   th.join();
 
-  EXPECT_FALSE(other_thread_saw.load());  // new thread default is false
-  EXPECT_TRUE(g_flag.Get());              // main thread still true
+  EXPECT_FALSE(other_thread_saw.load()); // new thread default is false
+  EXPECT_TRUE(g_flag.Get());             // main thread still true
 }
 
 // ---- Multiple slots (slot recycling) ---------------------------------------
@@ -222,7 +242,7 @@ TEST(ThreadLocalBooleanTest, PerThreadIsolation) {
 TEST(ThreadLocalTest, ManySlotsNoLeak) {
   // Create and destroy many ThreadLocalPointer instances.
   // This exercises slot recycling (FREE/IN_USE bitmap).
-  for (int i = 0; i < 300; ++i) {  // exceeds kMaxSlots=256
+  for (int i = 0; i < 300; ++i) { // exceeds kMaxSlots=256
     nei::ThreadLocalPointer<int> g_p;
     g_p.Set(new int(i));
     EXPECT_NE(g_p.Get(), nullptr);
@@ -284,7 +304,7 @@ TEST(ThreadLocalTest, IteratorFindsActiveSlots) {
     }
     it.Advance();
   }
-  EXPECT_GE(found, 2);  // at least our two slots
+  EXPECT_GE(found, 2); // at least our two slots
 }
 
 TEST(ThreadLocalTest, IteratorEmptyWhenNoSlotsActive) {
@@ -295,7 +315,7 @@ TEST(ThreadLocalTest, IteratorEmptyWhenNoSlotsActive) {
   while (!it.IsAtEnd()) {
     it.Advance();
   }
-  SUCCEED();  // no crash
+  SUCCEED(); // no crash
 }
 
 // ---- long_lived destructor ordering ----------------------------------------
@@ -306,12 +326,14 @@ std::atomic<int> g_order_flag{0};
 
 static void NTAPI OrderNormalDtor(void *) {
   g_order_normal.fetch_add(1);
-  if (g_order_flag.load() == 0) g_order_flag.store(1);
+  if (g_order_flag.load() == 0)
+    g_order_flag.store(1);
 }
 
 static void NTAPI OrderLongLivedDtor(void *) {
   g_order_long.fetch_add(1);
-  if (g_order_flag.load() == 1) g_order_flag.store(3);
+  if (g_order_flag.load() == 1)
+    g_order_flag.store(3);
 }
 
 TEST(ThreadLocalTest, LongLivedDestroyedAfterNormal) {
@@ -337,7 +359,9 @@ TEST(ThreadLocalTest, LongLivedDestroyedAfterNormal) {
 
 // ---- Slot::InitializeAsLongLived -------------------------------------------
 
-static void NTAPI NoopDtor(void *ptr) { (void)ptr; }
+static void NTAPI NoopDtor(void *ptr) {
+  (void)ptr;
+}
 
 TEST(ThreadLocalTest, LongLivedViaSlotApi) {
   nei::ThreadLocalStorage::Slot slot;
@@ -351,3 +375,5 @@ TEST(ThreadLocalTest, LongLivedViaSlotApi) {
 }
 
 } // namespace
+
+NEI_SUPPRESS_MSC_WARNING_END()
