@@ -5,7 +5,7 @@
 
 #include <cstddef>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/task/task_traits.h>
 
 namespace nei {

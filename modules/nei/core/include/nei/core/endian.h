@@ -2,7 +2,7 @@
 #ifndef NEI_CORE_ENDIAN_H
 #define NEI_CORE_ENDIAN_H
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <stdint.h>
 
 #ifdef __cplusplus

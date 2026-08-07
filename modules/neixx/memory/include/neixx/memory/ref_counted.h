@@ -4,7 +4,7 @@
 #include <type_traits>
 #include <utility>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 #if defined(_MSC_VER)
 #include <intrin.h>

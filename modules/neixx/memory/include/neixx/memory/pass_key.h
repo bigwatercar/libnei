@@ -1,7 +1,7 @@
 #ifndef NEIXX_MEMORY_PASS_KEY_H_
 #define NEIXX_MEMORY_PASS_KEY_H_
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 namespace nei {
 

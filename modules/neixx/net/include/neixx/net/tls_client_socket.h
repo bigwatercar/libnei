@@ -7,7 +7,7 @@
 #include <functional>
 #include <memory>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/io/async_stream.h>
 #include <neixx/net/tcp_client_socket.h>
 #include <neixx/task/task_runner.h>

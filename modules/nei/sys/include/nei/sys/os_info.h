@@ -2,7 +2,7 @@
 #ifndef NEI_SYS_OS_INFO_H
 #define NEI_SYS_OS_INFO_H
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 #include <stddef.h>
 

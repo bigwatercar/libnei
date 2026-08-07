@@ -38,7 +38,7 @@
 #include <atomic>
 
 #include <nei/debug/check.h>
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/threading/platform_thread.h>
 
 // ---------------------------------------------------------------------------

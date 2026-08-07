@@ -7,7 +7,7 @@
 #include <condition_variable>
 #include <mutex>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/common/time.h>
 #include <neixx/task/task_traits.h>
 

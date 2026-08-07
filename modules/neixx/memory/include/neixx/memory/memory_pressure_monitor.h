@@ -2,8 +2,8 @@
 #ifndef NEIXX_MEMORY_MEMORY_PRESSURE_MONITOR_H_
 #define NEIXX_MEMORY_MEMORY_PRESSURE_MONITOR_H_
 
-#include <nei/macros/nei_export.h>
-#include <nei/macros/suppress_compiler_warnings.h>
+#include <nei/build/nei_export.h>
+#include <nei/build/compiler_specific.h>
 
 #include <memory>
 

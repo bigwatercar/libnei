@@ -6,13 +6,13 @@
 #include <cstddef>
 #include <memory>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/common/time.h>
 #include <neixx/task/task_observer.h>
 #include <neixx/task/task_runner.h>
 #include <neixx/task/task_traits.h>
 #include <neixx/threading/platform_thread.h>
-#include <nei/macros/suppress_compiler_warnings.h>
+#include <nei/build/compiler_specific.h>
 
 namespace nei {
 

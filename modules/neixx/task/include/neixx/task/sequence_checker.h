@@ -49,7 +49,7 @@
 #include <atomic>
 
 #include <nei/debug/check.h>
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/task/thread_checker.h>
 #include <neixx/task/sequence_token.h>
 #include <neixx/threading/thread_local.h>

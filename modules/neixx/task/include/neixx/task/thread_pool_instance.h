@@ -3,7 +3,7 @@
 #ifndef NEIXX_TASK_THREAD_POOL_INSTANCE_H_
 #define NEIXX_TASK_THREAD_POOL_INSTANCE_H_
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/common/location.h>
 #include <neixx/functional/callback.h>
 #include <neixx/task/task_runner.h>

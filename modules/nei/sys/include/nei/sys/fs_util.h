@@ -9,7 +9,7 @@
  * to UTF-16LE internally; on POSIX they are used directly.
  */
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 #ifdef __cplusplus
 extern "C" {

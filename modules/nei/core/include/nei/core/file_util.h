@@ -6,7 +6,7 @@
  * UTF-8 file path utilities (cross-platform).
  */
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 #include <stdint.h>
 #include <stdio.h>

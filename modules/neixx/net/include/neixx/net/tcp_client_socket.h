@@ -6,7 +6,7 @@
 #include <functional>
 #include <memory>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/common/time.h>
 #include <neixx/functional/callback.h>
 #include <neixx/io/async_stream.h>

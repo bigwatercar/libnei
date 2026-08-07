@@ -6,7 +6,7 @@
 #include <memory>
 #include <string>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/net/address_list.h>

@@ -5,7 +5,7 @@
 
 #include <atomic>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/memory/ref_counted.h>
 
 namespace nei {

@@ -3,7 +3,7 @@
 #ifndef NEIXX_TASK_MESSAGE_LOOP_MESSAGE_PUMP_H_
 #define NEIXX_TASK_MESSAGE_LOOP_MESSAGE_PUMP_H_
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/common/time.h>
 
 namespace nei {

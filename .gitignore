@@ -40,22 +40,18 @@
 # debug information files
 *.dwo
 
+compile_commands.json
+
+/.vscode/
+/.agents/
+
 # CMake build directories
 /build/
-build/
 build-*/
 build_*/
 
-# Local clangd/CMake generated artifacts
-build-clangd/
-compile_commands.json
-
-log_bench_latest.md
-log_bench_compare_latest.md
-threadpool_bench_latest.md
-bench/output/
 /temp/
 /Testing/
-.vscode/
-.agents/bench/results/bench_*/
+
+bench/output/
 bench/results/bench_*/

@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 // mbedTLS types hidden via PIMPL.
 struct mbedtls_ssl_config;

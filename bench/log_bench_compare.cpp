@@ -24,7 +24,7 @@
 #include <memory>
 #include <string>
 
-#include <nei/macros/suppress_compiler_warnings.h>
+#include <nei/build/compiler_specific.h>
 #include <spdlog/async.h>
 #include <spdlog/sinks/base_sink.h>
 #include <spdlog/sinks/basic_file_sink.h>

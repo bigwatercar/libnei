@@ -11,7 +11,7 @@
 
 #ifdef _WIN32
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 #include <stddef.h>
 

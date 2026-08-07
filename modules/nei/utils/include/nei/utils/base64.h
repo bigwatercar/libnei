@@ -2,7 +2,7 @@
 #ifndef NEI_UTILS_BASE64_H
 #define NEI_UTILS_BASE64_H
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 #include <stddef.h>
 #include <stdint.h>

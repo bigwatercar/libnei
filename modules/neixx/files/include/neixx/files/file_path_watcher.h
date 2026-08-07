@@ -6,7 +6,7 @@
 #include <memory>
 #include <string>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/functional/callback.h>
 #include <neixx/task/task_runner.h>
 

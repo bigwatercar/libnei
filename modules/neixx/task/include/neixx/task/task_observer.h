@@ -5,7 +5,7 @@
 
 #include <cstdint>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/common/location.h>
 #include <neixx/common/time.h>
 #include <neixx/task/sequence_token.h>

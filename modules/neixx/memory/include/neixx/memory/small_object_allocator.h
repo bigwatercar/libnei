@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 namespace nei {
 

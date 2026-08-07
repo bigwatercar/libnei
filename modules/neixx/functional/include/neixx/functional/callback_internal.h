@@ -7,7 +7,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
-#include <nei/macros/suppress_compiler_warnings.h>
+#include <nei/build/compiler_specific.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/memory/small_object_allocator.h>
 #include <neixx/memory/unretained_wrapper.h>

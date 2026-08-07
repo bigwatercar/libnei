@@ -3,7 +3,7 @@
 #include <atomic>
 #include <thread>
 
-#include <nei/macros/suppress_compiler_warnings.h>
+#include <nei/build/compiler_specific.h>
 #include <neixx/threading/thread_local_storage.h>
 
 NEI_SUPPRESS_MSC_WARNING_BEGIN(4996)

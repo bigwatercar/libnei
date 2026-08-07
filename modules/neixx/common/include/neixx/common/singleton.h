@@ -7,7 +7,7 @@
 #include <mutex>
 
 #include <nei/debug/check.h>
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/common/at_exit.h>
 
 namespace nei {

@@ -2,7 +2,7 @@
 #ifndef NEI_UTILS_SHA1_H
 #define NEI_UTILS_SHA1_H
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 #include <stddef.h>
 #include <stdint.h>

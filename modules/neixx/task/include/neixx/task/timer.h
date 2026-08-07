@@ -41,8 +41,8 @@
 
 #include <memory>
 
-#include <nei/macros/nei_export.h>
-#include <nei/macros/suppress_compiler_warnings.h>
+#include <nei/build/nei_export.h>
+#include <nei/build/compiler_specific.h>
 #include <neixx/common/location.h>
 #include <neixx/common/time.h>
 #include <neixx/functional/callback.h>

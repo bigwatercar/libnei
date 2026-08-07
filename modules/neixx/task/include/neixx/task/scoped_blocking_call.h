@@ -5,7 +5,7 @@
 
 #include <functional>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 namespace nei {
 namespace internal {

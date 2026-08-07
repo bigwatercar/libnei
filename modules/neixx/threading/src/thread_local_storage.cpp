@@ -1,6 +1,6 @@
 // Implementation of the deprecated ThreadLocalStorage API.
 // Suppress deprecation warnings since this is the implementation itself.
-#include <nei/macros/suppress_compiler_warnings.h>
+#include <nei/build/compiler_specific.h>
 NEI_SUPPRESS_MSC_WARNING_BEGIN(4996)
 
 #include <neixx/threading/thread_local_storage.h>

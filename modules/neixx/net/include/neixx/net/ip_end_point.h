@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <string>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/net/ip_address.h>
 
 namespace nei::net {

@@ -2,7 +2,7 @@
 #ifndef NEI_UTILS_UUID_H
 #define NEI_UTILS_UUID_H
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 #include <stdint.h>
 

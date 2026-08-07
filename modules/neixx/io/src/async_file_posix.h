@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/io/async_file.h>
 
 namespace nei {

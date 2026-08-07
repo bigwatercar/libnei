@@ -6,8 +6,8 @@
 #include <cstring>
 #include <type_traits>
 #include <utility>
-#include <nei/macros/nei_export.h>
-#include <nei/macros/suppress_compiler_warnings.h>
+#include <nei/build/nei_export.h>
+#include <nei/build/compiler_specific.h>
 #include <neixx/functional/callback_internal.h>
 #include <neixx/memory/ref_counted.h>
 

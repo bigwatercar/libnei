@@ -19,8 +19,8 @@
 #include <memory>
 #include <utility>
 
-#include <nei/macros/nei_export.h>
-#include <nei/macros/suppress_compiler_warnings.h>
+#include <nei/build/nei_export.h>
+#include <nei/build/compiler_specific.h>
 
 #if defined(_WIN32)
 #ifndef NTAPI

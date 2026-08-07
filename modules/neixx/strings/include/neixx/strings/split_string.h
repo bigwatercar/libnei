@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 namespace nei {
 

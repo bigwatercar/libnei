@@ -7,11 +7,11 @@
 #include <functional>
 #include <string_view>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/io/async_stream.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/task/task_runner.h>
-#include <nei/macros/suppress_compiler_warnings.h>
+#include <nei/build/compiler_specific.h>
 
 namespace nei {
 

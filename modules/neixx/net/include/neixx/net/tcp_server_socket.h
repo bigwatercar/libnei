@@ -6,7 +6,7 @@
 #include <functional>
 #include <memory>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/net/ip_end_point.h>
 #include <neixx/task/task_runner.h>

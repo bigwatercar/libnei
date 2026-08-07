@@ -2,7 +2,7 @@
 #ifndef NEI_UTILS_CRC32_H
 #define NEI_UTILS_CRC32_H
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 #include <stddef.h>
 #include <stdint.h>

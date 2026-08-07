@@ -2,7 +2,7 @@
 #ifndef NEI_CORE_FLOAT_CTRL_H
 #define NEI_CORE_FLOAT_CTRL_H
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 #include <fenv.h>
 #include <stdint.h>

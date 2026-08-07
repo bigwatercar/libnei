@@ -13,7 +13,7 @@
 //
 // 线程安全：C++11 保证函数局部 static 初始化互斥。
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 namespace nei::net {
 

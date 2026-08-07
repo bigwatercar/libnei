@@ -6,8 +6,8 @@
 #include <memory>
 #include <string>
 
-#include <nei/macros/nei_export.h>
-#include <nei/macros/suppress_compiler_warnings.h>
+#include <nei/build/nei_export.h>
+#include <nei/build/compiler_specific.h>
 #include <neixx/synchronization/lock.h>
 #include <neixx/threading/platform_thread.h>
 

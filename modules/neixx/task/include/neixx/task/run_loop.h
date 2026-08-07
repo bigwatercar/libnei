@@ -3,7 +3,7 @@
 #ifndef NEIXX_TASK_RUN_LOOP_H_
 #define NEIXX_TASK_RUN_LOOP_H_
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/task/task_runner.h>
 
 namespace nei {

@@ -8,9 +8,9 @@
 #include <memory>
 #include <string>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/io/async_file.h>
-#include <nei/macros/suppress_compiler_warnings.h>
+#include <nei/build/compiler_specific.h>
 
 namespace nei {
 

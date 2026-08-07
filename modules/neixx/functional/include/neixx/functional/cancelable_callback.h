@@ -38,7 +38,7 @@
 // * PIMPL 保证：公开头文件不暴露 nei::Lock 或 RefCountedThreadSafe 细节。
 // =============================================================================
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 namespace nei {
 

@@ -12,7 +12,7 @@
  * the file system and have platform-specific implementations.
  */
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 
 #include <stddef.h>
 #include <stdint.h>

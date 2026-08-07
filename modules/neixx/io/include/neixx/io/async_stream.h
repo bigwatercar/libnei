@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <functional>
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/io/io_buffer.h>
 
 namespace nei {

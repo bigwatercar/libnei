@@ -33,7 +33,7 @@ if(NOT _nei_log_ring_slots_pow2_check EQUAL 0)
   )
 endif()
 
-add_subdirectory(macros)
+add_subdirectory(build)
 add_subdirectory(log)
 add_subdirectory(debug)
 add_subdirectory(core)

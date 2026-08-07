@@ -1,7 +1,7 @@
 target_sources(
   nei
-  PRIVATE include/nei/macros/compiler_specific.h include/nei/macros/namespace.h
-          include/nei/macros/nei_export.h include/nei/macros/typedefs.h
+  PRIVATE include/nei/build/compiler_specific.h
+          include/nei/build/nei_export.h
 )
 
 target_include_directories(

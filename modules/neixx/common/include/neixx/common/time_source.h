@@ -3,7 +3,7 @@
 #ifndef NEI_COMMON_TIME_SOURCE_H
 #define NEI_COMMON_TIME_SOURCE_H
 
-#include <nei/macros/nei_export.h>
+#include <nei/build/nei_export.h>
 #include <neixx/common/time.h>
 
 namespace nei {
