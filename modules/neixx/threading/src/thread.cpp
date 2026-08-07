@@ -136,11 +136,6 @@ void Thread::ThreadMain() {
     PlatformThread::SetCurrentThreadName(name_);
   }
 
-  // Apply the requested OS-level scheduling weight before entering the loop.
-  // Reads options_ which was written (with happens-before via OS thread
-  // creation) before this thread started.
-  PlatformThread::SetCurrentThreadType(options_.thread_type);
-
   // Build the pump for this thread's event loop.
   std::unique_ptr<MessagePump> pump = CreateMessagePumpForType(options_.message_pump_type);
 

@@ -118,10 +118,6 @@ void SimpleThread::ThreadMain() {
     PlatformThread::SetCurrentThreadName(name_);
   }
 
-  // Apply the requested OS-level scheduling weight.
-  // options_ is visible here with happens-before through OS thread creation.
-  PlatformThread::SetCurrentThreadType(options_.thread_type);
-
   WaitableEvent *start_event = nullptr;
   {
     AutoLock lock(lock_);
