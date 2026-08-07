@@ -3,6 +3,19 @@
 #ifndef NEIXX_THREADING_THREAD_LOCAL_STORAGE_H_
 #define NEIXX_THREADING_THREAD_LOCAL_STORAGE_H_
 
+// =============================================================================
+// ThreadLocalStorage::Slot — legacy API.  DEPRECATED.
+//
+// New code should use the type-safe templates in <neixx/threading/thread_local.h>:
+//   ThreadLocalPointer<T>  → replaces Slot + manual cast
+//   ThreadLocalOwnedPointer<T> → ownership + auto-delete
+//   ThreadLocalBoolean     → bool without allocation
+//   ThreadLocal<T>         → zero-cost thread_local
+//
+// The Slot class remains functional for backward compatibility but is
+// implemented on top of the same internal TlsSlot used by the new API.
+// =============================================================================
+
 #include <memory>
 
 #include <nei/macros/nei_export.h>
@@ -36,10 +49,31 @@ public:
     Slot &operator=(Slot &&) noexcept;
 
     bool Initialize(TLSDestructorFunc destructor = nullptr);
+    bool InitializeAsLongLived(TLSDestructorFunc destructor);
     bool initialized() const;
 
     void *Get() const;
     void Set(void *value);
+
+  private:
+    class Impl;
+    NEI_SUPPRESS_MSC_WARNING_BEGIN(4251)
+    std::unique_ptr<Impl> impl_;
+    NEI_SUPPRESS_MSC_WARNING_END()
+  };
+
+  // Diagnostics: iterate all active slots for the calling thread.
+  class NEI_API Iterator final {
+  public:
+    Iterator();
+    ~Iterator();
+
+    Iterator(const Iterator &) = delete;
+    Iterator &operator=(const Iterator &) = delete;
+
+    bool IsAtEnd() const;
+    void Advance();
+    void *Get() const;
 
   private:
     class Impl;
