@@ -38,11 +38,15 @@ public:
       , weak_factory_(owner, FROM_HERE) {
   }
 
-  // ---- Immediate tasks ------------------------------------------------
-
-  bool HasImmediateTasksLocked() const {
-    return !immediate_fifo_queue_.empty();
-  }
+  // ---- IncomingTaskQueue (Chromium-aligned) ---------------------------
+  //
+  // Mirrors Chromium's IncomingTaskQueue / MainThreadTaskQueue design:
+  //   incoming_queue_ — lock-protected, written by posting threads.
+  //   work_queue_     — consumer only, no lock, drained by Take*.
+  //
+  // On PushImmediateTask:  lock → push → unlock → callbacks.
+  // On TakeImmediateTasks: if work_queue_ is empty, lock → swap with
+  //   incoming_queue_ → unlock, then drain work_queue_ lock-free.
 
   bool PushImmediateTask(Task &&task) {
     if (!task.task) {
@@ -64,15 +68,15 @@ public:
         immediate_sequence_num_ = task.sequence_num;
       }
 
-      const bool was_empty = !HasImmediateTasksLocked();
+      const bool was_empty = incoming_queue_.empty() && work_queue_.empty();
 
-      if (immediate_fifo_queue_.empty() || task.sequence_num >= immediate_fifo_queue_.back().sequence_num) {
-        immediate_fifo_queue_.push_back(std::move(task));
+      if (incoming_queue_.empty() || task.sequence_num >= incoming_queue_.back().sequence_num) {
+        incoming_queue_.push_back(std::move(task));
       } else {
         const auto insert_it = std::upper_bound(
-            immediate_fifo_queue_.begin(), immediate_fifo_queue_.end(), task.sequence_num,
-            [](std::int64_t sequence_num, const Task &queued_task) { return sequence_num < queued_task.sequence_num; });
-        immediate_fifo_queue_.insert(insert_it, std::move(task));
+            incoming_queue_.begin(), incoming_queue_.end(), task.sequence_num,
+            [](std::int64_t s, const Task &t) { return s < t.sequence_num; });
+        incoming_queue_.insert(insert_it, std::move(task));
       }
 
       if (was_empty && on_task_posted_callback_) {
@@ -90,7 +94,6 @@ public:
     if (posted_callback_to_call) {
       posted_callback_to_call();
     }
-
     return true;
   }
 
@@ -99,13 +102,14 @@ public:
       return false;
     }
 
-    AutoLock lock(lock_);
-    if (immediate_fifo_queue_.empty()) {
+    ReloadWorkQueueIfEmpty();
+
+    if (work_queue_.empty()) {
       return false;
     }
 
-    *task = std::move(immediate_fifo_queue_.front());
-    immediate_fifo_queue_.pop_front();
+    *task = std::move(work_queue_.front());
+    work_queue_.pop_front();
     return true;
   }
 
@@ -114,11 +118,12 @@ public:
       return 0;
     }
 
-    AutoLock lock(lock_);
+    ReloadWorkQueueIfEmpty();
+
     std::size_t count = 0;
-    while (count < max_tasks && !immediate_fifo_queue_.empty()) {
-      tasks[count] = std::move(immediate_fifo_queue_.front());
-      immediate_fifo_queue_.pop_front();
+    while (count < max_tasks && !work_queue_.empty()) {
+      tasks[count] = std::move(work_queue_.front());
+      work_queue_.pop_front();
       ++count;
 
       if (IsShutdownBlockingTask(tasks[count - 1])) {
@@ -182,7 +187,7 @@ public:
       if (next_task.delayed_run_time > now) {
         break;
       }
-      immediate_fifo_queue_.push_back(PopTop(&delayed_incoming_queue_));
+      incoming_queue_.push_back(PopTop(&delayed_incoming_queue_));
       ++promoted;
     }
     return promoted;
@@ -197,7 +202,7 @@ public:
 
   bool HasImmediateWork() const {
     AutoLock lock(lock_);
-    return HasImmediateTasksLocked();
+    return !incoming_queue_.empty() || !work_queue_.empty();
   }
 
   bool HasDelayedWork() const {
@@ -275,17 +280,20 @@ private:
       return;
     }
 
-    std::deque<Task> kept_immediate;
-    while (!immediate_fifo_queue_.empty()) {
-      Task task = std::move(immediate_fifo_queue_.front());
-      immediate_fifo_queue_.pop_front();
+    // Load incoming into work queue first so all tasks are in one place.
+    ReloadWorkQueueLocked();
+
+    std::deque<Task> kept;
+    while (!work_queue_.empty()) {
+      Task task = std::move(work_queue_.front());
+      work_queue_.pop_front();
       if (IsShutdownBlockingTask(task)) {
-        kept_immediate.push_back(std::move(task));
+        kept.push_back(std::move(task));
       } else {
         dropped_tasks->push_back(std::move(task));
       }
     }
-    immediate_fifo_queue_.swap(kept_immediate);
+    work_queue_.swap(kept);
 
     TaskMinHeap kept_delayed;
     while (!delayed_incoming_queue_.empty()) {
@@ -304,7 +312,31 @@ private:
   SequenceToken sequence_token_ = SequenceToken::Create();
   bool shut_down_ = false;
   bool reject_new_tasks_ = false;
-  std::deque<Task> immediate_fifo_queue_;
+
+  // ---- IncomingTaskQueue (Chromium-aligned dual-queue) ----
+  // incoming_queue_: lock-protected, producer writes here.
+  // work_queue_:     consumer only, swapped from incoming when empty.
+  std::deque<Task> incoming_queue_;
+  std::deque<Task> work_queue_;
+
+  // Append incoming tasks to the work queue under lock.
+  // Called at shutdown or when cancelling non-shutdown-blocking tasks.
+  void ReloadWorkQueueLocked() {
+    while (!incoming_queue_.empty()) {
+      work_queue_.push_back(std::move(incoming_queue_.front()));
+      incoming_queue_.pop_front();
+    }
+  }
+
+  // If the work queue is empty, swap incoming → work under lock so
+  // the consumer can drain work_queue_ without holding the lock.
+  void ReloadWorkQueueIfEmpty() {
+    if (work_queue_.empty()) {
+      AutoLock lock(lock_);
+      work_queue_.swap(incoming_queue_);
+    }
+  }
+
   std::int64_t immediate_sequence_num_ = 0;
   std::int64_t delayed_sequence_num_ = 0;
   TaskMinHeap delayed_incoming_queue_;
