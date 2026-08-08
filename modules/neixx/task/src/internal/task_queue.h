@@ -50,7 +50,7 @@ public:
   TaskQueue(TaskQueue &&) = delete;
   TaskQueue &operator=(TaskQueue &&) = delete;
 
-  bool PushImmediateTask(Task task);
+  bool PushImmediateTask(Task &&task);
   bool PushDelayedTask(Task task);
   bool TakeImmediateTask(Task *task);
   std::size_t TakeImmediateTasks(Task *tasks, std::size_t max_tasks);

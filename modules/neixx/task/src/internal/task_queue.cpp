@@ -60,7 +60,7 @@ public:
     return !immediate_fifo_queue_.empty();
   }
 
-  bool PushImmediateTask(Task task) {
+  bool PushImmediateTask(Task &&task) {
     if (!task.task) {
       return false;
     }
@@ -512,7 +512,7 @@ TaskQueue::TaskQueue(const TaskTraits &traits)
 
 TaskQueue::~TaskQueue() = default;
 
-bool TaskQueue::PushImmediateTask(Task task) {
+bool TaskQueue::PushImmediateTask(Task &&task) {
   return impl_->PushImmediateTask(std::move(task));
 }
 
