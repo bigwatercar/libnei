@@ -40,11 +40,6 @@ public:
     /// baseline according to their TaskPriority (see WorkerThread priority
     /// backgrounding). The baseline is restored before each idle-wait.
     ThreadType worker_thread_type = ThreadType::DEFAULT;
-
-    /// When false, disables the SequenceManager single-queue fast-path
-    /// optimisation. Intended for test environments that must exercise the
-    /// full multi-queue dispatch path.
-    bool enable_single_queue_fast_path = true;
   };
 
   ThreadPool();

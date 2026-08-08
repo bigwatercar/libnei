@@ -24,7 +24,6 @@
 #include "internal/task_tracker.h"
 #include "internal/task_tracing_internal.h"
 #include <neixx/task/scoped_blocking_call.h>
-#include <neixx/task/sequence_manager.h>
 #include <neixx/task/task_observer.h>
 #include <neixx/task/task_traits.h>
 #include <neixx/threading/platform_thread.h>
@@ -650,10 +649,6 @@ public:
     // workers spawned by ScopedBlockingCall are capped here.
     const std::size_t max_workers = initial_workers * kMaxBlockingMultiplier;
     thread_group_ = std::make_unique<internal::ThreadGroup>("PoolDefault", max_workers);
-
-    // Propagate the testing knob before any workers are alive, so that every
-    // SequenceManager created thereafter respects the setting.
-    SequenceManager::SetSingleQueueFastPathEnabledForTesting(params_.enable_single_queue_fast_path);
 
     StartWorkers(initial_workers);
   }

@@ -19,7 +19,6 @@ int main() {
 
   nei::ThreadPool::InitParams params;
   params.max_num_workers = 4;
-  params.enable_single_queue_fast_path = true;
   params.suggested_reclaim_time = nei::TimeDelta();
   params.worker_thread_type = nei::ThreadType::DEFAULT;
 
