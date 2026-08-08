@@ -348,6 +348,24 @@ bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(PooledTaskQueue *queue, cons
   }
 
   if (raw->HasReadyTasks(now)) {
+    // Dedicated (SingleThreadTaskRunner) queues: the owning worker polls the
+    // queue directly and never reads the global heap, and EnqueueTaskSource is
+    // a no-op for them (EnqueueTaskSourceLocked bails when dedicated_owner != 0).
+    // If we don't wake the owner here, promoted delayed tasks sit in the
+    // immediate queue until the next post (or the 30s reclaim timeout), which
+    // makes SingleThread delayed tasks execute ~1000x too slowly.  Mirror the
+    // dedicated handling in ReEnqueueTaskQueue.
+    if (queue->is_dedicated()) {
+      std::size_t shard_index = GetTaskSourceShardIndex(raw);
+      Shard &shard = shards_[shard_index];
+      AutoLock lock(shard.lock);
+      auto it = shard.states.find(raw);
+      if (it != shard.states.end() && it->second.dedicated_owner != 0) {
+        WakeDedicatedWorker(queue);
+        return true;
+      }
+    }
+
     EnqueueTaskSource(RegisteredTaskSource{scoped_refptr<TaskSource>(raw)});
     return true;
   }
