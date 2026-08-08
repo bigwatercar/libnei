@@ -1,6 +1,7 @@
 #include <neixx/functional/bind.h>
 #include <neixx/common/location.h>
 #include <neixx/task/task_tracing.h>
+#include <neixx/task/sequence_manager.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/threading/thread.h>
 
@@ -39,6 +40,29 @@ std::uint32_t ParseTaskCount(int argc, char *argv[]) {
     std::cerr << "Invalid task_count: " << argv[1] << "\nUsage: task_thread_bench.exe [task_count]\n";
     return 0;
   }
+}
+
+bool ParseFastPathEnabled(int argc, char *argv[], bool *ok) {
+  if (ok != nullptr) {
+    *ok = true;
+  }
+
+  if (argc < 4) {
+    return true;
+  }
+
+  const std::string mode = argv[3];
+  if (mode == "on" || mode == "true" || mode == "1") {
+    return true;
+  }
+  if (mode == "off" || mode == "false" || mode == "0") {
+    return false;
+  }
+
+  if (ok != nullptr) {
+    *ok = false;
+  }
+  return true;
 }
 
 struct BenchmarkResult {
@@ -335,9 +359,18 @@ int main(int argc, char *argv[]) {
   const bool tracing_enabled_for_run = ParseTracingEnabled(argc, argv, &tracing_arg_ok);
   if (!tracing_arg_ok) {
     std::cerr << "Invalid tracing_mode: " << argv[2]
-              << "\nUsage: task_thread_bench.exe [task_count] [tracing_mode:on|off]\n";
+              << "\nUsage: task_thread_bench.exe [task_count] [tracing_mode:on|off] [fast_path:on|off]\n";
     return 2;
   }
+
+  bool fast_path_arg_ok = true;
+  const bool fast_path_enabled = ParseFastPathEnabled(argc, argv, &fast_path_arg_ok);
+  if (!fast_path_arg_ok) {
+    std::cerr << "Invalid fast_path: " << argv[3]
+              << "\nUsage: task_thread_bench.exe [task_count] [tracing_mode:on|off] [fast_path:on|off]\n";
+    return 2;
+  }
+  nei::SequenceManager::SetSingleQueueFastPathEnabledForTesting(fast_path_enabled);
 
   nei::Thread thread("task-thread-bench");
   if (!thread.Start()) {
