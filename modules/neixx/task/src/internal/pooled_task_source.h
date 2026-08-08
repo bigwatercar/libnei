@@ -20,6 +20,8 @@
 namespace nei {
 namespace internal {
 
+class TaskQueueTaskSource;
+
 // Global ready source used by ThreadPool workers. The source guarantees that a
 // PooledTaskQueue is handed out to at most one worker at a time.
 class PooledTaskSource final {
@@ -206,6 +208,12 @@ private:
   std::atomic<bool> shutdown_fast_path_{false};
   std::atomic<std::uint64_t> enqueue_order_{0};
   std::atomic<std::int64_t> total_task_count_{0};
+
+  // Mapping from PooledTaskQueue* → TaskSource* for scheduling state sync.
+  std::unordered_map<PooledTaskQueue *, TaskSource *> queue_to_source_;
+
+  // Holds TaskQueueTaskSource wrappers created by RegisterTaskQueue.
+  std::vector<scoped_refptr<TaskSource>> orphan_sources_;
 };
 
 } // namespace internal

@@ -40,6 +40,15 @@ void PooledTaskSource::RegisterTaskQueue(PooledTaskQueue *queue) {
 
   // Ensure queue has a stable state entry before any callback-driven reenqueue.
   (void)shard.states.emplace(queue, QueueState());
+
+  // Chromium-aligned: create a TaskQueueTaskSource wrapper to own scheduling
+  // state (has_worker_ / running_worker_count_) and establish the
+  // queue→source mapping for DidProcessTask synchronization.
+  if (queue_to_source_.find(queue) == queue_to_source_.end()) {
+    auto ts = MakeRefCounted<TaskQueueTaskSource>(queue);
+    queue_to_source_[queue] = ts.get();
+    orphan_sources_.push_back(std::move(ts));
+  }
 }
 
 PooledTaskQueue *PooledTaskSource::GetNextTaskQueue() {
@@ -448,6 +457,14 @@ void PooledTaskSource::OnTaskQueueProcessed(PooledTaskQueue *queue) {
 
   if (needs_signal) {
     NotifyWorkAvailable();
+  }
+
+  // Chromium-aligned: sync TaskQueueTaskSource scheduling state with the
+  // old heap's in_flight.  DidProcessTask resets has_worker_ (sequenced/
+  // single-thread) or decrements running_worker_count_ (parallel).
+  auto q2s_it = queue_to_source_.find(queue);
+  if (q2s_it != queue_to_source_.end()) {
+    (void)q2s_it->second->DidProcessTask();
   }
 }
 

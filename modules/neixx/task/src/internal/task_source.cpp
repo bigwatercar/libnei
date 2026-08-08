@@ -25,11 +25,56 @@ std::size_t TaskQueueTaskSource::TakeTasks(Task *out_tasks, std::size_t max_task
 }
 
 TaskSource::RunStatus TaskQueueTaskSource::WillRunTask() {
-  return static_cast<RunStatus>(queue_->WillRunTask());
+  ExecutionMode mode = GetExecutionMode();
+
+  switch (mode) {
+  case ExecutionMode::kParallel: {
+    static constexpr int kMaxParallelWorkers = 256;
+    const int prev = running_worker_count_.fetch_add(1, std::memory_order_acquire);
+    const int current = prev + 1;
+
+    if (shut_down_.load(std::memory_order_acquire)) {
+      running_worker_count_.fetch_sub(1, std::memory_order_release);
+      return RunStatus::kDisallowed;
+    }
+
+    if (current >= kMaxParallelWorkers) {
+      return RunStatus::kAllowedSaturated;
+    }
+    return RunStatus::kAllowedNotSaturated;
+  }
+
+  case ExecutionMode::kSequenced:
+  case ExecutionMode::kSingleThread:
+    if (has_worker_ || shut_down_.load(std::memory_order_acquire)) {
+      return RunStatus::kDisallowed;
+    }
+    has_worker_ = true;
+    return RunStatus::kAllowedNotSaturated;
+
+  default:
+    return RunStatus::kDisallowed;
+  }
 }
 
 bool TaskQueueTaskSource::DidProcessTask() {
-  return queue_->DidProcessTask();
+  ExecutionMode mode = GetExecutionMode();
+
+  switch (mode) {
+  case ExecutionMode::kParallel: {
+    const int prev = running_worker_count_.fetch_sub(1, std::memory_order_release);
+    (void)prev;
+    return HasWork();
+  }
+
+  case ExecutionMode::kSequenced:
+  case ExecutionMode::kSingleThread:
+    has_worker_ = false;
+    return HasWork();
+
+  default:
+    return false;
+  }
 }
 
 bool TaskQueueTaskSource::WillReEnqueue(TimeTicks now) {
@@ -82,14 +127,28 @@ bool TaskQueueTaskSource::HasWork() const {
 }
 
 std::size_t TaskQueueTaskSource::GetRemainingParallelism() const {
-  return queue_->GetRemainingParallelism();
+  ExecutionMode mode = GetExecutionMode();
+  switch (mode) {
+  case ExecutionMode::kParallel: {
+    static constexpr int kMaxParallelWorkers = 256;
+    const int running = running_worker_count_.load(std::memory_order_acquire);
+    const int remaining = kMaxParallelWorkers - running;
+    return remaining > 0 ? static_cast<std::size_t>(remaining) : 0;
+  }
+  case ExecutionMode::kSequenced:
+  case ExecutionMode::kSingleThread:
+    return has_worker_ ? 0 : 1;
+  default:
+    return 0;
+  }
 }
 
 bool TaskQueueTaskSource::IsShutdown() const {
-  return queue_->is_shutdown();
+  return shut_down_.load(std::memory_order_acquire);
 }
 
 void TaskQueueTaskSource::Shutdown() {
+  shut_down_.store(true, std::memory_order_release);
   queue_->Shutdown();
 }
 
