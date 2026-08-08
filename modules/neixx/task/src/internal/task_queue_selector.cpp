@@ -4,7 +4,7 @@
 
 #include <nei/debug/check.h>
 
-#include "task_queue.h"
+#include "sequenced_task_queue.h"
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -57,7 +57,7 @@ std::size_t TaskQueueSelector::PriorityToIndex(TaskPriority priority) {
   }
 }
 
-std::size_t TaskQueueSelector::AddQueue(internal::TaskQueue *queue, TaskPriority priority) {
+std::size_t TaskQueueSelector::AddQueue(internal::SequencedTaskQueue *queue, TaskPriority priority) {
   DCHECK(queue != nullptr);
   const std::size_t prio_idx = PriorityToIndex(priority);
   PriorityLevel &level = levels_[prio_idx];
@@ -75,7 +75,7 @@ std::size_t TaskQueueSelector::AddQueue(internal::TaskQueue *queue, TaskPriority
   return bit_pos;
 }
 
-void TaskQueueSelector::RemoveQueue(internal::TaskQueue *queue) {
+void TaskQueueSelector::RemoveQueue(internal::SequencedTaskQueue *queue) {
   DCHECK(queue != nullptr);
 
   for (std::size_t prio_idx = 0; prio_idx < kNumPriorities; ++prio_idx) {
@@ -104,7 +104,7 @@ void TaskQueueSelector::RemoveQueue(internal::TaskQueue *queue) {
   }
 }
 
-void TaskQueueSelector::SetQueueHasWork(internal::TaskQueue *queue, bool has_work) {
+void TaskQueueSelector::SetQueueHasWork(internal::SequencedTaskQueue *queue, bool has_work) {
   DCHECK(queue != nullptr);
 
   for (std::size_t prio_idx = 0; prio_idx < kNumPriorities; ++prio_idx) {
@@ -157,7 +157,7 @@ void TaskQueueSelector::MaybeResetScheduleRound() {
   }
 }
 
-internal::TaskQueue *TaskQueueSelector::SelectNextQueue() {
+internal::SequencedTaskQueue *TaskQueueSelector::SelectNextQueue() {
   MaybeResetScheduleRound();
 
   // Try each priority level in order: UB → UV → BE.
@@ -219,7 +219,7 @@ internal::TaskQueue *TaskQueueSelector::SelectNextQueue() {
   return nullptr;
 }
 
-void TaskQueueSelector::DidProcessTask(internal::TaskQueue * /*queue*/) {
+void TaskQueueSelector::DidProcessTask(internal::SequencedTaskQueue * /*queue*/) {
   // No additional state to update; round_robin_index is advanced in
   // SelectNextQueue(), and work_mask is updated via SetQueueHasWork().
 }

@@ -21,6 +21,7 @@ namespace nei {
 
 namespace internal {
 class TaskQueue;
+class SequencedTaskQueue;
 } // namespace internal
 
 struct NEI_API TaskRunnerTracingStats {
@@ -132,6 +133,11 @@ public:
   static scoped_refptr<SequencedTaskRunner> Create(internal::TaskQueue *task_queue,
                                                    const TaskTraits &traits = TaskTraits());
 
+  // Convenience factory accepting SequencedTaskQueue (SequenceManager path
+  // after the Chromium-aligned split).  Same semantics as Create(TaskQueue*).
+  static scoped_refptr<SequencedTaskRunner> Create(internal::SequencedTaskQueue *task_queue,
+                                                   const TaskTraits &traits = TaskTraits());
+
   // Convenience factory for thread-pool sequenced runners.  Unlike
   // Create(), this variant does NOT bind to the calling thread.
   // BelongsToCurrentThread() always returns false, while
@@ -200,6 +206,11 @@ public:
   // creating thread.  Use this factory for dedicated-thread runners
   // (e.g. the IO thread or a custom MessagePump-driven thread).
   static scoped_refptr<SingleThreadTaskRunner> Create(internal::TaskQueue *task_queue,
+                                                      const TaskTraits &traits = TaskTraits());
+
+  // Same as Create(TaskQueue*) but accepts SequencedTaskQueue for the
+  // SequenceManager path after the Chromium-aligned split.
+  static scoped_refptr<SingleThreadTaskRunner> Create(internal::SequencedTaskQueue *task_queue,
                                                       const TaskTraits &traits = TaskTraits());
 
   // Creates a pool-backed SingleThreadTaskRunner.  Unlike Create(), this

@@ -15,7 +15,7 @@
 #include <neixx/trace_event/trace_event.h>
 
 #include "internal/task.h"
-#include "internal/task_queue.h"
+#include "internal/sequenced_task_queue.h"
 #include "internal/task_queue_selector.h"
 #include "internal/task_tracing_internal.h"
 
@@ -130,14 +130,14 @@ public:
   // returns the raw queue pointer (owned by queues_).  Callers wrap it in the
   // runner type they need.  Must be called under lock_.  Returns nullptr if
   // the manager is shut down.
-  internal::TaskQueue *CreateTaskQueueLocked(const TaskTraits &traits, TaskPriority priority) {
+  internal::SequencedTaskQueue *CreateTaskQueueLocked(const TaskTraits &traits, TaskPriority priority) {
     if (is_shutdown_) {
       return nullptr;
     }
 
-    std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(traits);
-    internal::TaskQueue *raw_queue = queue.get();
-    WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
+    std::unique_ptr<internal::SequencedTaskQueue> queue = std::make_unique<internal::SequencedTaskQueue>(traits);
+    internal::SequencedTaskQueue *raw_queue = queue.get();
+    WeakPtr<internal::SequencedTaskQueue> weak_queue = raw_queue->GetWeakPtr();
     queue->SetOnTaskPostedCallback([this, weak_self = weak_impl_factory_.GetWeakPtr(), weak_queue]() {
       // Lifetime: once weak_self.get() succeeds, `this` is guaranteed valid
       // because weak_impl_factory_ is the *last* member of Impl (destroyed
@@ -147,7 +147,7 @@ public:
         return;
       }
 
-      internal::TaskQueue *queue = weak_queue.get();
+      internal::SequencedTaskQueue *queue = weak_queue.get();
       if (queue != nullptr && queue->HasImmediateWork()) {
         // Defer the selector update: set a flag that DoWork will flush
         // under lock_ at the start of its next invocation.  This avoids
@@ -210,7 +210,7 @@ public:
   }
 
   void Shutdown() {
-    std::vector<internal::TaskQueue *> queues_to_shutdown;
+    std::vector<internal::SequencedTaskQueue *> queues_to_shutdown;
     {
       AutoLock lock(lock_);
       if (is_shutdown_ || in_shutdown_processing_) {
@@ -232,7 +232,7 @@ public:
       RebuildQueueViewLocked();
     }
 
-    for (internal::TaskQueue *queue : queues_to_shutdown) {
+    for (internal::SequencedTaskQueue *queue : queues_to_shutdown) {
       if (queue == nullptr) {
         continue;
       }
@@ -272,7 +272,7 @@ public:
     };
 
     bool single_queue_fast_path_enabled = false;
-    internal::TaskQueue *fast_path_queue = nullptr;
+    internal::SequencedTaskQueue *fast_path_queue = nullptr;
     {
       AutoLock lock(lock_);
       FlushPendingWorkNotificationLocked();
@@ -329,7 +329,7 @@ public:
     // ---- General path: O(1) bitmask-based selection ----
     for (std::size_t i = 0; i < kMaxTasksPerDoWork; ++i) {
       internal::Task task;
-      internal::TaskQueue *selected_queue = nullptr;
+      internal::SequencedTaskQueue *selected_queue = nullptr;
 
       {
         AutoLock lock(lock_);
@@ -370,7 +370,7 @@ public:
     const TimeTicks now = TimeTicks::Now();
     bool promoted_any = false;
 
-    const std::shared_ptr<const std::vector<internal::TaskQueue *>> queues_view = GetQueuesView();
+    const std::shared_ptr<const std::vector<internal::SequencedTaskQueue *>> queues_view = GetQueuesView();
     if (!queues_view) {
       next_work_info->recent_now = now;
       next_work_info->next_run_time = MessagePump::Delegate::NextWorkInfo::kNoScheduledRunTime;
@@ -378,7 +378,7 @@ public:
     }
 
     TimeTicks earliest_next_run_time;
-    for (internal::TaskQueue *queue : *queues_view) {
+    for (internal::SequencedTaskQueue *queue : *queues_view) {
       if (queue->PromoteReadyDelayedTasks(now) > 0) {
         promoted_any = true;
         // Delayed tasks have been promoted to the immediate queue.
@@ -447,7 +447,7 @@ private:
   }
 
   void RebuildQueueViewLocked() {
-    auto new_view = std::make_shared<std::vector<internal::TaskQueue *>>();
+    auto new_view = std::make_shared<std::vector<internal::SequencedTaskQueue *>>();
     new_view->reserve(queues_.size());
 
     for (const auto &queue : queues_) {
@@ -457,7 +457,7 @@ private:
     queues_view_ = new_view;
   }
 
-  std::shared_ptr<const std::vector<internal::TaskQueue *>> GetQueuesView() const {
+  std::shared_ptr<const std::vector<internal::SequencedTaskQueue *>> GetQueuesView() const {
     AutoLock lock(lock_);
     return queues_view_;
   }
@@ -465,17 +465,17 @@ private:
   SequenceManager *owner_;
   mutable Lock lock_;
   std::unique_ptr<MessagePump> pump_;
-  std::vector<std::unique_ptr<internal::TaskQueue>> queues_;
-  std::vector<std::unique_ptr<internal::TaskQueue>> shutdown_queues_;
+  std::vector<std::unique_ptr<internal::SequencedTaskQueue>> queues_;
+  std::vector<std::unique_ptr<internal::SequencedTaskQueue>> shutdown_queues_;
   // Snapshot of raw queue pointers for lock-free read access from
   // DoDelayedWork.  Rebuilt under lock_ when queues are added/removed.
   //
   // Lifetime: shared_ptr ensures the vector outlives any inflight reader
   // even after Shutdown() swaps queues_ into shutdown_queues_.  The raw
-  // TaskQueue* pointers inside the view remain valid because Shutdown()
+  // SequencedTaskQueue* pointers inside the view remain valid because Shutdown()
   // keeps queue objects alive in shutdown_queues_ until Impl destruction.
-  std::shared_ptr<const std::vector<internal::TaskQueue *>> queues_view_ =
-      std::make_shared<std::vector<internal::TaskQueue *>>();
+  std::shared_ptr<const std::vector<internal::SequencedTaskQueue *>> queues_view_ =
+      std::make_shared<std::vector<internal::SequencedTaskQueue *>>();
 
   // O(1) bitmask-based queue selector.  Replaces the previous weighted
   // round-robin priority_schedule_ vector with per-priority bitmasks and

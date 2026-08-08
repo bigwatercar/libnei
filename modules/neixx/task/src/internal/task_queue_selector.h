@@ -14,7 +14,7 @@ namespace nei {
 
 // Forward declaration.
 namespace internal {
-class TaskQueue;
+class SequencedTaskQueue;
 }
 
 // =============================================================================
@@ -49,11 +49,11 @@ public:
   // Register a queue with the given priority.  Returns the bit position
   // assigned to this queue (or kMaxQueuesPerPriority if full).
   // Must be called before SetQueueHasWork / SelectNextQueue.
-  std::size_t AddQueue(internal::TaskQueue *queue, TaskPriority priority);
+  std::size_t AddQueue(internal::SequencedTaskQueue *queue, TaskPriority priority);
 
   // Remove a previously registered queue.  The bit position is released
   // and may be reused by future AddQueue calls.
-  void RemoveQueue(internal::TaskQueue *queue);
+  void RemoveQueue(internal::SequencedTaskQueue *queue);
 
   // ---- Work tracking ----
 
@@ -61,7 +61,7 @@ public:
   // Called by the SequenceManager when a task is posted to an empty queue
   // (has_work = true) or when the last task is taken from a queue
   // (has_work = false, set by TakeNextImmediateTask).
-  void SetQueueHasWork(internal::TaskQueue *queue, bool has_work);
+  void SetQueueHasWork(internal::SequencedTaskQueue *queue, bool has_work);
 
   // ---- Selection ----
 
@@ -70,11 +70,11 @@ public:
   //   1. Highest non-empty priority level (UB > UV > BE)
   //   2. Within priority: round-robin among ready queues
   //   3. 4:2:1 ratio enforced across priorities
-  internal::TaskQueue *SelectNextQueue();
+  internal::SequencedTaskQueue *SelectNextQueue();
 
   // Called after a task from |queue| has been processed.
   // Advances the round-robin pointer within the priority level.
-  void DidProcessTask(internal::TaskQueue *queue);
+  void DidProcessTask(internal::SequencedTaskQueue *queue);
 
   // ---- Query ----
 
@@ -91,7 +91,7 @@ private:
   struct PriorityLevel {
     // Ordered list of queues in this priority (index → queue).
     // Stable ordering; queues are appended on AddQueue, never reordered.
-    std::vector<internal::TaskQueue *> queues;
+    std::vector<internal::SequencedTaskQueue *> queues;
 
     // Bitmask: bit i is set ⇔ queues[i] has work available.
     // Atomic so that OnTaskPostedCallback (which runs on the posting

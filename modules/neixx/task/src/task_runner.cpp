@@ -8,6 +8,7 @@
 #include <neixx/task/task_tracing.h>
 #include "internal/task_tracing_internal.h"
 #include "internal/task_queue.h"
+#include "internal/sequenced_task_queue.h"
 #include "internal/pooled_task_runner_utils.h"
 #include <neixx/trace_event/trace_event.h>
 
@@ -55,6 +56,56 @@ bool PushTaskToQueue(WeakPtr<internal::TaskQueue> &task_queue,
     const std::int64_t delay_us = delay.InMicroseconds();
     if (now_us > std::numeric_limits<std::int64_t>::max() - delay_us) {
       g_delayed_overflow_fallback_count.fetch_add(1, std::memory_order_relaxed);
+      pushed = queue->PushImmediateTask(std::move(queued_task));
+    } else {
+      queued_task.delayed_run_time = enqueue_time + delay;
+      pushed = queue->PushDelayedTask(std::move(queued_task));
+    }
+  } else {
+    pushed = queue->PushImmediateTask(std::move(queued_task));
+  }
+
+  if (pushed && tracing_enabled) {
+    internal::RecordTaskPosted();
+  }
+  return pushed;
+}
+
+// Same as PushTaskToQueue but works with SequencedTaskQueue (SequenceManager
+// path after the Chromium-aligned split).
+bool PushTaskToSequencedQueue(WeakPtr<internal::SequencedTaskQueue> &seq_queue,
+                              const Location &from_here,
+                              const TaskTraits &traits,
+                              OnceClosure task,
+                              TimeDelta delay,
+                              const char *trace_category) {
+  TRACE_EVENT0(trace_category, "PostTask");
+  internal::SequencedTaskQueue *queue = seq_queue.get();
+  if (queue == nullptr) {
+    internal::RecordWeakPtrExpiredPost();
+    return false;
+  }
+
+  internal::Task queued_task;
+  queued_task.task = std::move(task);
+  queued_task.traits = traits;
+  queued_task.posted_from = from_here;
+
+  const bool tracing_enabled = internal::IsTaskTracingEnabled();
+  static constexpr int kImmediateTracingSampleRate = 16;
+  bool need_enqueue_time = delay.is_positive();
+  if (!need_enqueue_time && tracing_enabled) {
+    static thread_local std::size_t tl_sample_counter = 0;
+    need_enqueue_time = (++tl_sample_counter % kImmediateTracingSampleRate == 0);
+  }
+  const TimeTicks enqueue_time = need_enqueue_time ? TimeTicks::Now() : TimeTicks();
+  queued_task.enqueue_time = enqueue_time;
+
+  bool pushed = false;
+  if (delay.is_positive()) {
+    const std::int64_t now_us = enqueue_time.ToInternalValue();
+    const std::int64_t delay_us = delay.InMicroseconds();
+    if (now_us > std::numeric_limits<std::int64_t>::max() - delay_us) {
       pushed = queue->PushImmediateTask(std::move(queued_task));
     } else {
       queued_task.delayed_run_time = enqueue_time + delay;
@@ -124,17 +175,43 @@ bool PushPooledTaskToQueue(internal::TaskQueue *queue,
 // SequencedTaskRunner::Impl
 // =============================================================================
 //
-// Owns a WeakPtr to a TaskQueue.  The runner is bound to the thread that
-// created it (captured at construction).  All PostTask variants delegate
-// to the shared PushTaskToQueue helper.
+// Holds a WeakPtr to either a TaskQueue (ThreadPool path) or a
+// SequencedTaskQueue (SequenceManager path).  Uses a tagged union to
+// avoid vtable overhead on the PostTask hot path.
 struct SequencedTaskRunner::Impl {
-  WeakPtr<internal::TaskQueue> task_queue;
+  enum class QueueKind : std::uint8_t { kTaskQueue, kSequencedTaskQueue };
+
+  QueueKind kind;
+  union {
+    WeakPtr<internal::TaskQueue> task_queue;
+    WeakPtr<internal::SequencedTaskQueue> seq_queue;
+  };
   std::thread::id bound_thread_id;
 
-  Impl(WeakPtr<internal::TaskQueue> queue, const TaskTraits & /*traits*/)
-      : task_queue(std::move(queue))
+  // ---- TaskQueue constructor ----
+  Impl(WeakPtr<internal::TaskQueue> queue, const TaskTraits & /*traits*/, QueueKind k)
+      : kind(k)
       , bound_thread_id(std::this_thread::get_id()) {
+    new (&task_queue) WeakPtr<internal::TaskQueue>(std::move(queue));
   }
+
+  // ---- SequencedTaskQueue constructor ----
+  Impl(WeakPtr<internal::SequencedTaskQueue> queue, const TaskTraits & /*traits*/)
+      : kind(QueueKind::kSequencedTaskQueue)
+      , bound_thread_id(std::this_thread::get_id()) {
+    new (&seq_queue) WeakPtr<internal::SequencedTaskQueue>(std::move(queue));
+  }
+
+  ~Impl() {
+    if (kind == QueueKind::kTaskQueue) {
+      task_queue.~WeakPtr<internal::TaskQueue>();
+    } else {
+      seq_queue.~WeakPtr<internal::SequencedTaskQueue>();
+    }
+  }
+
+  Impl(const Impl &) = delete;
+  Impl &operator=(const Impl &) = delete;
 
   bool BelongsToCurrentThread() const {
     return std::this_thread::get_id() == bound_thread_id;
@@ -145,11 +222,20 @@ struct SequencedTaskRunner::Impl {
   }
 
   bool PostTask(const Location &from_here, const TaskTraits &traits, OnceClosure task) {
-    return PushTaskToQueue(task_queue, from_here, traits, std::move(task), TimeDelta(), "nei.scheduling");
+    if (kind == QueueKind::kTaskQueue) {
+      return PushTaskToQueue(task_queue, from_here, traits, std::move(task), TimeDelta(), "nei.scheduling");
+    }
+    return PushTaskToSequencedQueue(seq_queue, from_here, traits, std::move(task), TimeDelta(), "nei.scheduling");
   }
 
-  bool PostDelayedTask(const Location &from_here, const TaskTraits &traits, OnceClosure task, TimeDelta delay) {
-    return PushTaskToQueue(task_queue, from_here, traits, std::move(task), delay, "nei.scheduling");
+  bool PostDelayedTask(const Location &from_here,
+                       const TaskTraits &traits,
+                       OnceClosure task,
+                       TimeDelta delay) {
+    if (kind == QueueKind::kTaskQueue) {
+      return PushTaskToQueue(task_queue, from_here, traits, std::move(task), delay, "nei.scheduling");
+    }
+    return PushTaskToSequencedQueue(seq_queue, from_here, traits, std::move(task), delay, "nei.scheduling");
   }
 };
 
@@ -162,6 +248,16 @@ SequencedTaskRunner::~SequencedTaskRunner() = default;
 
 // static
 scoped_refptr<SequencedTaskRunner> SequencedTaskRunner::Create(internal::TaskQueue *task_queue,
+                                                               const TaskTraits &traits) {
+  if (task_queue == nullptr) {
+    return nullptr;
+  }
+  auto impl = std::make_unique<Impl>(task_queue->GetWeakPtr(), traits, Impl::QueueKind::kTaskQueue);
+  return scoped_refptr<SequencedTaskRunner>(new SequencedTaskRunner(std::move(impl), traits));
+}
+
+// static
+scoped_refptr<SequencedTaskRunner> SequencedTaskRunner::Create(internal::SequencedTaskQueue *task_queue,
                                                                const TaskTraits &traits) {
   if (task_queue == nullptr) {
     return nullptr;
@@ -211,6 +307,17 @@ SingleThreadTaskRunner::~SingleThreadTaskRunner() = default;
 
 // static
 scoped_refptr<SingleThreadTaskRunner> SingleThreadTaskRunner::Create(internal::TaskQueue *task_queue,
+                                                                     const TaskTraits &traits) {
+  if (task_queue == nullptr) {
+    return nullptr;
+  }
+  auto impl = std::make_unique<SequencedTaskRunner::Impl>(task_queue->GetWeakPtr(), traits,
+                                                          SequencedTaskRunner::Impl::QueueKind::kTaskQueue);
+  return scoped_refptr<SingleThreadTaskRunner>(new SingleThreadTaskRunner(std::move(impl), traits));
+}
+
+// static
+scoped_refptr<SingleThreadTaskRunner> SingleThreadTaskRunner::Create(internal::SequencedTaskQueue *task_queue,
                                                                      const TaskTraits &traits) {
   if (task_queue == nullptr) {
     return nullptr;
