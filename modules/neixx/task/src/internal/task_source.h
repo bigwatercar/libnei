@@ -4,9 +4,13 @@
 #define NEIXX_TASK_INTERNAL_TASK_SOURCE_H_
 
 #include <cstddef>
+#include <optional>
 
 #include <nei/build/nei_export.h>
+#include <neixx/common/time.h>
+#include <neixx/memory/ref_counted.h>
 #include <neixx/task/task_traits.h>
+#include "task_source_sort_key.h"
 
 namespace nei {
 namespace internal {
@@ -19,14 +23,19 @@ class PooledTaskQueue;
 // =============================================================================
 //
 // Mirrors Chromium's base/task/thread_pool/task_source.h.  Decouples the
-// pool scheduler (PooledTaskSource) from the concrete task container
-// (PooledTaskQueue), enabling future extension with JobTaskSource etc.
+// pool scheduler (PooledTaskSource) from the concrete task container,
+// enabling extension with non-queue task sources (JobTaskSource, etc.).
+//
+// A TaskSource is refcounted so that the scheduler (priority heap) and
+// workers (via RegisteredTaskSource) can safely share ownership across
+// the handoff chain: heap → worker → re-enqueue → heap.
 //
 // Implementations:
 //   TaskQueueTaskSource — adapts a PooledTaskQueue (sequenced / single-thread / parallel)
+//   ParallelTaskSequence  — single-task sequence for parallel runners
 //   (future) JobTaskSource — parallel-for work stealing
 //
-class NEI_API TaskSource {
+class NEI_API TaskSource : public RefCountedThreadSafe<TaskSource> {
 public:
   // Execution mode drives scheduling policy in the pool.
   enum class ExecutionMode {
@@ -43,8 +52,6 @@ public:
     kAllowedSaturated,    // Can run; remove from ready heap (last slot).
   };
 
-  virtual ~TaskSource() = default;
-
   // ---- Task retrieval ----
 
   // Take a single task. Returns true if a task was available.
@@ -53,7 +60,7 @@ public:
   // Batch-take up to |max_tasks|. Returns actual count (0 = empty).
   virtual std::size_t TakeTasks(Task *out_tasks, std::size_t max_tasks) = 0;
 
-  // ---- Concurrency control (parallel queues) ----
+  // ---- Concurrency control ----
 
   // Reserve a worker slot. Must be called before TakeTasks().
   virtual RunStatus WillRunTask() = 0;
@@ -61,6 +68,20 @@ public:
   // Release the reserved slot. Returns true if the source should be
   // re-enqueued into the ready heap.
   virtual bool DidProcessTask() = 0;
+
+  // Called after DidProcessTask() returns true to determine whether the
+  // source is ready to run immediately (vs having only delayed tasks).
+  // |now| is the current time for delayed-task readiness checks.
+  virtual bool WillReEnqueue(TimeTicks now) = 0;
+
+  // ---- Lifecycle ----
+
+  // Clear all pending tasks and return one representative task (if any).
+  // Used during shutdown to drain outstanding work.
+  virtual std::optional<Task> Clear() = 0;
+
+  virtual bool IsShutdown() const = 0;
+  virtual void Shutdown() = 0;
 
   // ---- Query ----
 
@@ -71,40 +92,63 @@ public:
   // Number of additional parallel workers that can be assigned.
   virtual std::size_t GetRemainingParallelism() const = 0;
 
-  // ---- Lifecycle ----
+  // ---- Sort key (priority heap integration) ----
 
-  virtual bool IsShutdown() const = 0;
-  virtual void Shutdown() = 0;
+  // Returns the sort key for the ready (immediate) priority heap.
+  virtual TaskSourceSortKey GetSortKey() const = 0;
+
+  // Returns the sort key for the delayed priority heap, or a null
+  // TimeTicks if this source has no delayed tasks.
+  virtual TimeTicks GetDelayedSortKey() const = 0;
+
+  // Returns true if this source has tasks that are ready to execute at |now|.
+  virtual bool HasReadyTasks(TimeTicks now) const = 0;
+
+  // Called when a delayed task becomes ready.  Returns true if the source
+  // should be moved from the delayed heap to the immediate heap.
+  virtual bool OnBecomeReady() = 0;
+
+  TaskSource() = default;
+  ~TaskSource() = default;
+
+  TaskSource(const TaskSource &) = delete;
+  TaskSource &operator=(const TaskSource &) = delete;
 };
 
 // =============================================================================
 // TaskQueueTaskSource — adapts a PooledTaskQueue to the TaskSource interface
 // =============================================================================
 //
-// Thin, non-owning adapter.  PooledTaskSource and WorkerThread interact
-// with TaskSource* instead of PooledTaskQueue*, enabling the future addition of
-// non-queue task sources (e.g. JobTaskSource).
-//
-// Lifetime: the PooledTaskQueue must outlive this adapter.  In practice the
-// ThreadPool owns both via queues_ vector; the TaskQueueTaskSource is
-// stored alongside, and both are destroyed together at shutdown.
+// Thin, non-owning adapter.  The PooledTaskQueue must outlive this adapter.
+// Because TaskSource is refcounted, TaskQueueTaskSource instances are
+// managed via scoped_refptr.  The ThreadPool owns both the PooledTaskQueue
+// (unique_ptr) and this adapter (scoped_refptr); the adapter is destroyed
+// before the queue at shutdown.
 //
 class NEI_API TaskQueueTaskSource final : public TaskSource {
 public:
   explicit TaskQueueTaskSource(PooledTaskQueue *queue);
-  ~TaskQueueTaskSource() override = default;
+  ~TaskQueueTaskSource() = default;
 
   // TaskSource interface.
   bool TakeTask(Task *out_task) override;
   std::size_t TakeTasks(Task *out_tasks, std::size_t max_tasks) override;
   RunStatus WillRunTask() override;
   bool DidProcessTask() override;
+  bool WillReEnqueue(TimeTicks now) override;
+  std::optional<Task> Clear() override;
+
   ExecutionMode GetExecutionMode() const override;
   const TaskTraits &GetTraits() const override;
   bool HasWork() const override;
   std::size_t GetRemainingParallelism() const override;
   bool IsShutdown() const override;
   void Shutdown() override;
+
+  TaskSourceSortKey GetSortKey() const override;
+  TimeTicks GetDelayedSortKey() const override;
+  bool HasReadyTasks(TimeTicks now) const override;
+  bool OnBecomeReady() override;
 
   // Access the underlying PooledTaskQueue (for delayed work, callbacks, etc.).
   PooledTaskQueue *task_queue() const {
