@@ -38,6 +38,10 @@ public:
       , weak_factory_(owner, FROM_HERE) {
   }
 
+  void set_single_consumer(bool single_consumer) {
+    single_consumer_ = single_consumer;
+  }
+
   // ---- IncomingTaskQueue (Chromium-aligned) ---------------------------
   //
   // Mirrors Chromium's IncomingTaskQueue / MainThreadTaskQueue design:
@@ -73,9 +77,10 @@ public:
       if (incoming_queue_.empty() || task.sequence_num >= incoming_queue_.back().sequence_num) {
         incoming_queue_.push_back(std::move(task));
       } else {
-        const auto insert_it = std::upper_bound(
-            incoming_queue_.begin(), incoming_queue_.end(), task.sequence_num,
-            [](std::int64_t s, const Task &t) { return s < t.sequence_num; });
+        const auto insert_it = std::upper_bound(incoming_queue_.begin(),
+                                                incoming_queue_.end(),
+                                                task.sequence_num,
+                                                [](std::int64_t s, const Task &t) { return s < t.sequence_num; });
         incoming_queue_.insert(insert_it, std::move(task));
       }
 
@@ -102,14 +107,25 @@ public:
       return false;
     }
 
-    ReloadWorkQueueIfEmpty();
+    if (single_consumer_) {
+      ReloadWorkQueueIfEmpty();
 
-    if (work_queue_.empty()) {
-      return false;
+      if (work_queue_.empty()) {
+        return false;
+      }
+
+      *task = std::move(work_queue_.front());
+      work_queue_.pop_front();
+      return true;
     }
 
-    *task = std::move(work_queue_.front());
-    work_queue_.pop_front();
+    // Multi-consumer (ThreadPool parallel) path: fully lock-protected.
+    AutoLock lock(lock_);
+    if (incoming_queue_.empty()) {
+      return false;
+    }
+    *task = std::move(incoming_queue_.front());
+    incoming_queue_.pop_front();
     return true;
   }
 
@@ -118,12 +134,28 @@ public:
       return 0;
     }
 
-    ReloadWorkQueueIfEmpty();
+    if (single_consumer_) {
+      ReloadWorkQueueIfEmpty();
 
+      std::size_t count = 0;
+      while (count < max_tasks && !work_queue_.empty()) {
+        tasks[count] = std::move(work_queue_.front());
+        work_queue_.pop_front();
+        ++count;
+
+        if (IsShutdownBlockingTask(tasks[count - 1])) {
+          break;
+        }
+      }
+      return count;
+    }
+
+    // Multi-consumer (ThreadPool parallel) path: fully lock-protected.
+    AutoLock lock(lock_);
     std::size_t count = 0;
-    while (count < max_tasks && !work_queue_.empty()) {
-      tasks[count] = std::move(work_queue_.front());
-      work_queue_.pop_front();
+    while (count < max_tasks && !incoming_queue_.empty()) {
+      tasks[count] = std::move(incoming_queue_.front());
+      incoming_queue_.pop_front();
       ++count;
 
       if (IsShutdownBlockingTask(tasks[count - 1])) {
@@ -280,20 +312,36 @@ private:
       return;
     }
 
-    // Load incoming into work queue first so all tasks are in one place.
-    ReloadWorkQueueLocked();
+    if (single_consumer_) {
+      // Load incoming into work queue first so all tasks are in one place.
+      ReloadWorkQueueLocked();
 
-    std::deque<Task> kept;
-    while (!work_queue_.empty()) {
-      Task task = std::move(work_queue_.front());
-      work_queue_.pop_front();
-      if (IsShutdownBlockingTask(task)) {
-        kept.push_back(std::move(task));
-      } else {
-        dropped_tasks->push_back(std::move(task));
+      std::deque<Task> kept;
+      while (!work_queue_.empty()) {
+        Task task = std::move(work_queue_.front());
+        work_queue_.pop_front();
+        if (IsShutdownBlockingTask(task)) {
+          kept.push_back(std::move(task));
+        } else {
+          dropped_tasks->push_back(std::move(task));
+        }
       }
+      work_queue_.swap(kept);
+    } else {
+      // Multi-consumer: work_queue_ is unused (Take* reads incoming directly),
+      // so filter incoming_queue_ in place.  Caller holds lock_.
+      std::deque<Task> kept;
+      while (!incoming_queue_.empty()) {
+        Task task = std::move(incoming_queue_.front());
+        incoming_queue_.pop_front();
+        if (IsShutdownBlockingTask(task)) {
+          kept.push_back(std::move(task));
+        } else {
+          dropped_tasks->push_back(std::move(task));
+        }
+      }
+      incoming_queue_.swap(kept);
     }
-    work_queue_.swap(kept);
 
     TaskMinHeap kept_delayed;
     while (!delayed_incoming_queue_.empty()) {
@@ -312,6 +360,11 @@ private:
   SequenceToken sequence_token_ = SequenceToken::Create();
   bool shut_down_ = false;
   bool reject_new_tasks_ = false;
+
+  // When true, the consumer is a single thread (SequenceManager) so Take*
+  // may use the swap-based fast path.  When false (ThreadPool), Take* stays
+  // fully lock-protected because multiple workers may consume concurrently.
+  bool single_consumer_ = false;
 
   // ---- IncomingTaskQueue (Chromium-aligned dual-queue) ----
   // incoming_queue_: lock-protected, producer writes here.
@@ -356,6 +409,10 @@ SequencedTaskQueue::SequencedTaskQueue(const TaskTraits &traits)
 }
 
 SequencedTaskQueue::~SequencedTaskQueue() = default;
+
+void SequencedTaskQueue::set_single_consumer(bool single_consumer) {
+  impl_->set_single_consumer(single_consumer);
+}
 
 bool SequencedTaskQueue::PushImmediateTask(Task &&task) {
   return impl_->PushImmediateTask(std::move(task));

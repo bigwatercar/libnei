@@ -46,6 +46,13 @@ public:
   SequencedTaskQueue(SequencedTaskQueue &&) = delete;
   SequencedTaskQueue &operator=(SequencedTaskQueue &&) = delete;
 
+  // When true (default), enables the IncomingTaskQueue-style dual-queue swap
+  // optimization for the consumer.  This is ONLY safe for a single consumer
+  // (SequenceManager's dedicated thread).  ThreadPool-backed queues (which may
+  // have multiple workers concurrently taking tasks) MUST leave this false so
+  // Take* stays fully lock-protected.
+  void set_single_consumer(bool single_consumer);
+
   // ---- Immediate tasks ----
 
   bool PushImmediateTask(Task &&task);

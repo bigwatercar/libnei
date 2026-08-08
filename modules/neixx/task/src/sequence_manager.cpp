@@ -137,6 +137,9 @@ public:
 
     std::unique_ptr<internal::SequencedTaskQueue> queue = std::make_unique<internal::SequencedTaskQueue>(traits);
     internal::SequencedTaskQueue *raw_queue = queue.get();
+    // SequenceManager is the single consumer of its own queues, so the
+    // IncomingTaskQueue-style swap fast path is safe (and fast).
+    queue->set_single_consumer(true);
     WeakPtr<internal::SequencedTaskQueue> weak_queue = raw_queue->GetWeakPtr();
     queue->SetOnTaskPostedCallback([this, weak_self = weak_impl_factory_.GetWeakPtr(), weak_queue]() {
       // Lifetime: once weak_self.get() succeeds, `this` is guaranteed valid
