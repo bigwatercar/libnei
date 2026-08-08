@@ -313,20 +313,26 @@ private:
     }
 
     if (single_consumer_) {
-      // Load incoming into work queue first so all tasks are in one place.
-      ReloadWorkQueueLocked();
-
+      // In single-consumer mode, work_queue_ is the consumer's private drain
+      // buffer, accessed LOCK-FREE by the message-pump thread (e.g.
+      // SequenceManager::DoWork → TakeImmediateTasks).  Shutdown() may run
+      // concurrently with that drain, so touching work_queue_ here would race
+      // with the lock-free pop and corrupt the deque.  Cancel only from
+      // incoming_queue_, which is lock-protected.  Tasks already moved into
+      // work_queue_ are drained by the consumer before the pump quits; running
+      // a few extra non-BLOCK_SHUTDOWN tasks during shutdown is acceptable
+      // best-effort semantics.
       std::deque<Task> kept;
-      while (!work_queue_.empty()) {
-        Task task = std::move(work_queue_.front());
-        work_queue_.pop_front();
+      while (!incoming_queue_.empty()) {
+        Task task = std::move(incoming_queue_.front());
+        incoming_queue_.pop_front();
         if (IsShutdownBlockingTask(task)) {
           kept.push_back(std::move(task));
         } else {
           dropped_tasks->push_back(std::move(task));
         }
       }
-      work_queue_.swap(kept);
+      incoming_queue_.swap(kept);
     } else {
       // Multi-consumer: work_queue_ is unused (Take* reads incoming directly),
       // so filter incoming_queue_ in place.  Caller holds lock_.
@@ -371,15 +377,6 @@ private:
   // work_queue_:     consumer only, swapped from incoming when empty.
   std::deque<Task> incoming_queue_;
   std::deque<Task> work_queue_;
-
-  // Append incoming tasks to the work queue under lock.
-  // Called at shutdown or when cancelling non-shutdown-blocking tasks.
-  void ReloadWorkQueueLocked() {
-    while (!incoming_queue_.empty()) {
-      work_queue_.push_back(std::move(incoming_queue_.front()));
-      incoming_queue_.pop_front();
-    }
-  }
 
   // If the work queue is empty, swap incoming → work under lock so
   // the consumer can drain work_queue_ without holding the lock.

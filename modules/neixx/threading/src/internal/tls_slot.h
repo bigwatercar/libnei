@@ -64,6 +64,8 @@ public:
   void FreeSlot(int index);
 
   PerThreadStorage *GetOrCreateThreadStorage();
+  // Returns this thread's storage without creating it (nullptr if none).
+  PerThreadStorage *GetThreadStorageNoCreate() const;
   bool IsSlotActive(int index) const;
 
   // Shared state (accessed by internal free functions).

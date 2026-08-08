@@ -95,7 +95,12 @@ public:
   }
 
   TaskSource() = default;
-  ~TaskSource() = default;
+  // Virtual so that derived sources (TaskQueueTaskSource, ParallelTaskSequence)
+  // are destroyed correctly when released through the RefCountedThreadSafe
+  // base.  Deleting a derived object via a non-virtual base pointer is
+  // undefined behavior (leaks the derived state, e.g. ParallelTaskSequence's
+  // task closure) and trips ASAN new-delete-type-mismatch.
+  virtual ~TaskSource() = default;
 
   TaskSource(const TaskSource &) = delete;
   TaskSource &operator=(const TaskSource &) = delete;

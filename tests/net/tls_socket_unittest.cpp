@@ -32,6 +32,7 @@
 #include <neixx/io/io_buffer.h>
 #include <neixx/net/ip_address.h>
 #include <neixx/net/ip_end_point.h>
+#include <neixx/memory/ref_counted.h>
 #include <neixx/net/ssl_context.h>
 #include <neixx/net/tcp_client_socket.h>
 #include <neixx/net/tcp_server_socket.h>
@@ -156,11 +157,11 @@ protected:
     ASSERT_FALSE(key_pem_.empty()) << "Key generation produced empty PEM";
 
     // Server context.
-    server_ctx_ = std::make_unique<SSLContext>(SSLContext::Mode::Server);
+    server_ctx_ = MakeRefCounted<SSLContext>(SSLContext::Mode::Server);
     ASSERT_TRUE(server_ctx_->SetCertificate(cert_pem_, key_pem_));
 
     // Client context — trusts our self-signed CA.
-    client_ctx_ = std::make_unique<SSLContext>(SSLContext::Mode::Client);
+    client_ctx_ = MakeRefCounted<SSLContext>(SSLContext::Mode::Client);
     client_ctx_->SetPeerVerify(nei::net::PeerVerify::kOptional);
     ASSERT_TRUE(client_ctx_->SetCAChain(cert_pem_));
 
@@ -217,8 +218,8 @@ protected:
   scoped_refptr<SingleThreadTaskRunner> srv_runner_;
   std::string cert_pem_;
   std::string key_pem_;
-  std::unique_ptr<SSLContext> server_ctx_;
-  std::unique_ptr<SSLContext> client_ctx_;
+  scoped_refptr<SSLContext> server_ctx_;
+  scoped_refptr<SSLContext> client_ctx_;
 };
 
 // =============================================================================
@@ -229,14 +230,14 @@ TEST_F(TlsSocketTest, CertGeneration) {
   ASSERT_FALSE(cert_pem_.empty());
   ASSERT_FALSE(key_pem_.empty());
 
-  SSLContext srv(SSLContext::Mode::Server);
-  EXPECT_TRUE(srv.SetCertificate(cert_pem_, key_pem_));
+  scoped_refptr<SSLContext> srv = MakeRefCounted<SSLContext>(SSLContext::Mode::Server);
+  EXPECT_TRUE(srv->SetCertificate(cert_pem_, key_pem_));
 
-  SSLContext cli(SSLContext::Mode::Client);
-  EXPECT_TRUE(cli.SetCAChain(cert_pem_));
+  scoped_refptr<SSLContext> cli = MakeRefCounted<SSLContext>(SSLContext::Mode::Client);
+  EXPECT_TRUE(cli->SetCAChain(cert_pem_));
 
-  EXPECT_EQ(mbedtls_ssl_conf_get_endpoint(srv.config()), MBEDTLS_SSL_IS_SERVER);
-  EXPECT_EQ(mbedtls_ssl_conf_get_endpoint(cli.config()), MBEDTLS_SSL_IS_CLIENT);
+  EXPECT_EQ(mbedtls_ssl_conf_get_endpoint(srv->config()), MBEDTLS_SSL_IS_SERVER);
+  EXPECT_EQ(mbedtls_ssl_conf_get_endpoint(cli->config()), MBEDTLS_SSL_IS_CLIENT);
 }
 
 // =============================================================================
@@ -496,12 +497,14 @@ TEST_F(TlsSocketTest, StrictPeerVerificationFailure) {
   });
   server_ready.Wait();
 
-  // Client: PeerVerify::kRequired with the WRONG CA.
-  SSLContext strict_cli(SSLContext::Mode::Client);
-  strict_cli.SetPeerVerify(PeerVerify::kRequired);
-  ASSERT_TRUE(strict_cli.SetCAChain(wrong_cert.cert_pem));
+  // Client: PeerVerify::kRequired with the WRONG CA.  Heap-allocated so the
+  // socket's Impl (which retains the context for the mbedtls session) keeps it
+  // alive even after this scope ends.
+  scoped_refptr<SSLContext> strict_cli = MakeRefCounted<SSLContext>(SSLContext::Mode::Client);
+  strict_cli->SetPeerVerify(PeerVerify::kRequired);
+  ASSERT_TRUE(strict_cli->SetCAChain(wrong_cert.cert_pem));
 
-  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), &strict_cli);
+  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), strict_cli.get());
 
   WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> connect_ok{true};

@@ -183,19 +183,27 @@ TEST_F(AsyncFilePosixTest, PositionalConcurrentWritesAndReadbackAreStable) {
   const std::filesystem::path path = NewTempPath("positional_rw");
   auto file = std::make_shared<AsyncFilePosix>(io_runner_);
 
-  WaitableEvent open_done(WaitableEvent::ResetPolicy::kAutomatic, false);
-  WaitableEvent write_done(WaitableEvent::ResetPolicy::kManual, false);
-  WaitableEvent read_done(WaitableEvent::ResetPolicy::kAutomatic, false);
-  WaitableEvent close_barrier(WaitableEvent::ResetPolicy::kAutomatic, false);
+  // Heap-allocated state captured BY VALUE in async callbacks.  Async
+  // callbacks may be delivered after the test body's stack frames unwind
+  // (e.g. a chunk completion racing with CloseAsync), so capturing stack
+  // locals by reference would be a use-after-free.  A shared_ptr keeps the
+  // state alive for as long as any in-flight operation references it.
+  struct State {
+    WaitableEvent open_done{WaitableEvent::ResetPolicy::kAutomatic, false};
+    WaitableEvent write_done{WaitableEvent::ResetPolicy::kManual, false};
+    WaitableEvent read_done{WaitableEvent::ResetPolicy::kAutomatic, false};
+    WaitableEvent close_barrier{WaitableEvent::ResetPolicy::kAutomatic, false};
+    std::atomic<bool> open_ok{false};
+    std::atomic<bool> write_ok{true};
+    std::atomic<int> pending_writes{2};
+    std::atomic<bool> read_ok{false};
+    std::atomic<std::size_t> first_bad_write_bytes{0};
+    std::atomic<std::uint32_t> first_bad_write_native{0};
+    std::atomic<int> first_bad_write_code{static_cast<int>(AsyncFile::ErrorCode::kOk)};
+    std::vector<std::uint8_t> read_back;
+  };
 
-  std::atomic<bool> open_ok{false};
-  std::atomic<bool> write_ok{true};
-  std::atomic<int> pending_writes{2};
-  std::atomic<bool> read_ok{false};
-  std::atomic<std::size_t> first_bad_write_bytes{0};
-  std::atomic<std::uint32_t> first_bad_write_native{0};
-  std::atomic<int> first_bad_write_code{static_cast<int>(AsyncFile::ErrorCode::kOk)};
-  std::vector<std::uint8_t> read_back;
+  auto state = std::make_shared<State>();
 
   const std::vector<std::uint8_t> payload_a = MakePayload(64 * 1024, 11);
   const std::vector<std::uint8_t> payload_b = MakePayload(64 * 1024, 29);
@@ -206,32 +214,35 @@ TEST_F(AsyncFilePosixTest, PositionalConcurrentWritesAndReadbackAreStable) {
                   AsyncFile::OpenMode::kReadWrite,
                   AsyncFile::OpenDisposition::kCreateAlways,
                   bg_runner_,
-                  [&](bool success, AsyncFile::Error error) {
-                    open_ok.store(success && error.ok(), std::memory_order_release);
-                    open_done.Signal();
+                  [state](bool success, AsyncFile::Error error) {
+                    state->open_ok.store(success && error.ok(), std::memory_order_release);
+                    state->open_done.Signal();
                   });
-  ASSERT_TRUE(open_done.TimedWait(std::chrono::seconds(10)));
-  ASSERT_TRUE(open_ok.load(std::memory_order_acquire));
+  ASSERT_TRUE(state->open_done.TimedWait(std::chrono::seconds(10)));
+  ASSERT_TRUE(state->open_ok.load(std::memory_order_acquire));
 
-  auto launch_write = [&](std::int64_t offset, std::vector<std::uint8_t> payload) {
+  auto launch_write = [state, &file](std::int64_t offset, std::vector<std::uint8_t> payload) {
     const std::size_t expect_bytes = payload.size();
-    const bool accepted = IssueWrite(
-        file, offset, std::move(payload), [&](bool success, std::size_t bytes_written, AsyncFile::Error error) {
-          if (!success || !error.ok() || bytes_written != expect_bytes) {
-            first_bad_write_bytes.store(bytes_written, std::memory_order_release);
-            first_bad_write_native.store(error.native_code, std::memory_order_release);
-            first_bad_write_code.store(static_cast<int>(error.code), std::memory_order_release);
-            write_ok.store(false, std::memory_order_release);
-          }
-          if (pending_writes.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-            write_done.Signal();
-          }
-        });
+    const bool accepted =
+        IssueWrite(file,
+                   offset,
+                   std::move(payload),
+                   [state, expect_bytes](bool success, std::size_t bytes_written, AsyncFile::Error error) {
+                     if (!success || !error.ok() || bytes_written != expect_bytes) {
+                       state->first_bad_write_bytes.store(bytes_written, std::memory_order_release);
+                       state->first_bad_write_native.store(error.native_code, std::memory_order_release);
+                       state->first_bad_write_code.store(static_cast<int>(error.code), std::memory_order_release);
+                       state->write_ok.store(false, std::memory_order_release);
+                     }
+                     if (state->pending_writes.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                       state->write_done.Signal();
+                     }
+                   });
 
     if (!accepted) {
-      write_ok.store(false, std::memory_order_release);
-      if (pending_writes.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        write_done.Signal();
+      state->write_ok.store(false, std::memory_order_release);
+      if (state->pending_writes.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        state->write_done.Signal();
       }
     }
   };
@@ -241,33 +252,33 @@ TEST_F(AsyncFilePosixTest, PositionalConcurrentWritesAndReadbackAreStable) {
   t1.join();
   t2.join();
 
-  ASSERT_TRUE(write_done.TimedWait(std::chrono::seconds(15)));
-  ASSERT_TRUE(write_ok.load(std::memory_order_acquire))
-      << "bad write callback: bytes=" << first_bad_write_bytes.load(std::memory_order_acquire)
-      << " code=" << first_bad_write_code.load(std::memory_order_acquire)
-      << " native=" << first_bad_write_native.load(std::memory_order_acquire);
+  ASSERT_TRUE(state->write_done.TimedWait(std::chrono::seconds(15)));
+  ASSERT_TRUE(state->write_ok.load(std::memory_order_acquire))
+      << "bad write callback: bytes=" << state->first_bad_write_bytes.load(std::memory_order_acquire)
+      << " code=" << state->first_bad_write_code.load(std::memory_order_acquire)
+      << " native=" << state->first_bad_write_native.load(std::memory_order_acquire);
 
   const std::size_t read_size = static_cast<std::size_t>(offset_b) + payload_b.size();
   const bool read_accepted =
-      IssueRead(file, 0, read_size, [&](bool success, std::vector<std::uint8_t> &&data, AsyncFile::Error error) {
-        read_ok.store(success && error.ok(), std::memory_order_release);
-        read_back = std::move(data);
-        read_done.Signal();
+      IssueRead(file, 0, read_size, [state](bool success, std::vector<std::uint8_t> &&data, AsyncFile::Error error) {
+        state->read_ok.store(success && error.ok(), std::memory_order_release);
+        state->read_back = std::move(data);
+        state->read_done.Signal();
       });
   ASSERT_TRUE(read_accepted);
-  ASSERT_TRUE(read_done.TimedWait(std::chrono::seconds(15)));
-  ASSERT_TRUE(read_ok.load(std::memory_order_acquire));
-  ASSERT_EQ(read_back.size(), read_size);
+  ASSERT_TRUE(state->read_done.TimedWait(std::chrono::seconds(15)));
+  ASSERT_TRUE(state->read_ok.load(std::memory_order_acquire));
+  ASSERT_EQ(state->read_back.size(), read_size);
 
-  ASSERT_TRUE(std::equal(payload_a.begin(), payload_a.end(), read_back.begin()));
+  ASSERT_TRUE(std::equal(payload_a.begin(), payload_a.end(), state->read_back.begin()));
   for (std::size_t i = payload_a.size(); i < static_cast<std::size_t>(offset_b); ++i) {
-    ASSERT_EQ(read_back[i], 0u);
+    ASSERT_EQ(state->read_back[i], 0u);
   }
   ASSERT_TRUE(
-      std::equal(payload_b.begin(), payload_b.end(), read_back.begin() + static_cast<std::ptrdiff_t>(offset_b)));
+      std::equal(payload_b.begin(), payload_b.end(), state->read_back.begin() + static_cast<std::ptrdiff_t>(offset_b)));
 
-  file->CloseAsync([&]() { close_barrier.Signal(); });
-  ASSERT_TRUE(close_barrier.TimedWait(std::chrono::seconds(10)));
+  file->CloseAsync([state]() { state->close_barrier.Signal(); });
+  ASSERT_TRUE(state->close_barrier.TimedWait(std::chrono::seconds(10)));
 }
 
 TEST_F(AsyncFilePosixTest, AppendModeAppendsIgnoringCallerOffset) {

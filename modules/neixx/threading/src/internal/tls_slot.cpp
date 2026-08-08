@@ -48,9 +48,8 @@ static int AllocateSlotInternal(TLSManager &mgr, TLSDestructorFunc destructor, b
   uint8_t target = long_lived ? TLSManager::kSlotLongLived : TLSManager::kSlotInUse;
   for (int i = 0; i < kMaxSlots; ++i) {
     uint8_t expected = TLSManager::kSlotFree;
-    if (mgr.slot_states_[i].compare_exchange_strong(expected, target,
-                                                     std::memory_order_acquire,
-                                                     std::memory_order_relaxed)) {
+    if (mgr.slot_states_[i].compare_exchange_strong(
+            expected, target, std::memory_order_acquire, std::memory_order_relaxed)) {
       mgr.slot_destructors_[i].store(destructor, std::memory_order_release);
       PerThreadStorage *s = mgr.GetOrCreateThreadStorage();
       s->EnsureIndex(static_cast<size_t>(i));
@@ -70,13 +69,25 @@ int TLSManager::AllocateLongLivedSlot(TLSDestructorFunc destructor) {
 }
 
 void TLSManager::FreeSlot(int index) {
-  if (index < 0 || index >= kMaxSlots) return;
+  if (index < 0 || index >= kMaxSlots)
+    return;
+  // Clear this thread's cached value for the freed slot.  Without this, a
+  // recycled slot index would observe stale data left behind by the previous
+  // owner on this thread (e.g. a ThreadLocalPointer allocated later on another
+  // thread only clears ITS OWN thread's storage, leaving this thread's stale
+  // pointer live) — which surfaces as a wild pointer read via Get().
+  if (PerThreadStorage *s = GetThreadStorageNoCreate()) {
+    if (static_cast<size_t>(index) < s->values.size()) {
+      s->values[static_cast<size_t>(index)] = nullptr;
+    }
+  }
   slot_destructors_[index].store(nullptr, std::memory_order_release);
   slot_states_[index].store(kSlotFree, std::memory_order_release);
 }
 
 TLSDestructorFunc TLSManager::GetDestructor(int index) const {
-  if (index < 0 || index >= kMaxSlots) return nullptr;
+  if (index < 0 || index >= kMaxSlots)
+    return nullptr;
   return slot_destructors_[index].load(std::memory_order_acquire);
 }
 
@@ -89,15 +100,21 @@ PerThreadStorage *TLSManager::GetOrCreateThreadStorage() {
   return s;
 }
 
+PerThreadStorage *TLSManager::GetThreadStorageNoCreate() const {
+  return static_cast<PerThreadStorage *>(PlatformGetValue());
+}
+
 bool TLSManager::IsSlotActive(int index) const {
-  if (index < 0 || index >= kMaxSlots) return false;
+  if (index < 0 || index >= kMaxSlots)
+    return false;
   uint8_t state = slot_states_[index].load(std::memory_order_relaxed);
   return state == kSlotInUse || state == kSlotLongLived;
 }
 
 void TLSManager::OnThreadExit(void *value) {
   PerThreadStorage *s = static_cast<PerThreadStorage *>(value);
-  if (!s) return;
+  if (!s)
+    return;
 
   TLSManager &mgr = Get();
   const size_t size = s->values.size();
@@ -109,7 +126,8 @@ void TLSManager::OnThreadExit(void *value) {
       if (val) {
         s->values[i] = nullptr;
         TLSDestructorFunc d = mgr.GetDestructor(static_cast<int>(i));
-        if (d) d(val);
+        if (d)
+          d(val);
       }
     }
   }
@@ -121,7 +139,8 @@ void TLSManager::OnThreadExit(void *value) {
       if (val) {
         s->values[i] = nullptr;
         TLSDestructorFunc d = mgr.GetDestructor(static_cast<int>(i));
-        if (d) d(val);
+        if (d)
+          d(val);
       }
     }
   }
@@ -129,35 +148,44 @@ void TLSManager::OnThreadExit(void *value) {
   delete s;
 }
 
-TLSManager &GetTLSManager() { return TLSManager::Get(); }
+TLSManager &GetTLSManager() {
+  return TLSManager::Get();
+}
 
 // ---- TlsSlot ---------------------------------------------------------------
 
-TlsSlot::TlsSlot() : index_(-1) {}
+TlsSlot::TlsSlot()
+    : index_(-1) {
+}
 
-TlsSlot::TlsSlot(TLSDestructorFunc dtor) : index_(-1) {
+TlsSlot::TlsSlot(TLSDestructorFunc dtor)
+    : index_(-1) {
   Initialize(dtor);
 }
 
 TlsSlot::~TlsSlot() {
-  if (index_ >= 0) GetTLSManager().FreeSlot(index_);
+  if (index_ >= 0)
+    GetTLSManager().FreeSlot(index_);
 }
 
 bool TlsSlot::Initialize(TLSDestructorFunc dtor) {
-  if (index_ >= 0) return false;
+  if (index_ >= 0)
+    return false;
   index_ = GetTLSManager().AllocateSlot(dtor);
   return index_ >= 0;
 }
 
 void *TlsSlot::Get() const {
-  if (index_ < 0) return nullptr;
+  if (index_ < 0)
+    return nullptr;
   PerThreadStorage *s = GetTLSManager().GetOrCreateThreadStorage();
   const size_t idx = static_cast<size_t>(index_);
   return idx < s->values.size() ? s->values[idx] : nullptr;
 }
 
 void TlsSlot::Set(void *value) {
-  if (index_ < 0) return;
+  if (index_ < 0)
+    return;
   PerThreadStorage *s = GetTLSManager().GetOrCreateThreadStorage();
   s->EnsureIndex(static_cast<size_t>(index_));
   s->values[index_] = value;
@@ -178,14 +206,16 @@ void InternalFreeSlot(int index) {
 }
 
 void *InternalGetSlotValue(int index) {
-  if (index < 0) return nullptr;
+  if (index < 0)
+    return nullptr;
   PerThreadStorage *s = GetTLSManager().GetOrCreateThreadStorage();
   const size_t idx = static_cast<size_t>(index);
   return idx < s->values.size() ? s->values[idx] : nullptr;
 }
 
 void InternalSetSlotValue(int index, void *value) {
-  if (index < 0) return;
+  if (index < 0)
+    return;
   PerThreadStorage *s = GetTLSManager().GetOrCreateThreadStorage();
   s->EnsureIndex(static_cast<size_t>(index));
   s->values[index] = value;

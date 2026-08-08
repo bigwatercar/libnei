@@ -193,17 +193,22 @@ TEST(ThreadLocalOwnedPointerTest, GetOrCreateIsPerThread) {
   main_obj->id = 1;
 
   std::atomic<OwnedObject *> t_obj{nullptr};
+  std::atomic<int> t_id{-1};
   std::thread th([&] {
-    t_obj.store(g_obj.GetOrCreate());
-    t_obj.load()->id = 2;
+    auto *obj = g_obj.GetOrCreate();
+    obj->id = 2;
+    t_obj.store(obj);
+    t_id.store(2);
   });
   th.join();
 
-  // Main thread still has its own object
+  // Main thread still has its own object.
   EXPECT_EQ(main_obj->id, 1);
-  // Other thread created a different object
+  // The worker thread created a different object.  Once `th` exits, its TLS
+  // destructor frees that object, so t_obj must NOT be dereferenced after
+  // join(); capture the id before the thread exits instead.
   EXPECT_NE(t_obj.load(), main_obj);
-  EXPECT_EQ(t_obj.load()->id, 2);
+  EXPECT_EQ(t_id.load(), 2);
 }
 
 // ---- ThreadLocalBoolean ----------------------------------------------------
