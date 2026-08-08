@@ -78,6 +78,20 @@
 
 - **Crash handler**: POSIX 信号处理器中非 async-signal-safe（已接受限制）。
 
+- **TaskQueueSelector false sharing** 📐 2026-08-08:
+
+  投递线程每次 `PostTask` 写入 `work_mask` 和 `active_priority_mask_`（atomic），
+  selector 线程 `SelectNextQueue()` 读取这些字段同时写入 `schedule_counter_`。当前
+  布局下这 3 个字段共享同一 cache line（offset 99-104），跨线程读写导致 cache 弹跳。
+
+  **实测**（i5-10400T, fast-path OFF, 1M tasks）：OFF 比 ON 慢 ~8-15%（ON 旁路了 selector）。
+  简单 `alignas(64)` 隔离 `active_priority_mask_` 反致倒退（-14.6%），原因是
+  `SequenceManager::Impl` 内存布局整体受影响，`SelectNextQueue` 跨 cache line 数从 2→3。
+
+  **方向**：需要对 `SequenceManager::Impl` 做整体 cache-line-aware 布局（热字段分
+  group、冷字段单独隔离），而非单点修补。低优先级（当前 fast-path 默认 ON，
+  selector 在 99% 场景不参与）。
+
 - **PipeStream direct dispatch continuation**: batch-quota-exhausted 路径可直连
   而非经 `PostTask`。低优先级 — 当前设计正确。
 
