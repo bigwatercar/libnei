@@ -33,6 +33,8 @@ set(NEIXX_TASK_SOURCES
     src/internal/task_queue.h
     src/internal/task_queue_selector.cpp
     src/internal/task_queue_selector.h
+    src/internal/sequenced_task_queue.cpp
+    src/internal/sequenced_task_queue.h
     src/internal/task_source.cpp
     src/internal/task_source.h
     src/internal/task_tracker.cpp

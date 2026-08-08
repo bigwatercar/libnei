@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "sequenced_task_queue.h"
 #include <neixx/synchronization/lock.h>
 #include <neixx/task/task_tracing.h>
 #include <neixx/trace_event/trace_event.h>
@@ -52,166 +53,41 @@ bool IsShutdownBlockingTask(const Task &task) {
 class TaskQueue::Impl {
 public:
   explicit Impl(TaskQueue *owner, const TaskTraits &traits)
-      : traits_(traits)
+      : seq_queue_(traits)
       , weak_factory_(owner, FROM_HERE) {
   }
 
-  bool HasImmediateTasksLocked() const {
-    return !immediate_fifo_queue_.empty();
-  }
-
   bool PushImmediateTask(Task &&task) {
-    if (!task.task) {
-      return false;
-    }
-
-    OnTaskPostedCallback posted_callback_to_call;
-    OnTaskEnqueuedCallback enqueued_callback_to_call;
-    TaskShutdownBehavior task_shutdown_behavior = TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN;
-    {
-      AutoLock lock(lock_);
-      if (shut_down_ || reject_new_tasks_) {
-        return false;
-      }
-
-      if (task.sequence_num == 0) {
-        task.sequence_num = ++immediate_sequence_num_;
-      } else if (task.sequence_num > immediate_sequence_num_) {
-        immediate_sequence_num_ = task.sequence_num;
-      }
-
-      const bool was_empty = !HasImmediateTasksLocked();
-
-      // Insertion maintains FIFO order sorted by sequence_num.
-      //
-      // Fast path (O(1)): the vast majority of tasks have monotonically
-      // increasing sequence numbers and append at the back.
-      //
-      // Slow path (O(n)): out-of-order sequence_num requires a
-      // binary search (std::upper_bound, O(log n)) followed by a deque
-      // insert (O(n) element shift).  This path only triggers when tasks
-      // are posted with pre-assigned sequence numbers from different
-      // producers that don't coordinate ordering  --  rare in practice.
-      if (immediate_fifo_queue_.empty() || task.sequence_num >= immediate_fifo_queue_.back().sequence_num) {
-        immediate_fifo_queue_.push_back(std::move(task)); // O(1)
-      } else {
-        const auto insert_it = std::upper_bound( // O(log n)
-            immediate_fifo_queue_.begin(),
-            immediate_fifo_queue_.end(),
-            task.sequence_num,
-            [](std::int64_t sequence_num, const Task &queued_task) { return sequence_num < queued_task.sequence_num; });
-        immediate_fifo_queue_.insert(insert_it, std::move(task)); // O(n)
-      }
-
-      if (was_empty && on_task_posted_callback_) {
-        posted_callback_to_call = on_task_posted_callback_;
-      }
-      if (on_task_enqueued_callback_) {
-        task_shutdown_behavior = task.traits.shutdown_behavior();
-        enqueued_callback_to_call = on_task_enqueued_callback_;
-      }
-    }
-
-    if (enqueued_callback_to_call) {
-      enqueued_callback_to_call(task_shutdown_behavior);
-    }
-    if (posted_callback_to_call) {
-      posted_callback_to_call();
-    }
-
-    if (parallel_) {
+    bool pushed = seq_queue_.PushImmediateTask(std::move(task));
+    if (pushed && parallel_) {
 #if NEI_PARALLEL_DIAGNOSTICS
       g_parallel_pushed.fetch_add(1, std::memory_order_relaxed);
 #endif
     }
-
 #if NEI_PARALLEL_DIAGNOSTICS
-    posted_tasks_.fetch_add(1, std::memory_order_relaxed);
+    if (pushed) {
+      posted_tasks_.fetch_add(1, std::memory_order_relaxed);
+    }
 #endif
-    return true;
+    return pushed;
   }
 
   bool PushDelayedTask(Task &&task) {
-    if (!task.task) {
-      return false;
-    }
-
-    const TimeTicks delayed_run_time = task.delayed_run_time;
-    OnTaskPostedCallback posted_callback_to_call;
-    OnTaskEnqueuedCallback enqueued_callback_to_call;
-    TaskShutdownBehavior task_shutdown_behavior = TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN;
-    {
-      AutoLock lock(lock_);
-      if (shut_down_ || reject_new_tasks_) {
-        return false;
-      }
-
-      if (task.sequence_num == 0) {
-        task.sequence_num = ++delayed_sequence_num_;
-      }
-
-      const bool had_delayed_tasks = !delayed_incoming_queue_.empty();
-      const TimeTicks previous_head = had_delayed_tasks ? delayed_incoming_queue_.top().delayed_run_time : TimeTicks();
-
-      delayed_incoming_queue_.push(std::move(task));
-
-      const bool should_notify = !had_delayed_tasks || delayed_run_time < previous_head;
-      if (should_notify && on_task_posted_callback_) {
-        posted_callback_to_call = on_task_posted_callback_;
-      }
-      if (on_task_enqueued_callback_) {
-        task_shutdown_behavior = task.traits.shutdown_behavior();
-        enqueued_callback_to_call = on_task_enqueued_callback_;
-      }
-    }
-
-    if (enqueued_callback_to_call) {
-      enqueued_callback_to_call(task_shutdown_behavior);
-    }
-    if (posted_callback_to_call) {
-      posted_callback_to_call();
-    }
-
+    bool pushed = seq_queue_.PushDelayedTask(std::move(task));
 #if NEI_PARALLEL_DIAGNOSTICS
-    posted_tasks_.fetch_add(1, std::memory_order_relaxed);
+    if (pushed) {
+      posted_tasks_.fetch_add(1, std::memory_order_relaxed);
+    }
 #endif
-    return true;
+    return pushed;
   }
 
   bool TakeImmediateTask(Task *task) {
-    if (task == nullptr) {
-      return false;
-    }
-
-    AutoLock lock(lock_);
-    if (immediate_fifo_queue_.empty()) {
-      return false;
-    }
-
-    *task = std::move(immediate_fifo_queue_.front());
-    immediate_fifo_queue_.pop_front();
-    return true;
+    return seq_queue_.TakeImmediateTask(task);
   }
 
   std::size_t TakeImmediateTasks(Task *tasks, std::size_t max_tasks) {
-    if (tasks == nullptr || max_tasks == 0) {
-      return 0;
-    }
-
-    AutoLock lock(lock_);
-    std::size_t count = 0;
-    while (count < max_tasks && !immediate_fifo_queue_.empty()) {
-      tasks[count] = std::move(immediate_fifo_queue_.front());
-      immediate_fifo_queue_.pop_front();
-      ++count;
-
-      // Keep shutdown semantics predictable: once a BLOCK_SHUTDOWN task is
-      // handed to a worker, leave following tasks in the queue so shutdown can
-      // still drop or retain them according to policy.
-      if (IsShutdownBlockingTask(tasks[count - 1])) {
-        break;
-      }
-    }
+    std::size_t count = seq_queue_.TakeImmediateTasks(tasks, max_tasks);
     if (parallel_ && count > 0) {
 #if NEI_PARALLEL_DIAGNOSTICS
       g_parallel_taken.fetch_add(count, std::memory_order_relaxed);
@@ -221,78 +97,46 @@ public:
     return count;
   }
 
-  bool TakeReadyDelayedTask(const TimeTicks &now, Task *task) {
-    PromoteReadyDelayedTasks(now);
-    return TakeImmediateTask(task);
+  std::size_t PromoteReadyDelayedTasks(const TimeTicks &now) {
+    return seq_queue_.PromoteReadyDelayedTasks(now);
   }
 
-  std::size_t PromoteReadyDelayedTasks(const TimeTicks &now) {
-    AutoLock lock(lock_);
-    std::size_t promoted = 0;
-    while (!delayed_incoming_queue_.empty()) {
-      const Task &next_task = delayed_incoming_queue_.top();
-      if (next_task.delayed_run_time > now) {
-        break;
-      }
-      immediate_fifo_queue_.push_back(PopTop(&delayed_incoming_queue_));
-      ++promoted;
-    }
-    return promoted;
+  bool TakeReadyDelayedTask(const TimeTicks &now, Task *task) {
+    return seq_queue_.TakeReadyDelayedTask(now, task);
   }
 
   bool HasImmediateWork() const {
-    AutoLock lock(lock_);
-    return HasImmediateTasksLocked();
+    return seq_queue_.HasImmediateWork();
   }
 
   bool HasDelayedWork() const {
-    AutoLock lock(lock_);
-    return !delayed_incoming_queue_.empty();
+    return seq_queue_.HasDelayedWork();
   }
 
   TimeTicks PeekNextDelayedRunTime() const {
-    AutoLock lock(lock_);
-    if (delayed_incoming_queue_.empty()) {
-      return TimeTicks();
-    }
-    return delayed_incoming_queue_.top().delayed_run_time;
+    return seq_queue_.PeekNextDelayedRunTime();
   }
 
   void Shutdown() {
-    std::vector<Task> dropped_tasks;
-    {
-      AutoLock lock(lock_);
-      if (shut_down_) {
-        return;
-      }
-
-      shut_down_ = true;
-      reject_new_tasks_ = true;
-      weak_factory_.InvalidateWeakPtrs(FROM_HERE);
-      CancelNonShutdownBlockingTasksLockedImpl(&dropped_tasks);
-    }
+    shut_down_.store(true, std::memory_order_release);
+    weak_factory_.InvalidateWeakPtrs(FROM_HERE);
+    seq_queue_.Shutdown();
   }
 
   void CancelNonShutdownBlockingTasksLocked() {
-    std::vector<Task> dropped_tasks;
-    {
-      AutoLock lock(lock_);
-      reject_new_tasks_ = true;
-      CancelNonShutdownBlockingTasksLockedImpl(&dropped_tasks);
-    }
+    seq_queue_.CancelNonShutdownBlockingTasksLocked();
   }
 
   bool is_shutdown() const {
-    AutoLock lock(lock_);
-    return shut_down_;
+    return shut_down_.load(std::memory_order_acquire);
   }
 
   const SequenceToken &sequence_token() const {
-    return sequence_token_;
+    return seq_queue_.sequence_token();
   }
 
   const TaskTraits &traits() const {
-    return traits_;
+    return seq_queue_.traits();
   }
 
   WeakPtr<TaskQueue> GetWeakPtr() {
@@ -300,13 +144,11 @@ public:
   }
 
   void SetOnTaskPostedCallback(OnTaskPostedCallback callback) {
-    AutoLock lock(lock_);
-    on_task_posted_callback_ = std::move(callback);
+    seq_queue_.SetOnTaskPostedCallback(std::move(callback));
   }
 
   void SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback) {
-    AutoLock lock(lock_);
-    on_task_enqueued_callback_ = std::move(callback);
+    seq_queue_.SetOnTaskEnqueuedCallback(std::move(callback));
   }
 
   bool is_parallel() const {
@@ -344,7 +186,7 @@ public:
     const int current = prev + 1;
 
     // Shut down?  Revert and disallow.
-    if (shut_down_) {
+    if (shut_down_.load(std::memory_order_acquire)) {
       running_worker_count_.fetch_sub(1, std::memory_order_release);
 #if NEI_PARALLEL_DIAGNOSTICS
       g_parallel_willrun_disallowed.fetch_add(1, std::memory_order_relaxed);
@@ -435,68 +277,18 @@ public:
 #endif
 
 private:
-  void CancelNonShutdownBlockingTasksLockedImpl(std::vector<Task> *dropped_tasks) {
-    if (dropped_tasks == nullptr) {
-      return;
-    }
+  // ---- FIFO core (delegated to SequencedTaskQueue) ----
+  SequencedTaskQueue seq_queue_;
 
-    std::deque<Task> kept_immediate;
-    while (!immediate_fifo_queue_.empty()) {
-      Task task = std::move(immediate_fifo_queue_.front());
-      immediate_fifo_queue_.pop_front();
-      if (IsShutdownBlockingTask(task)) {
-        kept_immediate.push_back(std::move(task));
-      } else {
-        dropped_tasks->push_back(std::move(task));
-      }
-    }
-    immediate_fifo_queue_.swap(kept_immediate);
-
-    TaskMinHeap kept_delayed;
-    while (!delayed_incoming_queue_.empty()) {
-      Task task = PopTop(&delayed_incoming_queue_);
-      if (IsShutdownBlockingTask(task)) {
-        kept_delayed.push(std::move(task));
-      } else {
-        dropped_tasks->push_back(std::move(task));
-      }
-    }
-    delayed_incoming_queue_ = std::move(kept_delayed);
-
-    // Dropped tasks will never execute; account for them as "completed" so the
-    // posted/completed balance (used by FlushForTesting) stays consistent.
-#if NEI_PARALLEL_DIAGNOSTICS
-    if (dropped_tasks != nullptr && !dropped_tasks->empty()) {
-      completed_tasks_.fetch_add(dropped_tasks->size(), std::memory_order_relaxed);
-    }
-#endif
-  }
-
-  mutable Lock lock_;
-  TaskTraits traits_;
-  SequenceToken sequence_token_ = SequenceToken::Create();
-  bool shut_down_ = false;
-  bool reject_new_tasks_ = false;
+  // ---- Parallel / pool-specific state ----
   bool parallel_ = false;
   bool dedicated_ = false;
-  std::deque<Task> immediate_fifo_queue_;
-  std::int64_t immediate_sequence_num_ = 0;
-  std::int64_t delayed_sequence_num_ = 0;
-  // The name "delayed_incoming_queue_" is intentionally retained even though
-  // the underlying type is a min-heap (std::priority_queue) rather than a
-  // traditional queue/deque.  The _queue suffix emphasises the FIFO semantics
-  // that callers observe once deadlines expire, while the heap is an internal
-  // implementation detail.
-  TaskMinHeap delayed_incoming_queue_;
-  OnTaskPostedCallback on_task_posted_callback_;
-  OnTaskEnqueuedCallback on_task_enqueued_callback_;
-  WeakPtrFactory<TaskQueue> weak_factory_;
 
-  // Chromium-aligned concurrency tracking (WillRunTask / DidProcessTask).
-  // Number of workers currently holding a slot on this queue.
-  // Managed exclusively by WillRunTask() (+1) and DidProcessTask() (-1).
-  // Uses acquire/release ordering to synchronize task-enqueue and
-  // task-completion effects across workers.
+  // Shutdown flag duplicated from seq_queue_ for lock-free access from
+  // WillRunTask (parallel hot path).  Set in Shutdown() alongside
+  // seq_queue_.Shutdown().
+  std::atomic<bool> shut_down_{false};
+
   std::atomic<int> running_worker_count_{0};
 
   // Completion accounting (see TaskQueue::GetPostedTaskCount etc.).
@@ -504,6 +296,8 @@ private:
   std::atomic<std::uint64_t> posted_tasks_{0};
   std::atomic<std::uint64_t> completed_tasks_{0};
 #endif
+
+  WeakPtrFactory<TaskQueue> weak_factory_;
 };
 
 TaskQueue::TaskQueue(const TaskTraits &traits)
