@@ -149,21 +149,17 @@ public:
 
       internal::SequencedTaskQueue *queue = weak_queue.get();
       if (queue != nullptr && queue->HasImmediateWork()) {
-        // Defer the selector update: set a flag that DoWork will flush
-        // under lock_ at the start of its next invocation.  This avoids
-        // acquiring lock_ on the hot PostTask path while still preventing
-        // the lost-wakeup race (the flag is atomic; the flush inside DoWork
-        // is serialized with SetQueueHasWork(false) by the same lock_).
-        pending_work_notification_.store(true, std::memory_order_release);
+        // Defer selector update to DoWork (avoids lock_ on hot path).
+        // Only wake the pump on the FIRST immediate task since the last
+        // drain — subsequent posts in the same batch skip the expensive
+        // ScheduleWorkAndDelayedWork (pump lock + event signal).
+        if (!pending_work_notification_.exchange(true, std::memory_order_acq_rel)) {
+          pump_->ScheduleWorkAndDelayedWork(queue->PeekNextDelayedRunTime());
+        }
+      } else if (queue != nullptr) {
+        // No immediate work, but may have delayed work — always wake.
+        pump_->ScheduleWorkAndDelayedWork(queue->PeekNextDelayedRunTime());
       }
-
-      // Wake the pump so DoWork / DoDelayedWork pick up the newly-posted
-      // task.  ScheduleWorkAndDelayedWork atomically updates both the
-      // work-scheduled flag and the delayed deadline under the pump's
-      // internal lock, eliminating the race window between the pump's
-      // DrainPendingWakeups / GetDelayedRunTime and the callback's
-      // back-to-back ScheduleWork + ScheduleDelayedWork calls.
-      pump_->ScheduleWorkAndDelayedWork(queue != nullptr ? queue->PeekNextDelayedRunTime() : TimeTicks());
     });
 
     queues_.push_back(std::move(queue));
