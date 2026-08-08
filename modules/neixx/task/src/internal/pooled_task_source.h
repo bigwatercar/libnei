@@ -13,13 +13,13 @@
 #include <neixx/synchronization/condition_variable.h>
 #include <neixx/synchronization/lock.h>
 #include <neixx/threading/platform_thread.h>
-#include "task_queue.h"
+#include "pooled_task_queue.h"
 
 namespace nei {
 namespace internal {
 
 // Global ready source used by ThreadPool workers. The source guarantees that a
-// TaskQueue is handed out to at most one worker at a time.
+// PooledTaskQueue is handed out to at most one worker at a time.
 class PooledTaskSource final {
 public:
   PooledTaskSource();
@@ -31,27 +31,27 @@ public:
   PooledTaskSource &operator=(PooledTaskSource &&) = delete;
 
   /// Blocks until a queue is available or Shutdown() is called.
-  TaskQueue *GetNextTaskQueue();
+  PooledTaskQueue *GetNextTaskQueue();
 
   /// Blocks until a queue is available, Shutdown() is called, or |timeout|
   /// elapses.  On timeout, sets |timed_out| = true and returns nullptr.
   /// |timeout| <= 0 behaves identically to GetNextTaskQueue() (no timeout).
-  TaskQueue *GetNextTaskQueueTimed(TimeDelta timeout, bool &timed_out);
+  PooledTaskQueue *GetNextTaskQueueTimed(TimeDelta timeout, bool &timed_out);
 
   // Registers a queue into internal state table.
-  void RegisterTaskQueue(TaskQueue *queue);
+  void RegisterTaskQueue(PooledTaskQueue *queue);
 
   // Re-enqueues queue into the global ready heap. Returns true if the queue was
   // actually inserted into heap in this call.
-  bool ReEnqueueTaskQueue(TaskQueue *queue);
+  bool ReEnqueueTaskQueue(PooledTaskQueue *queue);
 
   // Atomically (w.r.t PooledTaskSource state) promotes ready delayed tasks and
   // attempts to re-enqueue queue into ready heap.
-  bool PromoteAndReEnqueueTaskQueue(TaskQueue *queue, const TimeTicks &now);
+  bool PromoteAndReEnqueueTaskQueue(PooledTaskQueue *queue, const TimeTicks &now);
 
   // Marks queue execution complete. If new work arrived while queue was in
   // flight, queue is pushed back automatically.
-  void OnTaskQueueProcessed(TaskQueue *queue);
+  void OnTaskQueueProcessed(PooledTaskQueue *queue);
 
   // ---- Dedicated (single-thread) queue support ----
 
@@ -59,24 +59,24 @@ public:
   /// |queue|.  Returns true if the assignment succeeded (no other worker owns
   /// it).  Once assigned, the queue is removed from the global ready heap and
   /// the owning worker is responsible for polling it directly.
-  bool AssignDedicatedWorker(TaskQueue *queue);
+  bool AssignDedicatedWorker(PooledTaskQueue *queue);
 
   /// Called by WorkerThread::ThreadMain() to block until new work arrives on
   /// the dedicated queue, shutdown is signaled, or |timeout| elapses.
   /// On timeout sets |timed_out| = true and returns.  Must only be called by
   /// the owning worker.
-  void WaitForDedicatedWork(TaskQueue *queue, TimeDelta timeout, bool &timed_out);
+  void WaitForDedicatedWork(PooledTaskQueue *queue, TimeDelta timeout, bool &timed_out);
 
   /// Awakens the owning worker when new work is posted to a dedicated queue.
-  void WakeDedicatedWorker(TaskQueue *queue);
+  void WakeDedicatedWorker(PooledTaskQueue *queue);
 
   /// Releases the dedicated assignment.  The queue may re-enter the global
   /// heap for other workers to pick up.
-  void ReleaseDedicatedQueue(TaskQueue *queue);
+  void ReleaseDedicatedQueue(PooledTaskQueue *queue);
 
   /// Returns true if |queue| is a dedicated queue that is owned by a worker
   /// OTHER than the calling thread.
-  bool IsDedicatedOwnedByOther(TaskQueue *queue);
+  bool IsDedicatedOwnedByOther(PooledTaskQueue *queue);
 
   void Shutdown();
 
@@ -104,7 +104,7 @@ private:
   };
 
   struct QueueEntry {
-    TaskQueue *queue = nullptr;
+    PooledTaskQueue *queue = nullptr;
     TaskPriority priority = TaskPriority::USER_VISIBLE;
     std::uint64_t order = 0;
   };
@@ -119,7 +119,7 @@ private:
     }
   };
 
-  bool EnqueueLocked(TaskQueue *queue, std::size_t shard_index);
+  bool EnqueueLocked(PooledTaskQueue *queue, std::size_t shard_index);
 
   // Must be called AFTER releasing the shard lock to avoid the
   // signal-under-lock anti-pattern (hurry-up-and-wait).
@@ -131,14 +131,14 @@ private:
   // stalling the owner until its reclaim timeout).
   void NotifyDedicatedWorkAvailable();
 
-  std::size_t GetShardIndex(TaskQueue *queue) const;
+  std::size_t GetShardIndex(PooledTaskQueue *queue) const;
 
   static constexpr std::size_t kShardCount = 4;
 
   struct Shard {
     Lock lock;
     std::priority_queue<QueueEntry, std::vector<QueueEntry>, QueueEntryLess> heap;
-    std::unordered_map<TaskQueue *, QueueState> states;
+    std::unordered_map<PooledTaskQueue *, QueueState> states;
   };
 
   Shard shards_[kShardCount];

@@ -9,7 +9,7 @@
 
 #include <neixx/common/time.h>
 #include "internal/task.h"
-#include "internal/task_queue.h"
+#include "internal/pooled_task_queue.h"
 #include <neixx/task/task_runner.h>
 
 namespace nei {
@@ -31,12 +31,12 @@ void RunTask(internal::Task *task) {
 } // namespace
 
 TEST(TaskQueueTest, CreatesValidSequenceToken) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
   EXPECT_TRUE(queue.sequence_token().is_valid());
 }
 
 TEST(TaskQueueTest, ImmediateTasksComeOutBySequenceNum) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
 
   ASSERT_TRUE(queue.PushImmediateTask(MakeTask(3, []() {})));
   ASSERT_TRUE(queue.PushImmediateTask(MakeTask(1, []() {})));
@@ -53,7 +53,7 @@ TEST(TaskQueueTest, ImmediateTasksComeOutBySequenceNum) {
 }
 
 TEST(TaskQueueTest, ReadyDelayedTasksPromoteToImmediate) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
   const TimeTicks ready_time = TimeTicks::Now() - TimeDelta::FromSeconds(1);
 
   internal::Task first = MakeTask(1, []() {});
@@ -73,7 +73,7 @@ TEST(TaskQueueTest, ReadyDelayedTasksPromoteToImmediate) {
 }
 
 TEST(TaskQueueTest, DelayedTasksSameDeadlinePreserveSequenceOrder) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
   const TimeTicks same_deadline = TimeTicks::Now() + TimeDelta::FromMilliseconds(10);
 
   internal::Task first = MakeTask(1, []() {});
@@ -99,7 +99,7 @@ TEST(TaskQueueTest, DelayedTasksSameDeadlinePreserveSequenceOrder) {
 }
 
 TEST(TaskQueueTest, PromoteReadyTasksAtExactDeadlineIsReadyNotFuture) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
   const TimeTicks now = TimeTicks::Now();
 
   internal::Task task = MakeTask(42, []() {});
@@ -118,7 +118,7 @@ TEST(TaskQueueTest, PromoteReadyTasksAtExactDeadlineIsReadyNotFuture) {
 TEST(TaskQueueTest, ShutdownContinueClearsExistingTasks) {
   TaskTraits traits;
   traits.set_shutdown_behavior(TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN);
-  internal::TaskQueue queue(traits);
+  internal::PooledTaskQueue queue(traits);
 
   ASSERT_TRUE(queue.PushImmediateTask(MakeTask(1, []() {})));
   queue.Shutdown();
@@ -134,7 +134,7 @@ TEST(TaskQueueTest, ShutdownContinueClearsExistingTasks) {
 TEST(TaskQueueTest, ShutdownSkipClearsExistingTasks) {
   TaskTraits traits;
   traits.set_shutdown_behavior(TaskShutdownBehavior::SKIP_ON_SHUTDOWN);
-  internal::TaskQueue queue(traits);
+  internal::PooledTaskQueue queue(traits);
 
   ASSERT_TRUE(queue.PushImmediateTask(MakeTask(1, []() {})));
   queue.Shutdown();
@@ -150,7 +150,7 @@ TEST(TaskQueueTest, ShutdownSkipClearsExistingTasks) {
 TEST(TaskQueueTest, ShutdownBlockKeepsBlockingTasksOnly) {
   TaskTraits traits;
   traits.set_shutdown_behavior(TaskShutdownBehavior::BLOCK_SHUTDOWN);
-  internal::TaskQueue queue(traits);
+  internal::PooledTaskQueue queue(traits);
 
   internal::Task blocking = MakeTask(1, []() {});
   blocking.traits.set_shutdown_behavior(TaskShutdownBehavior::BLOCK_SHUTDOWN);
@@ -169,7 +169,7 @@ TEST(TaskQueueTest, ShutdownBlockKeepsBlockingTasksOnly) {
 }
 
 TEST(TaskQueueTest, ConcurrentPostTaskFromMultipleThreads) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
   auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
@@ -203,7 +203,7 @@ TEST(TaskQueueTest, ConcurrentPostTaskFromMultipleThreads) {
 }
 
 TEST(TaskQueueTest, OnTaskPostedCallbackCalledWhenQueueBecomesNonEmpty) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
 
   std::atomic<int> callback_count{0};
   queue.SetOnTaskPostedCallback([&callback_count]() { callback_count.fetch_add(1); });
@@ -223,7 +223,7 @@ TEST(TaskQueueTest, OnTaskPostedCallbackCalledWhenQueueBecomesNonEmpty) {
 }
 
 TEST(TaskQueueTest, OnTaskPostedCallbackNotCalledWhenQueueNonEmpty) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
 
   std::atomic<int> callback_count{0};
   queue.SetOnTaskPostedCallback([&callback_count]() { callback_count.fetch_add(1); });
@@ -242,7 +242,7 @@ TEST(TaskQueueTest, OnTaskPostedCallbackNotCalledWhenQueueNonEmpty) {
 }
 
 TEST(TaskRunnerTest, PostTaskEnqueuesImmediateTask) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
   auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
@@ -257,7 +257,7 @@ TEST(TaskRunnerTest, PostTaskEnqueuesImmediateTask) {
 }
 
 TEST(TaskRunnerTest, PostDelayedTaskEnqueuesDelayedTask) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
   auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
@@ -269,7 +269,7 @@ TEST(TaskRunnerTest, PostDelayedTaskEnqueuesDelayedTask) {
 }
 
 TEST(TaskRunnerTest, PostDelayedTaskZeroDelayExecutesImmediately) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
   auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
@@ -280,7 +280,7 @@ TEST(TaskRunnerTest, PostDelayedTaskZeroDelayExecutesImmediately) {
 }
 
 TEST(TaskRunnerTest, PostDelayedTaskNegativeDelayExecutesImmediately) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
   auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
@@ -291,7 +291,7 @@ TEST(TaskRunnerTest, PostDelayedTaskNegativeDelayExecutesImmediately) {
 }
 
 TEST(TaskRunnerTest, PostDelayedTaskExtremeDelayFallsBackToImmediate) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
   auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
@@ -304,7 +304,7 @@ TEST(TaskRunnerTest, PostDelayedTaskExtremeDelayFallsBackToImmediate) {
 TEST(TaskRunnerTest, DelayedOverflowFallbackCounterIncrements) {
   TaskRunner::ResetDelayedOverflowFallbackCountForTesting();
 
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
   auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
@@ -316,7 +316,7 @@ TEST(TaskRunnerTest, DelayedOverflowFallbackCounterIncrements) {
 }
 
 TEST(TaskRunnerTest, SequenceNumbersIncreaseMonotonically) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
   auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
@@ -337,7 +337,7 @@ TEST(TaskRunnerTest, SequenceNumbersIncreaseMonotonically) {
 }
 
 TEST(TaskRunnerTest, PostTaskAfterQueueShutdownIsIgnored) {
-  internal::TaskQueue queue;
+  internal::PooledTaskQueue queue;
   auto runner = SequencedTaskRunner::Create(&queue);
   ASSERT_TRUE(runner);
 
@@ -351,7 +351,7 @@ TEST(TaskRunnerTest, PostTaskAfterQueueShutdownIsIgnored) {
 TEST(TaskRunnerTest, PostTaskAfterQueueDestroyedDoesNotCrash) {
   TaskRunner::ResetTracingStatsForTesting();
 
-  auto queue = std::make_unique<internal::TaskQueue>();
+  auto queue = std::make_unique<internal::PooledTaskQueue>();
   auto runner = SequencedTaskRunner::Create(queue.get());
   ASSERT_TRUE(runner);
 

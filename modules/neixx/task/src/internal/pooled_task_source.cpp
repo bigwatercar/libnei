@@ -5,7 +5,7 @@
 #include <utility>
 
 #include "pooled_task_runner_utils.h"
-#include "task_queue.h"
+#include "pooled_task_queue.h"
 #include <neixx/trace_event/trace_event.h>
 
 namespace nei {
@@ -16,7 +16,7 @@ PooledTaskSource::PooledTaskSource() {
 
 PooledTaskSource::~PooledTaskSource() = default;
 
-std::size_t PooledTaskSource::GetShardIndex(TaskQueue *queue) const {
+std::size_t PooledTaskSource::GetShardIndex(PooledTaskQueue *queue) const {
   if (queue == nullptr) {
     return 0;
   }
@@ -24,7 +24,7 @@ std::size_t PooledTaskSource::GetShardIndex(TaskQueue *queue) const {
   return (reinterpret_cast<std::uintptr_t>(queue) >> 4) % kShardCount;
 }
 
-void PooledTaskSource::RegisterTaskQueue(TaskQueue *queue) {
+void PooledTaskSource::RegisterTaskQueue(PooledTaskQueue *queue) {
   if (queue == nullptr) {
     return;
   }
@@ -41,12 +41,12 @@ void PooledTaskSource::RegisterTaskQueue(TaskQueue *queue) {
   (void)shard.states.emplace(queue, QueueState());
 }
 
-TaskQueue *PooledTaskSource::GetNextTaskQueue() {
+PooledTaskQueue *PooledTaskSource::GetNextTaskQueue() {
   bool timed_out = false;
   return GetNextTaskQueueTimed(TimeDelta{}, timed_out);
 }
 
-TaskQueue *PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout, bool &timed_out) {
+PooledTaskQueue *PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout, bool &timed_out) {
   timed_out = false;
   const bool has_timeout = timeout.is_positive();
   // Compute the absolute deadline once, outside the retry loop, so that
@@ -108,16 +108,16 @@ TaskQueue *PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout, bool &time
           // We've already popped the entry from the heap (PopTaskSource
           // equivalent).  WillRunTask() atomically reserves a worker
           // slot and tells us how to manage the heap.
-          const TaskQueue::RunStatus status = entry.queue->WillRunTask();
+          const PooledTaskQueue::RunStatus status = entry.queue->WillRunTask();
 
           switch (status) {
-          case TaskQueue::RunStatus::kDisallowed:
+          case PooledTaskQueue::RunStatus::kDisallowed:
             // Shutdown or max-concurrency reached.  Discard this
             // heap entry and scan for the next ready queue.
             TRACE_EVENT_INSTANT("nei.scheduling", "ParallelWillRunDisallowed");
             continue;
 
-          case TaskQueue::RunStatus::kAllowedNotSaturated: {
+          case PooledTaskQueue::RunStatus::kAllowedNotSaturated: {
             // Slot reserved but more remain.  Re-push so other
             // workers can also reserve slots — but only if the
             // queue still contains work to avoid heap-churning
@@ -133,7 +133,7 @@ TaskQueue *PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout, bool &time
             return entry.queue;
           }
 
-          case TaskQueue::RunStatus::kAllowedSaturated:
+          case PooledTaskQueue::RunStatus::kAllowedSaturated:
             // Last slot reserved.  Do NOT re-push; the queue is now
             // saturated.  DidProcessTask() will re-enqueue it when
             // a slot frees up.
@@ -182,7 +182,7 @@ TaskQueue *PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout, bool &time
   }
 }
 
-bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue *queue) {
+bool PooledTaskSource::ReEnqueueTaskQueue(PooledTaskQueue *queue) {
   if (queue == nullptr) {
     return false;
   }
@@ -198,7 +198,7 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue *queue) {
   // heap so that WillRunTask() atomically reserves a worker slot and the
   // parallel-concurrency cap is enforced.  Injecting a parallel queue into
   // the local WorkQueue would bypass slot reservation, leading to a negative
-  // overflow of TaskQueue::running_worker_count_ (local-queue branch only
+  // overflow of PooledTaskQueue::running_worker_count_ (local-queue branch only
   // calls DidProcessTask() with no preceding WillRunTask()), duplicated task
   // execution, and eventual deadlock (see TODO parallel-repost defect).
   LocalWorkQueue *local_queue = GetLocalWorkQueue();
@@ -235,7 +235,7 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue *queue) {
     // Parallel queues: ensure the queue is in the heap if it has work,
     // then notify workers so they pick it up.
     if (queue->is_parallel()) {
-      // Single HasImmediateWork() call to avoid acquiring the TaskQueue
+      // Single HasImmediateWork() call to avoid acquiring the PooledTaskQueue
       // lock twice on the hot PostTask path.
       const bool has_work = queue->HasImmediateWork();
       if (has_work && !state.queued) {
@@ -272,7 +272,7 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue *queue) {
   return enqueued;
 }
 
-bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(TaskQueue *queue, const TimeTicks &now) {
+bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(PooledTaskQueue *queue, const TimeTicks &now) {
   if (queue == nullptr) {
     return false;
   }
@@ -334,7 +334,7 @@ bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(TaskQueue *queue, const Time
   return enqueued || wake_dedicated_owner;
 }
 
-void PooledTaskSource::OnTaskQueueProcessed(TaskQueue *queue) {
+void PooledTaskSource::OnTaskQueueProcessed(PooledTaskQueue *queue) {
   if (queue == nullptr) {
     return;
   }
@@ -419,7 +419,7 @@ void PooledTaskSource::Shutdown() {
   wait_cv_.Broadcast();
 }
 
-bool PooledTaskSource::EnqueueLocked(TaskQueue *queue, std::size_t shard_index) {
+bool PooledTaskSource::EnqueueLocked(PooledTaskQueue *queue, std::size_t shard_index) {
   Shard &shard = shards_[shard_index];
 
   auto it = shard.states.find(queue);
@@ -482,7 +482,7 @@ std::int64_t PooledTaskSource::GetTotalTaskCount() const {
 // Dedicated (single-thread) queue support
 // =============================================================================
 
-bool PooledTaskSource::AssignDedicatedWorker(TaskQueue *queue) {
+bool PooledTaskSource::AssignDedicatedWorker(PooledTaskQueue *queue) {
   if (queue == nullptr || !queue->is_dedicated()) {
     return false;
   }
@@ -511,7 +511,7 @@ bool PooledTaskSource::AssignDedicatedWorker(TaskQueue *queue) {
   return true;
 }
 
-bool PooledTaskSource::IsDedicatedOwnedByOther(TaskQueue *queue) {
+bool PooledTaskSource::IsDedicatedOwnedByOther(PooledTaskQueue *queue) {
   if (queue == nullptr || !queue->is_dedicated()) {
     return false;
   }
@@ -530,7 +530,7 @@ bool PooledTaskSource::IsDedicatedOwnedByOther(TaskQueue *queue) {
   return state.dedicated_owner != 0 && state.dedicated_owner != my_tid;
 }
 
-void PooledTaskSource::ReleaseDedicatedQueue(TaskQueue *queue) {
+void PooledTaskSource::ReleaseDedicatedQueue(PooledTaskQueue *queue) {
   if (queue == nullptr) {
     return;
   }
@@ -556,7 +556,7 @@ void PooledTaskSource::ReleaseDedicatedQueue(TaskQueue *queue) {
   }
 }
 
-void PooledTaskSource::WakeDedicatedWorker(TaskQueue * /*queue*/) {
+void PooledTaskSource::WakeDedicatedWorker(PooledTaskQueue * /*queue*/) {
   // For simplicity, we broadcast to all workers.  The dedicated owner will
   // wake up and find its queue has work; other workers will see no work in
   // the global heap and go back to sleep.  This avoids the complexity of
@@ -565,7 +565,7 @@ void PooledTaskSource::WakeDedicatedWorker(TaskQueue * /*queue*/) {
   NotifyDedicatedWorkAvailable();
 }
 
-void PooledTaskSource::WaitForDedicatedWork(TaskQueue *queue, TimeDelta timeout, bool &timed_out) {
+void PooledTaskSource::WaitForDedicatedWork(PooledTaskQueue *queue, TimeDelta timeout, bool &timed_out) {
   timed_out = false;
   const bool has_timeout = timeout.is_positive();
   const TimeTicks deadline = has_timeout ? TimeTicks::Now() + timeout : TimeTicks();

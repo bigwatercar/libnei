@@ -17,7 +17,7 @@ DelayedTaskManager::~DelayedTaskManager() {
   Shutdown();
 }
 
-void DelayedTaskManager::AddQueue(TaskQueue *queue) {
+void DelayedTaskManager::AddQueue(PooledTaskQueue *queue) {
   if (queue == nullptr) {
     return;
   }
@@ -32,7 +32,7 @@ void DelayedTaskManager::AddQueue(TaskQueue *queue) {
   wake_event_.Signal();
 }
 
-void DelayedTaskManager::RemoveQueue(TaskQueue *queue) {
+void DelayedTaskManager::RemoveQueue(PooledTaskQueue *queue) {
   if (queue == nullptr) {
     return;
   }
@@ -42,7 +42,7 @@ void DelayedTaskManager::RemoveQueue(TaskQueue *queue) {
   wake_event_.Signal();
 }
 
-void DelayedTaskManager::OnQueueUpdated(TaskQueue *queue) {
+void DelayedTaskManager::OnQueueUpdated(PooledTaskQueue *queue) {
   if (queue == nullptr) {
     return;
   }
@@ -143,7 +143,7 @@ void DelayedTaskManager::ThreadMain() {
       continue;
     }
 
-    TaskQueue *queue = next_entry.queue;
+    PooledTaskQueue *queue = next_entry.queue;
     if (queue == nullptr || queue->is_shutdown()) {
       continue;
     }
@@ -156,7 +156,7 @@ void DelayedTaskManager::ThreadMain() {
   }
 }
 
-void DelayedTaskManager::RefreshQueueStateLocked(TaskQueue *queue) {
+void DelayedTaskManager::RefreshQueueStateLocked(PooledTaskQueue *queue) {
   auto it = queues_.find(queue);
   if (it == queues_.end()) {
     return;

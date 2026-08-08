@@ -3,14 +3,14 @@
 #include <deque>
 #include <neixx/threading/thread_local.h>
 
-#include "task_queue.h"
+#include "pooled_task_queue.h"
 
 namespace nei {
 namespace internal {
 namespace {
 
-ThreadLocalPointer<TaskQueue> &GetCurrentQueueSlot() {
-  static ThreadLocalPointer<TaskQueue> slot;
+ThreadLocalPointer<PooledTaskQueue> &GetCurrentQueueSlot() {
+  static ThreadLocalPointer<PooledTaskQueue> slot;
   return slot;
 }
 
@@ -21,11 +21,11 @@ ThreadLocalPointer<LocalWorkQueue> &GetLocalWorkQueueSlot() {
 
 } // namespace
 
-TaskQueue *GetCurrentPooledTaskQueue() {
+PooledTaskQueue *GetCurrentPooledTaskQueue() {
   return GetCurrentQueueSlot().Get();
 }
 
-void SetCurrentPooledTaskQueue(TaskQueue *queue) {
+void SetCurrentPooledTaskQueue(PooledTaskQueue *queue) {
   GetCurrentQueueSlot().Set(queue);
 }
 

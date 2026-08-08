@@ -20,7 +20,7 @@
 #include <neixx/synchronization/condition_variable.h>
 #include <neixx/synchronization/waitable_event.h>
 #include "internal/task.h"
-#include "internal/task_queue.h"
+#include "internal/pooled_task_queue.h"
 #include "internal/task_tracker.h"
 #include "internal/task_tracing_internal.h"
 #include <neixx/task/scoped_blocking_call.h>
@@ -48,7 +48,7 @@ constexpr std::size_t kMaxTasksPerQueueTurn = 128;
 constexpr std::size_t kSaturatedBatchesToGrow = 2;
 // Parallel-queue per-handoff budget bounds.  Keep these smaller than
 // the sequenced-queue bounds so that multiple workers can interleave on
-// a hot parallel queue without excessive contention on the TaskQueue
+// a hot parallel queue without excessive contention on the PooledTaskQueue
 // lock, while still amortizing the shard-lock and dequeue overhead.
 constexpr std::size_t kMinParallelTasksPerTurn = 4;
 constexpr std::size_t kMaxParallelTasksPerTurn = 32;
@@ -223,7 +223,7 @@ private:
     // Dedicated (single-thread) queue that this worker owns.  When non-null,
     // the worker processes this queue exclusively, guaranteeing same-thread
     // execution for SingleThreadTaskRunner tasks.
-    internal::TaskQueue *dedicated_queue_ = nullptr;
+    internal::PooledTaskQueue *dedicated_queue_ = nullptr;
 
     for (;;) {
       // ---- Dedicated queue path ----
@@ -273,7 +273,7 @@ private:
       // shard heap.  This avoids lock contention when tasks posted from
       // within this worker's tasks are routed here via TLS.
       {
-        internal::TaskQueue *local_queue = nullptr;
+        internal::PooledTaskQueue *local_queue = nullptr;
         {
           AutoLock lock(local_queue_lock_);
           if (!local_work_queue_.empty()) {
@@ -313,9 +313,9 @@ private:
 
       // ---- Normal path: fetch next ready queue from global heap ----
       bool timed_out = false;
-      internal::TaskQueue *queue = reclaim_time_.is_positive()
-                                       ? source_->GetNextTaskQueueTimed(reclaim_time_, timed_out)
-                                       : source_->GetNextTaskQueue();
+      internal::PooledTaskQueue *queue = reclaim_time_.is_positive()
+                                             ? source_->GetNextTaskQueueTimed(reclaim_time_, timed_out)
+                                             : source_->GetNextTaskQueue();
 
       if (queue == nullptr) {
         // Either Shutdown() was called or the idle reclaim timeout elapsed.
@@ -366,12 +366,12 @@ private:
   /// Processes a batch of tasks from |queue|.  Handles budgeting, priority
   /// backgrounding, task observation, and blocking callbacks for both regular
   /// and parallel queues.
-  void ProcessTaskBatch(internal::TaskQueue *queue) {
+  void ProcessTaskBatch(internal::PooledTaskQueue *queue) {
     std::size_t remaining_budget = dynamic_turn_budget_;
 
     // For parallel queues, use a separate (smaller) dynamic budget
     // instead of the hard-coded 1-task limit.  This amortizes the
-    // shard-lock and TaskQueue-lock overhead across multiple tasks
+    // shard-lock and PooledTaskQueue-lock overhead across multiple tasks
     // while still keeping the handoff short enough for other workers
     // to interleave.
     //
@@ -514,7 +514,7 @@ private:
   // The TLS slot (internal::tls_local_work_queue) points to this member.
   // ReEnqueueTaskQueue() writes into it; ThreadMain drains from it.
   mutable Lock local_queue_lock_;
-  std::deque<internal::TaskQueue *> local_work_queue_;
+  std::deque<internal::PooledTaskQueue *> local_work_queue_;
 
   std::string name_;
   PlatformThread::Handle handle_;
@@ -667,9 +667,9 @@ public:
     }
     AutoLock lock(lock_);
 
-    std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(traits);
-    internal::TaskQueue *raw_queue = queue.get();
-    WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
+    std::unique_ptr<internal::PooledTaskQueue> queue = std::make_unique<internal::PooledTaskQueue>(traits);
+    internal::PooledTaskQueue *raw_queue = queue.get();
+    WeakPtr<internal::PooledTaskQueue> weak_queue = raw_queue->GetWeakPtr();
 
     task_source_.RegisterTaskQueue(raw_queue);
     delayed_task_manager_.AddQueue(raw_queue);
@@ -688,7 +688,7 @@ public:
     });
 
     raw_queue->SetOnTaskPostedCallback([this, weak_queue]() {
-      internal::TaskQueue *queue = weak_queue.get();
+      internal::PooledTaskQueue *queue = weak_queue.get();
       if (queue == nullptr) {
         return;
       }
@@ -706,9 +706,9 @@ public:
     }
     AutoLock lock(lock_);
 
-    std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(traits);
-    internal::TaskQueue *raw_queue = queue.get();
-    WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
+    std::unique_ptr<internal::PooledTaskQueue> queue = std::make_unique<internal::PooledTaskQueue>(traits);
+    internal::PooledTaskQueue *raw_queue = queue.get();
+    WeakPtr<internal::PooledTaskQueue> weak_queue = raw_queue->GetWeakPtr();
 
     // Mark as dedicated so PooledTaskSource assigns a single worker
     // exclusively to this queue, guaranteeing same-thread execution.
@@ -731,7 +731,7 @@ public:
     });
 
     raw_queue->SetOnTaskPostedCallback([this, weak_queue]() {
-      internal::TaskQueue *queue = weak_queue.get();
+      internal::PooledTaskQueue *queue = weak_queue.get();
       if (queue == nullptr) {
         return;
       }
@@ -749,9 +749,9 @@ public:
     }
     AutoLock lock(lock_);
 
-    std::unique_ptr<internal::TaskQueue> queue = std::make_unique<internal::TaskQueue>(traits);
-    internal::TaskQueue *raw_queue = queue.get();
-    WeakPtr<internal::TaskQueue> weak_queue = raw_queue->GetWeakPtr();
+    std::unique_ptr<internal::PooledTaskQueue> queue = std::make_unique<internal::PooledTaskQueue>(traits);
+    internal::PooledTaskQueue *raw_queue = queue.get();
+    WeakPtr<internal::PooledTaskQueue> weak_queue = raw_queue->GetWeakPtr();
 
     // Mark as parallel so PooledTaskSource skips the in_flight guard.
     raw_queue->set_parallel(true);
@@ -763,7 +763,7 @@ public:
         [this](TaskShutdownBehavior /*shutdown_behavior*/) { task_source_.NotifyTaskPosted(); });
 
     raw_queue->SetOnTaskPostedCallback([this, weak_queue]() {
-      internal::TaskQueue *queue = weak_queue.get();
+      internal::PooledTaskQueue *queue = weak_queue.get();
       if (queue == nullptr) {
         return;
       }
@@ -778,7 +778,7 @@ public:
   void FlushForTesting() {
 #if NEI_PARALLEL_DIAGNOSTICS
     struct QueueWatermark {
-      internal::TaskQueue *queue;
+      internal::PooledTaskQueue *queue;
       std::uint64_t watermark;
     };
 
@@ -790,7 +790,7 @@ public:
       }
       snapshots.reserve(queues_.size());
       for (const auto &q : queues_) {
-        internal::TaskQueue *raw = q.get();
+        internal::PooledTaskQueue *raw = q.get();
         snapshots.push_back(QueueWatermark{raw, raw->GetPostedTaskCount()});
       }
     }
@@ -828,8 +828,8 @@ public:
   }
 
   bool Shutdown(TimeDelta timeout = TimeDelta()) {
-    std::vector<internal::TaskQueue *> queues_snapshot;
-    std::vector<std::unique_ptr<internal::TaskQueue>> queues_to_shutdown;
+    std::vector<internal::PooledTaskQueue *> queues_snapshot;
+    std::vector<std::unique_ptr<internal::PooledTaskQueue>> queues_to_shutdown;
 
     tracker_.StartShutdown();
 
@@ -841,7 +841,7 @@ public:
       }
     }
 
-    for (internal::TaskQueue *queue : queues_snapshot) {
+    for (internal::PooledTaskQueue *queue : queues_snapshot) {
       queue->SetOnTaskPostedCallback(nullptr);
       queue->SetOnTaskEnqueuedCallback(nullptr);
       queue->CancelNonShutdownBlockingTasksLocked();
@@ -854,7 +854,7 @@ public:
 
     delayed_task_manager_.Shutdown();
 
-    for (internal::TaskQueue *queue : queues_snapshot) {
+    for (internal::PooledTaskQueue *queue : queues_snapshot) {
       delayed_task_manager_.RemoveQueue(queue);
     }
 
@@ -941,7 +941,7 @@ private:
   std::atomic<std::size_t> blocking_worker_count_{0};
   std::atomic<bool> backpressure_warning_emitted_{false};
   std::atomic<TaskObserver *> task_observer_{nullptr};
-  std::vector<std::unique_ptr<internal::TaskQueue>> queues_;
+  std::vector<std::unique_ptr<internal::PooledTaskQueue>> queues_;
 };
 
 ThreadPool::ThreadPool()

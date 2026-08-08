@@ -20,7 +20,7 @@ namespace nei {
 // using RepeatingClosure = RepeatingCallback<void()>;
 
 namespace internal {
-class TaskQueue;
+class PooledTaskQueue;
 class SequencedTaskQueue;
 } // namespace internal
 
@@ -58,7 +58,7 @@ public:
   // always returns false and RunsTasksInCurrentSequence() uses TLS-based
   // detection to determine whether the calling thread is executing a task
   // from this runner's queue.
-  static scoped_refptr<TaskRunner> CreateForThreadPool(internal::TaskQueue *task_queue,
+  static scoped_refptr<TaskRunner> CreateForThreadPool(internal::PooledTaskQueue *task_queue,
                                                        const TaskTraits &traits = TaskTraits());
 
   // Returns true if the current thread is the thread this runner is bound
@@ -113,7 +113,7 @@ private:
 // A TaskRunner that provides guaranteed ordering: tasks posted to it are
 // executed in posting order.  SequencedTaskRunner tasks may run on different
 // threads (e.g. thread-pool workers), but the sequencing guarantee is
-// maintained through the TaskQueue.
+// maintained through the PooledTaskQueue.
 //
 // This is the return type of SequenceManager::CreateTaskRunner() and
 // Thread::CreateTaskRunner() for dedicated-thread runners.
@@ -130,11 +130,11 @@ public:
   // runner is bound to the calling thread at construction time.
   // BelongsToCurrentThread() and RunsTasksInCurrentSequence() both return
   // true when called from that thread.
-  static scoped_refptr<SequencedTaskRunner> Create(internal::TaskQueue *task_queue,
+  static scoped_refptr<SequencedTaskRunner> Create(internal::PooledTaskQueue *task_queue,
                                                    const TaskTraits &traits = TaskTraits());
 
   // Convenience factory accepting SequencedTaskQueue (SequenceManager path
-  // after the Chromium-aligned split).  Same semantics as Create(TaskQueue*).
+  // after the Chromium-aligned split).  Same semantics as Create(PooledTaskQueue*).
   static scoped_refptr<SequencedTaskRunner> Create(internal::SequencedTaskQueue *task_queue,
                                                    const TaskTraits &traits = TaskTraits());
 
@@ -144,7 +144,7 @@ public:
   // RunsTasksInCurrentSequence() uses TLS-based detection to determine
   // whether the calling thread is currently executing a task from this
   // runner's queue.
-  static scoped_refptr<SequencedTaskRunner> CreateForThreadPool(internal::TaskQueue *task_queue,
+  static scoped_refptr<SequencedTaskRunner> CreateForThreadPool(internal::PooledTaskQueue *task_queue,
                                                                 const TaskTraits &traits = TaskTraits());
 
   bool PostTaskWithTraits(const Location &from_here, const TaskTraits &traits, OnceClosure task) override;
@@ -205,10 +205,10 @@ public:
   // BelongsToCurrentThread() returns true only when called from the
   // creating thread.  Use this factory for dedicated-thread runners
   // (e.g. the IO thread or a custom MessagePump-driven thread).
-  static scoped_refptr<SingleThreadTaskRunner> Create(internal::TaskQueue *task_queue,
+  static scoped_refptr<SingleThreadTaskRunner> Create(internal::PooledTaskQueue *task_queue,
                                                       const TaskTraits &traits = TaskTraits());
 
-  // Same as Create(TaskQueue*) but accepts SequencedTaskQueue for the
+  // Same as Create(PooledTaskQueue*) but accepts SequencedTaskQueue for the
   // SequenceManager path after the Chromium-aligned split.
   static scoped_refptr<SingleThreadTaskRunner> Create(internal::SequencedTaskQueue *task_queue,
                                                       const TaskTraits &traits = TaskTraits());
@@ -218,8 +218,8 @@ public:
   // always returns false, while RunsTasksInCurrentSequence() uses TLS-based
   // detection.  All tasks posted to this runner are guaranteed to execute
   // on the same pool worker thread — the pool dedicates one worker to this
-  // runner's TaskQueue for the lifetime of the runner.
-  static scoped_refptr<SingleThreadTaskRunner> CreateForThreadPool(internal::TaskQueue *task_queue,
+  // runner's PooledTaskQueue for the lifetime of the runner.
+  static scoped_refptr<SingleThreadTaskRunner> CreateForThreadPool(internal::PooledTaskQueue *task_queue,
                                                                    const TaskTraits &traits = TaskTraits());
 
   // All task-posting methods are inherited from SequencedTaskRunner.

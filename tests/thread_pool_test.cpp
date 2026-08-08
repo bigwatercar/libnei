@@ -302,7 +302,7 @@ TEST(ThreadPoolTest, PostTaskReturnsFalseAfterQueueShutdown) {
 
   pool.Shutdown();
 
-  // After shutdown the underlying TaskQueue is destroyed; the WeakPtr has
+  // After shutdown the underlying PooledTaskQueue is destroyed; the WeakPtr has
   // expired so PostTask must return false.
   const bool posted = runner->PostTask(FROM_HERE, []() {});
   EXPECT_FALSE(posted);

@@ -1,7 +1,7 @@
 #pragma once
 
-#ifndef NEIXX_TASK_INTERNAL_TASK_QUEUE_H_
-#define NEIXX_TASK_INTERNAL_TASK_QUEUE_H_
+#ifndef NEIXX_TASK_INTERNAL_POOLED_TASK_QUEUE_H_
+#define NEIXX_TASK_INTERNAL_POOLED_TASK_QUEUE_H_
 
 #include <cstddef>
 #include <functional>
@@ -38,17 +38,17 @@ namespace internal {
 using OnTaskPostedCallback = std::function<void()>;
 using OnTaskEnqueuedCallback = std::function<void(TaskShutdownBehavior)>;
 
-class NEI_API TaskQueue final {
+class NEI_API PooledTaskQueue final {
 public:
   class Impl;
 
-  explicit TaskQueue(const TaskTraits &traits = TaskTraits());
-  ~TaskQueue();
+  explicit PooledTaskQueue(const TaskTraits &traits = TaskTraits());
+  ~PooledTaskQueue();
 
-  TaskQueue(const TaskQueue &) = delete;
-  TaskQueue &operator=(const TaskQueue &) = delete;
-  TaskQueue(TaskQueue &&) = delete;
-  TaskQueue &operator=(TaskQueue &&) = delete;
+  PooledTaskQueue(const PooledTaskQueue &) = delete;
+  PooledTaskQueue &operator=(const PooledTaskQueue &) = delete;
+  PooledTaskQueue(PooledTaskQueue &&) = delete;
+  PooledTaskQueue &operator=(PooledTaskQueue &&) = delete;
 
   bool PushImmediateTask(Task &&task);
   bool PushDelayedTask(Task &&task);
@@ -83,7 +83,7 @@ public:
   const SequenceToken &sequence_token() const;
   const TaskTraits &traits() const;
 
-  WeakPtr<TaskQueue> GetWeakPtr();
+  WeakPtr<PooledTaskQueue> GetWeakPtr();
   void SetOnTaskPostedCallback(OnTaskPostedCallback callback);
   void SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback);
 
@@ -155,8 +155,8 @@ private:
 } // namespace internal
 
 template <>
-struct WeakPtrThreadSafe<internal::TaskQueue> : std::true_type {};
+struct WeakPtrThreadSafe<internal::PooledTaskQueue> : std::true_type {};
 
 } // namespace nei
 
-#endif // NEIXX_TASK_INTERNAL_TASK_QUEUE_H_
+#endif // NEIXX_TASK_INTERNAL_POOLED_TASK_QUEUE_H_

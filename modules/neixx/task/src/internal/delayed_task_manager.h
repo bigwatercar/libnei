@@ -11,7 +11,7 @@
 #include <neixx/common/time.h>
 #include <neixx/synchronization/lock.h>
 #include <neixx/synchronization/waitable_event.h>
-#include "task_queue.h"
+#include "pooled_task_queue.h"
 #include <neixx/threading/platform_thread.h>
 
 namespace nei {
@@ -31,9 +31,9 @@ public:
   DelayedTaskManager(DelayedTaskManager &&) = delete;
   DelayedTaskManager &operator=(DelayedTaskManager &&) = delete;
 
-  void AddQueue(TaskQueue *queue);
-  void RemoveQueue(TaskQueue *queue);
-  void OnQueueUpdated(TaskQueue *queue);
+  void AddQueue(PooledTaskQueue *queue);
+  void RemoveQueue(PooledTaskQueue *queue);
+  void OnQueueUpdated(PooledTaskQueue *queue);
 
   void Shutdown();
 
@@ -43,7 +43,7 @@ private:
   };
 
   struct HeapEntry {
-    TaskQueue *queue = nullptr;
+    PooledTaskQueue *queue = nullptr;
     TimeTicks run_time;
     std::uint64_t order = 0;
   };
@@ -58,7 +58,7 @@ private:
   };
 
   void ThreadMain() override;
-  void RefreshQueueStateLocked(TaskQueue *queue);
+  void RefreshQueueStateLocked(PooledTaskQueue *queue);
   bool PopNextValidEntryLocked(HeapEntry *out_entry);
 
   PooledTaskSource *task_source_ = nullptr;
@@ -70,7 +70,7 @@ private:
   bool is_shutdown_ = false;
   std::uint64_t next_order_ = 0;
 
-  std::unordered_map<TaskQueue *, QueueState> queues_;
+  std::unordered_map<PooledTaskQueue *, QueueState> queues_;
   std::priority_queue<HeapEntry, std::vector<HeapEntry>, HeapEntryLess> heap_;
 };
 

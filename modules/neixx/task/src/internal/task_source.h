@@ -12,7 +12,7 @@ namespace nei {
 namespace internal {
 
 struct Task;
-class TaskQueue;
+class PooledTaskQueue;
 
 // =============================================================================
 // TaskSource — abstract interface for a sequence of tasks
@@ -20,10 +20,10 @@ class TaskQueue;
 //
 // Mirrors Chromium's base/task/thread_pool/task_source.h.  Decouples the
 // pool scheduler (PooledTaskSource) from the concrete task container
-// (TaskQueue), enabling future extension with JobTaskSource etc.
+// (PooledTaskQueue), enabling future extension with JobTaskSource etc.
 //
 // Implementations:
-//   TaskQueueTaskSource — adapts a TaskQueue (sequenced / single-thread / parallel)
+//   TaskQueueTaskSource — adapts a PooledTaskQueue (sequenced / single-thread / parallel)
 //   (future) JobTaskSource — parallel-for work stealing
 //
 class NEI_API TaskSource {
@@ -78,20 +78,20 @@ public:
 };
 
 // =============================================================================
-// TaskQueueTaskSource — adapts a TaskQueue to the TaskSource interface
+// TaskQueueTaskSource — adapts a PooledTaskQueue to the TaskSource interface
 // =============================================================================
 //
 // Thin, non-owning adapter.  PooledTaskSource and WorkerThread interact
-// with TaskSource* instead of TaskQueue*, enabling the future addition of
+// with TaskSource* instead of PooledTaskQueue*, enabling the future addition of
 // non-queue task sources (e.g. JobTaskSource).
 //
-// Lifetime: the TaskQueue must outlive this adapter.  In practice the
+// Lifetime: the PooledTaskQueue must outlive this adapter.  In practice the
 // ThreadPool owns both via queues_ vector; the TaskQueueTaskSource is
 // stored alongside, and both are destroyed together at shutdown.
 //
 class NEI_API TaskQueueTaskSource final : public TaskSource {
 public:
-  explicit TaskQueueTaskSource(TaskQueue *queue);
+  explicit TaskQueueTaskSource(PooledTaskQueue *queue);
   ~TaskQueueTaskSource() override = default;
 
   // TaskSource interface.
@@ -106,13 +106,13 @@ public:
   bool IsShutdown() const override;
   void Shutdown() override;
 
-  // Access the underlying TaskQueue (for delayed work, callbacks, etc.).
-  TaskQueue *task_queue() const {
+  // Access the underlying PooledTaskQueue (for delayed work, callbacks, etc.).
+  PooledTaskQueue *task_queue() const {
     return queue_;
   }
 
 private:
-  TaskQueue *queue_; // Non-owning.
+  PooledTaskQueue *queue_; // Non-owning.
 };
 
 } // namespace internal

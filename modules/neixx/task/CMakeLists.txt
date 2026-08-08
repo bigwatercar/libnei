@@ -24,17 +24,17 @@ set(NEIXX_TASK_SOURCES
     src/internal/delayed_task_manager.h
     src/internal/job_task_source.cpp
     src/internal/job_task_source.h
+    src/internal/pooled_task_queue.cpp
+    src/internal/pooled_task_queue.h
     src/internal/pooled_task_runner_utils.cpp
     src/internal/pooled_task_runner_utils.h
     src/internal/pooled_task_source.cpp
     src/internal/pooled_task_source.h
-    src/internal/task.h
-    src/internal/task_queue.cpp
-    src/internal/task_queue.h
-    src/internal/task_queue_selector.cpp
-    src/internal/task_queue_selector.h
     src/internal/sequenced_task_queue.cpp
     src/internal/sequenced_task_queue.h
+    src/internal/task.h
+    src/internal/task_queue_selector.cpp
+    src/internal/task_queue_selector.h
     src/internal/task_source.cpp
     src/internal/task_source.h
     src/internal/task_tracker.cpp

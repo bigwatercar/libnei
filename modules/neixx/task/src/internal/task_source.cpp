@@ -2,7 +2,7 @@
 
 #include <nei/debug/check.h>
 
-#include "task_queue.h"
+#include "pooled_task_queue.h"
 
 namespace nei {
 namespace internal {
@@ -11,7 +11,7 @@ namespace internal {
 // TaskQueueTaskSource
 // =============================================================================
 
-TaskQueueTaskSource::TaskQueueTaskSource(TaskQueue *queue)
+TaskQueueTaskSource::TaskQueueTaskSource(PooledTaskQueue *queue)
     : queue_(queue) {
   DCHECK(queue_ != nullptr);
 }

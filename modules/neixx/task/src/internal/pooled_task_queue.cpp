@@ -1,4 +1,4 @@
-#include "task_queue.h"
+#include "pooled_task_queue.h"
 
 #include <algorithm>
 #include <deque>
@@ -50,9 +50,9 @@ bool IsShutdownBlockingTask(const Task &task) {
 
 } // namespace
 
-class TaskQueue::Impl {
+class PooledTaskQueue::Impl {
 public:
-  explicit Impl(TaskQueue *owner, const TaskTraits &traits)
+  explicit Impl(PooledTaskQueue *owner, const TaskTraits &traits)
       : seq_queue_(traits)
       , weak_factory_(owner, FROM_HERE) {
   }
@@ -139,7 +139,7 @@ public:
     return seq_queue_.traits();
   }
 
-  WeakPtr<TaskQueue> GetWeakPtr() {
+  WeakPtr<PooledTaskQueue> GetWeakPtr() {
     return weak_factory_.GetWeakPtr(FROM_HERE);
   }
 
@@ -171,9 +171,9 @@ public:
 
   // ---- Chromium-aligned WillRunTask / DidProcessTask ----
 
-  TaskQueue::RunStatus WillRunTask() {
+  PooledTaskQueue::RunStatus WillRunTask() {
     if (!parallel_) {
-      return TaskQueue::RunStatus::kDisallowed;
+      return PooledTaskQueue::RunStatus::kDisallowed;
     }
 
     // Atomically reserve a worker slot, mirroring
@@ -192,17 +192,17 @@ public:
       g_parallel_willrun_disallowed.fetch_add(1, std::memory_order_relaxed);
       TRACE_EVENT_INSTANT("nei.scheduling", "WillRunTaskShutdown");
 #endif
-      return TaskQueue::RunStatus::kDisallowed;
+      return PooledTaskQueue::RunStatus::kDisallowed;
     }
 
-    if (current >= TaskQueue::kMaxParallelWorkers) {
+    if (current >= PooledTaskQueue::kMaxParallelWorkers) {
       // Last (or beyond-last) slot taken: saturated.
       // The caller must remove this queue from the ready heap.
 #if NEI_PARALLEL_DIAGNOSTICS
       g_parallel_willrun_saturated.fetch_add(1, std::memory_order_relaxed);
       TRACE_EVENT_INSTANT("nei.scheduling", "WillRunTaskSaturated");
 #endif
-      return TaskQueue::RunStatus::kAllowedSaturated;
+      return PooledTaskQueue::RunStatus::kAllowedSaturated;
     }
 
     // Slot reserved with headroom: not saturated.
@@ -210,7 +210,7 @@ public:
 #if NEI_PARALLEL_DIAGNOSTICS
     g_parallel_willrun_not_saturated.fetch_add(1, std::memory_order_relaxed);
 #endif
-    return TaskQueue::RunStatus::kAllowedNotSaturated;
+    return PooledTaskQueue::RunStatus::kAllowedNotSaturated;
   }
 
   bool DidProcessTask() {
@@ -234,7 +234,7 @@ public:
     //   reenqueue = (new_max_concurrency > worker_count_after)
     // and the caller (RunAndPopNextTask) checks:
     //   if (task_source_must_be_queued) return task_source;
-    if (prev >= TaskQueue::kMaxParallelWorkers) {
+    if (prev >= PooledTaskQueue::kMaxParallelWorkers) {
       // Was saturated before this release; now has headroom.
       // Re-enqueue if work remains so idle workers can pick it up.
       // Use HasImmediateWork() (acquires lock_) rather than
@@ -255,13 +255,13 @@ public:
       return running_worker_count_.load(std::memory_order_acquire) == 0 ? 1 : 0;
     }
     const int running = running_worker_count_.load(std::memory_order_acquire);
-    if (running >= TaskQueue::kMaxParallelWorkers) {
+    if (running >= PooledTaskQueue::kMaxParallelWorkers) {
       return 0;
     }
-    return static_cast<size_t>(TaskQueue::kMaxParallelWorkers - running);
+    return static_cast<size_t>(PooledTaskQueue::kMaxParallelWorkers - running);
   }
 
-  // Completion accounting accessors (see TaskQueue::GetPostedTaskCount etc.).
+  // Completion accounting accessors (see PooledTaskQueue::GetPostedTaskCount etc.).
 #if NEI_PARALLEL_DIAGNOSTICS
   std::uint64_t GetPostedTaskCount() const {
     return posted_tasks_.load(std::memory_order_relaxed);
@@ -291,128 +291,128 @@ private:
 
   std::atomic<int> running_worker_count_{0};
 
-  // Completion accounting (see TaskQueue::GetPostedTaskCount etc.).
+  // Completion accounting (see PooledTaskQueue::GetPostedTaskCount etc.).
 #if NEI_PARALLEL_DIAGNOSTICS
   std::atomic<std::uint64_t> posted_tasks_{0};
   std::atomic<std::uint64_t> completed_tasks_{0};
 #endif
 
-  WeakPtrFactory<TaskQueue> weak_factory_;
+  WeakPtrFactory<PooledTaskQueue> weak_factory_;
 };
 
-TaskQueue::TaskQueue(const TaskTraits &traits)
+PooledTaskQueue::PooledTaskQueue(const TaskTraits &traits)
     : impl_(std::make_unique<Impl>(this, traits)) {
 }
 
-TaskQueue::~TaskQueue() = default;
+PooledTaskQueue::~PooledTaskQueue() = default;
 
-bool TaskQueue::PushImmediateTask(Task &&task) {
+bool PooledTaskQueue::PushImmediateTask(Task &&task) {
   return impl_->PushImmediateTask(std::move(task));
 }
 
-bool TaskQueue::PushDelayedTask(Task &&task) {
+bool PooledTaskQueue::PushDelayedTask(Task &&task) {
   return impl_->PushDelayedTask(std::move(task));
 }
 
-bool TaskQueue::TakeImmediateTask(Task *task) {
+bool PooledTaskQueue::TakeImmediateTask(Task *task) {
   return impl_->TakeImmediateTask(task);
 }
 
-std::size_t TaskQueue::TakeImmediateTasks(Task *tasks, std::size_t max_tasks) {
+std::size_t PooledTaskQueue::TakeImmediateTasks(Task *tasks, std::size_t max_tasks) {
   return impl_->TakeImmediateTasks(tasks, max_tasks);
 }
 
-bool TaskQueue::TakeReadyDelayedTask(const TimeTicks &now, Task *task) {
+bool PooledTaskQueue::TakeReadyDelayedTask(const TimeTicks &now, Task *task) {
   return impl_->TakeReadyDelayedTask(now, task);
 }
 
-std::size_t TaskQueue::PromoteReadyDelayedTasks(const TimeTicks &now) {
+std::size_t PooledTaskQueue::PromoteReadyDelayedTasks(const TimeTicks &now) {
   return impl_->PromoteReadyDelayedTasks(now);
 }
 
 #if NEI_PARALLEL_DIAGNOSTICS
-std::uint64_t TaskQueue::GetPostedTaskCount() const {
+std::uint64_t PooledTaskQueue::GetPostedTaskCount() const {
   return impl_->GetPostedTaskCount();
 }
 
-std::uint64_t TaskQueue::GetCompletedTaskCount() const {
+std::uint64_t PooledTaskQueue::GetCompletedTaskCount() const {
   return impl_->GetCompletedTaskCount();
 }
 
-void TaskQueue::NotifyTaskCompleted() {
+void PooledTaskQueue::NotifyTaskCompleted() {
   impl_->NotifyTaskCompleted();
 }
 #endif
 
-bool TaskQueue::HasImmediateWork() const {
+bool PooledTaskQueue::HasImmediateWork() const {
   return impl_->HasImmediateWork();
 }
 
-bool TaskQueue::HasDelayedWork() const {
+bool PooledTaskQueue::HasDelayedWork() const {
   return impl_->HasDelayedWork();
 }
 
-TimeTicks TaskQueue::PeekNextDelayedRunTime() const {
+TimeTicks PooledTaskQueue::PeekNextDelayedRunTime() const {
   return impl_->PeekNextDelayedRunTime();
 }
 
-void TaskQueue::Shutdown() {
+void PooledTaskQueue::Shutdown() {
   impl_->Shutdown();
 }
 
-void TaskQueue::CancelNonShutdownBlockingTasksLocked() {
+void PooledTaskQueue::CancelNonShutdownBlockingTasksLocked() {
   impl_->CancelNonShutdownBlockingTasksLocked();
 }
 
-bool TaskQueue::is_shutdown() const {
+bool PooledTaskQueue::is_shutdown() const {
   return impl_->is_shutdown();
 }
 
-const SequenceToken &TaskQueue::sequence_token() const {
+const SequenceToken &PooledTaskQueue::sequence_token() const {
   return impl_->sequence_token();
 }
 
-const TaskTraits &TaskQueue::traits() const {
+const TaskTraits &PooledTaskQueue::traits() const {
   return impl_->traits();
 }
 
-void TaskQueue::SetOnTaskPostedCallback(OnTaskPostedCallback callback) {
+void PooledTaskQueue::SetOnTaskPostedCallback(OnTaskPostedCallback callback) {
   impl_->SetOnTaskPostedCallback(std::move(callback));
 }
 
-void TaskQueue::SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback) {
+void PooledTaskQueue::SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback) {
   impl_->SetOnTaskEnqueuedCallback(std::move(callback));
 }
 
-WeakPtr<TaskQueue> TaskQueue::GetWeakPtr() {
+WeakPtr<PooledTaskQueue> PooledTaskQueue::GetWeakPtr() {
   return impl_->GetWeakPtr();
 }
 
-bool TaskQueue::is_parallel() const {
+bool PooledTaskQueue::is_parallel() const {
   return impl_->is_parallel();
 }
 
-void TaskQueue::set_parallel(bool parallel) {
+void PooledTaskQueue::set_parallel(bool parallel) {
   impl_->set_parallel(parallel);
 }
 
-bool TaskQueue::is_dedicated() const {
+bool PooledTaskQueue::is_dedicated() const {
   return impl_->is_dedicated();
 }
 
-void TaskQueue::set_dedicated(bool dedicated) {
+void PooledTaskQueue::set_dedicated(bool dedicated) {
   impl_->set_dedicated(dedicated);
 }
 
-TaskQueue::RunStatus TaskQueue::WillRunTask() {
+PooledTaskQueue::RunStatus PooledTaskQueue::WillRunTask() {
   return impl_->WillRunTask();
 }
 
-bool TaskQueue::DidProcessTask() {
+bool PooledTaskQueue::DidProcessTask() {
   return impl_->DidProcessTask();
 }
 
-size_t TaskQueue::GetRemainingParallelism() const {
+size_t PooledTaskQueue::GetRemainingParallelism() const {
   return impl_->GetRemainingParallelism();
 }
 
