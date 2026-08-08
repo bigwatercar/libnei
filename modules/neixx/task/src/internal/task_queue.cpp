@@ -131,7 +131,7 @@ public:
     return true;
   }
 
-  bool PushDelayedTask(Task task) {
+  bool PushDelayedTask(Task &&task) {
     if (!task.task) {
       return false;
     }
@@ -516,7 +516,7 @@ bool TaskQueue::PushImmediateTask(Task &&task) {
   return impl_->PushImmediateTask(std::move(task));
 }
 
-bool TaskQueue::PushDelayedTask(Task task) {
+bool TaskQueue::PushDelayedTask(Task &&task) {
   return impl_->PushDelayedTask(std::move(task));
 }
 
