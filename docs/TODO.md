@@ -32,6 +32,25 @@
 
   **量化目标**：单线程 PostTask 从 1.9M/s → 4M/s 以上（减少 50% 队列开销）。
 
+- **Parallel worker-repost 缺陷：`running_worker_count_` 负溢出 + 任务重复执行 + 死锁** 🐛 2026-08-08:
+
+  **症状**：benchmark `RunWorkerRepostBenchmark(seed_count=4)` 在 parallel runner 上导致
+  `g_executed_task_count` 远超 task_count（executed=220 for expected=100），随后崩溃
+  (0xC0000005) 或死锁。sequenced runner 的 seed_count=1 无此问题。
+
+  **根因**：`PooledTaskSource::ReEnqueueTaskQueue()` 的 Phase 2.2（TLS local WorkQueue 注入）
+  对 parallel queue 也生效——worker 内 PostTask 时 parallel queue 被 push 到本地队列，
+  绕过 `WillRunTask()` → `running_worker_count_` 缺少对应的 +1。本地队列分支处理时只调
+  `DidProcessTask()`（fetch_sub(-1)），无配对 `WillRunTask()`（fetch_add(+1)），导致
+  `running_worker_count_` 持续负溢出 → `DidProcessTask()` 饱和检查 `prev >= 256` 永远
+  false → 队列从不重入全局堆 → 多 worker 并发无保护地 `ProcessTaskBatch` 同一队列 +
+  本地队列重复 push → 任务放大执行 + 状态污染后续场景 → 死锁。
+
+  **修复**：Phase 2.2 排除 parallel queue（`!queue->is_parallel()`），parallel queue
+  始终走全局 shard heap + WillRunTask 槽位保护。改动 1 行（`pooled_task_source.cpp`）。
+  Chromium 的 local work queue 也仅用于 sequenced runner，不适用于全局共享的 parallel
+  queue。
+
 ### P2
 
 - **PostJob 接口参数对齐 Chromium** 🔧 2026-07-30:

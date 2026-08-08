@@ -193,8 +193,16 @@ bool PooledTaskSource::ReEnqueueTaskQueue(TaskQueue *queue) {
 
   // Phase 2.2: If the caller is a pool worker, inject into its local
   // WorkQueue instead of the global shard heap.
+  //
+  // Parallel queues are EXCLUDED: they must go through the global shard
+  // heap so that WillRunTask() atomically reserves a worker slot and the
+  // parallel-concurrency cap is enforced.  Injecting a parallel queue into
+  // the local WorkQueue would bypass slot reservation, leading to a negative
+  // overflow of TaskQueue::running_worker_count_ (local-queue branch only
+  // calls DidProcessTask() with no preceding WillRunTask()), duplicated task
+  // execution, and eventual deadlock (see TODO parallel-repost defect).
   LocalWorkQueue *local_queue = GetLocalWorkQueue();
-  if (local_queue != nullptr) {
+  if (local_queue != nullptr && !queue->is_parallel()) {
     local_queue->push_back(queue);
     return true;
   }
