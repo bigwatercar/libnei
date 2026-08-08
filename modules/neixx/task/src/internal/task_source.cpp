@@ -46,10 +46,10 @@ TaskSource::RunStatus TaskQueueTaskSource::WillRunTask() {
 
   case ExecutionMode::kSequenced:
   case ExecutionMode::kSingleThread:
-    if (has_worker_ || shut_down_.load(std::memory_order_acquire)) {
+    if (has_worker_.load(std::memory_order_acquire) || shut_down_.load(std::memory_order_acquire)) {
       return RunStatus::kDisallowed;
     }
-    has_worker_ = true;
+    has_worker_.store(true, std::memory_order_release);
     return RunStatus::kAllowedNotSaturated;
 
   default:
@@ -69,7 +69,7 @@ bool TaskQueueTaskSource::DidProcessTask() {
 
   case ExecutionMode::kSequenced:
   case ExecutionMode::kSingleThread:
-    has_worker_ = false;
+    has_worker_.store(false, std::memory_order_release);
     return HasWork();
 
   default:

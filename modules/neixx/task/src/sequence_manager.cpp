@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <nei/debug/check.h>
+#include <neixx/memory/ref_counted.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/synchronization/lock.h>
 #include <neixx/task/message_loop/message_pump_default.h>
@@ -80,15 +81,53 @@ PriorityBucket GetPriorityBucket(TaskPriority priority) {
 
 } // namespace
 
+// Refcounted bundle holding the MessagePump and the deferred work-bit flag,
+// shared with OnTaskPostedCallback.
+//
+// OnTaskPostedCallback can fire from ANY posting thread (e.g. Thread::Stop()
+// posting the quit task) while the SequenceManager thread is concurrently
+// tearing down and freeing pump_.  A WeakPtr<Impl> cannot close that race:
+// WeakPtr::get() only reads the invalidation flag and does not keep the
+// object alive, so Impl (and its pump_) could be freed between the check and
+// the member access.  Holding a strong scoped_refptr to this bundle keeps the
+// pump and the pending_work_notification_ flag alive for the whole callback,
+// making the wakeup safe even after Impl is destroyed.  No reference cycle is
+// formed because Shutdown() clears every OnTaskPostedCallback before the last
+// reference is dropped.
+class PumpWakeUp : public RefCountedThreadSafe<PumpWakeUp> {
+public:
+  explicit PumpWakeUp(std::unique_ptr<MessagePump> pump)
+      : pump_(std::move(pump)) {
+    if (!pump_) {
+      pump_ = std::make_unique<MessagePumpDefault>();
+    }
+  }
+
+  void Run(MessagePump::Delegate *delegate) {
+    pump_->Run(delegate);
+  }
+
+  void Quit() {
+    pump_->Quit();
+  }
+
+  void ScheduleWorkAndDelayedWork(const TimeTicks &delayed_run_time) {
+    pump_->ScheduleWorkAndDelayedWork(delayed_run_time);
+  }
+
+  // Set by cross-thread producers instead of acquiring lock_; DoWork flushes
+  // it under lock_ at the start of each invocation.
+  std::atomic<bool> pending_work_notification_{false};
+
+private:
+  std::unique_ptr<MessagePump> pump_;
+};
+
 class SequenceManager::Impl {
 public:
   explicit Impl(SequenceManager *owner, std::unique_ptr<MessagePump> pump)
       : owner_(owner)
-      , pump_(std::move(pump))
-      , weak_impl_factory_(this) {
-    if (!pump_) {
-      pump_ = std::make_unique<MessagePumpDefault>();
-    }
+      , wake_up_(MakeRefCounted<PumpWakeUp>(std::move(pump))) {
   }
 
   static SequenceManager *Current() {
@@ -141,27 +180,30 @@ public:
     // IncomingTaskQueue-style swap fast path is safe (and fast).
     queue->set_single_consumer(true);
     WeakPtr<internal::SequencedTaskQueue> weak_queue = raw_queue->GetWeakPtr();
-    queue->SetOnTaskPostedCallback([this, weak_self = weak_impl_factory_.GetWeakPtr(), weak_queue]() {
-      // Lifetime: once weak_self.get() succeeds, `this` is guaranteed valid
-      // because weak_impl_factory_ is the *last* member of Impl (destroyed
-      // first in the reverse construction order).  No other thread can be
-      // mid-destruction while we hold a live WeakPtr.
-      if (!weak_self.get()) {
-        return;
-      }
-
+    queue->SetOnTaskPostedCallback([wake_up = wake_up_, weak_queue]() {
+      // Lifetime: this callback may fire from ANY posting thread (e.g. from
+      // Thread::Stop() posting the quit task) while the SequenceManager
+      // thread is concurrently tearing down.  The queue object itself is
+      // guaranteed alive here because this callback is only ever invoked from
+      // the queue's own PushImmediateTask / PushDelayedTask paths.  The pump,
+      // however, is owned by Impl and may be freed concurrently — so this
+      // callback holds a strong scoped_refptr to the refcounted PumpWakeUp
+      // bundle (which owns the pump and the pending_work_notification_ flag)
+      // instead of touching Impl members directly.  This closes the TOCTOU
+      // window that WeakPtr::get() alone cannot (WeakPtr only reads the
+      // invalidation flag, it does not keep the object alive).
       internal::SequencedTaskQueue *queue = weak_queue.get();
       if (queue != nullptr && queue->HasImmediateWork()) {
         // Defer selector update to DoWork (avoids lock_ on hot path).
         // Only wake the pump on the FIRST immediate task since the last
         // drain — subsequent posts in the same batch skip the expensive
         // ScheduleWorkAndDelayedWork (pump lock + event signal).
-        if (!pending_work_notification_.exchange(true, std::memory_order_acq_rel)) {
-          pump_->ScheduleWorkAndDelayedWork(queue->PeekNextDelayedRunTime());
+        if (!wake_up->pending_work_notification_.exchange(true, std::memory_order_acq_rel)) {
+          wake_up->ScheduleWorkAndDelayedWork(queue->PeekNextDelayedRunTime());
         }
       } else if (queue != nullptr) {
         // No immediate work, but may have delayed work — always wake.
-        pump_->ScheduleWorkAndDelayedWork(queue->PeekNextDelayedRunTime());
+        wake_up->ScheduleWorkAndDelayedWork(queue->PeekNextDelayedRunTime());
       }
     });
 
@@ -201,11 +243,11 @@ public:
       Impl *impl_;
     } scoped_thread_binding_cleanup(this);
 
-    pump_->Run(delegate);
+    wake_up_->Run(delegate);
   }
 
   void Quit() {
-    pump_->Quit();
+    wake_up_->Quit();
   }
 
   void Shutdown() {
@@ -235,7 +277,14 @@ public:
       if (queue == nullptr) {
         continue;
       }
-      selector_.RemoveQueue(queue);
+      // RemoveQueue mutates the selector's non-atomic state (queues vector,
+      // total_queues_, round-robin index).  The consumer thread reads that
+      // state under lock_ (e.g. DoWork's queue_count()), so this must be
+      // serialized under lock_ too — otherwise it is a data race.
+      {
+        AutoLock lock(lock_);
+        selector_.RemoveQueue(queue);
+      }
       queue->SetOnTaskPostedCallback(nullptr);
       queue->Shutdown();
     }
@@ -246,7 +295,7 @@ public:
     }
 
     UnbindFromCurrentThread();
-    pump_->Quit();
+    wake_up_->Quit();
   }
 
   bool DoWork() {
@@ -463,7 +512,7 @@ private:
 
   SequenceManager *owner_;
   mutable Lock lock_;
-  std::unique_ptr<MessagePump> pump_;
+  scoped_refptr<PumpWakeUp> wake_up_;
   std::vector<std::unique_ptr<internal::SequencedTaskQueue>> queues_;
   std::vector<std::unique_ptr<internal::SequencedTaskQueue>> shutdown_queues_;
   // Snapshot of raw queue pointers for lock-free read access from
@@ -481,17 +530,12 @@ private:
   // 4:2:1 quota enforcement via a packed schedule counter.
   TaskQueueSelector selector_;
 
-  // Deferred work-bit notification: cross-thread producers set this flag
-  // instead of acquiring lock_ and calling SetQueueHasWork directly.
-  // DoWork flushes it under lock_ at the beginning of each invocation,
-  // batching multiple producer notifications into a single lock-protected
-  // scan.  This eliminates lock_ acquisition from the hot PostTask path.
-  std::atomic<bool> pending_work_notification_{false};
-
   // Flush deferred work notifications: scan all queues and set work bits
   // for any that have immediate tasks.  Must be called under lock_.
+  // pending_work_notification_ lives on wake_up_ (refcounted) so that
+  // cross-thread producers can touch it safely during teardown.
   void FlushPendingWorkNotificationLocked() {
-    if (!pending_work_notification_.exchange(false, std::memory_order_acquire)) {
+    if (!wake_up_->pending_work_notification_.exchange(false, std::memory_order_acquire)) {
       return;
     }
     for (const auto &q : queues_) {
@@ -504,18 +548,7 @@ private:
   bool is_shutdown_ = false;
   bool in_shutdown_processing_ = false;
   scoped_refptr<SingleThreadTaskRunner> default_task_runner_;
-
-  // MUST be the last member — WeakPtrFactory must be destroyed first so
-  // that all outstanding WeakPtrs are invalidated before other members
-  // (selector_, pump_, etc.) are torn down.  OnTaskPostedCallback uses
-  // WeakPtr<Impl> instead of raw `this` to safely detect destruction.
-  WeakPtrFactory<Impl> weak_impl_factory_;
 };
-
-// Allow cross-thread WeakPtr<Impl> access — OnTaskPostedCallback may fire
-// from any thread that calls PostTask.
-template <>
-struct WeakPtrThreadSafe<SequenceManager::Impl> : std::true_type {};
 
 SequenceManager::SequenceManager(std::unique_ptr<MessagePump> pump)
     : impl_(std::make_unique<Impl>(this, std::move(pump))) {

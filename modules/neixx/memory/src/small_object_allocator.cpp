@@ -528,26 +528,33 @@ void DestroySmallObjectAllocatorPartition(SmallObjectAllocatorPartition *partiti
   }
   // Release every remaining chunk (the caller must have freed all outstanding
   // blocks).  This never touches blocks in thread caches of other threads.
-  std::lock_guard<std::mutex> lock(partition->m);
-  Chunk *c = partition->chunks;
-  while (c != nullptr) {
-    Chunk *next = c->next;
-    PageFree(c->base, static_cast<std::size_t>(c->stride) * kBatchSize);
-    delete c;
-    c = next;
-  }
-  partition->chunks = nullptr;
-  for (std::size_t sc = 0; sc < kNumSizeClasses; ++sc) {
-    Chunk *d = partition->decommitted_heads[sc];
-    while (d != nullptr) {
-      Chunk *next = d->decommitted_next;
-      PageFree(d->base, static_cast<std::size_t>(d->stride) * kBatchSize);
-      delete d;
-      d = next;
+  {
+    std::lock_guard<std::mutex> lock(partition->m);
+    Chunk *c = partition->chunks;
+    while (c != nullptr) {
+      Chunk *next = c->next;
+      PageFree(c->base, static_cast<std::size_t>(c->stride) * kBatchSize);
+      delete c;
+      c = next;
     }
-    partition->decommitted_heads[sc] = nullptr;
+    partition->chunks = nullptr;
+    for (std::size_t sc = 0; sc < kNumSizeClasses; ++sc) {
+      Chunk *d = partition->decommitted_heads[sc];
+      while (d != nullptr) {
+        Chunk *next = d->decommitted_next;
+        PageFree(d->base, static_cast<std::size_t>(d->stride) * kBatchSize);
+        delete d;
+        d = next;
+      }
+      partition->decommitted_heads[sc] = nullptr;
+    }
+    g_partitions[partition->index].store(nullptr, std::memory_order_relaxed);
   }
-  g_partitions[partition->index].store(nullptr, std::memory_order_relaxed);
+  // CRITICAL: the lock_guard must be destroyed (unlock) BEFORE `delete
+  // partition`.  Previously the lock_guard outlived the delete, so its
+  // destructor unlocked a freed mutex — undefined behavior that corrupts the
+  // heap (TSan: "unlock of an unlocked mutex"; Windows Debug CRT: "unlock of
+  // unowned mutex") and caused intermittent malloc aborts in the full suite.
   delete partition;
 }
 

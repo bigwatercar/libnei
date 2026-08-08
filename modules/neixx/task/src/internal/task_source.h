@@ -151,7 +151,9 @@ private:
   // ---- Scheduling state (Chromium-aligned) ----
   // For sequenced and single-thread sources: true when a worker is
   // currently processing this source (at most one worker at a time).
-  bool has_worker_ = false;
+  // Atomic: WillRunTask (under the shard lock) and DidProcessTask (on the
+  // worker thread) touch it concurrently.
+  std::atomic<bool> has_worker_{false};
 
   // For parallel sources: number of workers currently holding a slot.
   // Atomic because multiple workers may call WillRunTask concurrently.

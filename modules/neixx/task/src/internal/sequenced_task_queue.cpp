@@ -72,7 +72,14 @@ public:
         immediate_sequence_num_ = task.sequence_num;
       }
 
-      const bool was_empty = incoming_queue_.empty() && work_queue_.empty();
+      // NOTE: was_empty intentionally considers only incoming_queue_, NOT
+      // work_queue_.  work_queue_ is the consumer's private drain buffer,
+      // modified lock-free by Take* on the consumer thread.  Reading it here
+      // would race with that lock-free pop (TSan-confirmed deque corruption),
+      // so the producer must never touch work_queue_.  If incoming was empty
+      // but work_queue_ still holds tasks, firing the posted callback is a
+      // harmless redundant wakeup (the consumer is already draining).
+      const bool was_empty = incoming_queue_.empty();
 
       if (incoming_queue_.empty() || task.sequence_num >= incoming_queue_.back().sequence_num) {
         incoming_queue_.push_back(std::move(task));
@@ -234,7 +241,11 @@ public:
 
   bool HasImmediateWork() const {
     AutoLock lock(lock_);
-    return !incoming_queue_.empty() || !work_queue_.empty();
+    // Only incoming_queue_ is examined.  work_queue_ is the consumer's private
+    // drain buffer, modified lock-free by Take* on the consumer thread; reading
+    // it here would race (TSan-confirmed).  If only work_queue_ holds tasks the
+    // consumer is already draining them, so no external work signal is needed.
+    return !incoming_queue_.empty();
   }
 
   bool HasDelayedWork() const {
