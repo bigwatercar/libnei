@@ -8,8 +8,11 @@
 #include <neixx/task/task_tracing.h>
 #include "internal/task_tracing_internal.h"
 #include "internal/pooled_task_queue.h"
-#include "internal/sequenced_task_queue.h"
 #include "internal/pooled_task_runner_utils.h"
+#include "internal/registered_task_source.h"
+#include "internal/sequenced_task_queue.h"
+#include "internal/task_source.h"
+#include "internal/task_source_sort_key.h"
 #include <neixx/trace_event/trace_event.h>
 
 namespace nei {
@@ -454,8 +457,131 @@ private:
 };
 
 // =============================================================================
+// ParallelTaskSequence — single-task TaskSource for parallel runners
+// =============================================================================
+//
+// Chromium-aligned: mirrors the per-PostTask Sequence in
+// PooledParallelTaskRunner::PostDelayedTask.  Holds exactly ONE task,
+// has kParallel execution mode, and is destroyed after the task completes.
+//
+// Concurrency safety: WillRunTask uses CAS to atomically claim the single
+// task slot, guaranteeing exactly-once execution across multiple workers
+// that may concurrently pop this source from the PooledTaskSource heap.
+//
+class ParallelTaskSequence final : public internal::TaskSource {
+public:
+  ParallelTaskSequence(internal::Task task, TaskPriority priority)
+      : task_(std::move(task))
+      , traits_(priority, task_.traits.shutdown_behavior()) {
+  }
+
+  // ---- TaskSource interface ----
+
+  bool TakeTask(internal::Task *out_task) override {
+    if (out_task == nullptr) {
+      return false;
+    }
+    // Single consumer after WillRunTask CAS — no further sync needed.
+    if (task_taken_.load(std::memory_order_acquire)) {
+      return false;
+    }
+    *out_task = std::move(task_);
+    task_taken_.store(true, std::memory_order_release);
+    return true;
+  }
+
+  std::size_t TakeTasks(internal::Task *out_tasks, std::size_t max_tasks) override {
+    if (max_tasks == 0) {
+      return 0;
+    }
+    return TakeTask(out_tasks) ? 1 : 0;
+  }
+
+  RunStatus WillRunTask() override {
+    bool expected = false;
+    if (task_claimed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+      // Single task, single slot — no other worker can claim it.
+      return RunStatus::kAllowedSaturated;
+    }
+    return RunStatus::kDisallowed;
+  }
+
+  bool DidProcessTask() override {
+    // Single task completed — source is now empty; no re-enqueue needed.
+    return false;
+  }
+
+  bool WillReEnqueue(TimeTicks /*now*/) override {
+    return false;
+  }
+
+  std::optional<internal::Task> Clear() override {
+    bool expected = false;
+    if (task_claimed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+      task_taken_.store(true, std::memory_order_release);
+      return std::optional<internal::Task>(std::move(task_));
+    }
+    return std::nullopt;
+  }
+
+  ExecutionMode GetExecutionMode() const override {
+    return ExecutionMode::kParallel;
+  }
+
+  const TaskTraits &GetTraits() const override {
+    return traits_;
+  }
+
+  bool HasWork() const override {
+    return !task_taken_.load(std::memory_order_acquire);
+  }
+
+  std::size_t GetRemainingParallelism() const override {
+    return task_taken_.load(std::memory_order_acquire) ? 0 : 1;
+  }
+
+  bool IsShutdown() const override {
+    return shut_down_.load(std::memory_order_acquire);
+  }
+
+  void Shutdown() override {
+    shut_down_.store(true, std::memory_order_release);
+  }
+
+  internal::TaskSourceSortKey GetSortKey() const override {
+    internal::TaskSourceSortKey key;
+    key.priority = traits_.priority();
+    // ready_time remains null (immediate tasks only for now).
+    return key;
+  }
+
+  TimeTicks GetDelayedSortKey() const override {
+    return TimeTicks(); // No delayed tasks.
+  }
+
+  bool HasReadyTasks(TimeTicks /*now*/) const override {
+    return HasWork();
+  }
+
+  bool OnBecomeReady() override {
+    return HasWork();
+  }
+
+private:
+  internal::Task task_;
+  TaskTraits traits_;
+  std::atomic<bool> task_claimed_{false};
+  std::atomic<bool> task_taken_{false};
+  std::atomic<bool> shut_down_{false};
+};
+
+// =============================================================================
 // PooledParallelTaskRunnerImpl (ThreadPool parallel — no ordering guarantee)
 // =============================================================================
+//
+// Immediate tasks now use the Chromium-aligned single-task ParallelTaskSequence
+// path (enqueued into PooledTaskSource's TaskSource heap).  Delayed tasks
+// continue to use the legacy PooledTaskQueue path.
 //
 // Tasks posted to a parallel runner may execute in any order on any worker
 // thread.  BelongsToCurrentThread() always returns false.
@@ -498,6 +624,27 @@ private:
       internal::RecordWeakPtrExpiredPost();
       return false;
     }
+
+    // ---- Chromium-aligned fast path: immediate tasks via ParallelTaskSequence ----
+    if (!delay.is_positive()) {
+      TRACE_EVENT0("nei.scheduling", "PooledParallelTaskRunner::PostTask");
+
+      internal::Task queued_task;
+      queued_task.task = std::move(task);
+      queued_task.posted_from = from_here;
+      queued_task.traits = traits;
+
+      auto ts = MakeRefCounted<ParallelTaskSequence>(std::move(queued_task), traits.priority());
+      scoped_refptr<internal::TaskSource> ts_ref = std::move(ts);
+      queue->EnqueueTaskSource(internal::RegisteredTaskSource(std::move(ts_ref)));
+
+      if (internal::IsTaskTracingEnabled()) {
+        internal::RecordTaskPosted();
+      }
+      return true;
+    }
+
+    // ---- Legacy path: delayed tasks still go through PooledTaskQueue ----
     return PushPooledTaskToQueue(queue, from_here, traits, std::move(task), delay);
   }
 

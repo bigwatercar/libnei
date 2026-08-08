@@ -7,11 +7,14 @@
 #include <functional>
 #include <memory>
 
+#include <optional>
+
 #include <nei/build/nei_export.h>
 #include <nei/build/compiler_specific.h>
 #include <neixx/common/time.h>
 #include <neixx/memory/weak_ptr.h>
 #include "task.h"
+#include "registered_task_source.h"
 #include <neixx/task/sequence_token.h>
 #include <neixx/task/task_traits.h>
 
@@ -37,6 +40,8 @@ namespace internal {
 
 using OnTaskPostedCallback = std::function<void()>;
 using OnTaskEnqueuedCallback = std::function<void(TaskShutdownBehavior)>;
+
+class RegisteredTaskSource;
 
 class NEI_API PooledTaskQueue final {
 public:
@@ -141,6 +146,20 @@ public:
   /// For parallel queues: kMaxParallelWorkers minus currently
   /// reserved slots.
   size_t GetRemainingParallelism() const;
+
+  // ---- TaskSource enqueue (Chromium-aligned parallel path) ----
+
+  using EnqueueTaskSourceCb = std::function<void(RegisteredTaskSource)>;
+
+  /// Set the callback invoked when a parallel runner posts an immediate
+  /// task via the new single-task TaskSource path.  The callback is
+  /// responsible for enqueuing the RegisteredTaskSource into the
+  /// PooledTaskSource's TaskSource heap.
+  void SetEnqueueTaskSourceCallback(EnqueueTaskSourceCb callback);
+
+  /// Enqueue a single-task RegisteredTaskSource via the stored callback.
+  /// Only meaningful for parallel queues using the new path.
+  void EnqueueTaskSource(RegisteredTaskSource task_source);
 
 private:
   /// Maximum workers that may simultaneously hold a slot on a single

@@ -14,6 +14,8 @@
 #include <neixx/synchronization/lock.h>
 #include <neixx/threading/platform_thread.h>
 #include "pooled_task_queue.h"
+#include "registered_task_source.h"
+#include "task_source_sort_key.h"
 
 namespace nei {
 namespace internal {
@@ -36,7 +38,12 @@ public:
   /// Blocks until a queue is available, Shutdown() is called, or |timeout|
   /// elapses.  On timeout, sets |timed_out| = true and returns nullptr.
   /// |timeout| <= 0 behaves identically to GetNextTaskQueue() (no timeout).
-  PooledTaskQueue *GetNextTaskQueueTimed(TimeDelta timeout, bool &timed_out);
+  ///
+  /// If |out_task_source| is non-null, the new Chromium-aligned TaskSource
+  /// heap is also scanned.  When a TaskSource is found there, it is moved
+  /// into |*out_task_source| and nullptr is returned (with |timed_out|=false).
+  PooledTaskQueue *
+  GetNextTaskQueueTimed(TimeDelta timeout, bool &timed_out, RegisteredTaskSource *out_task_source = nullptr);
 
   // Registers a queue into internal state table.
   void RegisterTaskQueue(PooledTaskQueue *queue);
@@ -93,6 +100,36 @@ public:
   // negative around shutdown.
   std::int64_t GetTotalTaskCount() const;
 
+  // ---- TaskSource-based scheduling (Chromium-aligned) ----
+  //
+  // New path for RegisteredTaskSource-backed work items (parallel single-task
+  // sequences).  Operates alongside the legacy PooledTaskQueue* heap so that
+  // existing sequenced/single-thread queues are unaffected.
+
+  /// Enqueue a RegisteredTaskSource into the ready heap.  The source MUST
+  /// be a single-task parallel source (kParallel, one task, no re-enqueue).
+  /// For sequenced sources use the legacy EnqueueTaskQueue path.
+  void EnqueueTaskSource(RegisteredTaskSource task_source);
+
+  /// Non-blocking poll: returns the next ready RegisteredTaskSource if
+  /// one is immediately available, or an empty RegisteredTaskSource if
+  /// both the old and new heaps are empty.  Never blocks.
+  RegisteredTaskSource TryGetNextTaskSource();
+
+  /// Fetch the next ready RegisteredTaskSource, blocking until one is
+  /// available or shutdown is signaled.  Returns an empty
+  /// RegisteredTaskSource if shutdown.
+  RegisteredTaskSource GetNextTaskSource();
+
+  /// Fetch with timeout.  On timeout sets |timed_out| = true and returns
+  /// an empty RegisteredTaskSource.
+  RegisteredTaskSource GetNextTaskSourceTimed(TimeDelta timeout, bool &timed_out);
+
+  /// Re-enqueue a RegisteredTaskSource that still has work (DidProcessTask
+  /// returned true).  Only meaningful for sequenced sources; parallel
+  /// single-task sources never re-enqueue.
+  void ReEnqueueTaskSource(RegisteredTaskSource task_source);
+
 private:
   struct QueueState {
     bool queued = false;
@@ -132,13 +169,31 @@ private:
   void NotifyDedicatedWorkAvailable();
 
   std::size_t GetShardIndex(PooledTaskQueue *queue) const;
+  std::size_t GetTaskSourceShardIndex(const TaskSource *task_source) const;
 
   static constexpr std::size_t kShardCount = 4;
+
+  // ---- TaskSource heap entry (Chromium-aligned) ----
+  //
+  // Lightweight heap entry for RegisteredTaskSource objects.  The sort key
+  // is embedded in the RegisteredTaskSource (set by the enqueuer).
+  // No state map is needed — parallel single-task sources are fire-and-forget;
+  // DidProcessTask returns false and the source is destroyed.
+  struct TaskSourceHeapEntry {
+    RegisteredTaskSource task_source;
+
+    bool operator<(const TaskSourceHeapEntry &rhs) const {
+      return task_source.sort_key() < rhs.task_source.sort_key();
+    }
+  };
 
   struct Shard {
     Lock lock;
     std::priority_queue<QueueEntry, std::vector<QueueEntry>, QueueEntryLess> heap;
     std::unordered_map<PooledTaskQueue *, QueueState> states;
+
+    // New: RegisteredTaskSource heap for parallel single-task sequences.
+    std::priority_queue<TaskSourceHeapEntry, std::vector<TaskSourceHeapEntry>> task_source_heap;
   };
 
   Shard shards_[kShardCount];

@@ -6,6 +6,7 @@
 
 #include "pooled_task_runner_utils.h"
 #include "pooled_task_queue.h"
+#include "registered_task_source.h"
 #include <neixx/trace_event/trace_event.h>
 
 namespace nei {
@@ -46,7 +47,8 @@ PooledTaskQueue *PooledTaskSource::GetNextTaskQueue() {
   return GetNextTaskQueueTimed(TimeDelta{}, timed_out);
 }
 
-PooledTaskQueue *PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout, bool &timed_out) {
+PooledTaskQueue *
+PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout, bool &timed_out, RegisteredTaskSource *out_task_source) {
   timed_out = false;
   const bool has_timeout = timeout.is_positive();
   // Compute the absolute deadline once, outside the retry loop, so that
@@ -154,6 +156,57 @@ PooledTaskQueue *PooledTaskSource::GetNextTaskQueueTimed(TimeDelta timeout, bool
 
         state.in_flight = true;
         return entry.queue;
+      }
+    }
+
+    // ---- Scan new TaskSource heap (Chromium-aligned) ----
+    // Only scanned when the caller provides an out-parameter, avoiding
+    // overhead for callers that don't use the new path.
+    if (out_task_source != nullptr) {
+      for (std::size_t i = 0; i < kShardCount; ++i) {
+        Shard &shard = shards_[i];
+        AutoLock lock(shard.lock);
+
+        if (is_shutdown_.load(std::memory_order_acquire)) {
+          return nullptr;
+        }
+
+        if (shard.task_source_heap.empty()) {
+          continue;
+        }
+
+        TaskSourceHeapEntry entry = std::move(const_cast<TaskSourceHeapEntry &>(shard.task_source_heap.top()));
+        shard.task_source_heap.pop();
+
+        RegisteredTaskSource task_source = std::move(entry.task_source);
+        if (!task_source) {
+          continue;
+        }
+
+        const TaskSource::RunStatus status = task_source.WillRunTask();
+
+        switch (status) {
+        case TaskSource::RunStatus::kDisallowed:
+          continue;
+
+        case TaskSource::RunStatus::kAllowedNotSaturated: {
+          TaskSource *raw = task_source.get();
+          if (raw->HasWork()) {
+            TaskSourceSortKey key = raw->GetSortKey();
+            key.enqueue_order = enqueue_order_.fetch_add(1, std::memory_order_relaxed);
+            task_source.set_sort_key(key);
+            shard.task_source_heap.push(TaskSourceHeapEntry{std::move(task_source)});
+            *out_task_source = RegisteredTaskSource(scoped_refptr<TaskSource>(raw));
+            return nullptr;
+          }
+          *out_task_source = std::move(task_source);
+          return nullptr;
+        }
+
+        case TaskSource::RunStatus::kAllowedSaturated:
+          *out_task_source = std::move(task_source);
+          return nullptr;
+        }
       }
     }
 
@@ -611,6 +664,190 @@ void PooledTaskSource::WaitForDedicatedWork(PooledTaskQueue *queue, TimeDelta ti
       wait_cv_.Wait();
     }
   }
+}
+
+// =============================================================================
+// TaskSource-based scheduling (Chromium-aligned)
+// =============================================================================
+
+std::size_t PooledTaskSource::GetTaskSourceShardIndex(const TaskSource *task_source) const {
+  if (task_source == nullptr) {
+    return 0;
+  }
+  return (reinterpret_cast<std::uintptr_t>(task_source) >> 4) % kShardCount;
+}
+
+void PooledTaskSource::EnqueueTaskSource(RegisteredTaskSource task_source) {
+  if (!task_source) {
+    return;
+  }
+
+  if (shutdown_fast_path_.load(std::memory_order_acquire)) {
+    return;
+  }
+
+  TaskSource *raw = task_source.get();
+  std::size_t shard_index = GetTaskSourceShardIndex(raw);
+  Shard &shard = shards_[shard_index];
+
+  {
+    AutoLock lock(shard.lock);
+    if (is_shutdown_.load(std::memory_order_acquire)) {
+      return;
+    }
+
+    // Set the sort key's enqueue_order now (under lock for total order).
+    TaskSourceSortKey key = raw->GetSortKey();
+    key.enqueue_order = enqueue_order_.fetch_add(1, std::memory_order_relaxed);
+    task_source.set_sort_key(key);
+
+    shard.task_source_heap.push(TaskSourceHeapEntry{std::move(task_source)});
+  }
+
+  NotifyWorkAvailable();
+}
+
+RegisteredTaskSource PooledTaskSource::GetNextTaskSource() {
+  bool timed_out = false;
+  return GetNextTaskSourceTimed(TimeDelta{}, timed_out);
+}
+
+RegisteredTaskSource PooledTaskSource::GetNextTaskSourceTimed(TimeDelta timeout, bool &timed_out) {
+  timed_out = false;
+  const bool has_timeout = timeout.is_positive();
+  const TimeTicks deadline = has_timeout ? TimeTicks::Now() + timeout : TimeTicks();
+
+  for (;;) {
+    const std::uint64_t observed_generation = wake_generation_.load(std::memory_order_acquire);
+
+    // Scan all shards' TaskSource heaps.
+    for (std::size_t i = 0; i < kShardCount; ++i) {
+      Shard &shard = shards_[i];
+      AutoLock lock(shard.lock);
+
+      if (is_shutdown_.load(std::memory_order_acquire)) {
+        return RegisteredTaskSource();
+      }
+
+      if (shard.task_source_heap.empty()) {
+        continue;
+      }
+
+      // Pop the highest-priority entry.
+      TaskSourceHeapEntry entry = std::move(const_cast<TaskSourceHeapEntry &>(shard.task_source_heap.top()));
+      shard.task_source_heap.pop();
+
+      RegisteredTaskSource task_source = std::move(entry.task_source);
+      if (!task_source) {
+        continue;
+      }
+
+      // Check if the source can run.
+      const TaskSource::RunStatus status = task_source.WillRunTask();
+
+      switch (status) {
+      case TaskSource::RunStatus::kDisallowed:
+        // Source is shut down or max concurrency reached.  Discard.
+        continue;
+
+      case TaskSource::RunStatus::kAllowedNotSaturated: {
+        // Can run and more slots remain.  Re-push the original and return
+        // a duplicate reference (AddRef) for this worker.
+        TaskSource *raw = task_source.get();
+        if (raw->HasWork()) {
+          TaskSourceSortKey key = raw->GetSortKey();
+          key.enqueue_order = enqueue_order_.fetch_add(1, std::memory_order_relaxed);
+          task_source.set_sort_key(key);
+          shard.task_source_heap.push(TaskSourceHeapEntry{std::move(task_source)});
+          // Return a new RegisteredTaskSource sharing the same TaskSource ref.
+          return RegisteredTaskSource(scoped_refptr<TaskSource>(raw));
+        }
+        // No more work — don't re-push.
+        return task_source;
+      }
+
+      case TaskSource::RunStatus::kAllowedSaturated:
+        // Last slot taken.  Source is removed from heap.  Worker will call
+        // DidProcessTask() → returns false for single-task → source destroyed.
+        return task_source;
+      }
+    }
+
+    // No ready task source found.  Block on condvar.
+    AutoLock wait_lock(wait_lock_);
+    if (is_shutdown_.load(std::memory_order_acquire)) {
+      return RegisteredTaskSource();
+    }
+
+    while (!is_shutdown_.load(std::memory_order_acquire)
+           && wake_generation_.load(std::memory_order_acquire) == observed_generation) {
+      if (has_timeout) {
+        const TimeDelta remaining = deadline - TimeTicks::Now();
+        if (!remaining.is_positive()) {
+          timed_out = true;
+          return RegisteredTaskSource();
+        }
+        const auto wait_ms = std::max<std::int64_t>(1, remaining.InMilliseconds());
+        wait_cv_.TimedWait(std::chrono::milliseconds(wait_ms));
+      } else {
+        wait_cv_.Wait();
+      }
+    }
+  }
+}
+
+void PooledTaskSource::ReEnqueueTaskSource(RegisteredTaskSource task_source) {
+  if (!task_source) {
+    return;
+  }
+  // Re-enqueue via the same path — update sort key and push.
+  EnqueueTaskSource(std::move(task_source));
+}
+
+RegisteredTaskSource PooledTaskSource::TryGetNextTaskSource() {
+  for (std::size_t i = 0; i < kShardCount; ++i) {
+    Shard &shard = shards_[i];
+    AutoLock lock(shard.lock);
+
+    if (is_shutdown_.load(std::memory_order_acquire)) {
+      return RegisteredTaskSource();
+    }
+
+    if (shard.task_source_heap.empty()) {
+      continue;
+    }
+
+    TaskSourceHeapEntry entry = std::move(const_cast<TaskSourceHeapEntry &>(shard.task_source_heap.top()));
+    shard.task_source_heap.pop();
+
+    RegisteredTaskSource task_source = std::move(entry.task_source);
+    if (!task_source) {
+      continue;
+    }
+
+    const TaskSource::RunStatus status = task_source.WillRunTask();
+
+    switch (status) {
+    case TaskSource::RunStatus::kDisallowed:
+      continue;
+
+    case TaskSource::RunStatus::kAllowedNotSaturated: {
+      TaskSource *raw = task_source.get();
+      if (raw->HasWork()) {
+        TaskSourceSortKey key = raw->GetSortKey();
+        key.enqueue_order = enqueue_order_.fetch_add(1, std::memory_order_relaxed);
+        task_source.set_sort_key(key);
+        shard.task_source_heap.push(TaskSourceHeapEntry{std::move(task_source)});
+        return RegisteredTaskSource(scoped_refptr<TaskSource>(raw));
+      }
+      return task_source;
+    }
+
+    case TaskSource::RunStatus::kAllowedSaturated:
+      return task_source;
+    }
+  }
+  return RegisteredTaskSource();
 }
 
 } // namespace internal

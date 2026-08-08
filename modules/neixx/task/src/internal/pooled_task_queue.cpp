@@ -151,6 +151,16 @@ public:
     seq_queue_.SetOnTaskEnqueuedCallback(std::move(callback));
   }
 
+  void SetEnqueueTaskSourceCallback(EnqueueTaskSourceCb callback) {
+    enqueue_task_source_cb_ = std::move(callback);
+  }
+
+  void EnqueueTaskSource(RegisteredTaskSource task_source) {
+    if (enqueue_task_source_cb_) {
+      enqueue_task_source_cb_(std::move(task_source));
+    }
+  }
+
   bool is_parallel() const {
     // parallel_ is set once before the queue is handed to the pool
     // and never mutated afterwards  --  no lock needed.
@@ -298,6 +308,9 @@ private:
 #endif
 
   WeakPtrFactory<PooledTaskQueue> weak_factory_;
+
+  // ---- TaskSource enqueue callback (Chromium-aligned parallel path) ----
+  EnqueueTaskSourceCb enqueue_task_source_cb_;
 };
 
 PooledTaskQueue::PooledTaskQueue(const TaskTraits &traits)
@@ -451,6 +464,16 @@ void ResetParallelPipelineDiag() {
 void RecordParallelEmptyTaskSkipped() {
 }
 #endif
+
+// ---- TaskSource enqueue (Chromium-aligned parallel path) ----
+
+void PooledTaskQueue::SetEnqueueTaskSourceCallback(EnqueueTaskSourceCb callback) {
+  impl_->SetEnqueueTaskSourceCallback(std::move(callback));
+}
+
+void PooledTaskQueue::EnqueueTaskSource(RegisteredTaskSource task_source) {
+  impl_->EnqueueTaskSource(std::move(task_source));
+}
 
 } // namespace internal
 } // namespace nei
