@@ -15,6 +15,7 @@
 #include "internal/delayed_task_manager.h"
 #include "internal/pooled_task_source.h"
 #include "internal/pooled_task_runner_utils.h"
+#include "internal/task_source.h"
 #include "internal/thread_group.h"
 #include <nei/log/log.h>
 #include <neixx/synchronization/condition_variable.h>
@@ -311,18 +312,30 @@ private:
         }
       }
 
-      // ---- Normal path: fetch next ready queue from global heap ----
+      // ---- Normal path: fetch next ready source from unified heap ----
       bool timed_out = false;
-      internal::RegisteredTaskSource task_source;
-      internal::PooledTaskQueue *queue = reclaim_time_.is_positive()
-                                             ? source_->GetNextTaskQueueTimed(reclaim_time_, timed_out, &task_source)
-                                             : source_->GetNextTaskQueueTimed(TimeDelta{}, timed_out, &task_source);
+      internal::RegisteredTaskSource task_source = reclaim_time_.is_positive()
+                                                       ? source_->GetNextTaskSourceTimed(reclaim_time_, timed_out)
+                                                       : source_->GetNextTaskSource();
+
+      if (!task_source) {
+        // Shutdown or idle reclaim timeout.
+        TRACE_EVENT_END("nei.scheduling", "WorkerThread");
+        RestoreBaseline();
+        internal::SetCurrentBlockingCallback(nullptr);
+        internal::SetCurrentPooledTaskQueue(nullptr);
+        internal::SetLocalWorkQueue(nullptr);
+        exit_event_.Signal();
+        return;
+      }
+
+      // Check if this source wraps a PooledTaskQueue or is standalone.
+      internal::PooledTaskQueue *queue = task_source->AsTaskQueue();
 
       if (queue == nullptr) {
-        if (task_source) {
-          // ---- Chromium-aligned: process single-task TaskSource ----
-          internal::Task task;
-          if (task_source.TakeTask(&task)) {
+        // ---- Standalone TaskSource (ParallelTaskSequence) ----
+        internal::Task task;
+        if (task_source.TakeTask(&task)) {
             source_->NotifyTaskConsumed();
             if (task.task) {
               TRACE_EVENT0("nei.scheduling", "ThreadPool::RunTaskSource");
@@ -376,20 +389,14 @@ private:
               }
             }
           }
-          // DidProcessTask for single-task parallel sources always returns false.
+          // DidProcessTask handles concurrency slot release.
           (void)task_source.DidProcessTask();
+          // OnTaskSourceProcessed handles re-enqueue if work remains.
+          source_->OnTaskSourceProcessed(std::move(task_source));
           continue;
         }
 
-        // Either Shutdown() was called or the idle reclaim timeout elapsed.
-        TRACE_EVENT_END("nei.scheduling", "WorkerThread");
-        RestoreBaseline();
-        internal::SetCurrentBlockingCallback(nullptr);
-        internal::SetCurrentPooledTaskQueue(nullptr);
-        internal::SetLocalWorkQueue(nullptr);
-        exit_event_.Signal();
-        return;
-      }
+        // ---- PooledTaskQueue-backed source (legacy path) ----
 
       // ---- Dedicated queue: claim ownership ----
       if (queue->is_dedicated()) {

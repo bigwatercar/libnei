@@ -3,6 +3,7 @@
 #ifndef NEIXX_TASK_INTERNAL_TASK_SOURCE_H_
 #define NEIXX_TASK_INTERNAL_TASK_SOURCE_H_
 
+#include <atomic>
 #include <cstddef>
 #include <optional>
 
@@ -108,6 +109,14 @@ public:
   // should be moved from the delayed heap to the immediate heap.
   virtual bool OnBecomeReady() = 0;
 
+  // Returns the associated PooledTaskQueue if this source wraps one,
+  // or nullptr otherwise (e.g. ParallelTaskSequence).  Used by
+  // WorkerThread to route to legacy ProcessTaskBatch for queue-backed
+  // sources.
+  virtual PooledTaskQueue *AsTaskQueue() {
+    return nullptr;
+  }
+
   TaskSource() = default;
   ~TaskSource() = default;
 
@@ -150,6 +159,10 @@ public:
   bool HasReadyTasks(TimeTicks now) const override;
   bool OnBecomeReady() override;
 
+  PooledTaskQueue *AsTaskQueue() override {
+    return queue_;
+  }
+
   // Access the underlying PooledTaskQueue (for delayed work, callbacks, etc.).
   PooledTaskQueue *task_queue() const {
     return queue_;
@@ -157,6 +170,18 @@ public:
 
 private:
   PooledTaskQueue *queue_; // Non-owning.
+
+  // ---- Scheduling state ----
+  // For sequenced and single-thread sources: true when a worker is
+  // currently processing this source (at most one worker at a time).
+  bool has_worker_ = false;
+
+  // For parallel sources: number of workers currently holding a slot.
+  // Atomic because multiple workers may call WillRunTask concurrently.
+  std::atomic<int> running_worker_count_{0};
+
+  // Shutdown flag duplicated from queue for lock-free hot-path access.
+  std::atomic<bool> shut_down_{false};
 };
 
 } // namespace internal
