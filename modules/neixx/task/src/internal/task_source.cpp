@@ -77,37 +77,6 @@ bool TaskQueueTaskSource::DidProcessTask() {
   }
 }
 
-bool TaskQueueTaskSource::WillReEnqueue(TimeTicks now) {
-  // PooledTaskQueue-backed sources are always immediately ready after
-  // DidProcessTask (the queue already handles delayed promotion internally
-  // via PromoteReadyDelayedTasks).  If the queue still has immediate work,
-  // re-enqueue; otherwise only re-enqueue if delayed tasks exist.
-  (void)now;
-  if (queue_->HasImmediateWork()) {
-    return true;
-  }
-  // If the source has only delayed work, check whether any delayed task
-  // is ready now.
-  return queue_->HasDelayedWork() && queue_->PeekNextDelayedRunTime() <= now;
-}
-
-std::optional<Task> TaskQueueTaskSource::Clear() {
-  // Drain all immediate tasks.  The caller is responsible for running or
-  // dropping them.  We return at most one representative task for logging.
-  Task first;
-  if (queue_->TakeImmediateTask(&first)) {
-    // Drain remaining tasks (they are dropped — shutdown path).
-    Task dummy;
-    while (queue_->TakeImmediateTask(&dummy)) {
-      // Intentionally empty: tasks are moved into |dummy| and destroyed.
-    }
-    queue_->Shutdown();
-    return std::optional<Task>(std::move(first));
-  }
-  queue_->Shutdown();
-  return std::nullopt;
-}
-
 TaskSource::ExecutionMode TaskQueueTaskSource::GetExecutionMode() const {
   if (queue_->is_dedicated()) {
     return ExecutionMode::kSingleThread;
@@ -124,23 +93,6 @@ const TaskTraits &TaskQueueTaskSource::GetTraits() const {
 
 bool TaskQueueTaskSource::HasWork() const {
   return queue_->HasImmediateWork();
-}
-
-std::size_t TaskQueueTaskSource::GetRemainingParallelism() const {
-  ExecutionMode mode = GetExecutionMode();
-  switch (mode) {
-  case ExecutionMode::kParallel: {
-    static constexpr int kMaxParallelWorkers = 256;
-    const int running = running_worker_count_.load(std::memory_order_acquire);
-    const int remaining = kMaxParallelWorkers - running;
-    return remaining > 0 ? static_cast<std::size_t>(remaining) : 0;
-  }
-  case ExecutionMode::kSequenced:
-  case ExecutionMode::kSingleThread:
-    return has_worker_ ? 0 : 1;
-  default:
-    return 0;
-  }
 }
 
 bool TaskQueueTaskSource::IsShutdown() const {
@@ -161,14 +113,6 @@ TaskSourceSortKey TaskQueueTaskSource::GetSortKey() const {
   return key;
 }
 
-TimeTicks TaskQueueTaskSource::GetDelayedSortKey() const {
-  // Return the next delayed run time; a null TimeTicks signals "no delayed tasks".
-  if (!queue_->HasDelayedWork()) {
-    return TimeTicks();
-  }
-  return queue_->PeekNextDelayedRunTime();
-}
-
 bool TaskQueueTaskSource::HasReadyTasks(TimeTicks now) const {
   if (queue_->HasImmediateWork()) {
     return true;
@@ -177,13 +121,6 @@ bool TaskQueueTaskSource::HasReadyTasks(TimeTicks now) const {
     return false;
   }
   return queue_->PeekNextDelayedRunTime() <= now;
-}
-
-bool TaskQueueTaskSource::OnBecomeReady() {
-  // PooledTaskQueue promotes delayed tasks internally via
-  // PromoteReadyDelayedTasks().  We just check whether immediate
-  // work is now available (the caller should have promoted first).
-  return queue_->HasImmediateWork();
 }
 
 } // namespace internal

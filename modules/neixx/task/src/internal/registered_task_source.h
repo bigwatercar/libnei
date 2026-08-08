@@ -4,7 +4,6 @@
 #define NEIXX_TASK_INTERNAL_REGISTERED_TASK_SOURCE_H_
 
 #include <cstddef>
-#include <optional>
 #include <utility>
 
 #include <nei/build/compiler_specific.h>
@@ -125,21 +124,6 @@ public:
     run_status_ = TaskSource::RunStatus::kDisallowed;
     has_run_ = false;
     return reenqueue;
-  }
-
-  /// After DidProcessTask() returned true, determine whether the source is
-  /// ready to run immediately (vs needing to wait for a delayed task).
-  /// Returns true if the source is immediately ready.
-  bool WillReEnqueue(TimeTicks now) {
-    return task_source_->WillReEnqueue(now);
-  }
-
-  /// Clear all tasks from the source (shutdown path).  Returns the cleared
-  /// task if any were pending.
-  std::optional<Task> Clear() {
-    run_status_ = TaskSource::RunStatus::kDisallowed;
-    has_run_ = false;
-    return task_source_->Clear();
   }
 
   // ---- Release ----

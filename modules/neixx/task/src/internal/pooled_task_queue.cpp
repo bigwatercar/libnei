@@ -1,6 +1,6 @@
 #include "pooled_task_queue.h"
 
-#include <algorithm>
+#include <atomic>
 #include <deque>
 #include <functional>
 #include <queue>
@@ -179,49 +179,7 @@ public:
     dedicated_ = dedicated;
   }
 
-  // ---- Chromium-aligned WillRunTask / DidProcessTask ----
-
-  PooledTaskQueue::RunStatus WillRunTask() {
-    if (!parallel_) {
-      return PooledTaskQueue::RunStatus::kDisallowed;
-    }
-
-    // Atomically reserve a worker slot, mirroring
-    // JobTaskSource::WillRunTask() in chromium/base.
-    //
-    // Use memory_order_acquire on the increment so that the caller
-    // observes all prior task-enqueue effects, and release on the
-    // saturation check so that other workers see the updated count.
-    const int prev = running_worker_count_.fetch_add(1, std::memory_order_acquire);
-    const int current = prev + 1;
-
-    // Shut down?  Revert and disallow.
-    if (shut_down_.load(std::memory_order_acquire)) {
-      running_worker_count_.fetch_sub(1, std::memory_order_release);
-#if NEI_PARALLEL_DIAGNOSTICS
-      g_parallel_willrun_disallowed.fetch_add(1, std::memory_order_relaxed);
-      TRACE_EVENT_INSTANT("nei.scheduling", "WillRunTaskShutdown");
-#endif
-      return PooledTaskQueue::RunStatus::kDisallowed;
-    }
-
-    if (current >= PooledTaskQueue::kMaxParallelWorkers) {
-      // Last (or beyond-last) slot taken: saturated.
-      // The caller must remove this queue from the ready heap.
-#if NEI_PARALLEL_DIAGNOSTICS
-      g_parallel_willrun_saturated.fetch_add(1, std::memory_order_relaxed);
-      TRACE_EVENT_INSTANT("nei.scheduling", "WillRunTaskSaturated");
-#endif
-      return PooledTaskQueue::RunStatus::kAllowedSaturated;
-    }
-
-    // Slot reserved with headroom: not saturated.
-    // The queue should stay in the ready heap.
-#if NEI_PARALLEL_DIAGNOSTICS
-    g_parallel_willrun_not_saturated.fetch_add(1, std::memory_order_relaxed);
-#endif
-    return PooledTaskQueue::RunStatus::kAllowedNotSaturated;
-  }
+  // ---- Chromium-aligned DidProcessTask ----
 
   bool DidProcessTask() {
     if (!parallel_) {
@@ -257,18 +215,6 @@ public:
     }
 
     return false;
-  }
-
-  size_t GetRemainingParallelism() const {
-    if (!parallel_) {
-      // Sequenced: at most one worker.
-      return running_worker_count_.load(std::memory_order_acquire) == 0 ? 1 : 0;
-    }
-    const int running = running_worker_count_.load(std::memory_order_acquire);
-    if (running >= PooledTaskQueue::kMaxParallelWorkers) {
-      return 0;
-    }
-    return static_cast<size_t>(PooledTaskQueue::kMaxParallelWorkers - running);
   }
 
   // Completion accounting accessors (see PooledTaskQueue::GetPostedTaskCount etc.).
@@ -417,16 +363,8 @@ void PooledTaskQueue::set_dedicated(bool dedicated) {
   impl_->set_dedicated(dedicated);
 }
 
-PooledTaskQueue::RunStatus PooledTaskQueue::WillRunTask() {
-  return impl_->WillRunTask();
-}
-
 bool PooledTaskQueue::DidProcessTask() {
   return impl_->DidProcessTask();
-}
-
-size_t PooledTaskQueue::GetRemainingParallelism() const {
-  return impl_->GetRemainingParallelism();
 }
 
 // ---- Public parallel-pipeline diagnostic wrappers ----

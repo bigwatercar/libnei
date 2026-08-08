@@ -5,7 +5,6 @@
 
 #include <atomic>
 #include <cstddef>
-#include <optional>
 
 #include <nei/build/nei_export.h>
 #include <neixx/common/time.h>
@@ -70,17 +69,6 @@ public:
   // re-enqueued into the ready heap.
   virtual bool DidProcessTask() = 0;
 
-  // Called after DidProcessTask() returns true to determine whether the
-  // source is ready to run immediately (vs having only delayed tasks).
-  // |now| is the current time for delayed-task readiness checks.
-  virtual bool WillReEnqueue(TimeTicks now) = 0;
-
-  // ---- Lifecycle ----
-
-  // Clear all pending tasks and return one representative task (if any).
-  // Used during shutdown to drain outstanding work.
-  virtual std::optional<Task> Clear() = 0;
-
   virtual bool IsShutdown() const = 0;
   virtual void Shutdown() = 0;
 
@@ -90,24 +78,13 @@ public:
   virtual const TaskTraits &GetTraits() const = 0;
   virtual bool HasWork() const = 0;
 
-  // Number of additional parallel workers that can be assigned.
-  virtual std::size_t GetRemainingParallelism() const = 0;
-
   // ---- Sort key (priority heap integration) ----
 
   // Returns the sort key for the ready (immediate) priority heap.
   virtual TaskSourceSortKey GetSortKey() const = 0;
 
-  // Returns the sort key for the delayed priority heap, or a null
-  // TimeTicks if this source has no delayed tasks.
-  virtual TimeTicks GetDelayedSortKey() const = 0;
-
   // Returns true if this source has tasks that are ready to execute at |now|.
   virtual bool HasReadyTasks(TimeTicks now) const = 0;
-
-  // Called when a delayed task becomes ready.  Returns true if the source
-  // should be moved from the delayed heap to the immediate heap.
-  virtual bool OnBecomeReady() = 0;
 
   // Returns the associated PooledTaskQueue if this source wraps one,
   // or nullptr otherwise (e.g. ParallelTaskSequence).  Used by
@@ -144,20 +121,15 @@ public:
   std::size_t TakeTasks(Task *out_tasks, std::size_t max_tasks) override;
   RunStatus WillRunTask() override;
   bool DidProcessTask() override;
-  bool WillReEnqueue(TimeTicks now) override;
-  std::optional<Task> Clear() override;
 
   ExecutionMode GetExecutionMode() const override;
   const TaskTraits &GetTraits() const override;
   bool HasWork() const override;
-  std::size_t GetRemainingParallelism() const override;
   bool IsShutdown() const override;
   void Shutdown() override;
 
   TaskSourceSortKey GetSortKey() const override;
-  TimeTicks GetDelayedSortKey() const override;
   bool HasReadyTasks(TimeTicks now) const override;
-  bool OnBecomeReady() override;
 
   PooledTaskQueue *AsTaskQueue() override {
     return queue_;

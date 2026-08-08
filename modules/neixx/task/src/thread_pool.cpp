@@ -311,77 +311,13 @@ private:
         }
       }
 
-      // ---- Normal path: fetch next ready queue from global heap ----
+      // ---- Normal path: fetch next ready source from unified heap ----
       bool timed_out = false;
-      internal::RegisteredTaskSource task_source;
-      internal::PooledTaskQueue *queue = reclaim_time_.is_positive()
-                                             ? source_->GetNextTaskQueueTimed(reclaim_time_, timed_out, &task_source)
-                                             : source_->GetNextTaskQueueTimed(TimeDelta{}, timed_out, &task_source);
+      internal::RegisteredTaskSource task_source = reclaim_time_.is_positive()
+                                                       ? source_->GetNextTaskSourceTimed(reclaim_time_, timed_out)
+                                                       : source_->GetNextTaskSource();
 
-      if (queue == nullptr) {
-        if (task_source) {
-          // ---- Chromium-aligned: process single-task TaskSource ----
-          internal::Task task;
-          if (task_source.TakeTask(&task)) {
-            source_->NotifyTaskConsumed();
-            if (task.task) {
-              TRACE_EVENT0("nei.scheduling", "ThreadPool::RunTaskSource");
-
-              const TimeDelta queue_delay =
-                  task.enqueue_time.is_null() ? TimeDelta() : TimeTicks::Now() - task.enqueue_time;
-              const bool may_block = task.traits.may_block();
-              if (may_block && on_blocking_begin_) {
-                on_blocking_begin_();
-              }
-
-              ApplyTaskPriority(task.traits.priority());
-
-              internal::RecordTaskExecutionStarted(task);
-
-              TaskObserver *observer = task_observer_ ? task_observer_->load(std::memory_order_acquire) : nullptr;
-              if (observer) {
-                const ObservedTask observed{task.posted_from,
-                                            task.enqueue_time,
-                                            task.delayed_run_time,
-                                            task.sequence_num,
-                                            task.sequence_token,
-                                            task.traits};
-                observer->OnTaskStarted(observed, queue_delay);
-              }
-
-              const TimeTicks run_start = TimeTicks::Now();
-              std::move(task.task).Run();
-              const TimeDelta run_duration = TimeTicks::Now() - run_start;
-
-              internal::RecordTaskExecutionCompleted();
-
-              if (observer) {
-                const ObservedTask observed{task.posted_from,
-                                            task.enqueue_time,
-                                            task.delayed_run_time,
-                                            task.sequence_num,
-                                            task.sequence_token,
-                                            task.traits};
-                observer->OnTaskCompleted(observed, run_duration);
-              }
-
-              RestoreBaseline();
-
-              if (may_block && on_blocking_end_) {
-                on_blocking_end_();
-              }
-
-              if (tracker_) {
-                tracker_->DidProcessTask(task.traits.shutdown_behavior());
-              }
-            }
-          }
-          // DidProcessTask for single-task parallel sources always returns false.
-          (void)task_source.DidProcessTask();
-          continue;
-        }
-
-        // Either Shutdown() was called or the idle reclaim timeout elapsed.
+      if (!task_source) {
         TRACE_EVENT_END("nei.scheduling", "WorkerThread");
         RestoreBaseline();
         internal::SetCurrentBlockingCallback(nullptr);
@@ -389,6 +325,60 @@ private:
         internal::SetLocalWorkQueue(nullptr);
         exit_event_.Signal();
         return;
+      }
+
+      internal::PooledTaskQueue *queue = task_source->AsTaskQueue();
+
+      if (queue == nullptr) {
+        // ---- Standalone TaskSource (ParallelTaskSequence) ----
+        internal::Task task;
+        if (task_source.TakeTask(&task)) {
+          source_->NotifyTaskConsumed();
+          if (task.task) {
+            TRACE_EVENT0("nei.scheduling", "ThreadPool::RunTaskSource");
+            const TimeDelta queue_delay =
+                task.enqueue_time.is_null() ? TimeDelta() : TimeTicks::Now() - task.enqueue_time;
+            const bool may_block = task.traits.may_block();
+            if (may_block && on_blocking_begin_) {
+              on_blocking_begin_();
+            }
+            ApplyTaskPriority(task.traits.priority());
+            internal::RecordTaskExecutionStarted(task);
+            TaskObserver *observer = task_observer_ ? task_observer_->load(std::memory_order_acquire) : nullptr;
+            if (observer) {
+              const ObservedTask observed{task.posted_from,
+                                          task.enqueue_time,
+                                          task.delayed_run_time,
+                                          task.sequence_num,
+                                          task.sequence_token,
+                                          task.traits};
+              observer->OnTaskStarted(observed, queue_delay);
+            }
+            const TimeTicks run_start = TimeTicks::Now();
+            std::move(task.task).Run();
+            const TimeDelta run_duration = TimeTicks::Now() - run_start;
+            internal::RecordTaskExecutionCompleted();
+            if (observer) {
+              const ObservedTask observed{task.posted_from,
+                                          task.enqueue_time,
+                                          task.delayed_run_time,
+                                          task.sequence_num,
+                                          task.sequence_token,
+                                          task.traits};
+              observer->OnTaskCompleted(observed, run_duration);
+            }
+            RestoreBaseline();
+            if (may_block && on_blocking_end_) {
+              on_blocking_end_();
+            }
+            if (tracker_) {
+              tracker_->DidProcessTask(task.traits.shutdown_behavior());
+            }
+          }
+        }
+        (void)task_source.DidProcessTask();
+        source_->OnTaskSourceProcessed(std::move(task_source));
+        continue;
       }
 
       // ---- Dedicated queue: claim ownership ----
@@ -401,22 +391,14 @@ private:
           if (delayed_task_manager_ != nullptr) {
             delayed_task_manager_->OnQueueUpdated(dedicated_queue_);
           }
-          continue; // Next iteration: dedicated path processes remaining work
+          continue;
         }
-        // Another worker owns this queue — skip and try again.
         continue;
       }
 
-      // ---- Normal path: process regular or parallel queue ----
+      // ---- Process regular or parallel queue ----
       internal::SetCurrentPooledTaskQueue(queue);
       ProcessTaskBatch(queue);
-
-      // ---- Chromium-aligned DidProcessTask ----
-      if (queue->is_parallel()) {
-        if (queue->DidProcessTask()) {
-          source_->ReEnqueueTaskQueue(queue);
-        }
-      }
 
       source_->OnTaskQueueProcessed(queue);
       internal::SetCurrentPooledTaskQueue(nullptr);

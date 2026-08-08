@@ -511,19 +511,6 @@ public:
     return false;
   }
 
-  bool WillReEnqueue(TimeTicks /*now*/) override {
-    return false;
-  }
-
-  std::optional<internal::Task> Clear() override {
-    bool expected = false;
-    if (task_claimed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-      task_taken_.store(true, std::memory_order_release);
-      return std::optional<internal::Task>(std::move(task_));
-    }
-    return std::nullopt;
-  }
-
   ExecutionMode GetExecutionMode() const override {
     return ExecutionMode::kParallel;
   }
@@ -534,10 +521,6 @@ public:
 
   bool HasWork() const override {
     return !task_taken_.load(std::memory_order_acquire);
-  }
-
-  std::size_t GetRemainingParallelism() const override {
-    return task_taken_.load(std::memory_order_acquire) ? 0 : 1;
   }
 
   bool IsShutdown() const override {
@@ -555,15 +538,7 @@ public:
     return key;
   }
 
-  TimeTicks GetDelayedSortKey() const override {
-    return TimeTicks(); // No delayed tasks.
-  }
-
   bool HasReadyTasks(TimeTicks /*now*/) const override {
-    return HasWork();
-  }
-
-  bool OnBecomeReady() override {
     return HasWork();
   }
 

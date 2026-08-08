@@ -7,8 +7,6 @@
 #include <functional>
 #include <memory>
 
-#include <optional>
-
 #include <nei/build/nei_export.h>
 #include <nei/build/compiler_specific.h>
 #include <neixx/common/time.h>
@@ -109,30 +107,10 @@ public:
   // chromium/base/task/thread_pool/task_source.h.
   //
   // Lifecycle per worker handoff:
-  //   1. WillRunTask()      – atomically reserve a worker slot
-  //   2. TakeImmediateTasks() – dequeue tasks while holding the slot
-  //   3. execute tasks
-  //   4. DidProcessTask()   – release the slot; return value drives
+  //   1. TakeImmediateTasks() – dequeue tasks
+  //   2. execute tasks
+  //   3. DidProcessTask()   – release the slot; return value drives
   //                            re-enqueue into the ready heap
-
-  /// Returned by WillRunTask().  Drives heap management in
-  /// PooledTaskSource, directly mirroring TaskSource::RunStatus.
-  enum class RunStatus {
-    kDisallowed,          // Cannot run (shutdown or max concurrency)
-    kAllowedNotSaturated, // Can run; queue should stay in ready heap
-    kAllowedSaturated,    // Can run; queue should be removed from heap
-  };
-
-  /// Atomically reserves a worker execution slot.
-  /// Must be called BEFORE TakeImmediateTasks().
-  /// Returns kAllowedNotSaturated if the queue should stay in the
-  /// ready heap after this reservation (more slots available).
-  /// Returns kAllowedSaturated if this was the last slot and the
-  /// queue should be removed from the heap.  The caller must later
-  /// call DidProcessTask() to release the slot; that call will
-  /// determine whether to re-enqueue.
-  /// Only meaningful when is_parallel() is true.
-  RunStatus WillRunTask();
 
   /// Releases the worker slot reserved by WillRunTask().
   /// Must be called AFTER the reserved tasks have completed.
@@ -140,12 +118,6 @@ public:
   /// PooledTaskSource ready heap (was saturated AND still has work).
   /// Only meaningful when is_parallel() is true.
   bool DidProcessTask();
-
-  /// Returns the number of additional worker slots available.
-  /// For sequenced queues: at most 1 (0 if occupied).
-  /// For parallel queues: kMaxParallelWorkers minus currently
-  /// reserved slots.
-  size_t GetRemainingParallelism() const;
 
   // ---- TaskSource enqueue (Chromium-aligned parallel path) ----
 
