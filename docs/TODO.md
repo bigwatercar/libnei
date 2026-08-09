@@ -77,6 +77,20 @@
   - 未做（可选项）：`GetCurrentTaskImportance()` 继承当前线程重要性。
   - 验证：WSL 596 / Windows 636 全量 PASSED，post_job_bench 功能正常。
 
+- **SingleThreadTaskRunner 增加 SHARED 模式（对齐 Chromium）** 🔧 2026-08-09（设计点已确认，未实现）:
+  **现状**：`ThreadPool::CreateSingleThreadTaskRunner` 每次调用都新建独立 `PooledTaskQueue` +
+  dedicated worker（计入 `max_num_workers` 上限）——runner/队列**不复用**（与 Chromium 一致：
+  runner/Sequence 对象从不按 traits 去重）。
+  **Chromium 差异**：`SingleThreadTaskRunnerThreadMode` 两档——
+  `DEDICATED`（每 runner 独享新建 WorkerThread，runner 销毁时 `UnregisterWorkerThread` 归还）与
+  `SHARED`（默认：`GetSharedWorkerThreadForTraits()` 按「环境 + shutdown 行为」从
+  `shared_worker_threads_[env][continue_on_shutdown]` 复用共享 worker，惰性创建、`JoinForTesting()` 前不回收；
+  多个 SHARED runner 共享同一线程但**各自独立 Sequence**——共享线程 ≠ 共享序列）。
+  **待办**：给 `CreateSingleThreadTaskRunner` 增加 `SingleThreadTaskRunnerThreadMode` 参数并实现 SHARED
+  模式，缓解大量 SingleThreadTaskRunner 撑爆 worker 上限；配套 `SameThreadUsed`/`DifferentThreadsUsed`
+  风格单测。可选：`CreateSequencedTaskRunnerForResource(path)` 按资源缓存 runner（Chromium 唯一按 key
+  缓存 runner 的 API，命中 CHECK traits 一致）。
+
 - **TCPServerSocket_FDExhaustion** (POSIX, P2):
   验证 EMFILE/ENFILE 生存不崩溃。阻塞于 IO pump 依赖 epoll FD；进程级 FD 耗尽会
   饿死 pump。需 mock/epoll-free pump，或预配置一个 fd 让 `accept4` 失败而不耗尽系统 FD。
