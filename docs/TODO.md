@@ -173,7 +173,16 @@
 
 ## 架构规划（memory 记录，未实施）
 
-- **IOContext 重构**（io_thread_refactor_next_phase）：使 IOContext 成为 `Thread` 的调度引擎而非独立线程——作为阻塞等待器提供 `Run(Delegate*)` 入口（`DoWork()` / `DoDelayedWork(next_time)`），由外部线程驱动事件循环。关键约束：Thread 阻塞于 GetQueuedCompletionStatus/epoll_wait 时，外部 PostTask 需内核级唤醒立即唤醒 IOContext。
+- **IOContext 重构**（io_thread_refactor_next_phase）📐 2026-08-10 已评估，未实施：
+  - **原目标**：使 IOContext（`MessagePumpForIO`）成为 `Thread` 的调度引擎而非独立线程——作为阻塞等待器提供 `Run(Delegate*)` 入口（`DoWork()` / `DoDelayedWork(next_time)`），由外部线程驱动事件循环。关键约束：Thread 阻塞于 GetQueuedCompletionStatus/epoll_wait 时，外部 PostTask 需内核级唤醒立即唤醒 IOContext。
+  - **当前架构诊断（实证）**：① `Thread` 已封装「线程 + SequenceManager + pump(IO/DEFAULT)」，`pump->Run()` 阻塞在线程上且 `run_thread_id_` 绑定首个 Run 线程；② IO 组件（AsyncFile/PipeStream/net socket/FilePathWatcher）**均不建线程**，只接收外部 `io_runner`；③ 各调用方（bench/测试/示例/`ProcessService`）**各自创建 `MessagePumpType::IO` 的 `Thread`** → 每个 IO 场景一个专用 OS 线程（膨胀）。→ 差距不在 pump 本身（已是等待器接口），而在**缺少 Chromium 的「共享 IO 驱动线程」层**。
+  - **Chromium 参照**：分层可组合——`MessagePumpForIO`（纯等待器 + fd watch，不拥有线程）/ `SequenceManager`（Delegate 驱动）/ 线程宿主（`base::Thread` 或 pool worker 都用 SequenceManager）/ 共享 IO 线程（BrowserThread::IO）。Chromium **不把 IO 泵塞进 CPU 型 pool worker**（IO 等待阻塞 worker 会降低 CPU 吞吐）。
+  - **方案评估**：
+    - **A（推荐，对齐 BrowserThread::IO）**：新增 `IOThread::Get()` / `GetGlobalIOTaskRunner()` 单例（内部一个 `Thread(IO)` + AtExit 清理，复用 `ThreadPoolInstance` 模式）；各调用方改用共享 runner；**组件接口不变**。收益：IO 线程 N→1、fd watch 统一到单 epoll/IOCP。低风险。
+    - **B（不推荐）**：IO 泵并入线程池 worker——worker 当前是自定义 `ProcessTaskBatch` 循环，需大改支持 fd watch + pump 驱动；且阻塞 worker 降 CPU 吞吐；省线程已由 A 实现。
+    - **C（A 的配套）**：清理 `MessagePumpForIO` 线程绑定语义（明确可任意线程驱动），可选「pump 一次/非阻塞」能力。
+  - **落地步骤**：① 新增共享 `IOThread` 单例 + `GetGlobalIOTaskRunner()` + AtExit；② bench/测试/示例/`ProcessService`/net 改用共享 runner；③ 清理 pump 线程绑定语义；④ 双平台全量测试 + IO bench（async_file/pipe/tcp/tls/process）回归。
+  - **主要风险**：单 IO 线程/单 epoll 在高 fd 并发下成调度瓶颈（可扩展多 IO 线程分片）；共享单例 AtExit 清理顺序（按 ThreadPoolInstance 教训）。
 - **ThreadPool Pimpl 重构** ✅ 已实现（2026-08-09 核实 + `c1bb7db` 增量）：
   - roadmap 目标已全部落地：Pimpl 单例（`ThreadPool::Impl` + `ThreadPoolInstance`：Get/CreateAndStart/Shutdown/ResetForTesting + AtExit）、`CreateSequenced/SingleThread/ParallelTaskRunner` 工厂、queue 级保序（`Task.sequence_token` 经 runner FIFO 保证，token 传给 TaskObserver）、PooledTaskSource 注入式调度。
   - 本次增量：**ExecutionFence**（`ThreadPoolInstance::BeginFence/EndFence`，`c1bb7db`）——Chromium 对齐，fenced 时暂停派发新任务（运行中的完成），可嵌套，Shutdown 不挂起。3 个测试。限制：dedicated SingleThreadTaskRunner 不受 fence。
