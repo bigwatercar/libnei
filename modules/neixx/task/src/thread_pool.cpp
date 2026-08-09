@@ -331,8 +331,18 @@ private:
 
       if (queue == nullptr) {
         // ---- Standalone TaskSource (ParallelTaskSequence) ----
-        internal::Task task;
-        if (task_source.TakeTask(&task)) {
+        // Take one task at a time (Chromium WorkerThread::RunNextTask model).
+        // Taking a single task per iteration keeps the source's remaining work
+        // visible to other workers (via the kAllowedNotSaturated re-push), so a
+        // blocking task cannot starve parallel execution.  Slot accounting:
+        // DequeueTaskSourceLocked claimed slot #1; after each task we re-claim a
+        // slot to decide whether to keep running, and DidProcessTask releases
+        // the final (unused) slot.
+        for (;;) {
+          internal::Task task;
+          if (!task_source.TakeTask(&task)) {
+            break;
+          }
           source_->NotifyTaskConsumed();
           if (task.task) {
             TRACE_EVENT0("nei.scheduling", "ThreadPool::RunTaskSource");
@@ -374,6 +384,13 @@ private:
             if (tracker_) {
               tracker_->DidProcessTask(task.traits.shutdown_behavior());
             }
+          }
+
+          // Stop when the source is saturated, empty, or shutting down
+          // (WillRunTask itself returns kDisallowed on shutdown/empty).  The
+          // extra slot claimed by this WillRunTask is released by DidProcessTask.
+          if (task_source.WillRunTask() != internal::TaskSource::RunStatus::kAllowedNotSaturated) {
+            break;
           }
         }
         (void)task_source.DidProcessTask();

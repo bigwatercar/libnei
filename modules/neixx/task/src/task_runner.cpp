@@ -1,10 +1,12 @@
 #include <neixx/task/task_runner.h>
 
 #include <atomic>
+#include <deque>
 #include <limits>
 #include <memory>
 #include <utility>
 
+#include <neixx/synchronization/lock.h>
 #include <neixx/task/task_tracing.h>
 #include "internal/task_tracing_internal.h"
 #include "internal/pooled_task_queue.h"
@@ -457,62 +459,102 @@ private:
 };
 
 // =============================================================================
-// ParallelTaskSequence — single-task TaskSource for parallel runners
+// ParallelTaskSequence — multi-task TaskSource for parallel runners
 // =============================================================================
 //
-// Chromium-aligned: mirrors the per-PostTask Sequence in
-// PooledParallelTaskRunner::PostDelayedTask.  Holds exactly ONE task,
-// has kParallel execution mode, and is destroyed after the task completes.
+// Chromium-aligned: mirrors PooledParallelTaskRunner's aggregate TaskSource.  A
+// runner owns ONE ParallelTaskSequence that accumulates many posted tasks
+// (guarded by lock_), so multiple tasks share a single heap entry instead of
+// paying one heap push/pop + refcount alloc per task.  Multiple workers may
+// claim slots and take tasks concurrently (no ordering guarantee — kParallel).
 //
-// Concurrency safety: WillRunTask uses CAS to atomically claim the single
-// task slot, guaranteeing exactly-once execution across multiple workers
-// that may concurrently pop this source from the PooledTaskSource heap.
+// Slot accounting (mirrors Chromium WorkerThread::RunNextTask):
+//   - DequeueTaskSourceLocked calls WillRunTask once (claims slot #1).
+//   - The worker runs a task, then calls WillRunTask again before each further
+//     task (claims slot #N+1); it stops when WillRunTask returns
+//     kDisallowed / kAllowedSaturated.  DidProcessTask releases the final
+//     (unused) slot, so every claimed slot is balanced by either a completed
+//     task or DidProcessTask.
 //
 class ParallelTaskSequence final : public internal::TaskSource {
 public:
-  ParallelTaskSequence(internal::Task task, TaskPriority priority)
-      : task_(std::move(task))
-      , traits_(priority, task_.traits.shutdown_behavior()) {
+  ParallelTaskSequence(TaskPriority priority, TaskShutdownBehavior shutdown_behavior)
+      : traits_(priority, shutdown_behavior) {
   }
 
-  // ---- TaskSource interface ----
+  // Post path (any thread): append a task.  Returns false if shutting down.
+  // |out_first| (optional) receives whether this was the first pending task
+  // (pending_count_ went 0 -> 1); the poster uses it to decide whether the
+  // source must be (re-)enqueued into the scheduler heap.  When the source is
+  // already in the heap or in-flight with a live worker, later tasks are picked
+  // up by the existing worker loop, so only the 0 -> 1 transition needs an
+  // explicit enqueue.
+  bool AddTask(internal::Task task, bool *out_first = nullptr) {
+    AutoLock lock(lock_);
+    if (shut_down_.load(std::memory_order_acquire)) {
+      return false;
+    }
+    const bool first = (pending_count_.load(std::memory_order_relaxed) == 0);
+    queue_.push_back(std::move(task));
+    pending_count_.fetch_add(1, std::memory_order_release);
+    if (out_first != nullptr) {
+      *out_first = first;
+    }
+    return true;
+  }
 
   bool TakeTask(internal::Task *out_task) override {
     if (out_task == nullptr) {
       return false;
     }
-    // Single consumer after WillRunTask CAS — no further sync needed.
-    if (task_taken_.load(std::memory_order_acquire)) {
+    AutoLock lock(lock_);
+    if (queue_.empty()) {
       return false;
     }
-    *out_task = std::move(task_);
-    task_taken_.store(true, std::memory_order_release);
+    *out_task = std::move(queue_.front());
+    queue_.pop_front();
+    pending_count_.fetch_sub(1, std::memory_order_release);
     return true;
   }
 
   std::size_t TakeTasks(internal::Task *out_tasks, std::size_t max_tasks) override {
-    if (max_tasks == 0) {
+    if (out_tasks == nullptr || max_tasks == 0) {
       return 0;
     }
-    return TakeTask(out_tasks) ? 1 : 0;
+    AutoLock lock(lock_);
+    std::size_t count = 0;
+    while (count < max_tasks && !queue_.empty()) {
+      out_tasks[count++] = std::move(queue_.front());
+      queue_.pop_front();
+      pending_count_.fetch_sub(1, std::memory_order_release);
+    }
+    return count;
   }
 
-  RunStatus WillRunTask() override {
-    bool expected = false;
-    if (task_claimed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-      // Single task, single slot — no other worker can claim it.
-      return RunStatus::kAllowedSaturated;
+  internal::TaskSource::RunStatus WillRunTask() override {
+    constexpr int kMaxParallelWorkers = 256;
+    if (shut_down_.load(std::memory_order_acquire)) {
+      return internal::TaskSource::RunStatus::kDisallowed;
     }
-    return RunStatus::kDisallowed;
+    // Lock-free emptiness check via the task counter.
+    if (pending_count_.load(std::memory_order_acquire) == 0) {
+      return internal::TaskSource::RunStatus::kDisallowed;
+    }
+    const int prev = running_worker_count_.fetch_add(1, std::memory_order_acquire);
+    const int current = prev + 1;
+    if (current >= kMaxParallelWorkers) {
+      return internal::TaskSource::RunStatus::kAllowedSaturated;
+    }
+    return internal::TaskSource::RunStatus::kAllowedNotSaturated;
   }
 
   bool DidProcessTask() override {
-    // Single task completed — source is now empty; no re-enqueue needed.
-    return false;
+    running_worker_count_.fetch_sub(1, std::memory_order_release);
+    return HasWork();
   }
 
-  ExecutionMode GetExecutionMode() const override {
-    return ExecutionMode::kParallel;
+  internal::TaskSource::ExecutionMode GetExecutionMode() const override {
+    return internal::TaskSource::ExecutionMode::kParallel;
   }
 
   const TaskTraits &GetTraits() const override {
@@ -520,7 +562,7 @@ public:
   }
 
   bool HasWork() const override {
-    return !task_taken_.load(std::memory_order_acquire);
+    return pending_count_.load(std::memory_order_acquire) > 0;
   }
 
   bool IsShutdown() const override {
@@ -528,7 +570,10 @@ public:
   }
 
   void Shutdown() override {
+    AutoLock lock(lock_);
     shut_down_.store(true, std::memory_order_release);
+    queue_.clear();
+    pending_count_.store(0, std::memory_order_relaxed);
   }
 
   internal::TaskSourceSortKey GetSortKey() const override {
@@ -543,11 +588,14 @@ public:
   }
 
 private:
-  internal::Task task_;
+  mutable Lock lock_;
+  std::deque<internal::Task> queue_;
   TaskTraits traits_;
-  std::atomic<bool> task_claimed_{false};
-  std::atomic<bool> task_taken_{false};
+  std::atomic<int> running_worker_count_{0};
   std::atomic<bool> shut_down_{false};
+  // Lock-free pending-task counter mirroring queue_ size (used by
+  // WillRunTask/HasWork so the scheduler hot path avoids lock_).
+  std::atomic<std::size_t> pending_count_{0};
 };
 
 // =============================================================================
@@ -600,7 +648,7 @@ private:
       return false;
     }
 
-    // ---- Chromium-aligned fast path: immediate tasks via ParallelTaskSequence ----
+    // ---- Chromium-aligned fast path: immediate tasks via aggregate source ----
     if (!delay.is_positive()) {
       TRACE_EVENT0("nei.scheduling", "PooledParallelTaskRunner::PostTask");
 
@@ -609,9 +657,23 @@ private:
       queued_task.posted_from = from_here;
       queued_task.traits = traits;
 
-      auto ts = MakeRefCounted<ParallelTaskSequence>(std::move(queued_task), traits.priority());
-      scoped_refptr<internal::TaskSource> ts_ref = std::move(ts);
-      queue->EnqueueTaskSource(internal::RegisteredTaskSource(std::move(ts_ref)));
+      // Aggregate into the runner's ParallelTaskSequence so many tasks share
+      // one heap entry (EnqueueTaskSource dedups via state.queued).  Only the
+      // first post after the source drained pays the heap push; while the
+      // source is already in the heap or in-flight, the live worker loop picks
+      // up subsequent tasks directly.
+      scoped_refptr<ParallelTaskSequence> source = task_source_;
+      if (!source) {
+        source = MakeRefCounted<ParallelTaskSequence>(traits.priority(), traits.shutdown_behavior());
+        task_source_ = source;
+      }
+      bool first_task = false;
+      if (!source->AddTask(std::move(queued_task), &first_task)) {
+        return false;
+      }
+      if (first_task) {
+        queue->EnqueueTaskSource(internal::RegisteredTaskSource(std::move(source)));
+      }
 
       if (internal::IsTaskTracingEnabled()) {
         internal::RecordTaskPosted();
@@ -624,6 +686,9 @@ private:
   }
 
   WeakPtr<internal::PooledTaskQueue> task_queue_;
+  // Aggregate TaskSource for immediate tasks (Chromium-aligned).  Owned by the
+  // runner; the scheduler heap holds additional references while queued.
+  scoped_refptr<ParallelTaskSequence> task_source_;
 };
 
 // =============================================================================
