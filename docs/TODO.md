@@ -36,6 +36,16 @@
 
   **量化目标**：单线程 PostTask 从 1.9M/s → 4M/s 以上（减少 50% 队列开销）。
 
+  **尝试记录（2026-08-09，已回退）**：尝试把 `SequencedTaskQueue` 的 posted 回调拆分为
+  `OnImmediateTaskPostedCallback`（立即任务专用，exchange 短路 + 免 `HasImmediateWork`/`PeekNextDelayedRunTime`
+  两次锁）。DIAG 显示投递热路径 lock+push 与回调各占 ~50%（WSL 各 ~170ns，含冗余锁）。但 **A/B 对照
+  （git stash）显示 Windows 大幅回归（229→303ns，-32%）**，WSL 仅 +3.5%（266→257ms）——已回退。
+  机制未完全明确（可能 Windows 上锁的缓存同步/分支预测副作用）。**结论**：跨线程投递的真正瓶颈是
+  **每次投递（队列空时）的完整 pump wake（eventfd Signal + pump lock）**，回调拆分的锁优化无法解决，
+  且 Windows 上有害。真正优化需减少 wake 次数（批量提交）或降低 Signal 成本（如 eventfd→无 syscall 的
+  TLS 标志 + 定时批量 flush），需严格双平台 A/B 验证（当前数值：Win 229ns / WSL 251ns，目标 4M/s=250ns，
+  Windows 已达标，WSL 仅差 ~1%）。
+
 - **Parallel worker-repost 缺陷：`running_worker_count_` 负溢出 + 任务重复执行 + 死锁** 🐛 2026-08-08:
 
   **症状**：benchmark `RunWorkerRepostBenchmark(seed_count=4)` 在 parallel runner 上导致
@@ -57,16 +67,15 @@
 
 ### P2
 
-- **PostJob 接口参数对齐 Chromium** 🔧 2026-07-30:
-  `PostJob(from_here, traits, ...)` 的 `from_here` 和 `traits` 被 `(void)` 丢弃，
-  `CreateParallelTaskRunner(TaskTraits())` 硬编码默认优先级，丢失调用方优先级控制
-  和调用位置追踪。
-  - **Chromium 参考**: `base/task/post_job.cc` — `from_here` 存入 `JobTaskSource`
-    用于崩溃报告/tracing；`traits` 控制 worker 线程优先级与 ThreadPolicy；
-    `GetCurrentTaskImportance()` 继承当前线程重要性。
-  - **方案**: ① `JobTaskSource` 构造函数接收 `Location`/`TaskTraits`；
-    ② `PostJob` 将 `traits` 透传给 `CreateParallelTaskRunner`；
-    ③ `from_here` 存入 `JobTaskSource` 用于 `posted_from()` 查询。
+- **PostJob 接口参数对齐 Chromium** ✅ 2026-08-09（`c09be98`）:
+  `PostJob(from_here, traits, ...)` 此前被 `(void)` 丢弃、`CreateParallelTaskRunner(TaskTraits())`
+  硬编码默认优先级。已修复：
+  - ① `JobTaskSource` 构造接收 `Location`/`TaskTraits`，存 `posted_from_`/`traits_`；
+  - ② `PostWorkers` 用 `PostTaskWithTraits(FROM_HERE, traits_, ...)` 透传 traits → worker 按
+    traits 优先级执行（此前硬编码 USER_VISIBLE）；
+  - ③ 提供 `posted_from()`/`traits()`/`priority()` 查询（崩溃报告/tracing 用）。
+  - 未做（可选项）：`GetCurrentTaskImportance()` 继承当前线程重要性。
+  - 验证：WSL 596 / Windows 636 全量 PASSED，post_job_bench 功能正常。
 
 - **TCPServerSocket_FDExhaustion** (POSIX, P2):
   验证 EMFILE/ENFILE 生存不崩溃。阻塞于 IO pump 依赖 epoll FD；进程级 FD 耗尽会
@@ -74,15 +83,17 @@
 
 ### P3
 
-- **post_job_bench 空转性能（bench 特有）** 📐 2026-08-09:
-  修复 ffd3642（崩溃）后遗留的性能问题：work-stealing joiner 空转（`id>=w` 时 `task_.Run` 快速 return 不干活但占 CPU）导致 bench 个别 w 阶段偶发性能低（0.25-0.9 M/s，随机）。当前 joiner 每 8 迭代让步缓解但不彻底。**真实用户（max_concurrency_cb 准确）不触发**——仅 bench 模式。
-  可选优化：joiner 检测 `id>=w`（无法贡献）后主动 `PlatformThread::Sleep` 退避，或直接退出 work-stealing（pool worker 覆盖时）。
+- **post_job Bench1 WSL 慢 9×（已深挖，2026-08-09）** 📐:
+  已定位：**非 joiner 空转**（join 仅 0.8µs），真正根因是 **WSL2 单次线程 handoff（投递→唤醒→执行→完成信号）延迟 14.7µs vs Windows 6.5µs（2.3×）**。PostJob 每 job 需 2 次 handoff（main→worker + worker→main）→ WSL ~30µs/job vs Win 3.8µs。这是平台物理特性（futex/调度延迟），非库缺陷；Bench1 是每 job 1 op 的病态模式才暴露它。真实用户（job 有实质工作）不受影响；task_threadpool 连续投递 5.44M/s 证明机制高效。
+  已关闭，无修复计划（除非未来引入"极小 job 由 joiner 直接完成、延迟投递 worker"的优化——Chromium 亦无此设计）。
 
-- **`IoThread` dtor: WeakPtrFactory::InternalFlag 残留 (~1KB)** 🔧 2026-07-27:
-  ASAN 报告 ~1KB（17 分配）间接泄漏 — 未释放的 `WeakPtr` 仍引用 InternalFlag。
-  影响可忽略（固定 ~1KB，进程退出时由 OS 回收），无 OOM/性能风险。
-  Next steps: 调查 `SequenceManager::Shutdown()`/`TaskQueue` 清理，确保
-  `WeakPtrFactory` 失效前 drain 所有 outstanding `WeakPtr`。低优先级。
+- **`IoThread` dtor: WeakPtrFactory::InternalFlag 残留** ✅ 已调查关闭（2026-08-09）:
+  ASAN 报告的 InternalFlag 间接泄漏已定位：`WeakPtrFactory<SequencedTaskQueue>`（195 个）+
+  `WeakPtrFactory<TCPClientSocket::Impl>`。**决定性验证**：`ThreadPoolTest.RepeatedShutdownAfterWorkerIdleWaitNeverHangs`
+  （150 次反复创建/销毁 ThreadPool）在 WSL ASAN 下 **exit=0 零泄漏** → **库核心无运行期累积泄漏**。
+  此前 IO 测试的 4MB 全为 `Indirect`（reachable）残留 = 测试进程退出时的 reachable 对象
+  （IOBuffer 全局池、静态持有者等），非 bug、无 OOM/性能影响（进程退出 OS 回收）。
+  如需 ASAN 全量零报告需测试基础设施清理或 `detect_leaks=0`（Windows ASAN 已如此）。
 
 - **Crash handler**: POSIX 信号处理器中非 async-signal-safe（已接受限制）。
 
@@ -149,7 +160,10 @@
 ## 架构规划（memory 记录，未实施）
 
 - **IOContext 重构**（io_thread_refactor_next_phase）：使 IOContext 成为 `Thread` 的调度引擎而非独立线程——作为阻塞等待器提供 `Run(Delegate*)` 入口（`DoWork()` / `DoDelayedWork(next_time)`），由外部线程驱动事件循环。关键约束：Thread 阻塞于 GetQueuedCompletionStatus/epoll_wait 时，外部 PostTask 需内核级唤醒立即唤醒 IOContext。
-- **ThreadPool Pimpl 重构**（threadpool-pimpl-roadmap）：Chromium 风格 Pimpl 单例接口（隐藏 scheduler policy/worker 管理）；`CreateSequencedTaskRunner` 工厂支持；按 `Task.sequence_token` 保序；概念上向 scheduler workers 注入任务而非直接暴露线程管理。
+- **ThreadPool Pimpl 重构** ✅ 已实现（2026-08-09 核实 + `c1bb7db` 增量）：
+  - roadmap 目标已全部落地：Pimpl 单例（`ThreadPool::Impl` + `ThreadPoolInstance`：Get/CreateAndStart/Shutdown/ResetForTesting + AtExit）、`CreateSequenced/SingleThread/ParallelTaskRunner` 工厂、queue 级保序（`Task.sequence_token` 经 runner FIFO 保证，token 传给 TaskObserver）、PooledTaskSource 注入式调度。
+  - 本次增量：**ExecutionFence**（`ThreadPoolInstance::BeginFence/EndFence`，`c1bb7db`）——Chromium 对齐，fenced 时暂停派发新任务（运行中的完成），可嵌套，Shutdown 不挂起。3 个测试。限制：dedicated SingleThreadTaskRunner 不受 fence。
+  - 可选后续：`GetCurrentTaskImportance` 继承（P2 已记录）、sequence_token 用于显式跨 runner 保序（当前无需）。
 
 ---
 
@@ -171,6 +185,7 @@
   **修复**：`Shutdown()` 改为持 `wait_lock_` 设置 `is_shutdown_` + `wake_generation_` + `Broadcast`（锁内设置状态 + 唤醒，消除丢失唤醒窗口）。
   **验证**：新增压力测试 `ThreadPoolTest.RepeatedShutdownAfterWorkerIdleWaitNeverHangs`（150 次反复创建-销毁）；Windows Debug 85 task 测试全过；WSL Release 全量 596 PASSED + **8/8 轮全量退出无挂起**。
 - **post_job_bench 跨平台崩溃修复（ffd3642）** 2026-08-09 — 根因链：① ShouldYield 用 running_workers_（含 work-stealing joiner）判断收缩 → pool worker 误判 over-subscribed → spawn-exit 风暴；② joiner 空转 → bench `nw->fetch_add` int 溢出 INT_MIN → `id>=w` 保护失效 → OOB。修复：ShouldYield 改用 assigned_workers_ + joiner 每 8 迭代让步 + bench id 改 uint32_t。Linux/Windows Release + ASAN 全平台验证不再崩溃。
+- **Worker-Repost local-queue WSL 掉速修复（38e14a9）** 2026-08-09 — 根因：`DelayedTaskManager::OnQueueUpdated()` 对**纯立即 PostTask**（前后均无延迟任务）也无条件 `wake_event_.Signal()`，唤醒延迟任务线程查空堆又睡 → **WSL 调度乒乓**抢占投递 worker（rdtsc 实测 PostTask 偶发 11-154µs）。修复：仅当延迟状态实际变化（新增/清除/提前）才 Signal。效果：WSL repost 0.12→**0.32 M/s**（+160%），Windows 0.44→**0.56 M/s**（+27%）；差距 3.7×→1.75×。双平台全量无回归（WSL 596 / Win 636 PASSED）。教训：条件唤醒必须精确——无状态变化不 Signal，Linux/WSL futex wake+调度往返比 Windows event 贵。
 - **TSan 竞态清零（2026-08-09）** — async_file 52 个（8f7d445 测试 shared_ptr<State> 范式）、net keepalive（c5f75a4 mutex_ 保护 keep_alive_dead_cb_）、log_runtime auto_flush_interval_ms（abaa069 原子化）。全量 TSan data races = 0。
 - **Windows ASAN 全量通过（2026-08-09）** — 623 tests PASSED 0 错误（detect_leaks=0）。
 - **Log 模块全面优化** 2026-07-31 — 死锁修复 + false-sharing 隔离 + timestamp 查表（+46%）。
