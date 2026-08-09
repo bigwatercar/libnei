@@ -55,3 +55,4 @@ build_*/
 
 bench/output/
 bench/results/bench_*/
+bench/results/wsl_*/
