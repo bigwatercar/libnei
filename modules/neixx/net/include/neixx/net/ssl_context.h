@@ -8,7 +8,6 @@
 #include <vector>
 
 #include <nei/build/nei_export.h>
-#include <neixx/memory/ref_counted.h>
 
 // mbedTLS types hidden via PIMPL.
 struct mbedtls_ssl_config;
@@ -44,25 +43,26 @@ enum class PeerVerify {
 // heavyweight object intended to be created once and shared across many
 // TLSClientSocket / TLSServerSocket instances.
 //
-// SSLContext is refcounted: TLS sockets retain it (scoped_refptr) for the
-// lifetime of the mbedtls session, because the session's ssl_config
-// references the context's internal DRBG / certificates / CA chain.  Create
-// it via MakeRefCounted<SSLContext>(...) and share it across sockets.
+// The TLS sockets reference the context's internal DRBG / certificates / CA
+// chain, so the CALLER must guarantee the context outlives every socket that
+// uses it — including every connection accepted by a TLSServerSocket.  This
+// is a plain value object (NOT refcounted): keep it on the stack or in a
+// member while the sockets are alive.
 //
 // Usage:
 //   // Server:
-//   scoped_refptr<SSLContext> ctx = MakeRefCounted<SSLContext>(SSLContext::Mode::Server);
-//   ctx->SetCertificate(cert_pem, key_pem);
+//   SSLContext ctx(SSLContext::Mode::Server);
+//   ctx.SetCertificate(cert_pem, key_pem);
 //
 //   // Client (verify server cert):
-//   scoped_refptr<SSLContext> ctx = MakeRefCounted<SSLContext>(SSLContext::Mode::Client);
-//   ctx->SetCAChain(ca_pem);
+//   SSLContext ctx(SSLContext::Mode::Client);
+//   ctx.SetCAChain(ca_pem);
 //
 // Thread-safety: SSLContext is NOT thread-safe.  The caller must ensure
 // exclusive access during configuration.  Once configured, the underlying
 // mbedtls_ssl_config may be shared read-only across connections.
 //
-class NEI_API SSLContext : public RefCountedThreadSafe<SSLContext> {
+class NEI_API SSLContext {
 public:
   enum class Mode {
     Server, // Authenticates with certificate + private key.

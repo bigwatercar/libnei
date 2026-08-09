@@ -46,7 +46,7 @@
   TLS 标志 + 定时批量 flush），需严格双平台 A/B 验证（当前数值：Win 229ns / WSL 251ns，目标 4M/s=250ns，
   Windows 已达标，WSL 仅差 ~1%）。
 
-- **Parallel worker-repost 缺陷：`running_worker_count_` 负溢出 + 任务重复执行 + 死锁** 🐛 2026-08-08:
+- **Parallel worker-repost 缺陷：`running_worker_count_` 负溢出 + 任务重复执行 + 死锁** ✅ 已修复 2026-08-08（`a01dd2a`）:
 
   **症状**：benchmark `RunWorkerRepostBenchmark(seed_count=4)` 在 parallel runner 上导致
   `g_executed_task_count` 远超 task_count（executed=220 for expected=100），随后崩溃

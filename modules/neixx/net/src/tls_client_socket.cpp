@@ -81,7 +81,7 @@ class TLSClientSocket::Impl final : public RefCountedThreadSafe<Impl> {
 public:
   Impl(std::unique_ptr<TCPClientSocket> transport, SSLContext *ctx)
       : transport_(std::move(transport))
-      , ctx_(ctx) { // Retain the context: ssl_.conf references its config/DRBG/certs.
+      , ctx_(ctx) { // Non-owning: ssl_.conf references its config/DRBG/certs.
     mbedtls_ssl_init(&ssl_);
     mbedtls_ssl_setup(&ssl_, ctx->config());
     mbedtls_ssl_set_bio(&ssl_, &bio_, BioSend, BioRecv, nullptr);
@@ -409,10 +409,9 @@ private:
   bool handshake_completed_ = false;
   std::unique_ptr<TCPClientSocket> transport_;
   mbedtls_ssl_context ssl_;
-  // Retains the SSLContext (and its mbedtls config / DRBG / certs) for the
-  // lifetime of this session.  ssl_.conf references ctx's config, so the
-  // context MUST outlive the mbedtls session.
-  scoped_refptr<SSLContext> ctx_;
+  // Non-owning: ssl_.conf references ctx's config, so the caller MUST keep
+  // the context alive for the lifetime of this session.
+  SSLContext *ctx_;
   TlsBioCtx bio_;
   scoped_refptr<SingleThreadTaskRunner> runner_;
 

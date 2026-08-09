@@ -156,14 +156,12 @@ protected:
     ASSERT_FALSE(cert_pem_.empty()) << "Cert generation produced empty PEM";
     ASSERT_FALSE(key_pem_.empty()) << "Key generation produced empty PEM";
 
-    // Server context.
-    server_ctx_ = MakeRefCounted<SSLContext>(SSLContext::Mode::Server);
-    ASSERT_TRUE(server_ctx_->SetCertificate(cert_pem_, key_pem_));
+    // Server context (fixture member — alive for the whole test).
+    ASSERT_TRUE(server_ctx_.SetCertificate(cert_pem_, key_pem_));
 
     // Client context — trusts our self-signed CA.
-    client_ctx_ = MakeRefCounted<SSLContext>(SSLContext::Mode::Client);
-    client_ctx_->SetPeerVerify(nei::net::PeerVerify::kOptional);
-    ASSERT_TRUE(client_ctx_->SetCAChain(cert_pem_));
+    client_ctx_.SetPeerVerify(nei::net::PeerVerify::kOptional);
+    ASSERT_TRUE(client_ctx_.SetCAChain(cert_pem_));
 
     Thread::Options opts;
     opts.message_pump_type = MessagePumpType::IO;
@@ -218,8 +216,8 @@ protected:
   scoped_refptr<SingleThreadTaskRunner> srv_runner_;
   std::string cert_pem_;
   std::string key_pem_;
-  scoped_refptr<SSLContext> server_ctx_;
-  scoped_refptr<SSLContext> client_ctx_;
+  SSLContext server_ctx_{SSLContext::Mode::Server};
+  SSLContext client_ctx_{SSLContext::Mode::Client};
 };
 
 // =============================================================================
@@ -230,14 +228,14 @@ TEST_F(TlsSocketTest, CertGeneration) {
   ASSERT_FALSE(cert_pem_.empty());
   ASSERT_FALSE(key_pem_.empty());
 
-  scoped_refptr<SSLContext> srv = MakeRefCounted<SSLContext>(SSLContext::Mode::Server);
-  EXPECT_TRUE(srv->SetCertificate(cert_pem_, key_pem_));
+  SSLContext srv(SSLContext::Mode::Server);
+  EXPECT_TRUE(srv.SetCertificate(cert_pem_, key_pem_));
 
-  scoped_refptr<SSLContext> cli = MakeRefCounted<SSLContext>(SSLContext::Mode::Client);
-  EXPECT_TRUE(cli->SetCAChain(cert_pem_));
+  SSLContext cli(SSLContext::Mode::Client);
+  EXPECT_TRUE(cli.SetCAChain(cert_pem_));
 
-  EXPECT_EQ(mbedtls_ssl_conf_get_endpoint(srv->config()), MBEDTLS_SSL_IS_SERVER);
-  EXPECT_EQ(mbedtls_ssl_conf_get_endpoint(cli->config()), MBEDTLS_SSL_IS_CLIENT);
+  EXPECT_EQ(mbedtls_ssl_conf_get_endpoint(srv.config()), MBEDTLS_SSL_IS_SERVER);
+  EXPECT_EQ(mbedtls_ssl_conf_get_endpoint(cli.config()), MBEDTLS_SSL_IS_CLIENT);
 }
 
 // =============================================================================
@@ -303,7 +301,7 @@ TEST_F(TlsSocketTest, HandshakeEofDeathSpiral) {
   WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> connect_ok{true};
 
-  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), client_ctx_.get());
+  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), &client_ctx_);
   io_runner_->PostTask(FROM_HERE, [&]() {
     client->Connect(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
@@ -335,7 +333,7 @@ TEST_F(TlsSocketTest, DestructionDuringHandshake) {
   // ---- TLS server: accept, but DON'T call the accept callback ----
   // We just need TCP connect + ClientHello to be sent.  The handshake
   // will stall waiting for ServerHello.
-  auto server = std::make_shared<TLSServerSocket>(server_ctx_.get());
+  auto server = std::make_shared<TLSServerSocket>(&server_ctx_);
   WaitableEvent server_ready(WaitableEvent::ResetPolicy::kAutomatic, false);
   srv_runner_->PostTask(FROM_HERE, [&]() {
     ASSERT_TRUE(server->Listen(
@@ -348,7 +346,7 @@ TEST_F(TlsSocketTest, DestructionDuringHandshake) {
   server_ready.Wait();
 
   // ---- TLS client: start handshake, destroy before completion ----
-  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), client_ctx_.get());
+  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), &client_ctx_);
 
   io_runner_->PostTask(FROM_HERE, [&]() {
     client->Connect(IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), [](bool) {}, io_runner_);
@@ -394,7 +392,7 @@ TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
   auto server_done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
   auto server_ok = std::make_shared<std::atomic<bool>>(false);
 
-  auto server = std::make_shared<TLSServerSocket>(server_ctx_.get());
+  auto server = std::make_shared<TLSServerSocket>(&server_ctx_);
   srv_runner_->PostTask(FROM_HERE, [&, server_done]() {
     ASSERT_TRUE(server->Listen(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
@@ -428,7 +426,7 @@ TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
   });
 
   // ---- Client: connect, send whole payload ----
-  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), client_ctx_.get());
+  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), &client_ctx_);
   auto client_done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
 
   io_runner_->PostTask(FROM_HERE, [&, client_done]() {
@@ -485,7 +483,7 @@ TEST_F(TlsSocketTest, StrictPeerVerificationFailure) {
   ASSERT_FALSE(wrong_cert.cert_pem.empty());
 
   // Server uses our test cert.
-  auto server = std::make_shared<TLSServerSocket>(server_ctx_.get());
+  auto server = std::make_shared<TLSServerSocket>(&server_ctx_);
   WaitableEvent server_ready(WaitableEvent::ResetPolicy::kAutomatic, false);
   srv_runner_->PostTask(FROM_HERE, [&]() {
     ASSERT_TRUE(server->Listen(
@@ -497,14 +495,13 @@ TEST_F(TlsSocketTest, StrictPeerVerificationFailure) {
   });
   server_ready.Wait();
 
-  // Client: PeerVerify::kRequired with the WRONG CA.  Heap-allocated so the
-  // socket's Impl (which retains the context for the mbedtls session) keeps it
-  // alive even after this scope ends.
-  scoped_refptr<SSLContext> strict_cli = MakeRefCounted<SSLContext>(SSLContext::Mode::Client);
-  strict_cli->SetPeerVerify(PeerVerify::kRequired);
-  ASSERT_TRUE(strict_cli->SetCAChain(wrong_cert.cert_pem));
+  // Client: PeerVerify::kRequired with the WRONG CA.  Declared before the
+  // socket so it outlives it (lifetime contract for the mbedtls session).
+  SSLContext strict_cli(SSLContext::Mode::Client);
+  strict_cli.SetPeerVerify(PeerVerify::kRequired);
+  ASSERT_TRUE(strict_cli.SetCAChain(wrong_cert.cert_pem));
 
-  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), strict_cli.get());
+  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), &strict_cli);
 
   WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> connect_ok{true};

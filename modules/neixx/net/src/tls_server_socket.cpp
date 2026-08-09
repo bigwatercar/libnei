@@ -58,7 +58,7 @@ private:
     if (keep_alive_config_.enable)
       tcp->SetKeepAlive(keep_alive_config_);
 
-    auto tls = new TLSClientSocket(std::move(tcp), ctx_.get());
+    auto tls = new TLSClientSocket(std::move(tcp), ctx_);
     tls->StartHandshake(
         [self = scoped_refptr<Impl>(this), tls](bool s) {
           std::unique_ptr<TLSClientSocket> owned(tls);
@@ -68,9 +68,10 @@ private:
         std::move(io_runner));
   }
 
-  // Retains the SSLContext for the lifetime of the server: every accepted
-  // connection's TLS session references its mbedtls config / DRBG / certs.
-  scoped_refptr<SSLContext> ctx_;
+  // Non-owning: the caller must keep the SSLContext alive for the lifetime
+  // of this server AND every connection it accepts (each TLS session
+  // references its mbedtls config / DRBG / certs).
+  SSLContext *ctx_;
   std::shared_ptr<TCPServerSocket> server_;
   AcceptCallback cb_;
   RunnerSelector selector_;

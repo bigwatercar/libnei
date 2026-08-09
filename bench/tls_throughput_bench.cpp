@@ -216,11 +216,13 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
     return;
   }
 
-  auto srv_ctx = nei::MakeRefCounted<nei::net::SSLContext>(nei::net::SSLContext::Mode::Server);
-  srv_ctx->SetCertificate(cert.cert_pem, cert.key_pem);
-  auto cli_ctx = nei::MakeRefCounted<nei::net::SSLContext>(nei::net::SSLContext::Mode::Client);
-  cli_ctx->SetPeerVerify(nei::net::PeerVerify::kOptional);
-  cli_ctx->SetCAChain(cert.cert_pem);
+  // Keep the contexts alive for the whole benchmark: the sockets below
+  // reference them for the mbedtls session (lifetime contract).
+  nei::net::SSLContext srv_ctx(nei::net::SSLContext::Mode::Server);
+  srv_ctx.SetCertificate(cert.cert_pem, cert.key_pem);
+  nei::net::SSLContext cli_ctx(nei::net::SSLContext::Mode::Client);
+  cli_ctx.SetPeerVerify(nei::net::PeerVerify::kOptional);
+  cli_ctx.SetCAChain(cert.cert_pem);
 
   // Deterministic pattern: byte i = (i*37+17) & 0xFF.  Server computes
   // a running 64-bit FNV-1a hash; client sends the expected hash after
@@ -240,9 +242,8 @@ void RunBenchmark(size_t total_bytes, size_t buffer_size) {
   auto bench_done = std::make_shared<nei::WaitableEvent>(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   auto server_ready = std::make_shared<nei::WaitableEvent>(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
 
-  auto server = std::make_shared<nei::net::TLSServerSocket>(srv_ctx.get());
-  auto client =
-      std::make_shared<nei::net::TLSClientSocket>(std::make_unique<nei::net::TCPClientSocket>(), cli_ctx.get());
+  auto server = std::make_shared<nei::net::TLSServerSocket>(&srv_ctx);
+  auto client = std::make_shared<nei::net::TLSClientSocket>(std::make_unique<nei::net::TCPClientSocket>(), &cli_ctx);
 
   auto t_start = Clock::now();
 
