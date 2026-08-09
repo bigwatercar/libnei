@@ -96,4 +96,12 @@ scoped_refptr<TaskRunner> ThreadPoolInstance::CreateParallelTaskRunner(const Tas
   return pool_.CreateParallelTaskRunner(traits);
 }
 
+void ThreadPoolInstance::BeginFence() {
+  pool_.BeginFence();
+}
+
+void ThreadPoolInstance::EndFence() {
+  pool_.EndFence();
+}
+
 } // namespace nei

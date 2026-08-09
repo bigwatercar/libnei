@@ -65,6 +65,11 @@ public:
   /// Creates a parallel TaskRunner on the global pool (for PostJob).
   scoped_refptr<TaskRunner> CreateParallelTaskRunner(const TaskTraits &traits = TaskTraits());
 
+  /// Execution fence: while fenced, workers pause dispatching new work
+  /// (running tasks finish).  See ThreadPool::BeginFence/EndFence.
+  void BeginFence();
+  void EndFence();
+
   ThreadPoolInstance(const ThreadPoolInstance &) = delete;
   ThreadPoolInstance &operator=(const ThreadPoolInstance &) = delete;
 

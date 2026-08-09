@@ -956,5 +956,73 @@ TEST(ThreadPoolTest, RepeatedShutdownAfterWorkerIdleWaitNeverHangs) {
   EXPECT_FALSE(abandoned_any) << "Shutdown abandoned a worker (lost-wakeup regression)";
 }
 
+// Chromium-aligned execution fence: while fenced, workers pause dispatching
+// NEW work; EndFence() resumes it.  Running tasks finish.
+TEST(ThreadPoolTest, ExecutionFencePausesDispatchUntilEndFence) {
+  ThreadPool pool({2});
+  scoped_refptr<TaskRunner> runner = pool.CreateParallelTaskRunner();
+  ASSERT_TRUE(runner);
+
+  std::atomic<int> executed{0};
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  pool.BeginFence();
+  ASSERT_TRUE(runner->PostTask(FROM_HERE, [&executed, &done]() {
+    executed.fetch_add(1, std::memory_order_relaxed);
+    done.Signal();
+  }));
+
+  // Give a worker ample time to (incorrectly) dispatch the task.
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(100));
+  EXPECT_EQ(executed.load(std::memory_order_relaxed), 0) << "Task ran while fenced";
+
+  pool.EndFence();
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  EXPECT_EQ(executed.load(std::memory_order_relaxed), 1);
+
+  pool.Shutdown();
+}
+
+// A nested fence must require two EndFence() calls to resume dispatch.
+TEST(ThreadPoolTest, ExecutionFenceNests) {
+  ThreadPool pool({2});
+  scoped_refptr<TaskRunner> runner = pool.CreateParallelTaskRunner();
+  ASSERT_TRUE(runner);
+
+  std::atomic<int> executed{0};
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  pool.BeginFence();
+  pool.BeginFence();
+  ASSERT_TRUE(runner->PostTask(FROM_HERE, [&executed, &done]() {
+    executed.fetch_add(1, std::memory_order_relaxed);
+    done.Signal();
+  }));
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(50));
+  EXPECT_EQ(executed.load(std::memory_order_relaxed), 0);
+
+  // First EndFence still leaves one nesting level active.
+  pool.EndFence();
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(50));
+  EXPECT_EQ(executed.load(std::memory_order_relaxed), 0);
+
+  pool.EndFence();
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  EXPECT_EQ(executed.load(std::memory_order_relaxed), 1);
+
+  pool.Shutdown();
+}
+
+// Shutdown must not hang even when an execution fence is still active.
+TEST(ThreadPoolTest, ShutdownWhileFencedDoesNotHang) {
+  ThreadPool pool({2});
+  scoped_refptr<TaskRunner> runner = pool.CreateParallelTaskRunner();
+  ASSERT_TRUE(runner);
+
+  pool.BeginFence();
+  ASSERT_TRUE(runner->PostTask(FROM_HERE, []() {}));
+  EXPECT_TRUE(pool.Shutdown(TimeDelta::FromSeconds(5)));
+}
+
 } // namespace
 } // namespace nei

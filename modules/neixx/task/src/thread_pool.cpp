@@ -82,7 +82,9 @@ public:
                BlockingCb on_blocking_end,
                ThreadType baseline_thread_type,
                TimeDelta reclaim_time,
-               const std::string &name)
+               const std::string &name,
+               std::atomic<int> *execution_fence_count,
+               WaitableEvent *fence_release_event)
       : source_(source)
       , delayed_task_manager_(delayed_task_manager)
       , task_observer_(task_observer)
@@ -92,7 +94,9 @@ public:
       , baseline_thread_type_(baseline_thread_type)
       , reclaim_time_(reclaim_time)
       , current_thread_type_(baseline_thread_type)
-      , name_(name) {
+      , name_(name)
+      , execution_fence_count_(execution_fence_count)
+      , fence_release_event_(fence_release_event) {
   }
 
   ~WorkerThread() override = default;
@@ -325,6 +329,21 @@ private:
         internal::SetLocalWorkQueue(nullptr);
         exit_event_.Signal();
         return;
+      }
+
+      // Execution fence: while fenced, pause dispatching NEW work.  Re-enqueue
+      // the (untouched) source and wait on the release event; EndFence() or
+      // Shutdown() signals it to wake all blocked workers.  Running tasks are
+      // allowed to finish (Chromium semantics).
+      if (execution_fence_count_ != nullptr && execution_fence_count_->load(std::memory_order_acquire) > 0) {
+        source_->OnTaskSourceProcessed(std::move(task_source));
+        while (execution_fence_count_->load(std::memory_order_acquire) > 0) {
+          if (tracker_->HasShutdownStarted()) {
+            break;
+          }
+          fence_release_event_->Wait();
+        }
+        continue;
       }
 
       internal::PooledTaskQueue *queue = task_source->AsTaskQueue();
@@ -581,6 +600,13 @@ private:
   std::string name_;
   PlatformThread::Handle handle_;
   WaitableEvent exit_event_{WaitableEvent::ResetPolicy::kManual, false};
+
+  // Execution fence (Chromium ThreadPoolInstance::BeginFence/EndFence).
+  // Shared with ThreadPool::Impl; when non-null and > 0 the worker must not
+  // dispatch NEW work.  fence_release_event_ (Manual) is signalled by
+  // EndFence() or Shutdown() to wake blocked workers.
+  std::atomic<int> *execution_fence_count_ = nullptr;
+  WaitableEvent *fence_release_event_ = nullptr;
 };
 
 } // namespace
@@ -900,6 +926,9 @@ public:
     std::vector<std::unique_ptr<internal::PooledTaskQueue>> queues_to_shutdown;
 
     tracker_.StartShutdown();
+    // Wake any worker blocked in an execution-fence wait so it observes the
+    // shutdown state and exits instead of hanging.
+    fence_release_event_.Signal();
 
     {
       AutoLock lock(lock_);
@@ -948,6 +977,19 @@ public:
     return true;
   }
 
+  void BeginFence() {
+    // Reset the release event before arming so a stale signal from a previous
+    // EndFence/Shutdown does not let workers skip the new fence.
+    fence_release_event_.Reset();
+    execution_fence_count_.fetch_add(1, std::memory_order_acq_rel);
+  }
+
+  void EndFence() {
+    if (execution_fence_count_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      fence_release_event_.Signal();
+    }
+  }
+
   std::size_t worker_count() const {
     return thread_group_->worker_count();
   }
@@ -985,7 +1027,9 @@ private:
         [this]() { OnWorkerEndedBlocking(); },
         params_.worker_thread_type,
         params_.suggested_reclaim_time,
-        prefix + std::to_string(idx));
+        prefix + std::to_string(idx),
+        &execution_fence_count_,
+        &fence_release_event_);
 
     // Start outside any lock.
     if (!worker->Start()) {
@@ -1010,6 +1054,10 @@ private:
   std::atomic<bool> backpressure_warning_emitted_{false};
   std::atomic<TaskObserver *> task_observer_{nullptr};
   std::vector<std::unique_ptr<internal::PooledTaskQueue>> queues_;
+
+  // Execution fence (Chromium ThreadPoolInstance::BeginFence/EndFence).
+  std::atomic<int> execution_fence_count_{0};
+  WaitableEvent fence_release_event_{WaitableEvent::ResetPolicy::kManual, false};
 };
 
 ThreadPool::ThreadPool()
@@ -1048,6 +1096,14 @@ std::size_t ThreadPool::worker_count() const {
 
 void ThreadPool::SetTaskObserver(TaskObserver *observer) {
   impl_->SetTaskObserver(observer);
+}
+
+void ThreadPool::BeginFence() {
+  impl_->BeginFence();
+}
+
+void ThreadPool::EndFence() {
+  impl_->EndFence();
 }
 
 } // namespace nei

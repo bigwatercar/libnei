@@ -97,6 +97,19 @@ public:
   /// A zero or negative timeout means wait indefinitely.
   bool Shutdown(TimeDelta timeout = TimeDelta());
 
+  /// Chromium-aligned execution fence (ThreadPoolInstance::BeginFence/EndFence).
+  ///
+  /// While fenced, workers stop dispatching NEW work — tasks already running
+  /// finish, and queued tasks pause until EndFence() resumes dispatch.  This
+  /// provides a stable point for tests (post then assert nothing runs until
+  /// the fence is lifted) and for draining work in phases.  Begin/End may
+  /// nest (reference counted).
+  ///
+  /// NOTE: affects the global dispatch path; dedicated SingleThreadTaskRunner
+  /// queues are not fenced.
+  void BeginFence();
+  void EndFence();
+
   std::size_t worker_count() const;
 
   /// Registers a global observer for task execution events.
