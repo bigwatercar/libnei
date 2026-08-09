@@ -113,6 +113,7 @@ static BOOL CALLBACK _nei_log_runtime_init_once_callback(PINIT_ONCE init_once, P
 
   InitializeCriticalSection(&s_runtime.mutex);
   InitializeConditionVariable(&s_runtime.cond);
+  s_runtime.stop_requested = 0;
   s_runtime.thread = CreateThread(NULL, 0, _nei_log_consumer_thread, &s_runtime, 0, NULL);
   if (s_runtime.thread == NULL) {
     s_runtime_init_error = GetLastError();
@@ -120,8 +121,7 @@ static BOOL CALLBACK _nei_log_runtime_init_once_callback(PINIT_ONCE init_once, P
     return FALSE;
   }
 
-  s_runtime.stop_requested = 0;
-  s_runtime.initialized = 1;
+  _NEI_LOG_ATOMIC_STORE32(&s_runtime.initialized, 1U);
   s_runtime_init_count += 1U;
   (void)atexit(_nei_log_shutdown_runtime);
   s_runtime_init_error = ERROR_SUCCESS;
@@ -145,6 +145,10 @@ static void _nei_log_runtime_init_once_callback(void) {
     pthread_mutex_destroy(&s_runtime.mutex);
     return;
   }
+  /* Set stop_requested before spawning the consumer thread so the newly
+   * created thread never observes a torn/racy initial value.  pthread_create
+   * then establishes a happens-before edge to the consumer's reads. */
+  s_runtime.stop_requested = 0;
   rc = pthread_create(&s_runtime.thread, NULL, _nei_log_consumer_thread, &s_runtime);
   if (rc != 0) {
     s_runtime_init_error = rc;
@@ -153,8 +157,7 @@ static void _nei_log_runtime_init_once_callback(void) {
     return;
   }
 
-  s_runtime.stop_requested = 0;
-  s_runtime.initialized = 1;
+  _NEI_LOG_ATOMIC_STORE32(&s_runtime.initialized, 1U);
   s_runtime_init_count += 1U;
   (void)atexit(_nei_log_shutdown_runtime);
   s_runtime_init_error = 0;
@@ -162,7 +165,7 @@ static void _nei_log_runtime_init_once_callback(void) {
 #endif
 
 int _nei_log_ensure_runtime_initialized(void) {
-  if (s_runtime.initialized) {
+  if (_NEI_LOG_ATOMIC_LOAD32(&s_runtime.initialized) != 0U) {
     return 0;
   }
 
@@ -176,7 +179,7 @@ int _nei_log_ensure_runtime_initialized(void) {
   }
 #endif
 
-  if (!s_runtime.initialized || s_runtime_init_error != 0) {
+  if (_NEI_LOG_ATOMIC_LOAD32(&s_runtime.initialized) == 0U || s_runtime_init_error != 0) {
     return -1;
   }
   return 0;
@@ -244,15 +247,17 @@ int _nei_log_rollback_unpublished_slot_for_test(uint64_t reserved_pos) {
 }
 
 void nei_log_set_auto_flush_interval_ms(uint32_t interval_ms) {
-  s_runtime.auto_flush_interval_ms = interval_ms;
+  // Atomic: the consumer thread reads this without holding any lock while
+  // choosing its idle-wait timeout (TSan-confirmed data race vs consumer).
+  _NEI_LOG_ATOMIC_STORE32(&s_runtime.auto_flush_interval_ms, interval_ms);
 }
 
 uint32_t nei_log_get_auto_flush_interval_ms(void) {
-  return s_runtime.auto_flush_interval_ms;
+  return _NEI_LOG_ATOMIC_LOAD32(&s_runtime.auto_flush_interval_ms);
 }
 
 void _nei_log_shutdown_runtime(void) {
-  if (!s_runtime.initialized) {
+  if (_NEI_LOG_ATOMIC_LOAD32(&s_runtime.initialized) == 0U) {
     return;
   }
 
@@ -274,7 +279,7 @@ void _nei_log_shutdown_runtime(void) {
   pthread_cond_destroy(&s_runtime.cond);
   pthread_mutex_destroy(&s_runtime.mutex);
 #endif
-  s_runtime.initialized = 0;
+  _NEI_LOG_ATOMIC_STORE32(&s_runtime.initialized, 0U);
 }
 
 /* ── Ring-buffer helpers (consumer-side) ──────────────────────────────────── */
@@ -331,7 +336,8 @@ int _nei_log_enqueue_event(const uint8_t *event, size_t len) {
   uint32_t idx;
   nei_log_ring_slot_st *slot;
 
-  if (event == NULL || len == 0U || len > _NEI_LOG_EVENT_BUFFER_SIZE || !s_runtime.initialized) {
+  if (event == NULL || len == 0U || len > _NEI_LOG_EVENT_BUFFER_SIZE
+      || _NEI_LOG_ATOMIC_LOAD32(&s_runtime.initialized) == 0U) {
     return -1;
   }
 
@@ -491,7 +497,7 @@ static void *_nei_log_consumer_thread(void *arg) {
         break;
       }
 
-      wait_ms = rt->auto_flush_interval_ms;
+      wait_ms = _NEI_LOG_ATOMIC_LOAD32(&rt->auto_flush_interval_ms);
       if (wait_ms == 0U) {
         wait_ms = INFINITE;
       }
@@ -577,12 +583,13 @@ static void *_nei_log_consumer_thread(void *arg) {
         break;
       }
 
-      if (rt->auto_flush_interval_ms > 0U) {
+      const uint32_t auto_flush_ms = _NEI_LOG_ATOMIC_LOAD32(&rt->auto_flush_interval_ms);
+      if (auto_flush_ms > 0U) {
         struct timespec ts;
         int rc;
         clock_gettime(CLOCK_REALTIME, &ts);
-        ts.tv_sec += (time_t)(rt->auto_flush_interval_ms / 1000U);
-        ts.tv_nsec += (long)((rt->auto_flush_interval_ms % 1000U) * 1000000U);
+        ts.tv_sec += (time_t)(auto_flush_ms / 1000U);
+        ts.tv_nsec += (long)((auto_flush_ms % 1000U) * 1000000U);
         if (ts.tv_nsec >= 1000000000L) {
           ts.tv_sec += 1;
           ts.tv_nsec -= 1000000000L;

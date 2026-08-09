@@ -70,10 +70,14 @@ public:
         (void)write(event_fd_, &one, sizeof(one));
       }
     } else {
-      {
-        std::lock_guard<std::mutex> lock(mutex_);
-        signaled_ = true;
-      }
+      // Hold mutex_ across notify_one() so that Wait() returning (re-acquiring
+      // mutex_ after seeing signaled_) guarantees the Signal() call has fully
+      // completed.  Otherwise a waiter could observe signaled_, return, and
+      // destroy the event while the signaling thread is still inside
+      // cv_.notify_one() — a pthread_cond_signal / pthread_cond_destroy race
+      // (TSan-confirmed in async_file/pipe_stream benches).
+      std::lock_guard<std::mutex> lock(mutex_);
+      signaled_ = true;
       cv_.notify_one();
     }
 #endif

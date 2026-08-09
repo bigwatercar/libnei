@@ -117,13 +117,15 @@ void TCPClientSocket::Impl::Orphan() {
   if (orphaned_.exchange(true))
     return;
 
-  // Clear the keep-alive dead callback so the timer (if running) won't
-  // spuriously fire it during graceful shutdown.  The timer itself will
-  // be stopped later in DoCloseCleanup() on the IO thread.
-  keep_alive_dead_cb_ = {};
-
   {
     std::unique_lock<std::mutex> lock(mutex_);
+    // Clear the keep-alive dead callback so the timer (if running) won't
+    // spuriously fire it during graceful shutdown.  The timer itself will
+    // be stopped later in DoCloseCleanup() on the IO thread.  Protected by
+    // mutex_: Orphan() may run on any thread while the IO thread's
+    // StopKeepAliveMonitor()/OnKeepAliveCheck() touch the same callback
+    // (TSan-confirmed data race on keep_alive_dead_cb_).
+    keep_alive_dead_cb_ = {};
     // Clear user callbacks to prevent UAF.
     connect_cb_ = {};
     read_cb_ = {};
@@ -651,7 +653,10 @@ void TCPClientSocket::Impl::StartKeepAliveMonitor(TimeDelta check_interval, Once
   if (!on_dead)
     return;
 
-  keep_alive_dead_cb_ = std::move(on_dead);
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    keep_alive_dead_cb_ = std::move(on_dead);
+  }
 
   // Create the RepeatingTimer on the IO thread's task runner.
   keep_alive_timer_ = std::make_unique<RepeatingTimer>(io_runner_);
@@ -671,7 +676,10 @@ void TCPClientSocket::Impl::StopKeepAliveMonitor() {
   }
 
   keep_alive_timer_.reset();
-  keep_alive_dead_cb_ = {};
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    keep_alive_dead_cb_ = {};
+  }
 }
 
 void TCPClientSocket::Impl::OnKeepAliveCheck() {
@@ -679,7 +687,11 @@ void TCPClientSocket::Impl::OnKeepAliveCheck() {
 
   if (closed_ || fd_ < 0 || orphaned_) {
     // Socket already dead or shutting down  --  stop the timer.
-    auto cb = std::move(keep_alive_dead_cb_);
+    OnceCallback<void()> cb;
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      cb = std::move(keep_alive_dead_cb_);
+    }
     keep_alive_timer_.reset();
     if (cb)
       std::move(cb).Run();
@@ -695,7 +707,11 @@ void TCPClientSocket::Impl::OnKeepAliveCheck() {
 
   if (rc != 0 || error != 0) {
     // Socket is dead  --  stop the timer and fire the callback.
-    auto cb = std::move(keep_alive_dead_cb_);
+    OnceCallback<void()> cb;
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      cb = std::move(keep_alive_dead_cb_);
+    }
     keep_alive_timer_.reset();
     if (cb)
       std::move(cb).Run();

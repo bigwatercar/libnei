@@ -13,7 +13,9 @@
 #include <vector>
 
 namespace {
-void Hdr(const char *t) { printf("\n---- %s ----\n", t); }
+void Hdr(const char *t) {
+  printf("\n---- %s ----\n", t);
+}
 } // namespace
 
 int main() {
@@ -50,26 +52,28 @@ int main() {
     std::vector<double> bases;
     for (int w = 1; w <= 16; w *= 2) {
       std::atomic<std::int64_t> c{0};
-      nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kManual, false);
+      std::atomic<int> finished{0};
+      nei::WaitableEvent all_done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
 
       auto t0 = std::chrono::steady_clock::now();
       for (int i = 0; i < w; ++i) {
         runner->PostTask(FROM_HERE, [&]() {
           while (c.fetch_add(1, std::memory_order_relaxed) < O - 1) {
           }
+          // Wait until ALL w tasks have fully exited their loop before the
+          // next iteration reuses the stack-local counters.
+          if (finished.fetch_add(1, std::memory_order_relaxed) + 1 == w) {
+            all_done.Signal();
+          }
         });
       }
-      // Spin-wait for completion
-      while (c.load(std::memory_order_acquire) < O) {
-        std::this_thread::yield();
-      }
+      all_done.Wait();
       double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
       double r = O / s;
       bases.push_back(r);
       char buf[32];
       snprintf(buf, sizeof(buf), "%.1f M/s", r / 1e6);
-      printf("  %6d  %14s  %7.1fx\n", w, buf,
-             w == 1 ? 1.0 : r / bases[0]);
+      printf("  %6d  %14s  %7.1fx\n", w, buf, w == 1 ? 1.0 : r / bases[0]);
     }
   }
 
@@ -85,20 +89,24 @@ int main() {
     std::vector<double> bases;
     for (int w = 1; w <= 16; w *= 2) {
       std::atomic<int> c{0};
+      std::atomic<int> finished{0};
+      nei::WaitableEvent all_done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
       auto t0 = std::chrono::steady_clock::now();
       for (int i = 0; i < N; ++i) {
-        runner->PostTask(FROM_HERE, [&]() { c.fetch_add(1, std::memory_order_relaxed); });
+        runner->PostTask(FROM_HERE, [&]() {
+          c.fetch_add(1, std::memory_order_relaxed);
+          if (finished.fetch_add(1, std::memory_order_relaxed) + 1 == N) {
+            all_done.Signal();
+          }
+        });
       }
-      while (c.load(std::memory_order_acquire) < N) {
-        std::this_thread::yield();
-      }
+      all_done.Wait();
       double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
       double r = N / s;
       bases.push_back(r);
       char buf[32];
       snprintf(buf, sizeof(buf), "%d K/s", static_cast<int>(r / 1000));
-      printf("  %6d  %14s  %7.1fx\n", w, buf,
-             w == 1 ? 1.0 : r / bases[0]);
+      printf("  %6d  %14s  %7.1fx\n", w, buf, w == 1 ? 1.0 : r / bases[0]);
     }
   }
 
@@ -116,23 +124,25 @@ int main() {
     std::vector<double> bases;
     for (int w = 1; w <= 16; w *= 2) {
       std::atomic<int> done{0};
+      std::atomic<int> finished{0};
+      nei::WaitableEvent all_done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
 
       auto t0 = std::chrono::steady_clock::now();
       for (int i = 0; i < N; ++i) {
         runner->PostTask(FROM_HERE, [&]() {
           done.fetch_add(1, std::memory_order_relaxed);
+          if (finished.fetch_add(1, std::memory_order_relaxed) + 1 == N) {
+            all_done.Signal();
+          }
         });
       }
-      while (done.load(std::memory_order_acquire) < N) {
-        std::this_thread::yield();
-      }
+      all_done.Wait();
       double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
       double r = N / s;
       bases.push_back(r);
       char buf[32];
       snprintf(buf, sizeof(buf), "%.0f K/s", r / 1000);
-      printf("  %6d  %14s  %7.1fx\n", w, buf,
-             w == 1 ? 1.0 : r / bases[0]);
+      printf("  %6d  %14s  %7.1fx\n", w, buf, w == 1 ? 1.0 : r / bases[0]);
     }
   }
 
