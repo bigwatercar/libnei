@@ -153,14 +153,14 @@ int main() {
       // vector destroyed at the next loop iteration is a use-after-free on the
       // next w (observed as 0xC0000005 on Windows for w >= 2).
       auto ctrs = std::make_shared<std::vector<P>>(w);
-      auto nw = std::make_shared<std::atomic<int>>(0);
+      auto nw = std::make_shared<std::atomic<std::uint32_t>>(0);
       auto td = std::make_shared<std::atomic<uint64_t>>(0);
       auto h = nei::PostJob(
           FROM_HERE,
           nei::TaskTraits(),
           [ctrs, nw, w, O, td](nei::JobDelegate *d) {
-            int id = nw->fetch_add(1, std::memory_order_relaxed);
-            if (id >= w)
+            std::uint32_t id = nw->fetch_add(1, std::memory_order_relaxed);
+            if (id >= (std::uint32_t)w)
               return;
             auto &ct = (*ctrs)[id].v;
             // Batch ShouldYield() calls: the virtual dispatch + callback

@@ -3,6 +3,7 @@
 #include <atomic>
 
 #include <nei/debug/check.h>
+#include <neixx/threading/platform_thread.h>
 #include <neixx/threading/thread_local.h>
 
 namespace nei {
@@ -39,8 +40,17 @@ bool JobTaskSource::ShouldYield() {
   if (tls_is_joiner)
     return (desired == 0);
 
-  // Pool workers: yield if there are more workers than desired.
-  if (static_cast<int>(desired) < running)
+  // Pool workers: yield only when pool-assigned workers exceed the desired
+  // concurrency.  Do NOT use running_workers_ here: it includes the
+  // work-stealing joiner (a volunteer that is NOT counted in
+  // assigned_workers_), so a concurrent joiner makes every pool worker
+  // believe the pool is over-subscribed and shrink-exit, triggering a
+  // spawn-exit compensation storm (each replacement worker re-enters the
+  // task callback and bumps the caller's worker-counter, which can overflow
+  // to INT_MIN → id >= w guard fails → out-of-bounds write; reproduced as
+  // post_job_bench crash at w >= 2 / O = 10M).
+  int assigned = assigned_workers_.load(std::memory_order_acquire);
+  if (static_cast<int>(desired) < assigned)
     return true;
   return false;
 }
@@ -225,8 +235,14 @@ void JobTaskSource::Join(bool steal_work) {
     int iter = 0;
     while (!ShouldYield()) {
       task_.Run(this);
-      if ((++iter & 63) == 0)
+      // The joiner is a volunteer; when it cannot make progress (e.g. all
+      // task slots are taken and its callback no-ops) it must not spin at
+      // full speed and starve the pool workers that DO make progress.
+      // Yield every 8 iterations to let real workers run.
+      if ((++iter & 7) == 0) {
         MaybeSpawnWorkers();
+        PlatformThread::YieldCurrentThread();
+      }
     }
     int prev_running = running_workers_.fetch_sub(1, std::memory_order_release);
     DCHECK_GT(prev_running, 0);
