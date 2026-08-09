@@ -40,6 +40,11 @@ add_executable(task_threadpool_bench task_threadpool_bench.cpp)
 target_link_libraries(task_threadpool_bench PRIVATE nei::nei)
 
 add_executable(
+  multi_single_thread_bench multi_single_thread_bench.cpp
+)
+target_link_libraries(multi_single_thread_bench PRIVATE nei::nei)
+
+add_executable(
   task_threadpool_parallel_bench task_threadpool_parallel_bench.cpp
 )
 target_link_libraries(task_threadpool_parallel_bench PRIVATE nei::nei)
