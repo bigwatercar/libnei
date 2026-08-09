@@ -286,15 +286,25 @@ std::size_t JobTaskSource::AssignTaskId() const {
 }
 
 void JobTaskSource::OnWorkerExited() {
+  // A pool worker is NOT the work-stealing joiner: it decrements both the
+  // running count (its own participation) and the assigned count (its posted
+  // slot).  The LAST assigned worker to exit is responsible for signalling
+  // completion.  Completion must key off assigned_workers_, NOT
+  // running_workers_ (which also counts the volunteer joiner): keying off
+  // running had a race where the last thread to decrement running (prev==1)
+  // could observe a stale assigned_workers_ > 0 from concurrently-exiting
+  // workers whose OnWorkerExited had not yet reached their assigned fetch_sub,
+  // so it skipped the completion signal — and the stragglers never re-checked
+  // (their prev_running != 1).  No one then set is_completed_, and Join()'s
+  // completion_event_.Wait() deadlocked (reproduced as post_job_bench hangs
+  // at multi-worker scaling, w >= 2, ~50% of runs).
+  int prev_assigned = assigned_workers_.fetch_sub(1, std::memory_order_release);
+  DCHECK_GT(prev_assigned, 0);
   int prev_running = running_workers_.fetch_sub(1, std::memory_order_release);
   DCHECK_GT(prev_running, 0);
-  int prev_assigned = assigned_workers_.fetch_sub(1, std::memory_order_release);
-  (void)prev_assigned;
-  DCHECK_GT(prev_assigned, 0);
-  if (prev_running == 1) {
+  if (prev_assigned == 1) {
     int pending = pending_concurrency_increases_.load(std::memory_order_acquire);
-    int assigned = assigned_workers_.load(std::memory_order_acquire);
-    if (pending <= 0 && assigned <= 0) {
+    if (pending <= 0) {
       is_completed_.store(true, std::memory_order_release);
       completion_event_.Signal();
     }
