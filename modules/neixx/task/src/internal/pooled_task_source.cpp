@@ -528,9 +528,24 @@ void PooledTaskSource::WaitForDedicatedWork(PooledTaskQueue *queue, TimeDelta ti
 // =============================================================================
 
 void PooledTaskSource::Shutdown() {
-  shutdown_fast_path_.store(true, std::memory_order_release);
-  is_shutdown_.store(true, std::memory_order_release);
-  NotifyDedicatedWorkAvailable();
+  // Set the shutdown flag and wake every blocked worker UNDER wait_lock_.
+  // Workers evaluate the shutdown flag / wake_generation while holding
+  // wait_lock_ right before entering wait_cv_.Wait(), so broadcasting
+  // WITHOUT the lock leaves a lost-wakeup window: a worker that has already
+  // passed the while-condition can miss the broadcast and sleep in
+  // wait_cv_.Wait() forever.  That worker never signals its exit_event_, so
+  // ThreadPool::Shutdown -> JoinAll blocks on it indefinitely — observed as
+  // an intermittent process hang right after the final "595 tests PASSED"
+  // (AtExit teardown), with the main thread parked in
+  // WorkerThread::TryJoin's exit_event_.TimedWait (poll on eventfd) until
+  // SIGTERM.
+  {
+    AutoLock lock(wait_lock_);
+    shutdown_fast_path_.store(true, std::memory_order_release);
+    is_shutdown_.store(true, std::memory_order_release);
+    wake_generation_.fetch_add(1, std::memory_order_acq_rel);
+    wait_cv_.Broadcast();
+  }
 }
 
 void PooledTaskSource::NotifyWorkAvailable() {

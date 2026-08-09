@@ -1,10 +1,14 @@
 ﻿# libnei — TODO & Roadmap
 
-**Updated**: 2026-08-06
+**Updated**: 2026-08-09
 
 ---
 
 ## 待办事项（未完成）
+
+> ✅ **最高优先级（退出阶段挂起）已于 2026-08-09 定位并修复**（见下方"最近完成"）。
+> 根因：`PooledTaskSource::Shutdown()` 未持 `wait_lock_` 即设置 `is_shutdown_` + Broadcast，
+> 导致 condvar 丢失唤醒，worker 永久睡眠 → `JoinAll` 卡死。修复：锁内设置 + Broadcast。
 
 ### P1
 
@@ -70,6 +74,10 @@
 
 ### P3
 
+- **post_job_bench 空转性能（bench 特有）** 📐 2026-08-09:
+  修复 ffd3642（崩溃）后遗留的性能问题：work-stealing joiner 空转（`id>=w` 时 `task_.Run` 快速 return 不干活但占 CPU）导致 bench 个别 w 阶段偶发性能低（0.25-0.9 M/s，随机）。当前 joiner 每 8 迭代让步缓解但不彻底。**真实用户（max_concurrency_cb 准确）不触发**——仅 bench 模式。
+  可选优化：joiner 检测 `id>=w`（无法贡献）后主动 `PlatformThread::Sleep` 退避，或直接退出 work-stealing（pool worker 覆盖时）。
+
 - **`IoThread` dtor: WeakPtrFactory::InternalFlag 残留 (~1KB)** 🔧 2026-07-27:
   ASAN 报告 ~1KB（17 分配）间接泄漏 — 未释放的 `WeakPtr` 仍引用 InternalFlag。
   影响可忽略（固定 ~1KB，进程退出时由 OS 回收），无 OOM/性能风险。
@@ -120,11 +128,28 @@
 | `HostResolverTest.ResolveDualStack` | Always (no DNS) | 需功能性 DNS |
 | `HostResolverTest.ResolveIPv4Only` | Always (no DNS) | 需功能性 DNS |
 
+### TSan 专项（RelWithDebInfo）
+
+| Test | 状态 | Root Cause |
+|------|------|-----------|
+| `SequenceManagerTest.MultiQueueBurstDoesNotStarveAnyQueue` | 慢速挂起（loadavg 0.00） | 时序敏感 + TSan 慢速丢唤醒，与 valgrind 下 SequenceManagerTest 死锁同源；全量 TSan 扫描需排除 |
+| `LogCTest.ConcurrentFirstUseInitializationStress` | TSan 失败 | 环境（TSan 慢速时序） |
+| `PipeStreamTest.PosixYieldQuotaPreventsStarvation` | TSan 失败 | 同上（也是 WSL ~30% flaky 那个） |
+| `TlsSocketTest.LargePayloadBioCompaction` | TSan 失败 | 环境（TSan 慢速时序） |
+| `ThreadPoolTest.DelayedTaskRunsWithoutImmediateKick` | 全量 ~1/18 偶发（单跑 50 轮全过） | 依赖全量进程上下文；pool({1}) 单 worker + 120ms 延迟任务。DelayedTaskManager wake_event_ 为 auto，heap 为状态源，静态未见确定性 bug |
+
 ### Notes
 
 - DNS 相关测试在具备完整网络访问的 CI 环境通过。
 - Pipe/ChildProcess 偶发失败可考虑 `EXPECT_DEATH`-style 重试或事件同步修复。
 - 低优先级 — 无崩溃/数据损坏/生产影响。
+
+---
+
+## 架构规划（memory 记录，未实施）
+
+- **IOContext 重构**（io_thread_refactor_next_phase）：使 IOContext 成为 `Thread` 的调度引擎而非独立线程——作为阻塞等待器提供 `Run(Delegate*)` 入口（`DoWork()` / `DoDelayedWork(next_time)`），由外部线程驱动事件循环。关键约束：Thread 阻塞于 GetQueuedCompletionStatus/epoll_wait 时，外部 PostTask 需内核级唤醒立即唤醒 IOContext。
+- **ThreadPool Pimpl 重构**（threadpool-pimpl-roadmap）：Chromium 风格 Pimpl 单例接口（隐藏 scheduler policy/worker 管理）；`CreateSequencedTaskRunner` 工厂支持；按 `Task.sequence_token` 保序；概念上向 scheduler workers 注入任务而非直接暴露线程管理。
 
 ---
 
@@ -140,6 +165,14 @@
 
 ## 最近完成（记录，2026-07 ~ 08）
 
+- **退出阶段偶发挂起（遗留问题①）根因定位 + 修复** 🐛✅ 2026-08-09 —
+  **症状**：Release 全量 GTest 退出阶段偶发挂起，595 PASSED 后进程不退出（主线程 `poll(eventfd)`），概率 <1/18。
+  **根因**：`PooledTaskSource::Shutdown()` 设置 `is_shutdown_` + `wake_generation_.fetch_add` + `wait_cv_.Broadcast()` **均未持 `wait_lock_`**。worker 在 `GetNextTaskSourceTimed`/`WaitForDedicatedWork` 中持 `wait_lock_` 检查条件后进入 `wait_cv_.Wait()`；Shutdown 在 worker 尚未进入 futex 等待时 Broadcast 是 no-op → **condvar 丢失唤醒** → worker 永久睡眠 → 不 Signal `exit_event_` → `ThreadPool::Shutdown → JoinAll` 永久阻塞（主线程在 `TryJoin` 的 `exit_event_.TimedWait` = poll eventfd）。这是**逻辑时序竞态**（非 data race），TSan 检测不到，故此前 TSan 清零仍漏检。
+  **修复**：`Shutdown()` 改为持 `wait_lock_` 设置 `is_shutdown_` + `wake_generation_` + `Broadcast`（锁内设置状态 + 唤醒，消除丢失唤醒窗口）。
+  **验证**：新增压力测试 `ThreadPoolTest.RepeatedShutdownAfterWorkerIdleWaitNeverHangs`（150 次反复创建-销毁）；Windows Debug 85 task 测试全过；WSL Release 全量 596 PASSED + **8/8 轮全量退出无挂起**。
+- **post_job_bench 跨平台崩溃修复（ffd3642）** 2026-08-09 — 根因链：① ShouldYield 用 running_workers_（含 work-stealing joiner）判断收缩 → pool worker 误判 over-subscribed → spawn-exit 风暴；② joiner 空转 → bench `nw->fetch_add` int 溢出 INT_MIN → `id>=w` 保护失效 → OOB。修复：ShouldYield 改用 assigned_workers_ + joiner 每 8 迭代让步 + bench id 改 uint32_t。Linux/Windows Release + ASAN 全平台验证不再崩溃。
+- **TSan 竞态清零（2026-08-09）** — async_file 52 个（8f7d445 测试 shared_ptr<State> 范式）、net keepalive（c5f75a4 mutex_ 保护 keep_alive_dead_cb_）、log_runtime auto_flush_interval_ms（abaa069 原子化）。全量 TSan data races = 0。
+- **Windows ASAN 全量通过（2026-08-09）** — 623 tests PASSED 0 错误（detect_leaks=0）。
 - **Log 模块全面优化** 2026-07-31 — 死锁修复 + false-sharing 隔离 + timestamp 查表（+46%）。
 - **SmallObjectAllocator + 独立 MemoryPressureMonitor** 2026-08-05 —
   PartitionAlloc 风格分配器（freelist 编码、decommit 中间态、多分区、committed/分桶统计）

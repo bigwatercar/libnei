@@ -904,5 +904,57 @@ TEST(ThreadPoolTest, PooledSingleThreadExecutesTasksInFifoOrder) {
   pool.Shutdown();
 }
 
+// Regression test for the PooledTaskSource::Shutdown lost-wakeup — the
+// intermittent "hang after the final test" during AtExit teardown.
+//
+// The bug: PooledTaskSource::Shutdown() set is_shutdown_ and broadcast the
+// workers WITHOUT holding wait_lock_.  A worker that had just evaluated the
+// while-condition in GetNextTaskSourceTimed()/GetNextTaskSource() could
+// miss the broadcast and sleep in wait_cv_.Wait() forever; that worker
+// never signals its exit_event_, so ThreadPool::Shutdown -> JoinAll blocks
+// on it indefinitely (main thread parked in TryJoin's exit_event_.TimedWait
+// = poll on eventfd, until SIGTERM).
+//
+// This stress test repeatedly creates pools whose workers transition through
+// task execution back into the idle-wait, then tears them down with a
+// bounded timeout.  Before the fix a worker caught mid-transition could be
+// lost; after the fix every worker must exit promptly.
+TEST(ThreadPoolTest, RepeatedShutdownAfterWorkerIdleWaitNeverHangs) {
+  constexpr int kIterations = 150;
+  bool abandoned_any = false;
+  for (int i = 0; i < kIterations; ++i) {
+    // Heap-allocate so an (unexpected, post-fix impossible) timeout does not
+    // destroy the pool while abandoned workers still point into it.
+    ThreadPool::InitParams params;
+    params.max_num_workers = 8;
+    auto pool = std::make_unique<ThreadPool>(params);
+    scoped_refptr<TaskRunner> parallel = pool->CreateParallelTaskRunner();
+    ASSERT_TRUE(parallel);
+
+    std::atomic<int> executed{0};
+    constexpr int kTasks = 64;
+    for (int t = 0; t < kTasks; ++t) {
+      parallel->PostTask(FROM_HERE, [&executed]() { executed.fetch_add(1, std::memory_order_relaxed); });
+    }
+
+    // Alternate between tearing down immediately (workers mid-task / mid
+    // transition into idle-wait) and after a short settle (workers parked in
+    // wait_cv_.Wait()), covering both lost-wakeup windows.
+    if ((i & 1) != 0) {
+      PlatformThread::Sleep(TimeDelta::FromMilliseconds(1));
+    }
+
+    const bool all_exited = pool->Shutdown(TimeDelta::FromSeconds(10));
+    if (!all_exited) {
+      // Leak the pool to avoid UAF on abandoned workers; the test still
+      // fails below and the run is recorded as a hang regression.
+      (void)pool.release();
+      abandoned_any = true;
+      break;
+    }
+  }
+  EXPECT_FALSE(abandoned_any) << "Shutdown abandoned a worker (lost-wakeup regression)";
+}
+
 } // namespace
 } // namespace nei
