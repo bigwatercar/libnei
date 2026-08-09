@@ -10,6 +10,7 @@
 
 #include <nei/build/nei_export.h>
 #include <nei/build/compiler_specific.h>
+#include <neixx/common/location.h>
 #include <neixx/functional/callback.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/synchronization/waitable_event.h>
@@ -22,10 +23,26 @@ namespace internal {
 
 class NEI_API JobTaskSource final : public JobDelegate, public RefCountedThreadSafe<JobTaskSource> {
 public:
-  JobTaskSource(RepeatingCallback<void(JobDelegate *)> task,
+  JobTaskSource(const Location &from_here,
+                TaskTraits traits,
+                RepeatingCallback<void(JobDelegate *)> task,
                 MaxConcurrencyCallback max_concurrency_cb,
                 int initial_workers);
   ~JobTaskSource() override = default;
+
+  // Chromium-aligned accessors: the posting site (for crash reports /
+  // tracing) and the traits that drive worker thread priority.
+  const Location &posted_from() const {
+    return posted_from_;
+  }
+
+  const TaskTraits &traits() const {
+    return traits_;
+  }
+
+  TaskPriority priority() const {
+    return static_cast<TaskPriority>(priority_.load(std::memory_order_acquire));
+  }
 
   bool ShouldYield() override;
   bool IsCompleted() const override;
@@ -51,6 +68,8 @@ private:
   std::size_t AssignTaskId() const;
 
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
+  const Location posted_from_;
+  TaskTraits traits_;
   RepeatingCallback<void(JobDelegate *)> task_;
   MaxConcurrencyCallback max_concurrency_cb_;
   const int initial_workers_;

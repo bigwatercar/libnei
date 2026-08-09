@@ -13,14 +13,18 @@ namespace internal {
 // Pool workers check this to avoid yielding the joiner.
 static thread_local bool tls_is_joiner = false;
 
-JobTaskSource::JobTaskSource(RepeatingCallback<void(JobDelegate *)> task,
+JobTaskSource::JobTaskSource(const Location &from_here,
+                             TaskTraits traits,
+                             RepeatingCallback<void(JobDelegate *)> task,
                              MaxConcurrencyCallback max_concurrency_cb,
                              int initial_workers)
-    : task_(std::move(task))
+    : posted_from_(from_here)
+    , traits_(std::move(traits))
+    , task_(std::move(task))
     , max_concurrency_cb_(std::move(max_concurrency_cb))
     , initial_workers_(initial_workers)
     , completion_event_(WaitableEvent::ResetPolicy::kManual, false)
-    , priority_(static_cast<int>(TaskPriority::USER_VISIBLE)) {
+    , priority_(static_cast<int>(traits_.priority())) {
   DCHECK(task_);
   DCHECK(max_concurrency_cb_);
 }
@@ -112,7 +116,9 @@ void JobTaskSource::PostWorkers(int count) {
       return;
     assigned_workers_.fetch_add(1, std::memory_order_release);
     scoped_refptr<JobTaskSource> self(this);
-    if (!runner_->PostTask(FROM_HERE, [self]() { self->RunWorkerLoop(); })) {
+    // Pass the job's own traits so ThreadPool workers execute at the
+    // requested priority (Chromium-aligned; traits_ drives thread priority).
+    if (!runner_->PostTaskWithTraits(FROM_HERE, traits_, [self]() { self->RunWorkerLoop(); })) {
       assigned_workers_.fetch_sub(1, std::memory_order_release);
     }
     return;
@@ -148,7 +154,8 @@ void JobTaskSource::PostWorkers(int count) {
   scoped_refptr<JobTaskSource> self(this);
   int posted = 0;
   for (int i = 0; i < count; ++i) {
-    if (runner_->PostTask(FROM_HERE, [self]() { self->RunWorkerLoop(); })) {
+    // Same as the fast path: propagate the job's traits to the worker task.
+    if (runner_->PostTaskWithTraits(FROM_HERE, traits_, [self]() { self->RunWorkerLoop(); })) {
       ++posted;
     }
   }

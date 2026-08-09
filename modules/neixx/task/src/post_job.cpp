@@ -12,6 +12,7 @@ struct JobHandle::Impl {
   bool detached = false;
   bool joined = false;
 };
+
 JobHandle::JobHandle() = default;
 
 JobHandle::~JobHandle() {
@@ -90,7 +91,7 @@ scoped_refptr<TaskRunner> GetJobRunner() {
   return runners[idx];
 }
 
-}  // namespace
+} // namespace
 
 // static
 JobHandle JobHandle::PostJob(const Location &from_here,
@@ -98,12 +99,12 @@ JobHandle JobHandle::PostJob(const Location &from_here,
                              RepeatingCallback<void(JobDelegate *)> task,
                              MaxConcurrencyCallback max_concurrency_cb,
                              int initial_workers) {
-  (void)from_here;
-  (void)traits;
   DCHECK(task);
   DCHECK(max_concurrency_cb);
-  scoped_refptr<internal::JobTaskSource> source(
-      new internal::JobTaskSource(std::move(task), std::move(max_concurrency_cb), initial_workers));
+  // Chromium-aligned: retain the posting site (crash reports / tracing) and
+  // propagate the traits so worker threads run at the requested priority.
+  scoped_refptr<internal::JobTaskSource> source(new internal::JobTaskSource(
+      from_here, std::move(traits), std::move(task), std::move(max_concurrency_cb), initial_workers));
   source->SetRunner(GetJobRunner());
   source->PostInitialWorkers(initial_workers);
   JobHandle handle;
