@@ -61,12 +61,22 @@ void DelayedTaskManager::OnQueueUpdated(PooledTaskQueue *queue) {
   RefreshQueueStateLocked(queue);
   const TimeTicks updated_next_run_time = it->second.next_run_time;
 
-  // Preempt timer wait when a newly posted delayed task has an earlier
-  // deadline, or when we need to clear stale waiting assumptions.
-  if (previous_next_run_time.is_null()
-      || (!updated_next_run_time.is_null() && updated_next_run_time < previous_next_run_time)
-      || updated_next_run_time.is_null()) {
-    wake_event_.Signal();
+  // Only wake the delayed-task thread when there is something for it to
+  // reconsider.  For a purely-immediate task (no delayed work before OR
+  // after this update) the manager thread is idle-blocked on wake_event_
+  // with an empty heap; signalling it merely wakes it up to find nothing
+  // and go back to sleep.  On Linux/WSL2 that wake-sleep scheduler
+  // ping-pong measurably slows worker-internal PostTask repost chains
+  // (the woken manager thread preempts the posting worker), even though
+  // the delayed-task state did not change.
+  if (previous_next_run_time.is_null()) {
+    if (!updated_next_run_time.is_null())
+      wake_event_.Signal(); // New delayed work appeared — wake to arm a wait.
+  } else {
+    if (updated_next_run_time.is_null())
+      wake_event_.Signal(); // Last delayed work cleared — wake to stop waiting.
+    else if (updated_next_run_time < previous_next_run_time)
+      wake_event_.Signal(); // Earlier deadline — wake to re-arm sooner.
   }
 }
 
