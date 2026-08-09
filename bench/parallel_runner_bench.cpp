@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <thread>
@@ -18,10 +19,20 @@ void Hdr(const char *t) {
 }
 } // namespace
 
-int main() {
+int main(int argc, char *argv[]) {
+  // Optional argv[1]: workload scale factor (default 1.0).  Passing e.g. 0.05
+  // shrinks every bench so valgrind / other slow-instrumented runs finish in
+  // reasonable time while still exercising the same code paths.
+  double scale = 1.0;
+  if (argc > 1) {
+    scale = std::atof(argv[1]);
+    if (scale <= 0.0 || !(scale == scale)) // guard NaN
+      scale = 1.0;
+  }
+  printf("=== ParallelTaskRunner Throughput Benchmark (scale=%.3f) ===\n", scale);
+
   nei::AtExitManager ae;
   nei::ThreadPoolInstance::CreateAndStartWithDefaultParams();
-  printf("=== ParallelTaskRunner Throughput Benchmark ===\n");
 
   // ── Bench 0: raw pool baseline (for reference) ──
   {
@@ -29,7 +40,9 @@ int main() {
     auto *p = nei::ThreadPoolInstance::Get();
     auto r = p->CreateSequencedTaskRunner(nei::TaskTraits());
     double t = 0;
-    int n = 200;
+    int n = (int)(200 * scale);
+    if (n < 1)
+      n = 1;
     for (int i = 0; i < n; ++i) {
       nei::WaitableEvent d(nei::WaitableEvent::ResetPolicy::kManual, false);
       auto t0 = std::chrono::steady_clock::now();
@@ -43,7 +56,9 @@ int main() {
   // ── Bench 1: single parallel runner, multiple workers ──
   {
     Hdr("Bench 1: Parallel runner — atomic increment (1-16 workers)");
-    const std::int64_t O = 1'000'000;
+    std::int64_t O = (std::int64_t)(1'000'000 * scale);
+    if (O < 1)
+      O = 1;
     printf("  %6s  %14s  %8s\n", "Workers", "Total Ops/s", "vs 1w");
 
     nei::ThreadPool pool({/*max_num_workers=*/16});
@@ -79,8 +94,10 @@ int main() {
 
   // ── Bench 2: many tasks, single parallel runner ──
   {
-    Hdr("Bench 2: Parallel runner — many small tasks (100K)");
-    const int N = 100'000;
+    Hdr("Bench 2: Parallel runner — many small tasks");
+    int N = (int)(100'000 * scale);
+    if (N < 1)
+      N = 1;
     printf("  %6s  %14s  %8s\n", "Workers", "Tasks/s", "vs 1w");
 
     nei::ThreadPool pool({/*max_num_workers=*/16});
@@ -115,7 +132,9 @@ int main() {
   // Measures how fast the parallel runner can ingest and dispatch tasks.
   {
     Hdr("Bench 3: PostTask throughput — N tasks, 1 fetch_add each");
-    const int N = 500'000;
+    int N = (int)(500'000 * scale);
+    if (N < 1)
+      N = 1;
     printf("  %6s  %14s  %8s\n", "Workers", "PostTask/s", "vs 1w");
 
     nei::ThreadPool pool(nei::ThreadPool::InitParams{/*max_num_workers=*/16});
