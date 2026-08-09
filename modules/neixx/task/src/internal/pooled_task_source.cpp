@@ -466,6 +466,14 @@ void PooledTaskSource::WaitForDedicatedWork(PooledTaskQueue *queue, TimeDelta ti
   const TimeTicks deadline = has_timeout ? TimeTicks::Now() + timeout : TimeTicks();
 
   for (;;) {
+    // Snapshot the wake generation up front.  If any wake (task post,
+    // re-enqueue) lands after this snapshot, we must re-check the queue
+    // instead of sleeping — this closes the lost-wakeup window between the
+    // HasImmediateWork() check and wait_cv_.Wait()/TimedWait() where a
+    // producer's Broadcast can be dropped, leaving the dedicated worker
+    // asleep until the 30s reclaim timeout.
+    const std::uint64_t observed_generation = wake_generation_.load(std::memory_order_acquire);
+
     if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
       return;
     }
@@ -493,6 +501,12 @@ void PooledTaskSource::WaitForDedicatedWork(PooledTaskQueue *queue, TimeDelta ti
     }
     if (queue->HasImmediateWork()) {
       return;
+    }
+
+    // A wake arrived after our snapshot — loop back and re-check the queue
+    // rather than sleeping (the Broadcast may have been dropped).
+    if (wake_generation_.load(std::memory_order_acquire) != observed_generation) {
+      continue;
     }
 
     if (has_timeout) {
