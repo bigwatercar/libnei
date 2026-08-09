@@ -29,6 +29,8 @@ nei::MaxConcurrencyCallback DynCc(std::atomic<int> *d, int total, int cap) {
 } // namespace
 
 int main() {
+  // Unbuffered stdout so a crash mid-benchmark still shows how far we got.
+  std::setvbuf(stdout, nullptr, _IONBF, 0);
   nei::AtExitManager ae;
   nei::ThreadPoolInstance::CreateAndStartWithDefaultParams();
   printf("=== PostJob Benchmark ===\n");
@@ -134,7 +136,7 @@ int main() {
 
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable: 4324)
+#pragma warning(disable : 4324)
 #endif
     struct alignas(64) P {
       std::atomic<uint64_t> v{0};
@@ -146,17 +148,21 @@ int main() {
     printf("  %6s  %14s  %10s\n", "Workers", "Total Ops/s", "vs 1-wkr");
     std::vector<double> bases;
     for (int w = 1; w <= 16; w *= 2) {
-      std::vector<P> ctrs(w);
+      // Heap-allocate ctrs and capture by value: worker callbacks may still be
+      // executing (accessing ctrs) after Join() returns, and a stack-local
+      // vector destroyed at the next loop iteration is a use-after-free on the
+      // next w (observed as 0xC0000005 on Windows for w >= 2).
+      auto ctrs = std::make_shared<std::vector<P>>(w);
       auto nw = std::make_shared<std::atomic<int>>(0);
       auto td = std::make_shared<std::atomic<uint64_t>>(0);
       auto h = nei::PostJob(
           FROM_HERE,
           nei::TaskTraits(),
-          [&, nw, w, O, td](nei::JobDelegate *d) {
+          [ctrs, nw, w, O, td](nei::JobDelegate *d) {
             int id = nw->fetch_add(1, std::memory_order_relaxed);
             if (id >= w)
               return;
-            auto &ct = ctrs[id].v;
+            auto &ct = (*ctrs)[id].v;
             // Batch ShouldYield() calls: the virtual dispatch + callback
             // overhead dominates the inner loop.  Check ShouldYield only
             // every 1024 iterations; between checks we just do the work.
@@ -189,7 +195,7 @@ int main() {
       h.Join();
       double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
       uint64_t tot = 0;
-      for (auto &c : ctrs)
+      for (const auto &c : *ctrs)
         tot += c.v.load();
       double r = s > 0 ? tot / s : 0;
       bases.push_back(r);
