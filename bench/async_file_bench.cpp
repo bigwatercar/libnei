@@ -18,13 +18,15 @@
 #include <thread>
 #include <vector>
 
+#include <neixx/common/at_exit.h>
 #include <neixx/common/location.h>
 #include <neixx/io/async_file.h>
 #include <neixx/io/io_buffer.h>
+#include <neixx/io/io_thread.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
+#include <neixx/task/thread_pool_instance.h>
 #include <neixx/threading/thread.h>
 #if __cplusplus >= 202002L
 namespace {
@@ -232,6 +234,12 @@ void PrintRow(const BenchEntry &e) {
 } // namespace
 
 int main() {
+  nei::AtExitManager at_exit;
+  nei::ThreadPoolInstance::CreateAndStart(nei::ThreadPoolInstance::InitParams{});
+  if (!nei::IOThread::Start()) {
+    std::cerr << "Failed to start shared IO thread.\n";
+    return 2;
+  }
 #if defined(_WIN32)
   const std::vector<std::size_t> kChunks = {
       4 * 1024, 16 * 1024, 64 * 1024, 256 * 1024, 1 * 1024 * 1024, 4 * 1024 * 1024};
@@ -255,15 +263,9 @@ int main() {
   const std::filesystem::path base = MakeTempPath();
   std::cout << "Temp file: " << PathToUTF8(base) << std::endl;
 
-  nei::Thread io{"async-bench-io"};
   nei::Thread bg{"async-bench-bg"};
-  {
-    nei::Thread::Options opts;
-    opts.message_pump_type = nei::MessagePumpType::IO;
-    io.StartWithOptions(opts);
-    bg.Start();
-  }
-  auto io_r = io.GetTaskRunner();
+  bg.Start();
+  auto io_r = nei::GetGlobalIOTaskRunner();
   auto bg_r = bg.GetTaskRunner();
 
   const std::vector<std::uint8_t> fill = MakeFill(1 * 1024 * 1024, 42);
