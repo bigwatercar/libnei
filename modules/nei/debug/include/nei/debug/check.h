@@ -2,9 +2,10 @@
 #ifndef NEI_DEBUG_CHECK_H
 #define NEI_DEBUG_CHECK_H
 
-#include <nei/log/log.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#include <nei/log/log.h>
 
 #if !defined(NEI_CHROMIUM_LIKE_CHECK)
 #define NEI_CHROMIUM_LIKE_CHECK 1
