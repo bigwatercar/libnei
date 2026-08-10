@@ -1,18 +1,21 @@
 #include "neixx/io/io_thread.h"
 
+#include <atomic>
 #include <memory>
 
 #include <nei/debug/check.h>
 #include <neixx/common/at_exit.h>
+#include <neixx/synchronization/lock.h>
 #include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/threading/thread.h>
 
 namespace nei {
 namespace {
 
-// ---- singleton state ----
-IOThread *g_io_thread = nullptr;
-bool g_shutdown_registered = false;
+// ---- singleton state (thread-safe) ----
+std::atomic<IOThread *> g_io_thread{nullptr};
+std::atomic<bool> g_shutdown_registered{false};
+Lock g_lock; // protects Start / Shutdown / ResetForTesting transitions
 
 } // namespace
 
@@ -61,43 +64,61 @@ IOThread::~IOThread() = default;
 
 // static
 bool IOThread::Start() {
-  if (g_io_thread) {
+  // Fast-path: singleton already exists (acquire load is enough — the pointer
+  // is never reset outside of ResetForTesting).
+  if (g_io_thread.load(std::memory_order_acquire) != nullptr) {
     return true;
   }
 
-  g_io_thread = new IOThread();
+  AutoLock lock(g_lock);
+  // Double-check under lock: another thread may have raced past the fast-path.
+  if (g_io_thread.load(std::memory_order_relaxed) != nullptr) {
+    return true;
+  }
 
-  if (!g_shutdown_registered) {
-    g_shutdown_registered = true;
-    // Register AFTER ThreadPoolInstance (LIFO: IO stops first, pool
-    // second).  If AtExitManager hasn't been constructed, the callback
-    // is a no-op — the caller must Shutdown() manually.
+  auto *instance = new IOThread();
+  g_io_thread.store(instance, std::memory_order_release);
+
+  // Register AtExit cleanup — once per process lifetime.
+  bool expected_reg = false;
+  if (g_shutdown_registered.compare_exchange_strong(
+          expected_reg, true, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+    // Register AFTER ThreadPoolInstance (LIFO: IO stops first, pool second).
+    // If AtExitManager hasn't been constructed, the callback is a no-op —
+    // the caller must Shutdown() manually.
     (void)AtExitManager::RegisterCallback([] { IOThread::Shutdown(); });
   }
 
-  return g_io_thread != nullptr;
+  return g_io_thread.load(std::memory_order_relaxed) != nullptr;
 }
 
 // static
 IOThread *IOThread::Get() {
-  return g_io_thread;
+  return g_io_thread.load(std::memory_order_acquire);
 }
 
 // static
 void IOThread::Shutdown() {
-  if (g_io_thread) {
-    g_io_thread->Stop();
+  IOThread *snapshot = nullptr;
+  {
+    AutoLock lock(g_lock);
+    snapshot = g_io_thread.load(std::memory_order_relaxed);
+  }
+  if (snapshot) {
+    snapshot->Stop();
   }
 }
 
 // static
 void IOThread::ResetForTesting() {
-  if (g_io_thread) {
-    g_io_thread->Stop();
-    delete g_io_thread;
-    g_io_thread = nullptr;
+  AutoLock lock(g_lock);
+  IOThread *snapshot = g_io_thread.load(std::memory_order_relaxed);
+  if (snapshot) {
+    snapshot->Stop();
+    delete snapshot;
+    g_io_thread.store(nullptr, std::memory_order_release);
   }
-  g_shutdown_registered = false;
+  g_shutdown_registered.store(false, std::memory_order_release);
 }
 
 scoped_refptr<SingleThreadTaskRunner> IOThread::task_runner() const {
