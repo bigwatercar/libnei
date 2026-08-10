@@ -7,11 +7,11 @@
 #include <functional>
 #include <memory>
 
+#include <nei/build/compiler_specific.h>
 #include <nei/build/nei_export.h>
 #include <neixx/io/async_stream.h>
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/ref_counted.h>
-#include <nei/build/compiler_specific.h>
 #include <neixx/task/task_runner.h>
 
 namespace nei {

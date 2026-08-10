@@ -2,9 +2,10 @@
 
 #include "pipe_stream_posix.h"
 
-#include <cerrno>
 #include <fcntl.h>
 #include <unistd.h>
+
+#include <cerrno>
 #include <utility>
 
 #include <nei/debug/check.h>

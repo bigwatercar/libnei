@@ -6,8 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <nei/build/nei_export.h>
 #include <nei/build/compiler_specific.h>
+#include <nei/build/nei_export.h>
 #include <neixx/io/async_stream.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/task/task_runner.h>

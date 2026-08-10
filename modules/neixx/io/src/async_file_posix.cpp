@@ -2,8 +2,8 @@
 
 #include <async_file_posix.h>
 
-#include <atomic>
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <memory>
@@ -17,14 +17,14 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <internal/async_file_error_code.h>
 #include <nei/debug/check.h>
 #include <neixx/common/location.h>
-#include <neixx/task/thread_checker.h>
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/task/task_runner.h>
+#include <neixx/task/thread_checker.h>
 #include <neixx/trace_event/trace_event.h>
-#include <internal/async_file_error_code.h>
 
 namespace nei {
 

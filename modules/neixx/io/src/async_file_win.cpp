@@ -1,14 +1,14 @@
 #if defined(_WIN32)
 
-#include <windows.h>
-
 #include <async_file_win.h>
 
+#include <windows.h>
+
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <deque>
-#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -16,16 +16,16 @@
 #include <utility>
 #include <vector>
 
+#include <internal/async_file_error_code.h>
 #include <nei/debug/check.h>
 #include <neixx/common/location.h>
-#include <neixx/task/thread_checker.h>
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/strings/utf_string_conversions.h>
 #include <neixx/task/message_loop/message_pump_io.h>
 #include <neixx/task/task_runner.h>
+#include <neixx/task/thread_checker.h>
 #include <neixx/trace_event/trace_event.h>
-#include <internal/async_file_error_code.h>
 
 namespace nei {
 
