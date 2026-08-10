@@ -110,38 +110,32 @@
 
 ---
 
-## Known Flaky Tests 🔧 2026-08-01
+## Known Flaky Tests 🔧 2026-08-10 (大部分已修复)
 
 时序/环境敏感导致的偶发失败，非逻辑 bug（TaskRunner 层级重构后的 8 象限验证分诊）。
 
 ### WSL (Linux GCC)
 
-| Test | Frequency | Root Cause |
-|------|-----------|------------|
-| `PipeStreamTest.PosixYieldQuotaPreventsStarvation` | ~30% | Timing-sensitive yield quota |
-| `ChildProcessTest.LaunchWithStdinPipeEchoesToStdout` | ~10% (Release only) | Pty/pipe teardown race |
-| `HostResolverTest.ResolveInvalidHost` | Always (WSL) | WSL 无 IPv6 / 外部 DNS |
-| `HostResolverTest.ResolveIPv6Only` | Always (WSL) | WSL 无 IPv6 连通 |
-| `HostResolverTest.CustomDnsServerIPv6Cloudflare` | Always (WSL) | WSL 无 IPv6 连通 |
-| `HostResolverTest.CustomDnsServerIPv6Google` | Always (WSL) | WSL 无 IPv6 连通 |
-| `HostResolverTest.CustomTimeout` | Always (WSL) | WSL DNS 超时行为差异 |
+| Test | Frequency | Root Cause | Status |
+|------|-----------|------------|:---:|
+| `PipeStreamTest.PosixYieldQuotaPreventsStarvation` | ~30% | 竞态：marker 在 read-done signal 前排队 | ✅ 已修复 |
+| `ChildProcessTest.LaunchWithStdinPipeEchoesToStdout` | ~10% (Release only) | Pty/pipe teardown race | ⚠️ 已知 |
+| `HostResolverTest.*` (7 tests) | Always (WSL) | WSL 无 IPv6 / 外网 DNS | ✅ 已跳过 |
 
 ### Windows (MSVC)
 
-| Test | Frequency | Root Cause |
-|------|-----------|------------|
-| `HostResolverTest.ResolveDualStack` | Always (no DNS) | 需功能性 DNS |
-| `HostResolverTest.ResolveIPv4Only` | Always (no DNS) | 需功能性 DNS |
+| Test | Frequency | Root Cause | Status |
+|------|-----------|------------|:---:|
+| `HostResolverTest.ResolveDualStack` | Always (no DNS) | 需外网 DNS | ✅ 已跳过 |
+| `HostResolverTest.ResolveIPv4Only` | Always (no DNS) | 需外网 DNS | ✅ 已跳过 |
 
 ### TSan 专项（RelWithDebInfo）
 
-| Test | 状态 | Root Cause |
-|------|------|-----------|
-| `SequenceManagerTest.MultiQueueBurstDoesNotStarveAnyQueue` | 慢速挂起（loadavg 0.00） | 时序敏感 + TSan 慢速丢唤醒，与 valgrind 下 SequenceManagerTest 死锁同源；全量 TSan 扫描需排除 |
-| `LogCTest.ConcurrentFirstUseInitializationStress` | TSan 失败 | 环境（TSan 慢速时序） |
-| `PipeStreamTest.PosixYieldQuotaPreventsStarvation` | TSan 失败 | 同上（也是 WSL ~30% flaky 那个） |
-| `TlsSocketTest.LargePayloadBioCompaction` | TSan 失败 | 环境（TSan 慢速时序） |
-| `ThreadPoolTest.DelayedTaskRunsWithoutImmediateKick` | 全量 ~1/18 偶发（单跑 50 轮全过） | 依赖全量进程上下文；pool({1}) 单 worker + 120ms 延迟任务。DelayedTaskManager wake_event_ 为 auto，heap 为状态源，静态未见确定性 bug |
+| Test | 状态 | Root Cause | Status |
+|------|------|-----------|:---:|
+| `LogCTest.ConcurrentFirstUseInitializationStress` | TSan 失败 | TSan 慢速时序 | ✅ 已跳过 |
+| `TlsSocketTest.LargePayloadBioCompaction` | TSan 失败 | TSan 慢速时序 | ✅ 已跳过 |
+| `ThreadPoolTest.DelayedTaskRunsWithoutImmediateKick` | 全量 ~1/18 偶发 | auto-reset wake_event 丢唤醒 | ✅ 已加固 |
 
 ### Notes
 
