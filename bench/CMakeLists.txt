@@ -61,6 +61,9 @@ target_link_libraries(task_priority_perf_demo PRIVATE nei::nei)
 add_executable(callback_bench callback_bench.cpp)
 target_link_libraries(callback_bench PRIVATE nei::nei)
 
+add_executable(small_object_alloc_bench small_object_alloc_bench.cpp)
+target_link_libraries(small_object_alloc_bench PRIVATE nei::nei)
+
 add_executable(async_file_bench async_file_bench.cpp)
 target_link_libraries(async_file_bench PRIVATE nei::nei)
 
