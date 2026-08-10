@@ -1,0 +1,21 @@
+# Helgrind suppressions for libnei — C++11 std::atomic / shared_ptr control-block
+# false positives.  Helgrind cannot track the happens-before edges of
+# std::atomic operations (C++ memory model) or shared_ptr refcount RMWs,
+# so it reports these as "Possible data race" when they are correctly
+# synchronized at the language level.  Each entry is manually confirmed.
+
+# SequenceManager teardown (worker thread ~MessagePumpForIO) vs
+# cross-thread PostTask callback (Stop/Join path).  The callback holds a
+# scoped_refptr<PumpWakeUp> that keeps pump alive via shared_ptr atomic
+# refcount; Helgrind cannot see that happens-before edge and reports the
+# control-block RMWs as a race.
+# Thread #2 stack: ~MessagePumpForIO -> ~SequenceManager -> ThreadMain -> ThreadEntry
+# Thread #1 stack: PushImmediateTask -> PostTask -> Thread::Stop -> TestBody
+{
+   <SequenceManager-pump-teardown-shared-ptr-ctrl-block>
+   helgrind:PossibleRace
+   fun:_ZN3nei16MessagePumpForIOD2Ev
+   fun:_ZN3nei8internal18SequencedTaskQueue4Impl17PushImmediateTaskE*
+   fun:_ZN3nei15SequenceManagerD2Ev
+   fun:_ZN3nei6Thread5StopE*
+}
