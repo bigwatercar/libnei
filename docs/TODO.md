@@ -72,9 +72,8 @@
   风格单测。可选：`CreateSequencedTaskRunnerForResource(path)` 按资源缓存 runner（Chromium 唯一按 key
   缓存 runner 的 API，命中 CHECK traits 一致）。
 
-- **TCPServerSocket_FDExhaustion** (POSIX, P2):
-  验证 EMFILE/ENFILE 生存不崩溃。阻塞于 IO pump 依赖 epoll FD；进程级 FD 耗尽会
-  饿死 pump。需 mock/epoll-free pump，或预配置一个 fd 让 `accept4` 失败而不耗尽系统 FD。
+- **TCPServerSocket_FDExhaustion** (POSIX, P2) ⏸️ 推迟:
+  场景难以可靠构造（需 mock/epoll-free pump 或预配置 fd），且生产影响极低。
 
 ### P3
 
