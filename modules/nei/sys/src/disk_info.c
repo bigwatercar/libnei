@@ -1,7 +1,5 @@
 #include <nei/sys/disk_info.h>
 
-#include <nei/core/encoding.h>
-
 #include <string.h>
 
 #ifdef _WIN32
@@ -9,6 +7,8 @@
 #else
 #include <sys/statvfs.h>
 #endif
+
+#include <nei/core/encoding.h>
 
 uint64_t nei_get_disk_total_space(const char *path) {
 #ifdef _WIN32

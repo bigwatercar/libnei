@@ -1,7 +1,5 @@
 #include <nei/sys/host_info.h>
 
-#include <nei/core/encoding.h>
-
 #include <stdlib.h>
 #include <string.h>
 
@@ -10,9 +8,11 @@
 #include <shlobj.h>
 #else
 #include <pwd.h>
-#include <unistd.h>
 #include <sys/types.h>
+#include <unistd.h>
 #endif
+
+#include <nei/core/encoding.h>
 
 int nei_get_hostname(char *buf, size_t size) {
   if (buf == NULL || size == 0) {

@@ -2,10 +2,10 @@
 #ifndef NEI_SYS_PROCESS_INFO_H
 #define NEI_SYS_PROCESS_INFO_H
 
-#include <nei/build/nei_export.h>
-
 #include <stddef.h>
 #include <stdint.h>
+
+#include <nei/build/nei_export.h>
 
 #ifdef __cplusplus
 extern "C" {

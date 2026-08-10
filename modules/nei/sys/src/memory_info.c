@@ -3,9 +3,9 @@
 #ifdef _WIN32
 #include <windows.h>
 #elif defined(__APPLE__)
+#include <mach/mach.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
-#include <mach/mach.h>
 #include <unistd.h>
 #else /* Linux / other Unix */
 #include <stdio.h>

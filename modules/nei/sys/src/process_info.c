@@ -1,7 +1,5 @@
 #include <nei/sys/process_info.h>
 
-#include <nei/core/encoding.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +18,8 @@
 #include <stdio.h>
 #include <unistd.h>
 #endif
+
+#include <nei/core/encoding.h>
 
 int64_t nei_get_pid(void) {
 #ifdef _WIN32

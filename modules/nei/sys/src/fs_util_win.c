@@ -1,7 +1,8 @@
 #include <nei/sys/fs_util.h>
-#include <nei/core/encoding.h>
 
 #include <windows.h>
+
+#include <nei/core/encoding.h>
 
 int nei_is_file_busy(const char *path) {
   HANDLE h;

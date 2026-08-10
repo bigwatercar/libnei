@@ -11,9 +11,9 @@
 
 #ifdef _WIN32
 
-#include <nei/build/nei_export.h>
-
 #include <stddef.h>
+
+#include <nei/build/nei_export.h>
 
 #ifdef __cplusplus
 extern "C" {

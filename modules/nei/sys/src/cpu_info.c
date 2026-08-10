@@ -6,10 +6,10 @@
 #include <sys/sysctl.h>
 #include <sys/types.h>
 #else /* Linux / other Unix */
-#include <sys/utsname.h>
-#include <unistd.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/utsname.h>
+#include <unistd.h>
 #endif
 #include <stdlib.h>
 

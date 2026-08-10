@@ -1,8 +1,9 @@
 #include <nei/sys/win/utils.h>
-#include <nei/core/encoding.h>
 
 #include <windows.h>
 #include <shlobj.h>
+
+#include <nei/core/encoding.h>
 
 int nei_win_resolve_shortcut(const char *lnk_path, char *buf, size_t size) {
   IShellLinkW *psl = NULL;
