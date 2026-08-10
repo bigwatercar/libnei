@@ -13,6 +13,7 @@
 #include <neixx/common/location.h>
 #include <neixx/io/async_stream.h>
 #include <neixx/io/io_buffer.h>
+#include <neixx/io/io_thread.h>
 #include <neixx/process/child_process.h>
 #include <neixx/process/process_service.h>
 #include <neixx/synchronization/waitable_event.h>
@@ -280,6 +281,10 @@ TEST(ChildProcessTest, LaunchMultipleProcessesWithSharedProcessService) {
   EXPECT_TRUE(second_listener.terminated.load(std::memory_order_acquire));
   EXPECT_EQ(second_listener.exit_state.load(std::memory_order_acquire), ProcessState::kExited);
   EXPECT_EQ(second_listener.exit_code.load(std::memory_order_acquire), 0);
+
+  // Reset the shared IOThread so repeated test runs (--gtest_repeat)
+  // get a clean pump state.
+  IOThread::ResetForTesting();
 }
 
 TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
@@ -673,7 +678,7 @@ TEST(ChildProcessTest, LaunchWithWorkingDirectory) {
   // Use %TEMP% instead of hardcoded C:\Windows.
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable: 4996)
+#pragma warning(disable : 4996)
 #endif
   const char *temp = getenv("TEMP");
 #ifdef _MSC_VER
