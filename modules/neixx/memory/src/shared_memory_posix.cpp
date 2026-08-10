@@ -2,13 +2,14 @@
 
 #include "shared_memory_posix.h"
 
-#include <cerrno>
-#include <cstdio>
-#include <cstring>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
 
 #include <nei/sys/os_info.h>
 

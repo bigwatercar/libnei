@@ -4,8 +4,6 @@
 
 #include <neixx/memory/memory_pressure_monitor.h>
 
-#include <nei/sys/memory_info.h>
-
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -19,6 +17,8 @@
 #else
 #include <cstdio>
 #endif
+
+#include <nei/sys/memory_info.h>
 
 namespace nei {
 namespace {

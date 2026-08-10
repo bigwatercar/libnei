@@ -2,10 +2,10 @@
 #ifndef NEIXX_MEMORY_MEMORY_PRESSURE_MONITOR_H_
 #define NEIXX_MEMORY_MEMORY_PRESSURE_MONITOR_H_
 
-#include <nei/build/nei_export.h>
-#include <nei/build/compiler_specific.h>
-
 #include <memory>
+
+#include <nei/build/compiler_specific.h>
+#include <nei/build/nei_export.h>
 
 namespace nei {
 
