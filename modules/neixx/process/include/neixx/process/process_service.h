@@ -6,10 +6,9 @@
 #include <memory>
 #include <string>
 
-#include <nei/build/nei_export.h>
 #include <nei/build/compiler_specific.h>
+#include <nei/build/nei_export.h>
 #include <neixx/memory/ref_counted.h>
-
 #include <neixx/task/task_runner.h>
 
 namespace nei {

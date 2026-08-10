@@ -4,11 +4,10 @@
 #define NEIXX_PROCESS_PROCESS_UTIL_H_
 
 #include <limits>
-
 #include <string>
 
-#include <nei/build/nei_export.h>
 #include <nei/build/compiler_specific.h>
+#include <nei/build/nei_export.h>
 #include <neixx/common/time.h>
 #include <neixx/process/child_process.h>
 
