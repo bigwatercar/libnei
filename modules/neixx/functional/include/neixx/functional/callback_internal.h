@@ -7,6 +7,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+
 #include <nei/build/compiler_specific.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/memory/small_object_allocator.h>

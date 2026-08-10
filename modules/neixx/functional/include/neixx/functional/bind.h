@@ -5,6 +5,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+
 #include <neixx/functional/callback.h>
 
 namespace nei {
