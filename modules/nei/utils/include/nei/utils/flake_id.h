@@ -2,8 +2,9 @@
 #ifndef NEI_UTILS_FLAKE_ID_H
 #define NEI_UTILS_FLAKE_ID_H
 
-#include <nei/build/nei_export.h>
 #include <stdint.h>
+
+#include <nei/build/nei_export.h>
 
 #ifdef __cplusplus
 extern "C" {

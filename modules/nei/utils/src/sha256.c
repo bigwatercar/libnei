@@ -1,9 +1,9 @@
 #include <nei/utils/sha256.h>
 
-#include <nei/core/file_util.h>
-
 #include <stdio.h>
 #include <string.h>
+
+#include <nei/core/file_util.h>
 
 #define NEI_SHA256_ROTR32(x, n) (((x) >> (n)) | ((x) << (32U - (n))))
 #define NEI_SHA256_CH(x, y, z) (((x) & (y)) ^ (~(x) & (z)))

@@ -1,8 +1,8 @@
 #include <nei/utils/crc32.h>
 
-#include <nei/core/file_util.h>
-
 #include <stdio.h>
+
+#include <nei/core/file_util.h>
 
 static const uint32_t nei_crc32_table[256] = {
     0x00000000U, 0x77073096U, 0xEE0E612CU, 0x990951BAU, 0x076DC419U, 0x706AF48FU, 0xE963A535U, 0x9E6495A3U, 0x0EDB8832U,

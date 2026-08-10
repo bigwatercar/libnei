@@ -1,9 +1,9 @@
 #include <nei/utils/md5.h>
 
-#include <nei/core/file_util.h>
-
 #include <stdio.h>
 #include <string.h>
+
+#include <nei/core/file_util.h>
 
 #define NEI_MD5_F(x, y, z) (((x) & (y)) | ((~(x)) & (z)))
 #define NEI_MD5_G(x, y, z) (((x) & (z)) | ((y) & (~(z))))

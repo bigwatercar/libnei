@@ -1,9 +1,9 @@
 #include <nei/utils/sha1.h>
 
-#include <nei/core/file_util.h>
-
 #include <stdio.h>
 #include <string.h>
+
+#include <nei/core/file_util.h>
 
 #define NEI_SHA1_ROTL32(x, n) (((x) << (n)) | ((x) >> (32U - (n))))
 

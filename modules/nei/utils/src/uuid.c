@@ -1,4 +1,5 @@
 #include <nei/utils/uuid.h>
+
 #include <nei/core/random.h>
 
 int nei_uuid4_generate(uint8_t out_uuid[NEI_UUID_BINARY_SIZE]) {
