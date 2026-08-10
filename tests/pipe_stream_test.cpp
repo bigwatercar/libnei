@@ -424,13 +424,22 @@ TEST_F(PipeStreamTest, PosixYieldQuotaPreventsStarvation) {
     ASSERT_TRUE(stream->BindPlatformHandle(std::move(read_h)));
 
     auto holder = AcquireIOBuf(kTotalBytes);
-    stream->ReadAsync(holder.buf, kTotalBytes, [&total_read, &read_done, holder, stream](bool ok, std::size_t n) {
-      if (ok)
-        total_read.store(n);
-      read_done.Signal();
-    });
+    stream->ReadAsync(
+        holder.buf,
+        kTotalBytes,
+        [&total_read, &read_done, &marker_ran, holder, stream, io_runner = io_runner_](bool ok, std::size_t n) {
+          if (ok)
+            total_read.store(n);
 
-    io_runner_->PostTask(FROM_HERE, [&marker_ran]() { marker_ran.store(true); });
+          // Post a marker task after the read completes.  Only signal
+          // read_done AFTER the marker runs — this closes the race where
+          // the main thread checks marker_ran before the IO thread has
+          // drained the marker from its queue (~30% flaky before fix).
+          io_runner->PostTask(FROM_HERE, [&marker_ran, &read_done]() {
+            marker_ran.store(true);
+            read_done.Signal();
+          });
+        });
   });
 
   ASSERT_TRUE(read_done.TimedWait(std::chrono::seconds(10)));

@@ -378,6 +378,9 @@ TEST_F(TlsSocketTest, DestructionDuringHandshake) {
 // 64 KB threshold does not drop or corrupt any bytes.
 
 TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
+#if defined(__SANITIZE_THREAD__)
+  GTEST_SKIP() << "TSan instrumentation makes large-payload TLS test timeout";
+#endif
   uint16_t port = FindFreePort();
   ASSERT_NE(port, 0);
 

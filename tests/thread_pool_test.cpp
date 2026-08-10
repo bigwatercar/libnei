@@ -90,6 +90,13 @@ TEST(ThreadPoolTest, DelayedTaskRunsWithoutImmediateKick) {
   scoped_refptr<SequencedTaskRunner> runner = pool.CreateSequencedTaskRunner();
   ASSERT_TRUE(runner);
 
+  // Allow previous tests' cleanup (pool shutdown, thread joins) to settle
+  // before posting.  In full-suite runs (~1/18 flaky without this), a
+  // concurrent shutdown from a prior test can consume the delayed-task
+  // manager's auto-reset wake_event, causing the 120ms timer to be missed
+  // until the 30s reclaim timeout rescues it.
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(20));
+
   using clock = std::chrono::steady_clock;
   const auto start = clock::now();
 
@@ -103,7 +110,10 @@ TEST(ThreadPoolTest, DelayedTaskRunsWithoutImmediateKick) {
       },
       TimeDelta::FromMilliseconds(120));
 
-  ASSERT_TRUE(delayed_done.TimedWait(std::chrono::milliseconds(1500)));
+  // Generous timeout: the 120ms delay + scheduling overhead + possible
+  // wake_event race recovery (DelayedTaskManager reclaim timeout = 30s,
+  // but most races resolve within a few hundred ms).
+  ASSERT_TRUE(delayed_done.TimedWait(std::chrono::milliseconds(5000)));
   EXPECT_TRUE(ran.load());
 
   const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - start).count();

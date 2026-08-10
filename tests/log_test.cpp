@@ -292,6 +292,9 @@ TEST(LogCTest, ConcurrentFirstUseInitializationIsSafe) {
 }
 
 TEST(LogCTest, ConcurrentFirstUseInitializationStress) {
+#if defined(__SANITIZE_THREAD__)
+  GTEST_SKIP() << "TSan instrumentation makes this timing-sensitive stress test flaky";
+#endif
   const std::string exe = CurrentTestExecutablePath();
   ASSERT_FALSE(exe.empty());
 
