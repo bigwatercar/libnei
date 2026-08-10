@@ -1,12 +1,13 @@
 #include <nei/core/path_util.h>
-#include <nei/core/encoding.h>
 
+#include <direct.h>
+#include <io.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <io.h>
-#include <windows.h>
-#include <direct.h>
 #include <wchar.h>
+#include <windows.h>
+
+#include <nei/core/encoding.h>
 
 int nei_path_exists(const char *path) {
   if (path == NULL)

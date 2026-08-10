@@ -6,10 +6,10 @@
  * UTF-8 file path utilities (cross-platform).
  */
 
-#include <nei/build/nei_export.h>
-
 #include <stdint.h>
 #include <stdio.h>
+
+#include <nei/build/nei_export.h>
 
 #ifdef __cplusplus
 extern "C" {

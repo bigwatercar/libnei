@@ -1,8 +1,8 @@
 #include "nei/core/endian.h"
 
-#include "endian_internal.h"
-
 #include <string.h>
+
+#include "endian_internal.h"
 
 int nei_is_little_endian(void) {
   const uint16_t x = 0x0001U;

@@ -1,9 +1,10 @@
 #include <nei/core/file_util.h>
-#include <nei/core/encoding.h>
 
 #include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include <nei/core/encoding.h>
 
 FILE *nei_fopen_utf8(const char *path, const char *mode) {
   return fopen(path, mode);

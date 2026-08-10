@@ -10,9 +10,9 @@
  * for interval measurement.
  */
 
-#include <nei/build/nei_export.h>
-
 #include <stdint.h>
+
+#include <nei/build/nei_export.h>
 
 #ifdef __cplusplus
 extern "C" {

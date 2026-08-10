@@ -2,8 +2,9 @@
 #ifndef NEI_CORE_ENDIAN_H
 #define NEI_CORE_ENDIAN_H
 
-#include <nei/build/nei_export.h>
 #include <stdint.h>
+
+#include <nei/build/nei_export.h>
 
 #ifdef __cplusplus
 extern "C" {

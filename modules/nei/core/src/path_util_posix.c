@@ -1,5 +1,4 @@
 #include <nei/core/path_util.h>
-#include <nei/core/encoding.h>
 
 #include <dirent.h>
 #include <errno.h>
@@ -8,6 +7,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include <nei/core/encoding.h>
 
 int nei_path_exists(const char *path) {
   if (path == NULL)
