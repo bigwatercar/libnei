@@ -100,7 +100,7 @@ static uint16_t FindFreePort() {
 #endif
 }
 
-void RunStressTest(int total_connections) {
+void RunStressTest(int total_connections, int num_io_workers) {
   const uint16_t port = FindFreePort();
   if (port == 0) {
     std::cerr << "ERROR: no free port" << std::endl;
@@ -109,8 +109,8 @@ void RunStressTest(int total_connections) {
 
   // Use multiple IO worker threads via Multi-Reactor so the accept
   // load is spread across workers and the listen backlog doesn't
-  // become the bottleneck.
-  const int kWorkers = 4;
+  // become the bottleneck.  Set to 1 for single-reactor baseline.
+  const int kWorkers = std::max(1, num_io_workers);
   std::vector<std::unique_ptr<IoThread>> workers;
   for (int i = 0; i < kWorkers; ++i) {
     workers.push_back(std::make_unique<IoThread>("stress-wkr-" + std::to_string(i)));
@@ -249,8 +249,14 @@ int main(int argc, char *argv[]) {
   if (total <= 0)
     total = 1000;
 
-  std::cout << "=== TCP Connection Stress ===" << std::endl;
-  RunStressTest(total);
+  int reactors = 4;
+  if (argc > 2)
+    reactors = std::atoi(argv[2]);
+  if (reactors <= 0)
+    reactors = 4;
+
+  std::cout << "=== TCP Connection Stress (reactors=" << reactors << ") ===" << std::endl;
+  RunStressTest(total, reactors);
 
   std::cout << std::endl;
   nei::ThreadPoolInstance::Shutdown();

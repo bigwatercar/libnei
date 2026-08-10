@@ -173,20 +173,16 @@
 
 ## 架构规划（memory 记录，未实施）
 
-- **IOContext 重构**（io_thread_refactor_next_phase）📐 2026-08-10 已评估，未实施：
-  - **原目标**：使 IOContext（`MessagePumpForIO`）成为 `Thread` 的调度引擎而非独立线程——作为阻塞等待器提供 `Run(Delegate*)` 入口（`DoWork()` / `DoDelayedWork(next_time)`），由外部线程驱动事件循环。关键约束：Thread 阻塞于 GetQueuedCompletionStatus/epoll_wait 时，外部 PostTask 需内核级唤醒立即唤醒 IOContext。
-  - **当前架构诊断（实证）**：① `Thread` 已封装「线程 + SequenceManager + pump(IO/DEFAULT)」，`pump->Run()` 阻塞在线程上且 `run_thread_id_` 绑定首个 Run 线程；② IO 组件（AsyncFile/PipeStream/net socket/FilePathWatcher）**均不建线程**，只接收外部 `io_runner`；③ 各调用方（bench/测试/示例/`ProcessService`）**各自创建 `MessagePumpType::IO` 的 `Thread`** → 每个 IO 场景一个专用 OS 线程（膨胀）。→ 差距不在 pump 本身（已是等待器接口），而在**缺少 Chromium 的「共享 IO 驱动线程」层**。
-  - **Chromium 参照**：分层可组合——`MessagePumpForIO`（纯等待器 + fd watch，不拥有线程）/ `SequenceManager`（Delegate 驱动）/ 线程宿主（`base::Thread` 或 pool worker 都用 SequenceManager）/ 共享 IO 线程（BrowserThread::IO）。Chromium **不把 IO 泵塞进 CPU 型 pool worker**（IO 等待阻塞 worker 会降低 CPU 吞吐）。
-  - **Proactor/Reactor 双模澄清（2026-08-10，实证）**：`MessagePumpForIO` 是**混合抽象**——**Windows 是 proactor**（`GetQueuedCompletionStatus`/`PostQueuedCompletionStatus`/`OVERLAPPED`/`OnIOCompleted`，socket 用 overlapped I/O，OS 完成通知），**POSIX 是 reactor**（`epoll_wait` + `EPOLLIN/EPOLLOUT` → `OnFileCanRead/WriteWithoutBlocking`，真正的 `read`/`write` 由调用方以非阻塞 I/O 在回调里完成）。与 Chromium 完全一致（同名类同样双模）。此前"多 reactor"为口语化叫法，正确术语是**「多事件循环实例（epoll reactor / IOCP proactor）」**。**对方案 D 的影响**：Windows（IOCP proactor）单实例高并发本可被多线程 `GetQueuedCompletionStatus` 共享（proactor 天生支持），单例瓶颈较弱；POSIX（epoll reactor）一个 loop = 一个派发线程、回调串行，**高 fd 翻动下单 epoll 必成 CPU 派发瓶颈** → 方案 D 的"有界多实例池"对 **POSIX 是刚需、对 Windows 是锦上添花**，尤其 POSIX 侧绝不能塌成单实例。
-  - **方案评估**：
-    - **A（❌ 已否决，2026-08-10）**：`IOThread::Get()` / `GetGlobalIOTaskRunner()` **单例**（一个 `Thread(IO)`）。
-      **否决理由（实证）**：① 生产代码 IO 线程占用极小——`grep MessagePumpType::IO` 全 `modules/` 仅 `ProcessService`（每实例 1 个）+ pump 类型分发；net 全部 socket 均接收注入 `io_runner`、**从不自建线程**，多 reactor 是调用方（bench）刻意做的；② 单例会把 tcp_rtt/cross/stress 的**多 reactor（4 worker + acceptor）塌缩为单 epoll/IOCP 串行调度**，高并发连接下成为瓶颈，IO bench 基线全塌；③ "线程膨胀"问题在**生产几乎不存在**，单例是解决不存在的问题却引入真实瓶颈。
-    - **B（❌ 已否决，2026-08-10）**：IO 泵并入线程池 worker。
-      **否决理由**：Chromium **不把 fd-watch IO 泵塞进 CPU 型 pool worker**——worker park 于 epoll/IOCP 则无法执行 CPU 任务，**CPU 吞吐塌陷**。CPU pool worker 与 IO 泵线程职责必须分离（Chromium 用 `ScopedBlockingCall` 补偿处理阻塞 IO，而非让 worker 跑事件泵）。与本库现状对齐：pool worker 已是离散任务执行循环 + `MayBlockTasksAllCompleteWithCompensation` 已验证。
-    - **C（D 的配套）**：清理 `MessagePumpForIO` 线程绑定语义（明确可任意线程驱动），可选「pump 一次/非阻塞」能力。
-    - **D（✅ 推荐，2026-08-10）**：**有界共享 IO reactor 池**。固定小规模 reactor 线程组 `N = min(4, hardware_concurrency)`，每线程跑 `MessagePumpForIO`；提供 `IOThreadPool::Get()` / `GetGlobalIOReactorRunner(selector)`（round-robin 分发）；组件从池中拿 runner，**不再各自创建 IO 线程**；热服务器路径经 `RunnerSelector` 跨 N 分发，**保留多 reactor 扩展能力**。收益：组件线程数 → 固定 N 上限；服务器多 reactor 能力保留；对齐 Chromium 分层（专用泵线程 ≠ CPU pool worker）。
-  - **落地步骤（方案 D）**：① 新增 `IOThreadPool`（有界 reactor 线程组 + `GetGlobalIOReactorRunner` round-robin + AtExit 清理，复用 `ThreadPoolInstance` 模式）；② bench/测试/示例/`ProcessService` 改用共享 reactor runner（**保留** hot server 路径显式多 reactor 能力）；③ 清理 pump 线程绑定语义（方案 C）；④ 双平台全量测试 + IO bench（async_file/pipe/tcp/tls/process）回归，确认 tcp_rtt/cross/stress 多 reactor 基线**不塌**。
-  - **主要风险（方案 D）**：固定 N 上限下高并发 fd 仍可能饱和（N 远小于当前 bench 的 4+N 时需按需扩容或允许调用方自建专用 reactor）；共享池 AtExit 清理顺序（按 ThreadPoolInstance 教训）；**诚实边界**：生产当前仅 `ProcessService` 1 个 IO 线程，方案 D 的价值是 **API 对齐 + 防未来组件各自建线程**，而非修复现有生产瓶颈。
+- **IOContext 重构**（io_thread_refactor_next_phase）📐 2026-08-10 评估完成，方向确定，未实施：
+  - **原目标**：使 IOContext（`MessagePumpForIO`）成为 `Thread` 的调度引擎而非独立线程——作为阻塞等待器提供 `Run(Delegate*)` 入口（`DoWork()` / `DoDelayedWork(next_time)`），由外部线程驱动事件循环。
+  - **当前架构诊断**：① `Thread` 已封装线程 + SequenceManager + pump；② IO 组件均不建线程，只接收 `io_runner`；③ 各调用方**各自创建 `MessagePumpType::IO` 的 `Thread`** → 每个 IO 场景一个专用线程。差距在**缺少「共享 IO 驱动线程」层**（Chromium `BrowserThread::IO` 等价物）。
+  - **Proactor/Reactor 双模澄清**：`MessagePumpForIO` 是混合抽象——**Windows proactor**（IOCP+OVERLAPPED）、**POSIX reactor**（epoll+非阻塞 I/O 回调）。与 Chromium 同名类一致。
+  - **方案回顾与实验证据**：
+    - **A（❌ IO 单例）**：生产代码 IO 线程极少；单例会塌缩 bench 的多 reactor 基线。
+    - **B（❌ 泵入 pool worker）**：Chromium 不把 IO 泵塞入 CPU worker。
+    - **D（❌ 有界多 reactor 池 round-robin，2026-08-10 实测否决）**：`tcp_conn_stress`（2000 conn Win）K=4 慢 2.2×、`tcp_rtt`（1000 conn echo）K=4 RTT 高 40%（WSL）/持平（Win）。**1000 连接下单 epoll/IOCP 足够高效，多 reactor 的线程调度/同步开销 > IO 派发收益，池化反有害。**
+    - **C（✅ 推荐方向）**：**共享命名 IO 线程 + 按需显式多实例工厂**——提供 `GetGlobalIOTaskRunner()`（一个命名 `Thread(IO)` 单例 + AtExit，对齐 Chromium `BrowserThread::IO`），覆盖缺省 IO 组件；调用方如需多 reactor（如 bench/server），**显式创建命名 IO 线程**（保留在调用侧控制，不自动池化）。benefits：解决组件各自建线程 + 不引入池化复杂度/回退风险。
+  - **落地步骤（方向 C）**：① 新增 `IOThread::Get()` / `GetGlobalIOTaskRunner()` 单例 + AtExit（复用 `ThreadPoolInstance` 模式）；② bench/测试/示例/`ProcessService` 改用共享 runner；③ 清理 pump 线程绑定语义；④ 双平台全量 + IO bench 回归。**诚实边界**：生产当前仅 `ProcessService` 1 个 IO 线程，方向 C 价值是 API 对齐 + 防未来膨胀。
 - **ThreadPool Pimpl 重构** ✅ 已实现（2026-08-09 核实 + `c1bb7db` 增量）：
   - roadmap 目标已全部落地：Pimpl 单例（`ThreadPool::Impl` + `ThreadPoolInstance`：Get/CreateAndStart/Shutdown/ResetForTesting + AtExit）、`CreateSequenced/SingleThread/ParallelTaskRunner` 工厂、queue 级保序（`Task.sequence_token` 经 runner FIFO 保证，token 传给 TaskObserver）、PooledTaskSource 注入式调度。
   - 本次增量：**ExecutionFence**（`ThreadPoolInstance::BeginFence/EndFence`，`c1bb7db`）——Chromium 对齐，fenced 时暂停派发新任务（运行中的完成），可嵌套，Shutdown 不挂起。3 个测试。限制：dedicated SingleThreadTaskRunner 不受 fence。

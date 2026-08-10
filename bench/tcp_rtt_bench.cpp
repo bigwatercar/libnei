@@ -106,7 +106,7 @@ static uint16_t FindFreePort() {
 const char kPing[4] = {'P', 'I', 'N', 'G'};
 const char kPong[4] = {'P', 'O', 'N', 'G'};
 
-void RunRttBench(int total_connections) {
+void RunRttBench(int total_connections, int num_io_workers) {
   const uint16_t port = FindFreePort();
   if (port == 0) {
     std::cerr << "ERROR: no free port" << std::endl;
@@ -114,7 +114,7 @@ void RunRttBench(int total_connections) {
   }
 
   // ---- Multi-Reactor workers ----
-  const int kWorkers = 4;
+  const int kWorkers = std::max(1, num_io_workers);
   std::vector<std::unique_ptr<IoThread>> workers;
   for (int i = 0; i < kWorkers; ++i) {
     workers.push_back(std::make_unique<IoThread>("rtt-wkr-" + std::to_string(i)));
@@ -351,8 +351,14 @@ int main(int argc, char *argv[]) {
   if (total <= 0)
     total = 1000;
 
-  std::cout << "=== TCP RTT Under Concurrency ===" << std::endl;
-  RunRttBench(total);
+  int reactors = 4;
+  if (argc > 2)
+    reactors = std::atoi(argv[2]);
+  if (reactors <= 0)
+    reactors = 4;
+
+  std::cout << "=== TCP RTT Under Concurrency (reactors=" << reactors << ") ===" << std::endl;
+  RunRttBench(total, reactors);
 
   std::cout << std::endl;
   nei::ThreadPoolInstance::Shutdown();
