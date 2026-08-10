@@ -1,10 +1,10 @@
 #include <neixx/strings/string_util.h>
-#include <neixx/strings/utf_string_conversions.h>
-
-#include "utf_string_conversions_fallback.h"
 
 #include <cstdarg>
 #include <cstdio>
+
+#include "utf_string_conversions_fallback.h"
+#include <neixx/strings/utf_string_conversions.h>
 
 namespace nei {
 namespace {

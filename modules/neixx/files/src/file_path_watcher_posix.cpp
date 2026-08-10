@@ -2,11 +2,12 @@
 
 #include "file_path_watcher_posix.h"
 
-#include <cerrno>
-#include <cstring>
 #include <dirent.h>
 #include <sys/inotify.h>
 #include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
 
 #include <nei/debug/check.h>
 #include <neixx/common/location.h>
