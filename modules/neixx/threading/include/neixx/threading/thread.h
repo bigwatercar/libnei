@@ -6,8 +6,8 @@
 #include <memory>
 #include <string>
 
-#include <nei/build/nei_export.h>
 #include <nei/build/compiler_specific.h>
+#include <nei/build/nei_export.h>
 #include <neixx/synchronization/lock.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/message_loop/message_pump_type.h>
