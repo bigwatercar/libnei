@@ -302,6 +302,7 @@ void JobTaskSource::OnWorkerExited() {
   DCHECK_GT(prev_assigned, 0);
   int prev_running = running_workers_.fetch_sub(1, std::memory_order_release);
   DCHECK_GT(prev_running, 0);
+  (void)prev_running; // Used only by DCHECK (elided in Release builds).
   if (prev_assigned == 1) {
     int pending = pending_concurrency_increases_.load(std::memory_order_acquire);
     if (pending <= 0) {

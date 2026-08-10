@@ -5,6 +5,7 @@
 
 #include <memory>
 
+#include <nei/build/compiler_specific.h>
 #include <nei/build/nei_export.h>
 #include <neixx/task/message_loop/message_pump.h>
 
@@ -33,7 +34,9 @@ public:
 
 private:
   class Impl;
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<Impl> impl_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 } // namespace nei

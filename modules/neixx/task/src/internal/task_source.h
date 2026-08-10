@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstddef>
 
+#include <nei/build/compiler_specific.h>
 #include <nei/build/nei_export.h>
 #include <neixx/common/time.h>
 #include <neixx/memory/ref_counted.h>
@@ -153,6 +154,7 @@ private:
   // currently processing this source (at most one worker at a time).
   // Atomic: WillRunTask (under the shard lock) and DidProcessTask (on the
   // worker thread) touch it concurrently.
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::atomic<bool> has_worker_{false};
 
   // For parallel sources: number of workers currently holding a slot.
@@ -161,6 +163,7 @@ private:
 
   // Shutdown flag for lock-free hot-path access.
   std::atomic<bool> shut_down_{false};
+  NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 
 } // namespace internal
