@@ -31,6 +31,7 @@ add_executable(
   async_line_reader_test.cpp
   stream_reader_writer_test.cpp
   io_buffer_test.cpp
+  io_thread_test.cpp
   base64_test.cpp
   buffer_stream_test.cpp
   cancelable_callback_test.cpp

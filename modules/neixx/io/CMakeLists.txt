@@ -5,6 +5,7 @@ set(NEIXX_IO_SOURCES
     include/neixx/io/buffer_stream.h
     include/neixx/io/file_stream_adapters.h
     include/neixx/io/io_buffer.h
+    include/neixx/io/io_thread.h
     include/neixx/io/pipe_stream.h
     include/neixx/io/stream_reader.h
     include/neixx/io/stream_writer.h
@@ -14,6 +15,7 @@ set(NEIXX_IO_SOURCES
     src/file_stream_adapters.cpp
     src/internal/async_file_error_code.h
     src/io_buffer.cpp
+    src/io_thread.cpp
     src/pipe_stream.cpp
     src/stream_reader.cpp
     src/stream_writer.cpp
