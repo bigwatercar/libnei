@@ -28,9 +28,9 @@
 #include <string>
 #include <vector>
 
+#include <nei/build/compiler_specific.h>
 #include <nei/build/nei_export.h>
 #include <neixx/common/singleton.h>
-#include <nei/build/compiler_specific.h>
 #include <neixx/common/time.h>
 
 namespace nei {
