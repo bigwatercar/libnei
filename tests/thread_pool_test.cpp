@@ -1041,9 +1041,8 @@ TEST(ThreadPoolTest, SingleThreadPostTasksWith500msInterval) {
   for (int i = 0; i < kTaskCount; ++i) {
     const auto t0 = std::chrono::steady_clock::now();
     runner->PostTask(FROM_HERE, [i, &executed, &latencies_us, &done, t0]() {
-      const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                               std::chrono::steady_clock::now() - t0)
-                               .count();
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
       latencies_us[i] = elapsed;
       if (executed.fetch_add(1) + 1 == kTaskCount) {
         done.Signal();
@@ -1057,8 +1056,7 @@ TEST(ThreadPoolTest, SingleThreadPostTasksWith500msInterval) {
 
   EXPECT_EQ(executed.load(), kTaskCount);
   for (int i = 0; i < kTaskCount; ++i) {
-    EXPECT_LT(latencies_us[i], 100'000)
-        << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
+    EXPECT_LT(latencies_us[i], 100'000) << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
   }
 }
 
@@ -1077,16 +1075,14 @@ TEST(ThreadPoolTest, SingleThreadPostWaitExecuteThenPostNext) {
   for (int i = 0; i < kTaskCount; ++i) {
     const auto t0 = std::chrono::steady_clock::now();
     runner->PostTask(FROM_HERE, [i, &executed, &latencies_us, &task_done, t0]() {
-      const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                               std::chrono::steady_clock::now() - t0)
-                               .count();
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
       latencies_us[i] = elapsed;
       executed.fetch_add(1);
       task_done.Signal();
     });
 
-    ASSERT_TRUE(task_done.TimedWait(std::chrono::seconds(5)))
-        << "task " << i << " did not finish in time";
+    ASSERT_TRUE(task_done.TimedWait(std::chrono::seconds(5))) << "task " << i << " did not finish in time";
 
     if (i < kTaskCount - 1) {
       PlatformThread::Sleep(TimeDelta::FromMilliseconds(200));
@@ -1097,8 +1093,7 @@ TEST(ThreadPoolTest, SingleThreadPostWaitExecuteThenPostNext) {
 
   EXPECT_EQ(executed.load(), kTaskCount);
   for (int i = 0; i < kTaskCount; ++i) {
-    EXPECT_LT(latencies_us[i], 100'000)
-        << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
+    EXPECT_LT(latencies_us[i], 100'000) << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
   }
 }
 
@@ -1117,9 +1112,8 @@ TEST(ThreadPoolTest, SequencedPostTasksWith500msInterval) {
   for (int i = 0; i < kTaskCount; ++i) {
     const auto t0 = std::chrono::steady_clock::now();
     runner->PostTask(FROM_HERE, [i, &executed, &latencies_us, &done, t0]() {
-      const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                               std::chrono::steady_clock::now() - t0)
-                               .count();
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
       latencies_us[i] = elapsed;
       if (executed.fetch_add(1) + 1 == kTaskCount) {
         done.Signal();
@@ -1133,8 +1127,7 @@ TEST(ThreadPoolTest, SequencedPostTasksWith500msInterval) {
 
   EXPECT_EQ(executed.load(), kTaskCount);
   for (int i = 0; i < kTaskCount; ++i) {
-    EXPECT_LT(latencies_us[i], 100'000)
-        << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
+    EXPECT_LT(latencies_us[i], 100'000) << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
   }
 }
 
@@ -1151,16 +1144,14 @@ TEST(ThreadPoolTest, SequencedPostWaitExecuteThenPostNext) {
   for (int i = 0; i < kTaskCount; ++i) {
     const auto t0 = std::chrono::steady_clock::now();
     runner->PostTask(FROM_HERE, [i, &executed, &latencies_us, &task_done, t0]() {
-      const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                               std::chrono::steady_clock::now() - t0)
-                               .count();
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
       latencies_us[i] = elapsed;
       executed.fetch_add(1);
       task_done.Signal();
     });
 
-    ASSERT_TRUE(task_done.TimedWait(std::chrono::seconds(5)))
-        << "task " << i << " did not finish in time";
+    ASSERT_TRUE(task_done.TimedWait(std::chrono::seconds(5))) << "task " << i << " did not finish in time";
 
     if (i < kTaskCount - 1) {
       PlatformThread::Sleep(TimeDelta::FromMilliseconds(200));
@@ -1171,8 +1162,7 @@ TEST(ThreadPoolTest, SequencedPostWaitExecuteThenPostNext) {
 
   EXPECT_EQ(executed.load(), kTaskCount);
   for (int i = 0; i < kTaskCount; ++i) {
-    EXPECT_LT(latencies_us[i], 100'000)
-        << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
+    EXPECT_LT(latencies_us[i], 100'000) << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
   }
 }
 
@@ -1191,9 +1181,8 @@ TEST(ThreadPoolTest, ParallelPostTasksWith500msInterval) {
   for (int i = 0; i < kTaskCount; ++i) {
     const auto t0 = std::chrono::steady_clock::now();
     runner->PostTask(FROM_HERE, [i, &executed, &latencies_us, &done, t0]() {
-      const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                               std::chrono::steady_clock::now() - t0)
-                               .count();
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
       latencies_us[i] = elapsed;
       if (executed.fetch_add(1) + 1 == kTaskCount) {
         done.Signal();
@@ -1207,8 +1196,7 @@ TEST(ThreadPoolTest, ParallelPostTasksWith500msInterval) {
 
   EXPECT_EQ(executed.load(), kTaskCount);
   for (int i = 0; i < kTaskCount; ++i) {
-    EXPECT_LT(latencies_us[i], 100'000)
-        << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
+    EXPECT_LT(latencies_us[i], 100'000) << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
   }
 }
 
@@ -1225,16 +1213,14 @@ TEST(ThreadPoolTest, ParallelPostWaitExecuteThenPostNext) {
   for (int i = 0; i < kTaskCount; ++i) {
     const auto t0 = std::chrono::steady_clock::now();
     runner->PostTask(FROM_HERE, [i, &executed, &latencies_us, &task_done, t0]() {
-      const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                               std::chrono::steady_clock::now() - t0)
-                               .count();
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
       latencies_us[i] = elapsed;
       executed.fetch_add(1);
       task_done.Signal();
     });
 
-    ASSERT_TRUE(task_done.TimedWait(std::chrono::seconds(5)))
-        << "task " << i << " did not finish in time";
+    ASSERT_TRUE(task_done.TimedWait(std::chrono::seconds(5))) << "task " << i << " did not finish in time";
 
     if (i < kTaskCount - 1) {
       PlatformThread::Sleep(TimeDelta::FromMilliseconds(200));
@@ -1245,9 +1231,143 @@ TEST(ThreadPoolTest, ParallelPostWaitExecuteThenPostNext) {
 
   EXPECT_EQ(executed.load(), kTaskCount);
   for (int i = 0; i < kTaskCount; ++i) {
-    EXPECT_LT(latencies_us[i], 100'000)
-        << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
+    EXPECT_LT(latencies_us[i], 100'000) << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
   }
+}
+
+// =============================================================================
+// SingleThreadTaskRunner SHARED mode tests
+// =============================================================================
+
+// SHARED-mode runners with the same shutdown behavior share a worker thread.
+TEST(ThreadPoolTest, SharedSingleThreadTwoRunnersShareSameThread) {
+  ThreadPool pool(ThreadPool::InitParams{});
+  auto r1 = pool.CreateSingleThreadTaskRunner(TaskTraits(), SingleThreadTaskRunnerThreadMode::SHARED);
+  auto r2 = pool.CreateSingleThreadTaskRunner(TaskTraits(), SingleThreadTaskRunnerThreadMode::SHARED);
+  ASSERT_TRUE(r1);
+  ASSERT_TRUE(r2);
+
+  std::atomic<int> count{0};
+  std::atomic<PlatformThread::PlatformThreadId> tid1{0};
+  std::atomic<PlatformThread::PlatformThreadId> tid2{0};
+  WaitableEvent done(WaitableEvent::ResetPolicy::kManual, false);
+
+  r1->PostTask(FROM_HERE, [&]() {
+    tid1.store(PlatformThread::CurrentId(), std::memory_order_release);
+    if (++count == 2)
+      done.Signal();
+  });
+  r2->PostTask(FROM_HERE, [&]() {
+    tid2.store(PlatformThread::CurrentId(), std::memory_order_release);
+    if (++count == 2)
+      done.Signal();
+  });
+
+  done.Wait();
+  pool.Shutdown();
+
+  EXPECT_NE(tid1.load(), 0);
+  EXPECT_NE(tid2.load(), 0);
+  // Both tasks MUST execute on the same thread (shared worker).
+  EXPECT_EQ(tid1.load(), tid2.load());
+}
+
+// DEDICATED runners each get their own thread — two runners = two different threads.
+TEST(ThreadPoolTest, DedicatedSingleThreadTwoRunnersHaveDifferentThreads) {
+  ThreadPool pool(ThreadPool::InitParams{});
+  auto r1 = pool.CreateSingleThreadTaskRunner(TaskTraits(), SingleThreadTaskRunnerThreadMode::DEDICATED);
+  auto r2 = pool.CreateSingleThreadTaskRunner(TaskTraits(), SingleThreadTaskRunnerThreadMode::DEDICATED);
+  ASSERT_TRUE(r1);
+  ASSERT_TRUE(r2);
+
+  std::atomic<int> count{0};
+  std::atomic<PlatformThread::PlatformThreadId> tid1{0};
+  std::atomic<PlatformThread::PlatformThreadId> tid2{0};
+  WaitableEvent done(WaitableEvent::ResetPolicy::kManual, false);
+
+  r1->PostTask(FROM_HERE, [&]() {
+    tid1.store(PlatformThread::CurrentId(), std::memory_order_release);
+    if (++count == 2)
+      done.Signal();
+  });
+  r2->PostTask(FROM_HERE, [&]() {
+    tid2.store(PlatformThread::CurrentId(), std::memory_order_release);
+    if (++count == 2)
+      done.Signal();
+  });
+
+  done.Wait();
+  pool.Shutdown();
+
+  EXPECT_NE(tid1.load(), 0);
+  EXPECT_NE(tid2.load(), 0);
+  // Dedicated runners use different workers → different threads.
+  EXPECT_NE(tid1.load(), tid2.load());
+}
+
+// SHARED-mode runners with different shutdown behaviors get different workers.
+TEST(ThreadPoolTest, SharedSingleThreadDifferentKeysDifferentWorkers) {
+  ThreadPool pool(ThreadPool::InitParams{});
+  auto r1 =
+      pool.CreateSingleThreadTaskRunner(TaskTraits(ContinueOnShutdown()), SingleThreadTaskRunnerThreadMode::SHARED);
+  auto r2 = pool.CreateSingleThreadTaskRunner(TaskTraits(BlockShutdown()), SingleThreadTaskRunnerThreadMode::SHARED);
+  ASSERT_TRUE(r1);
+  ASSERT_TRUE(r2);
+
+  std::atomic<int> count{0};
+  std::atomic<PlatformThread::PlatformThreadId> tid1{0};
+  std::atomic<PlatformThread::PlatformThreadId> tid2{0};
+  WaitableEvent done(WaitableEvent::ResetPolicy::kManual, false);
+
+  r1->PostTask(FROM_HERE, [&]() {
+    tid1.store(PlatformThread::CurrentId(), std::memory_order_release);
+    if (++count == 2)
+      done.Signal();
+  });
+  r2->PostTask(FROM_HERE, [&]() {
+    tid2.store(PlatformThread::CurrentId(), std::memory_order_release);
+    if (++count == 2)
+      done.Signal();
+  });
+
+  done.Wait();
+  pool.Shutdown();
+
+  EXPECT_NE(tid1.load(), 0);
+  EXPECT_NE(tid2.load(), 0);
+  // Different shutdown behaviors → different shared workers → different threads.
+  EXPECT_NE(tid1.load(), tid2.load());
+}
+
+// SHARED workers do not count against max_num_workers — creating many does
+// not block or fail.
+TEST(ThreadPoolTest, SharedSingleThreadManyRunnersDoNotExhaustWorkerLimit) {
+  ThreadPool::InitParams params;
+  params.max_num_workers = 2; // Tiny pool
+  ThreadPool pool(params);
+
+  constexpr int kRunners = 20;
+  std::vector<scoped_refptr<SingleThreadTaskRunner>> runners;
+  for (int i = 0; i < kRunners; ++i) {
+    auto r = pool.CreateSingleThreadTaskRunner(TaskTraits(), SingleThreadTaskRunnerThreadMode::SHARED);
+    ASSERT_TRUE(r) << "Failed to create SHARED runner " << i;
+    runners.push_back(std::move(r));
+  }
+
+  // Post one task per runner; all should complete without deadlock or error.
+  std::atomic<int> completed{0};
+  WaitableEvent all_done(WaitableEvent::ResetPolicy::kManual, false);
+  for (int i = 0; i < kRunners; ++i) {
+    runners[i]->PostTask(FROM_HERE, [&]() {
+      if (++completed == kRunners)
+        all_done.Signal();
+    });
+  }
+  all_done.Wait();
+  EXPECT_EQ(completed.load(), kRunners);
+
+  pool.Shutdown();
+  // All runners destroyed after Shutdown — workers should exit cleanly.
 }
 
 } // namespace

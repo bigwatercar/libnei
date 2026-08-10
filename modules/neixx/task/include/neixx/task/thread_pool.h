@@ -62,7 +62,22 @@ public:
   /// NOTE: Dedicated workers count against the pool's max_num_workers
   /// ceiling.  Creating many SingleThreadTaskRunners on a small pool
   /// may saturate the worker limit and cause priority inversion.
+  /// For many runners, use the SHARED mode overload to share a worker
+  /// thread across multiple runners with the same traits key.
   scoped_refptr<SingleThreadTaskRunner> CreateSingleThreadTaskRunner(const TaskTraits &traits = TaskTraits());
+
+  /// Creates a SingleThreadTaskRunner with the given thread mode.
+  ///
+  /// DEDICATED (default): same as the single-argument overload above.
+  ///
+  /// SHARED: multiple runners with the same (environment_index,
+  /// shutdown_behavior) key share a single worker thread.  Tasks from
+  /// different shared runners interleave on that thread, but each
+  /// runner's own tasks are strictly FIFO.  Shared workers do NOT
+  /// count against max_num_workers, so creating many SHARED runners
+  /// does not saturate the worker ceiling.
+  scoped_refptr<SingleThreadTaskRunner> CreateSingleThreadTaskRunner(const TaskTraits &traits,
+                                                                     SingleThreadTaskRunnerThreadMode mode);
 
   /// Creates a TaskRunner whose tasks may run in parallel on different
   /// worker threads.  Unlike sequenced runners, there is no guarantee of

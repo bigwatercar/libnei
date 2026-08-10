@@ -25,6 +25,25 @@ enum class TaskShutdownBehavior {
   BLOCK_SHUTDOWN,
 };
 
+// Chromium-aligned: controls whether a SingleThreadTaskRunner gets its own
+// exclusive worker thread (DEDICATED) or shares a thread with other
+// SingleThreadTaskRunners created with the same traits key (SHARED).
+//
+// DEDICATED — current / default.  Each runner owns a dedicated worker;
+//   all tasks on that runner execute on the same physical thread.
+//   Workers count against max_num_workers.
+//
+// SHARED — workers are grouped by (environment_index, shutdown_behavior).
+//   Runners with the same key share one worker thread; tasks from
+//   different runners interleave on that thread, but each runner's
+//   tasks remain FIFO.  Shared workers do not count against
+//   max_num_workers.  Creating many SHARED runners no longer saturates
+//   the worker limit.
+enum class SingleThreadTaskRunnerThreadMode {
+  DEDICATED,
+  SHARED,
+};
+
 struct TaskShutdownBehaviorTag final {
   TaskShutdownBehavior behavior;
 };

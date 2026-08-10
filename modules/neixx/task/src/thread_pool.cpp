@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdio>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <thread>
@@ -70,21 +71,25 @@ ThreadType ThreadTypeFromTaskPriority(TaskPriority priority) {
   return ThreadType::DEFAULT;
 }
 
-class WorkerThread final : public PlatformThread::Delegate {
+// =============================================================================
+// PoolWorkerBase — shared infrastructure for all pool worker thread types.
+// Owns the OS thread handle and provides priority management, blocking
+// callbacks, and observer hooks.  Subclasses implement ThreadMain() with
+// their specific scheduling policy (dedicated, shared, parallel, etc.).
+// =============================================================================
+class PoolWorkerBase : public PlatformThread::Delegate {
 public:
   using BlockingCb = std::function<void()>;
 
-  WorkerThread(internal::PooledTaskSource *source,
-               internal::DelayedTaskManager *delayed_task_manager,
-               std::atomic<TaskObserver *> *task_observer,
-               internal::TaskTracker *tracker,
-               BlockingCb on_blocking_begin,
-               BlockingCb on_blocking_end,
-               ThreadType baseline_thread_type,
-               TimeDelta reclaim_time,
-               const std::string &name,
-               std::atomic<int> *execution_fence_count,
-               WaitableEvent *fence_release_event)
+  PoolWorkerBase(internal::PooledTaskSource *source,
+                 internal::DelayedTaskManager *delayed_task_manager,
+                 std::atomic<TaskObserver *> *task_observer,
+                 internal::TaskTracker *tracker,
+                 BlockingCb on_blocking_begin,
+                 BlockingCb on_blocking_end,
+                 ThreadType baseline_thread_type,
+                 TimeDelta reclaim_time,
+                 const std::string &name)
       : source_(source)
       , delayed_task_manager_(delayed_task_manager)
       , task_observer_(task_observer)
@@ -94,16 +99,12 @@ public:
       , baseline_thread_type_(baseline_thread_type)
       , reclaim_time_(reclaim_time)
       , current_thread_type_(baseline_thread_type)
-      , name_(name)
-      , execution_fence_count_(execution_fence_count)
-      , fence_release_event_(fence_release_event) {
+      , name_(name) {
   }
 
-  ~WorkerThread() override = default;
+  ~PoolWorkerBase() override = default;
 
   bool Start() {
-    // Spawn the OS thread already at the configured baseline priority so that
-    // even the idle-wait period runs at the correct scheduling weight.
     return PlatformThread::CreateWithType(0, this, &handle_, baseline_thread_type_);
   }
 
@@ -111,20 +112,7 @@ public:
     (void)PlatformThread::Join(&handle_);
   }
 
-  bool TryJoin(TimeDelta timeout) {
-    if (!timeout.is_positive()) {
-      Join();
-      return true;
-    }
-    const auto ms = std::chrono::milliseconds(timeout.InMilliseconds());
-    if (!exit_event_.TimedWait(ms)) {
-      return false;
-    }
-    Join();
-    return true;
-  }
-
-private:
+protected:
   void InstallBlockingCallback() {
     internal::SetCurrentBlockingCallback([this](bool began) {
       if (began && on_blocking_begin_) {
@@ -157,6 +145,65 @@ private:
     }
   }
 
+  internal::PooledTaskSource *source_ = nullptr;
+  internal::DelayedTaskManager *delayed_task_manager_ = nullptr;
+  std::atomic<TaskObserver *> *task_observer_ = nullptr;
+  BlockingCb on_blocking_begin_;
+  BlockingCb on_blocking_end_;
+  internal::TaskTracker *tracker_ = nullptr;
+
+  /// Pool-configured OS scheduling baseline restored after each task.
+  const ThreadType baseline_thread_type_;
+  /// 0 = never reclaim; positive = self-terminate after this idle duration.
+  const TimeDelta reclaim_time_;
+  /// Current OS priority of this thread, updated by Apply/Restore.
+  /// Only accessed from this thread's ThreadMain() - no synchronisation needed.
+  ThreadType current_thread_type_;
+
+  std::string name_;
+  PlatformThread::Handle handle_;
+};
+
+class WorkerThread final : public PoolWorkerBase {
+public:
+  WorkerThread(internal::PooledTaskSource *source,
+               internal::DelayedTaskManager *delayed_task_manager,
+               std::atomic<TaskObserver *> *task_observer,
+               internal::TaskTracker *tracker,
+               PoolWorkerBase::BlockingCb on_blocking_begin,
+               PoolWorkerBase::BlockingCb on_blocking_end,
+               ThreadType baseline_thread_type,
+               TimeDelta reclaim_time,
+               const std::string &name,
+               std::atomic<int> *execution_fence_count,
+               WaitableEvent *fence_release_event)
+      : PoolWorkerBase(source,
+                       delayed_task_manager,
+                       task_observer,
+                       tracker,
+                       std::move(on_blocking_begin),
+                       std::move(on_blocking_end),
+                       baseline_thread_type,
+                       reclaim_time,
+                       name)
+      , execution_fence_count_(execution_fence_count)
+      , fence_release_event_(fence_release_event) {
+  }
+
+  bool TryJoin(TimeDelta timeout) {
+    if (!timeout.is_positive()) {
+      Join();
+      return true;
+    }
+    const auto ms = std::chrono::milliseconds(timeout.InMilliseconds());
+    if (!exit_event_.TimedWait(ms)) {
+      return false;
+    }
+    Join();
+    return true;
+  }
+
+private:
   // Adapts the per-queue turn budget based on dequeue saturation:
   // - Full batch => queue is likely still hot, grow budget.
   // - Very sparse batch => queue likely cooling down, shrink budget.
@@ -563,20 +610,8 @@ private:
     }
   }
 
-  internal::PooledTaskSource *source_ = nullptr;
-  internal::DelayedTaskManager *delayed_task_manager_ = nullptr;
-  std::atomic<TaskObserver *> *task_observer_ = nullptr;
-  BlockingCb on_blocking_begin_;
-  BlockingCb on_blocking_end_;
-  internal::TaskTracker *tracker_ = nullptr;
+  // ---- WorkerThread-specific members (common members are in PoolWorkerBase) ----
 
-  /// Pool-configured OS scheduling baseline restored after each task.
-  const ThreadType baseline_thread_type_;
-  /// 0 = never reclaim; positive = self-terminate after this idle duration.
-  const TimeDelta reclaim_time_;
-  /// Current OS priority of this thread, updated by Apply/Restore.
-  /// Only accessed from this thread's ThreadMain() - no synchronisation needed.
-  ThreadType current_thread_type_;
   /// Adaptive per-queue processing budget for this worker thread.
   std::size_t dynamic_turn_budget_ = kTaskBatchSize;
   std::size_t consecutive_saturated_batches_ = 0;
@@ -585,28 +620,153 @@ private:
   std::size_t consecutive_parallel_saturated_batches_ = 0;
 
   // ---- Per-worker local WorkQueue (Phase 2.2) ----
-  //
-  // Reduces contention on PooledTaskSource's global shard heap by caching
-  // recently-posted TaskQueues locally.  When a task running on this worker
-  // posts another task, ReEnqueueTaskQueue() routes it here (via TLS) instead
-  // of the global heap.  ThreadMain drains the local queue before falling
-  // back to the global heap.
-  //
-  // The TLS slot (internal::tls_local_work_queue) points to this member.
-  // ReEnqueueTaskQueue() writes into it; ThreadMain drains from it.
   mutable Lock local_queue_lock_;
   std::deque<internal::PooledTaskQueue *> local_work_queue_;
 
-  std::string name_;
-  PlatformThread::Handle handle_;
   WaitableEvent exit_event_{WaitableEvent::ResetPolicy::kManual, false};
 
   // Execution fence (Chromium ThreadPoolInstance::BeginFence/EndFence).
-  // Shared with ThreadPool::Impl; when non-null and > 0 the worker must not
-  // dispatch NEW work.  fence_release_event_ (Manual) is signalled by
-  // EndFence() or Shutdown() to wake blocked workers.
   std::atomic<int> *execution_fence_count_ = nullptr;
   WaitableEvent *fence_release_event_ = nullptr;
+};
+
+// =============================================================================
+// SharedWorker — groups SHARED-mode SingleThreadTaskRunner queues onto one
+// OS thread.  Defined here (not nested in Impl) so that SharedWorkerThread
+// can reference it before Impl is fully defined.
+// =============================================================================
+struct SharedWorker {
+  std::vector<internal::PooledTaskQueue *> queues; // Guarded by Impl::lock_.
+  WaitableEvent wake_event{WaitableEvent::ResetPolicy::kAutomatic, false};
+  std::atomic<bool> should_stop{false};
+};
+
+// =============================================================================
+// SharedWorkerThread — processes multiple SHARED SingleThreadTaskRunner queues
+// on a single OS thread, round-robin.
+// =============================================================================
+class SharedWorkerThread final : public PoolWorkerBase {
+public:
+  SharedWorkerThread(internal::PooledTaskSource *source,
+                     internal::DelayedTaskManager *delayed_task_manager,
+                     std::atomic<TaskObserver *> *task_observer,
+                     internal::TaskTracker *tracker,
+                     PoolWorkerBase::BlockingCb on_blocking_begin,
+                     PoolWorkerBase::BlockingCb on_blocking_end,
+                     ThreadType baseline_thread_type,
+                     TimeDelta reclaim_time,
+                     const std::string &name,
+                     SharedWorker *shared)
+      : PoolWorkerBase(source,
+                       delayed_task_manager,
+                       task_observer,
+                       tracker,
+                       std::move(on_blocking_begin),
+                       std::move(on_blocking_end),
+                       baseline_thread_type,
+                       reclaim_time,
+                       name)
+      , shared_(shared) {
+  }
+
+private:
+  // Shared-worker variant of ProcessTaskBatch.  Processes a batch of tasks
+  // from |queue|, applying priority and observer hooks per task.
+  void ProcessTaskBatch(internal::PooledTaskQueue *queue) {
+    std::array<internal::Task, kTaskBatchSize> batch;
+    const std::size_t taken = queue->TakeImmediateTasks(batch.data(), kTaskBatchSize);
+
+    for (std::size_t i = 0; i < taken; ++i) {
+      internal::Task &task = batch[i];
+
+      if (tracker_->WillRunTask(task.traits.shutdown_behavior())) {
+        const TimeDelta queue_delay = task.enqueue_time.is_null() ? TimeDelta() : TimeTicks::Now() - task.enqueue_time;
+        ApplyTaskPriority(task.traits.priority());
+        internal::RecordTaskExecutionStarted(task);
+        TaskObserver *observer = task_observer_->load(std::memory_order_acquire);
+        if (observer) {
+          const ObservedTask observed{task.posted_from,
+                                      task.enqueue_time,
+                                      task.delayed_run_time,
+                                      task.sequence_num,
+                                      task.sequence_token,
+                                      task.traits};
+          observer->OnTaskStarted(observed, queue_delay);
+        }
+        const TimeTicks run_start = TimeTicks::Now();
+        std::move(task.task).Run();
+        const TimeDelta run_duration = TimeTicks::Now() - run_start;
+        internal::RecordTaskExecutionCompleted();
+        if (observer) {
+          const ObservedTask observed{task.posted_from,
+                                      task.enqueue_time,
+                                      task.delayed_run_time,
+                                      task.sequence_num,
+                                      task.sequence_token,
+                                      task.traits};
+          observer->OnTaskCompleted(observed, run_duration);
+        }
+        RestoreBaseline();
+        tracker_->DidProcessTask(task.traits.shutdown_behavior());
+        internal::SetCurrentPooledTaskQueue(nullptr);
+      }
+    }
+
+    (void)queue->DidProcessTask();
+  }
+
+  void ThreadMain() override {
+    TRACE_EVENT_BEGIN("nei.scheduling", "SharedWorkerThread");
+
+    if (!name_.empty()) {
+      PlatformThread::SetCurrentThreadName(name_);
+    }
+
+    PlatformThread::SetCurrentThreadType(baseline_thread_type_);
+    current_thread_type_ = baseline_thread_type_;
+    InstallBlockingCallback();
+
+    for (;;) {
+      bool did_work = false;
+
+      // Round-robin through all assigned queues looking for work.
+      for (internal::PooledTaskQueue *queue : shared_->queues) {
+        if (queue->is_shutdown()) {
+          continue;
+        }
+
+        if (!queue->HasImmediateWork()) {
+          continue;
+        }
+
+        if (source_->AssignDedicatedWorker(queue)) {
+          internal::SetCurrentPooledTaskQueue(queue);
+          ProcessTaskBatch(queue);
+          internal::SetCurrentPooledTaskQueue(nullptr);
+
+          source_->ReleaseDedicatedQueue(queue);
+          if (delayed_task_manager_ != nullptr) {
+            delayed_task_manager_->OnQueueUpdated(queue);
+          }
+          did_work = true;
+        }
+      }
+
+      if (shared_->should_stop.load(std::memory_order_acquire)) {
+        break;
+      }
+
+      if (!did_work) {
+        // No queue had work — wait for a wake-up from a new task post.
+        shared_->wake_event.TimedWait(std::chrono::milliseconds(reclaim_time_.InMilliseconds()));
+      }
+    }
+
+    TRACE_EVENT_END("nei.scheduling", "SharedWorkerThread");
+  }
+
+  // ---- SharedWorkerThread-specific members ----
+  SharedWorker *shared_;
 };
 
 } // namespace
@@ -831,6 +991,75 @@ public:
     return SingleThreadTaskRunner::CreateForThreadPool(raw_queue, traits);
   }
 
+  /// SHARED-mode variant: queues with the same (environment_index,
+  /// shutdown_behavior) key share a single worker thread.
+  scoped_refptr<SingleThreadTaskRunner> CreateSingleThreadTaskRunner(const TaskTraits &traits,
+                                                                     SingleThreadTaskRunnerThreadMode mode) {
+    if (mode == SingleThreadTaskRunnerThreadMode::DEDICATED) {
+      return CreateSingleThreadTaskRunner(traits);
+    }
+
+    // ---- SHARED mode ----
+    if (!tracker_.WillPostTask(traits.shutdown_behavior())) {
+      return nullptr;
+    }
+    AutoLock lock(lock_);
+
+    // Key workers by shutdown_behavior so that runners with the same
+    // lifecycle requirements share a thread.  (environment_index grouping
+    // can be added later when TaskTraits supports it.)
+    auto key = static_cast<int>(traits.shutdown_behavior());
+
+    std::shared_ptr<SharedWorker> &sw = shared_workers_[key];
+    if (!sw) {
+      sw = std::make_shared<SharedWorker>();
+    }
+
+    std::unique_ptr<internal::PooledTaskQueue> queue = std::make_unique<internal::PooledTaskQueue>(traits);
+    internal::PooledTaskQueue *raw_queue = queue.get();
+
+    // Mark as dedicated so PooledTaskSource single-thread guards (has_worker_,
+    // dedicated_owner) still apply — each queue can only be processed by one
+    // worker at a time, and the shared worker becomes its owner.
+    raw_queue->set_dedicated(true);
+
+    task_source_.RegisterTaskQueue(raw_queue);
+    delayed_task_manager_.AddQueue(raw_queue);
+
+    sw->queues.push_back(raw_queue);
+
+    // When a task is posted to this queue, wake the shared worker.
+    raw_queue->SetOnTaskPostedCallback([sw]() { sw->wake_event.Signal(); });
+
+    raw_queue->SetOnTaskEnqueuedCallback(
+        [this](TaskShutdownBehavior /*shutdown_behavior*/) { task_source_.NotifyTaskPosted(); });
+
+    // Spawn the shared worker thread if this is the first queue in the group.
+    if (sw->queues.size() == 1) {
+      std::string worker_name = "nei-shared-sb";
+      worker_name += std::to_string(key);
+
+      auto worker = std::make_shared<SharedWorkerThread>(
+          &task_source_,
+          &delayed_task_manager_,
+          &task_observer_,
+          &tracker_,
+          [this]() { OnWorkerBeganBlocking(); },
+          [this]() { OnWorkerEndedBlocking(); },
+          params_.worker_thread_type,
+          params_.suggested_reclaim_time,
+          worker_name,
+          sw.get());
+
+      if (worker->Start()) {
+        shared_worker_threads_.push_back(worker);
+      }
+    }
+
+    queues_.push_back(std::move(queue));
+    return SingleThreadTaskRunner::CreateForThreadPool(raw_queue, traits);
+  }
+
   scoped_refptr<TaskRunner> CreateParallelTaskRunner(const TaskTraits &traits) {
     if (!tracker_.WillPostTask(traits.shutdown_behavior())) {
       return nullptr;
@@ -966,6 +1195,20 @@ public:
 
     task_source_.Shutdown();
 
+    // Signal all shared workers to stop and wake them so they exit.
+    {
+      AutoLock lock(lock_);
+      for (auto &kv : shared_workers_) {
+        kv.second->should_stop.store(true, std::memory_order_release);
+        kv.second->wake_event.Signal();
+      }
+    }
+    for (auto &worker : shared_worker_threads_) {
+      worker->Join();
+    }
+    shared_worker_threads_.clear();
+    shared_workers_.clear();
+
     if (!timeout.is_positive()) {
       thread_group_->JoinAll();
       return true;
@@ -1058,6 +1301,11 @@ private:
   // Execution fence (Chromium ThreadPoolInstance::BeginFence/EndFence).
   std::atomic<int> execution_fence_count_{0};
   WaitableEvent fence_release_event_{WaitableEvent::ResetPolicy::kManual, false};
+
+  // ---- Shared (SHARED-mode SingleThreadTaskRunner) worker support ----
+  // Keyed by shutdown_behavior.  Owned by Impl, freed at shutdown.
+  std::map<int, std::shared_ptr<SharedWorker>> shared_workers_;
+  std::vector<std::shared_ptr<SharedWorkerThread>> shared_worker_threads_;
 };
 
 ThreadPool::ThreadPool()
@@ -1076,6 +1324,11 @@ scoped_refptr<SequencedTaskRunner> ThreadPool::CreateSequencedTaskRunner(const T
 
 scoped_refptr<SingleThreadTaskRunner> ThreadPool::CreateSingleThreadTaskRunner(const TaskTraits &traits) {
   return impl_->CreateSingleThreadTaskRunner(traits);
+}
+
+scoped_refptr<SingleThreadTaskRunner> ThreadPool::CreateSingleThreadTaskRunner(const TaskTraits &traits,
+                                                                               SingleThreadTaskRunnerThreadMode mode) {
+  return impl_->CreateSingleThreadTaskRunner(traits, mode);
 }
 
 scoped_refptr<TaskRunner> ThreadPool::CreateParallelTaskRunner(const TaskTraits &traits) {

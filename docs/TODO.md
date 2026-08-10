@@ -58,7 +58,7 @@
   - 未做（可选项）：`GetCurrentTaskImportance()` 继承当前线程重要性。
   - 验证：WSL 596 / Windows 636 全量 PASSED，post_job_bench 功能正常。
 
-- **SingleThreadTaskRunner 增加 SHARED 模式（对齐 Chromium）** 🔧 2026-08-09（设计点已确认，未实现）:
+- **SingleThreadTaskRunner 增加 SHARED 模式（对齐 Chromium）** ✅ 已实现 2026-08-10:
   **现状**：`ThreadPool::CreateSingleThreadTaskRunner` 每次调用都新建独立 `PooledTaskQueue` +
   dedicated worker（计入 `max_num_workers` 上限）——runner/队列**不复用**（与 Chromium 一致：
   runner/Sequence 对象从不按 traits 去重）。
@@ -177,6 +177,11 @@
 ---
 
 ## 最近完成（记录，2026-07 ~ 08）
+
+- **SingleThreadTaskRunner SHARED 模式** ✅ 2026-08-10 — 新增 `SingleThreadTaskRunnerThreadMode::SHARED`。
+  按 shutdown_behavior 分组共享 worker 线程；SharedWorkerThread 轮询处理多个队列。
+  API: `CreateSingleThreadTaskRunner(traits, mode)`。4 个单测（同键同线程、不同键不同线程、DEDICATED 不同线程、大量 runner 不超限）。
+  验证：Win 47/47 + WSL 47/47 ThreadPool 测试全通过。
 
 - **退出阶段偶发挂起（遗留问题①）根因定位 + 修复** 🐛✅ 2026-08-09 —
   **症状**：Release 全量 GTest 退出阶段偶发挂起，595 PASSED 后进程不退出（主线程 `poll(eventfd)`），概率 <1/18。
