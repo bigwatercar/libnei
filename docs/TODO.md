@@ -1,50 +1,31 @@
 ﻿# libnei — TODO & Roadmap
 
-**Updated**: 2026-08-09
+**Updated**: 2026-08-10
 
 ---
 
 ## 待办事项（未完成）
 
-> ✅ **最高优先级（退出阶段挂起）已于 2026-08-09 定位并修复**（见下方"最近完成"）。
-> 根因：`PooledTaskSource::Shutdown()` 未持 `wait_lock_` 即设置 `is_shutdown_` + Broadcast，
-> 导致 condvar 丢失唤醒，worker 永久睡眠 → `JoinAll` 卡死。修复：锁内设置 + Broadcast。
-
 ### P1
 
-- **单线程 TaskRunner 队列调度开销优化** 🔧 2026-08-06:
+- **单线程 TaskRunner 队列调度开销优化** ✅ 已关闭 2026-08-10:
 
-  **数据**：i5-10400T 上 PostTask 全链路 524.7 ns/task，其中：
-  | 层 | ns | 占比 |
-  |----|----|------|
-  | 原子操作 | 10.8 | 2.1% |
-  | BindOnce 构造 | 31.5 | 6.0% |
-  | Run() 调用 | 15.0 | 2.9% |
-  | **队列锁+push+DoWork+pop** | **467.4** | **89.0%** |
+  **当前基线**（Ultra 9 185H, Release）：
+  | 平台 | PostTask 延迟 | 吞吐 | vs 目标 4M/s |
+  |------|:---:|------|:---:|
+  | Windows | 229ns | 4.4M/s | ✅ 超标 10% |
+  | WSL (GCC) | 251ns | 4.0M/s | ✅ 达标 |
 
-  89% 开销在队列调度，而非 callback 构造。历史 Ultra 9 185H 可达 6.9M/s（143ns/task），
-  按频率折算后队列开销仍为主要瓶颈。
+  **已尝试的优化（全部记录了教训，见 repo memory）**：
+  | 实验 | 收益 | 结论 |
+  |------|:---:|------|
+  | SequenceManager fast-path A/B | +8.8% | queue-lock + Take 仍主导 |
+  | 回调拆分 (OnImmediateTaskPostedCallback) | Win -32% | 锁缓存同步反效果，已回退 |
+  | Selector work-bit deferred flush | 多线程 +28% | 已落地 |
 
-  **优化方向**：
-  1. **同线程快速路径**：当 `PostTask` 发生在 TaskRunner 绑定的线程上时，
-     跳过 `on_task_posted_callback_` 调度，直接在当前调用栈中执行
-     （类似 Chromium `IncomingTaskQueue::PostTask` 的 `can_run_now` 路径）。
-  2. **无锁批量提交**：利用线程局部缓存累积任务，批量 flush 到队列，
-     减少锁获取次数（参考 SmallObjectAllocator 的 ThreadCache 模式）。
-  3. **SequenceManager 同线程绕过 pump**：当 `DoWork` 发现调用者
-     已在绑定线程上时，直接在 PostTask 返回前 drain 队列。
-
-  **量化目标**：单线程 PostTask 从 1.9M/s → 4M/s 以上（减少 50% 队列开销）。
-
-  **尝试记录（2026-08-09，已回退）**：尝试把 `SequencedTaskQueue` 的 posted 回调拆分为
-  `OnImmediateTaskPostedCallback`（立即任务专用，exchange 短路 + 免 `HasImmediateWork`/`PeekNextDelayedRunTime`
-  两次锁）。DIAG 显示投递热路径 lock+push 与回调各占 ~50%（WSL 各 ~170ns，含冗余锁）。但 **A/B 对照
-  （git stash）显示 Windows 大幅回归（229→303ns，-32%）**，WSL 仅 +3.5%（266→257ms）——已回退。
-  机制未完全明确（可能 Windows 上锁的缓存同步/分支预测副作用）。**结论**：跨线程投递的真正瓶颈是
-  **每次投递（队列空时）的完整 pump wake（eventfd Signal + pump lock）**，回调拆分的锁优化无法解决，
-  且 Windows 上有害。真正优化需减少 wake 次数（批量提交）或降低 Signal 成本（如 eventfd→无 syscall 的
-  TLS 标志 + 定时批量 flush），需严格双平台 A/B 验证（当前数值：Win 229ns / WSL 251ns，目标 4M/s=250ns，
-  Windows 已达标，WSL 仅差 ~1%）。
+  **核心结论**：跨线程投递的真正瓶颈是每次投递（队列空时）的 pump wake
+  （eventfd Signal + pump lock），而非队列结构或回调锁。当前数值已达标，
+  进一步优化（批量提交/TLS flush）ROI 低，移至远期方向。
 
 - **Parallel worker-repost 缺陷：`running_worker_count_` 负溢出 + 任务重复执行 + 死锁** ✅ 已修复 2026-08-08（`a01dd2a`）:
 
@@ -173,16 +154,11 @@
 
 ## 架构规划（memory 记录，未实施）
 
-- **IOContext 重构**（io_thread_refactor_next_phase）📐 2026-08-10 评估完成，方向确定，未实施：
-  - **原目标**：使 IOContext（`MessagePumpForIO`）成为 `Thread` 的调度引擎而非独立线程——作为阻塞等待器提供 `Run(Delegate*)` 入口（`DoWork()` / `DoDelayedWork(next_time)`），由外部线程驱动事件循环。
-  - **当前架构诊断**：① `Thread` 已封装线程 + SequenceManager + pump；② IO 组件均不建线程，只接收 `io_runner`；③ 各调用方**各自创建 `MessagePumpType::IO` 的 `Thread`** → 每个 IO 场景一个专用线程。差距在**缺少「共享 IO 驱动线程」层**（Chromium `BrowserThread::IO` 等价物）。
-  - **Proactor/Reactor 双模澄清**：`MessagePumpForIO` 是混合抽象——**Windows proactor**（IOCP+OVERLAPPED）、**POSIX reactor**（epoll+非阻塞 I/O 回调）。与 Chromium 同名类一致。
-  - **方案回顾与实验证据**：
-    - **A（❌ IO 单例）**：生产代码 IO 线程极少；单例会塌缩 bench 的多 reactor 基线。
-    - **B（❌ 泵入 pool worker）**：Chromium 不把 IO 泵塞入 CPU worker。
-    - **D（❌ 有界多 reactor 池 round-robin，2026-08-10 实测否决）**：`tcp_conn_stress`（2000 conn Win）K=4 慢 2.2×、`tcp_rtt`（1000 conn echo）K=4 RTT 高 40%（WSL）/持平（Win）。**1000 连接下单 epoll/IOCP 足够高效，多 reactor 的线程调度/同步开销 > IO 派发收益，池化反有害。**
-    - **C（✅ 推荐方向）**：**共享命名 IO 线程 + 按需显式多实例工厂**——提供 `GetGlobalIOTaskRunner()`（一个命名 `Thread(IO)` 单例 + AtExit，对齐 Chromium `BrowserThread::IO`），覆盖缺省 IO 组件；调用方如需多 reactor（如 bench/server），**显式创建命名 IO 线程**（保留在调用侧控制，不自动池化）。benefits：解决组件各自建线程 + 不引入池化复杂度/回退风险。
-  - **落地步骤（方向 C）**：① 新增 `IOThread::Get()` / `GetGlobalIOTaskRunner()` 单例 + AtExit（复用 `ThreadPoolInstance` 模式）；② bench/测试/示例/`ProcessService` 改用共享 runner；③ 清理 pump 线程绑定语义；④ 双平台全量 + IO bench 回归。**诚实边界**：生产当前仅 `ProcessService` 1 个 IO 线程，方向 C 价值是 API 对齐 + 防未来膨胀。
+- **IOContext 重构 / IOThread 单例** 🔧 2026-08-10（方向 C，步骤①-③已完成）:
+  - ✅ ① 新增 `IOThread::Get()` / `GetGlobalIOTaskRunner()` 单例 + AtExit
+  - ✅ ② bench/测试/示例/`ProcessService` 改用共享 runner（10 文件迁移）
+  - ✅ ③ 清理 pump 线程绑定语义（文档化惰性绑定、Current()、FdWatchController 生命周期）
+  - ⏳ ④ 双平台 IO bench 回归（async_file/pipe/tcp/tls/process）——待跑
 - **ThreadPool Pimpl 重构** ✅ 已实现（2026-08-09 核实 + `c1bb7db` 增量）：
   - roadmap 目标已全部落地：Pimpl 单例（`ThreadPool::Impl` + `ThreadPoolInstance`：Get/CreateAndStart/Shutdown/ResetForTesting + AtExit）、`CreateSequenced/SingleThread/ParallelTaskRunner` 工厂、queue 级保序（`Task.sequence_token` 经 runner FIFO 保证，token 传给 TaskObserver）、PooledTaskSource 注入式调度。
   - 本次增量：**ExecutionFence**（`ThreadPoolInstance::BeginFence/EndFence`，`c1bb7db`）——Chromium 对齐，fenced 时暂停派发新任务（运行中的完成），可嵌套，Shutdown 不挂起。3 个测试。限制：dedicated SingleThreadTaskRunner 不受 fence。
