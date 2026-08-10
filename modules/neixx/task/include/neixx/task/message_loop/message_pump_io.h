@@ -6,9 +6,9 @@
 #include <cstdint>
 #include <memory>
 
+#include <nei/build/compiler_specific.h>
 #include <nei/build/nei_export.h>
 #include <neixx/task/message_loop/message_pump.h>
-#include <nei/build/compiler_specific.h>
 
 namespace nei {
 

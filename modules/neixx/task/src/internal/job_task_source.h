@@ -8,8 +8,8 @@
 #include <cstdint>
 #include <memory>
 
-#include <nei/build/nei_export.h>
 #include <nei/build/compiler_specific.h>
+#include <nei/build/nei_export.h>
 #include <neixx/common/location.h>
 #include <neixx/functional/callback.h>
 #include <neixx/memory/ref_counted.h>

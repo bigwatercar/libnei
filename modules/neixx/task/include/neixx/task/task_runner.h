@@ -6,13 +6,13 @@
 #include <cstdint>
 #include <thread>
 
-#include <neixx/common/location.h>
 #include <nei/build/compiler_specific.h>
+#include <nei/build/nei_export.h>
+#include <neixx/common/location.h>
 #include <neixx/common/time.h>
 #include <neixx/functional/callback.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/task/task_traits.h>
-#include <nei/build/nei_export.h>
 
 namespace nei {
 

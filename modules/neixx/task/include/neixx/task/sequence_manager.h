@@ -5,8 +5,8 @@
 
 #include <memory>
 
-#include <nei/build/nei_export.h>
 #include <nei/build/compiler_specific.h>
+#include <nei/build/nei_export.h>
 #include <neixx/task/message_loop/message_pump.h>
 #include <neixx/task/task_runner.h>
 #include <neixx/task/task_traits.h>
