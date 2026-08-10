@@ -20,10 +20,11 @@
 #endif
 #endif
 
-#include <nei/build/nei_export.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdarg.h>
+
+#include <nei/build/nei_export.h>
 
 #ifdef __cplusplus
 extern "C" {

@@ -4,16 +4,16 @@
 #include <nei/log/log.h>
 
 #include <assert.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdarg.h>
-#include <signal.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <time.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <signal.h>
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 #include <wchar.h>
 
 #if defined(_WIN32)
@@ -21,11 +21,11 @@
 #include <DbgHelp.h>
 #include <strsafe.h>
 #else
+#include <errno.h>
 #include <execinfo.h>
+#include <iconv.h>
 #include <pthread.h>
 #include <sched.h>
-#include <errno.h>
-#include <iconv.h>
 #include <unistd.h>
 #endif
 
