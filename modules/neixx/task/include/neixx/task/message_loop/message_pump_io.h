@@ -22,6 +22,41 @@ using NativeIOHandle = int;
 //
 // POSIX uses epoll + eventfd for cross-thread wakeups and fd watches.
 // Windows uses IOCP for completion-key driven wakeups and handle watches.
+//
+// == Thread binding ==
+//
+// Each MessagePumpForIO instance is bound to a single OS thread for its
+// entire lifetime (lazy binding: the first thread to call Run() becomes the
+// owner).  This is a hard requirement on POSIX (epoll is not thread-safe
+// for concurrent epoll_wait callers) and a design invariant on Windows
+// (simplifies IOCP completion-key state management).  Calling Run() from a
+// different thread after binding triggers a DCHECK.
+//
+// The owning thread is tracked via run_thread_id_ inside the internal
+// Impl (shared_ptr-owned, so the binding outlives the MessagePumpForIO
+// wrapper if FdWatchController references remain).
+//
+// == MessagePumpForIO::Current() ==
+//
+// Returns the pump instance whose Run() is active on the calling thread,
+// or nullptr otherwise.  This is the canonical way for I/O completion
+// callbacks and watchers to reach the pump without storing a raw pointer.
+// Implementation: thread-local pointer set on Run() entry and restored
+// on exit; supports nested Run() (innermost wins).
+//
+// == FdWatchController lifetime ==
+//
+// FdWatchController holds a shared_ptr<Impl> to keep the epoll fd / IOCP
+// handle alive while any watch is registered.  The controller may be
+// destroyed on any thread; StopWatching() synchronizes with the pump via
+// the Impl's internal lock.
+//
+// == Relationship to SequenceManager ==
+//
+// SequenceManager enforces a stronger constraint: at most one
+// SequenceManager per thread (CHECK, not DCHECK).  MessagePumpForIO is
+// the bottom-half executor that SequenceManager drives via Run(delegate).
+// Together they form a single-threaded task + I/O event loop.
 class MessagePumpForIOState;
 
 class NEI_API MessagePumpForIO final : public MessagePump {
@@ -106,8 +141,11 @@ public:
   MessagePumpForIO(const MessagePumpForIO &) = delete;
   MessagePumpForIO &operator=(const MessagePumpForIO &) = delete;
 
-  // Returns the currently running MessagePumpForIO on this thread, or nullptr
-  // when the current thread is not inside MessagePumpForIO::Run().
+  // Returns the MessagePumpForIO whose Run() is active on the current thread,
+  // or nullptr if the current thread is not inside MessagePumpForIO::Run().
+  //
+  // Thread-safe: may be called from any thread (returns nullptr if the
+  // calling thread is not the pump's owner thread).
   static MessagePumpForIO *Current();
 
   static void ResetDebugCountersForTesting();

@@ -99,10 +99,13 @@ public:
     }
   }
 
+  // Called at the start of each Run() invocation.  On the first call,
+  // binds the pump to the calling thread (run_thread_id_); subsequent
+  // calls from a different thread are caught by the DCHECK in Run().
   int EnterRunLoopAndGetDepth(PlatformThread::PlatformThreadId current_thread_id) {
     AutoLock lock(state_lock_);
     if (run_thread_id_ == 0) {
-      run_thread_id_ = current_thread_id;
+      run_thread_id_ = current_thread_id; // Lazy bind to owner thread.
     }
     ++run_depth_;
     return run_depth_;
@@ -122,10 +125,13 @@ public:
     return quit_run_depth_.load(std::memory_order_acquire) < run_depth;
   }
 
+  // Lazy thread binding: returns true when run_thread_id_ == 0 (pump has
+  // never been driven by Run() yet), allowing the first caller to become
+  // the owner thread.  After binding, only the owner thread passes.
   bool IsCurrentRunThread(PlatformThread::PlatformThreadId current_thread_id) const {
     AutoLock lock(state_lock_);
     if (run_thread_id_ == 0) {
-      return true;
+      return true; // Not yet bound — any thread may become the owner.
     }
     return run_thread_id_ == current_thread_id;
   }
@@ -438,6 +444,8 @@ private:
 
   int run_depth_ = 0;
   std::atomic<int> quit_run_depth_{0};
+  // Owner thread ID (lazy-binding): set on first EnterRunLoopAndGetDepth(),
+  // checked by IsCurrentRunThread().  0 = not yet bound.
   PlatformThread::PlatformThreadId run_thread_id_ = 0;
 
   bool work_scheduled_ = false;
