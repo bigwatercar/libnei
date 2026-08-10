@@ -154,11 +154,11 @@
 
 ## 架构规划（memory 记录，未实施）
 
-- **IOContext 重构 / IOThread 单例** 🔧 2026-08-10（方向 C，步骤①-③已完成）:
+- **IOContext 重构 / IOThread 单例** ✅ 完成 2026-08-10（方向 C，全部 4 步完成）:
   - ✅ ① 新增 `IOThread::Get()` / `GetGlobalIOTaskRunner()` 单例 + AtExit
   - ✅ ② bench/测试/示例/`ProcessService` 改用共享 runner（10 文件迁移）
   - ✅ ③ 清理 pump 线程绑定语义（文档化惰性绑定、Current()、FdWatchController 生命周期）
-  - ⏳ ④ 双平台 IO bench 回归（async_file/pipe/tcp/tls/process）——待跑
+  - ✅ ④ 双平台 IO bench 回归（async_file/pipe/tcp/tls 全部正常，无性能退化）
 - **ThreadPool Pimpl 重构** ✅ 已实现（2026-08-09 核实 + `c1bb7db` 增量）：
   - roadmap 目标已全部落地：Pimpl 单例（`ThreadPool::Impl` + `ThreadPoolInstance`：Get/CreateAndStart/Shutdown/ResetForTesting + AtExit）、`CreateSequenced/SingleThread/ParallelTaskRunner` 工厂、queue 级保序（`Task.sequence_token` 经 runner FIFO 保证，token 传给 TaskObserver）、PooledTaskSource 注入式调度。
   - 本次增量：**ExecutionFence**（`ThreadPoolInstance::BeginFence/EndFence`，`c1bb7db`）——Chromium 对齐，fenced 时暂停派发新任务（运行中的完成），可嵌套，Shutdown 不挂起。3 个测试。限制：dedicated SingleThreadTaskRunner 不受 fence。

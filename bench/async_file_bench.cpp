@@ -328,6 +328,5 @@ int main() {
   std::cout << "Best read:  " << br << " MB/s at " << FormatSize(cr) << " chunk" << std::endl;
 
   bg.Stop();
-  io.Stop();
   return 0;
 }
