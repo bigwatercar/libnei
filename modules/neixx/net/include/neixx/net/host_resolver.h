@@ -14,11 +14,11 @@
 #include <sys/socket.h>
 #endif
 
+#include <nei/build/compiler_specific.h>
 #include <nei/build/nei_export.h>
 #include <neixx/functional/callback.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/net/address_list.h>
-#include <nei/build/compiler_specific.h>
 #include <neixx/task/task_runner.h>
 
 namespace nei {

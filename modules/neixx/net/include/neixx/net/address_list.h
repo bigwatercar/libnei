@@ -5,9 +5,9 @@
 
 #include <vector>
 
+#include <nei/build/compiler_specific.h>
 #include <nei/build/nei_export.h>
 #include <neixx/net/ip_end_point.h>
-#include <nei/build/compiler_specific.h>
 
 namespace nei::net {
 
