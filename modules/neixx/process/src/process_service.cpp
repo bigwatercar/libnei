@@ -6,8 +6,7 @@
 
 #include <nei/debug/check.h>
 #include <neixx/common/at_exit.h>
-#include <neixx/task/message_loop/message_pump_type.h>
-#include <neixx/threading/thread.h>
+#include <neixx/io/io_thread.h>
 #include <neixx/threading/platform_thread.h>
 
 namespace nei {
@@ -25,8 +24,9 @@ void IgnoreSigPipeGlobalOnce() {
 
 class ProcessService::Impl final {
 public:
-  explicit Impl(std::string thread_name)
-      : io_thread_(std::move(thread_name)) {
+  explicit Impl(std::string /*thread_name*/) {
+    // thread_name retained for API compatibility; the actual IO thread
+    // is now the shared global IOThread singleton (direction C).
   }
 
   ~Impl() {
@@ -35,7 +35,6 @@ public:
 
   bool Start() {
 #if !defined(_WIN32)
-    // Apply process-wide SIGPIPE protection before any IO thread startup.
     IgnoreSigPipeGlobalOnce();
 #endif
 
@@ -48,14 +47,12 @@ public:
         return false;
       }
 
-      Thread::Options options;
-      options.message_pump_type = MessagePumpType::IO;
-      if (!io_thread_.StartWithOptions(options)) {
+      if (!IOThread::Start()) {
         start_failed_ = true;
         return false;
       }
 
-      io_runner_ = io_thread_.GetTaskRunner();
+      io_runner_ = IOThread::Get()->task_runner();
       if (io_runner_.get() == nullptr) {
         start_failed_ = true;
         return false;
@@ -65,8 +62,7 @@ public:
   }
 
   bool IsRunning() const {
-    std::lock_guard<std::mutex> lock(lock_);
-    return io_runner_.get() != nullptr;
+    return IOThread::Get() != nullptr;
   }
 
   bool IsOnServiceThread() const {
@@ -74,8 +70,7 @@ public:
     if (io_runner_.get() == nullptr) {
       return false;
     }
-    const PlatformThread::PlatformThreadId service_thread_id = io_thread_.GetThreadId();
-    return service_thread_id != 0 && PlatformThread::CurrentId() == service_thread_id;
+    return io_runner_->BelongsToCurrentThread();
   }
 
   scoped_refptr<SingleThreadTaskRunner> GetTaskRunner() const {
@@ -85,20 +80,13 @@ public:
 
 private:
   void Shutdown() {
-    scoped_refptr<SingleThreadTaskRunner> runner;
-    {
-      std::lock_guard<std::mutex> lock(lock_);
-      runner = io_runner_;
-      io_runner_.reset();
-    }
-
-    if (runner.get() != nullptr) {
-      io_thread_.Stop();
-    }
+    std::lock_guard<std::mutex> lock(lock_);
+    io_runner_.reset();
+    // The IO thread itself is owned by the global IOThread singleton;
+    // it shuts down via AtExit after all ProcessService references drop.
   }
 
   mutable std::mutex lock_;
-  Thread io_thread_;
   scoped_refptr<SingleThreadTaskRunner> io_runner_;
   bool start_failed_ = false;
 };

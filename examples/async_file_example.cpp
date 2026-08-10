@@ -7,12 +7,14 @@
 #include <string>
 #include <vector>
 
+#include <neixx/common/at_exit.h>
 #include <neixx/common/location.h>
 #include <neixx/io/async_file.h>
 #include <neixx/io/io_buffer.h>
+#include <neixx/io/io_thread.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
+#include <neixx/task/thread_pool_instance.h>
 #include <neixx/threading/thread.h>
 #if __cplusplus >= 202002L
 namespace {
@@ -149,27 +151,25 @@ bool RunDemo(nei::AsyncFile &file,
 } // namespace
 
 int main() {
-  nei::Thread io_thread("async-file-demo-io");
-  nei::Thread::Options io_options;
-  io_options.message_pump_type = nei::MessagePumpType::IO;
-  if (!io_thread.StartWithOptions(io_options)) {
-    std::cerr << "Failed to start IO thread." << std::endl;
+  nei::AtExitManager at_exit;
+  nei::ThreadPoolInstance::CreateAndStart(nei::ThreadPoolInstance::InitParams{});
+
+  if (!nei::IOThread::Start()) {
+    std::cerr << "Failed to start shared IO thread." << std::endl;
     return 1;
   }
 
   nei::Thread background_thread("async-file-demo-bg");
   if (!background_thread.Start()) {
     std::cerr << "Failed to start background thread." << std::endl;
-    io_thread.Stop();
     return 1;
   }
 
-  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
+  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = nei::GetGlobalIOTaskRunner();
   const nei::scoped_refptr<nei::SequencedTaskRunner> background_runner = background_thread.GetTaskRunner();
   if (!io_runner || !background_runner) {
     std::cerr << "Failed to acquire task runners." << std::endl;
     background_thread.Stop();
-    io_thread.Stop();
     return 1;
   }
 
@@ -178,7 +178,6 @@ int main() {
   if (!file) {
     std::cerr << "Failed to create AsyncFile." << std::endl;
     background_thread.Stop();
-    io_thread.Stop();
     return 1;
   }
 
@@ -193,7 +192,6 @@ int main() {
   file.reset(); // trigger Close/cleanup before stopping threads
 
   background_thread.Stop();
-  io_thread.Stop();
 
   std::error_code ec;
   (void)std::filesystem::remove(path, ec);
