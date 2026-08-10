@@ -1024,5 +1024,231 @@ TEST(ThreadPoolTest, ShutdownWhileFencedDoesNotHang) {
   EXPECT_TRUE(pool.Shutdown(TimeDelta::FromSeconds(5)));
 }
 
+// ── Interval / chain posting latency tests for SingleThreadTaskRunner ──────
+
+// Posts 10 tasks at 500 ms intervals from the main thread.
+// Assert every task executes within 100 ms end-to-end.
+TEST(ThreadPoolTest, SingleThreadPostTasksWith500msInterval) {
+  ThreadPool pool({2});
+  scoped_refptr<SingleThreadTaskRunner> runner = pool.CreateSingleThreadTaskRunner();
+  ASSERT_TRUE(runner);
+
+  constexpr int kTaskCount = 10;
+  std::atomic<int> executed{0};
+  std::vector<int64_t> latencies_us(kTaskCount, -1);
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  for (int i = 0; i < kTaskCount; ++i) {
+    const auto t0 = std::chrono::steady_clock::now();
+    runner->PostTask(FROM_HERE, [i, &executed, &latencies_us, &done, t0]() {
+      const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                               std::chrono::steady_clock::now() - t0)
+                               .count();
+      latencies_us[i] = elapsed;
+      if (executed.fetch_add(1) + 1 == kTaskCount) {
+        done.Signal();
+      }
+    });
+    PlatformThread::Sleep(TimeDelta::FromMilliseconds(500));
+  }
+
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(10)));
+  pool.Shutdown();
+
+  EXPECT_EQ(executed.load(), kTaskCount);
+  for (int i = 0; i < kTaskCount; ++i) {
+    EXPECT_LT(latencies_us[i], 100'000)
+        << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
+  }
+}
+
+// Chains 10 posts: block-wait for each callback before posting the next one,
+// with a 200 ms sleep between posts.  Assert every task < 100 ms.
+TEST(ThreadPoolTest, SingleThreadPostWaitExecuteThenPostNext) {
+  ThreadPool pool({2});
+  scoped_refptr<SingleThreadTaskRunner> runner = pool.CreateSingleThreadTaskRunner();
+  ASSERT_TRUE(runner);
+
+  constexpr int kTaskCount = 10;
+  std::atomic<int> executed{0};
+  std::vector<int64_t> latencies_us(kTaskCount, -1);
+  WaitableEvent task_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  for (int i = 0; i < kTaskCount; ++i) {
+    const auto t0 = std::chrono::steady_clock::now();
+    runner->PostTask(FROM_HERE, [i, &executed, &latencies_us, &task_done, t0]() {
+      const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                               std::chrono::steady_clock::now() - t0)
+                               .count();
+      latencies_us[i] = elapsed;
+      executed.fetch_add(1);
+      task_done.Signal();
+    });
+
+    ASSERT_TRUE(task_done.TimedWait(std::chrono::seconds(5)))
+        << "task " << i << " did not finish in time";
+
+    if (i < kTaskCount - 1) {
+      PlatformThread::Sleep(TimeDelta::FromMilliseconds(200));
+    }
+  }
+
+  pool.Shutdown();
+
+  EXPECT_EQ(executed.load(), kTaskCount);
+  for (int i = 0; i < kTaskCount; ++i) {
+    EXPECT_LT(latencies_us[i], 100'000)
+        << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
+  }
+}
+
+// ── Interval / chain posting latency tests for SequencedTaskRunner ─────────
+
+TEST(ThreadPoolTest, SequencedPostTasksWith500msInterval) {
+  ThreadPool pool({2});
+  scoped_refptr<SequencedTaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  constexpr int kTaskCount = 10;
+  std::atomic<int> executed{0};
+  std::vector<int64_t> latencies_us(kTaskCount, -1);
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  for (int i = 0; i < kTaskCount; ++i) {
+    const auto t0 = std::chrono::steady_clock::now();
+    runner->PostTask(FROM_HERE, [i, &executed, &latencies_us, &done, t0]() {
+      const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                               std::chrono::steady_clock::now() - t0)
+                               .count();
+      latencies_us[i] = elapsed;
+      if (executed.fetch_add(1) + 1 == kTaskCount) {
+        done.Signal();
+      }
+    });
+    PlatformThread::Sleep(TimeDelta::FromMilliseconds(500));
+  }
+
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(10)));
+  pool.Shutdown();
+
+  EXPECT_EQ(executed.load(), kTaskCount);
+  for (int i = 0; i < kTaskCount; ++i) {
+    EXPECT_LT(latencies_us[i], 100'000)
+        << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
+  }
+}
+
+TEST(ThreadPoolTest, SequencedPostWaitExecuteThenPostNext) {
+  ThreadPool pool({2});
+  scoped_refptr<SequencedTaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  constexpr int kTaskCount = 10;
+  std::atomic<int> executed{0};
+  std::vector<int64_t> latencies_us(kTaskCount, -1);
+  WaitableEvent task_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  for (int i = 0; i < kTaskCount; ++i) {
+    const auto t0 = std::chrono::steady_clock::now();
+    runner->PostTask(FROM_HERE, [i, &executed, &latencies_us, &task_done, t0]() {
+      const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                               std::chrono::steady_clock::now() - t0)
+                               .count();
+      latencies_us[i] = elapsed;
+      executed.fetch_add(1);
+      task_done.Signal();
+    });
+
+    ASSERT_TRUE(task_done.TimedWait(std::chrono::seconds(5)))
+        << "task " << i << " did not finish in time";
+
+    if (i < kTaskCount - 1) {
+      PlatformThread::Sleep(TimeDelta::FromMilliseconds(200));
+    }
+  }
+
+  pool.Shutdown();
+
+  EXPECT_EQ(executed.load(), kTaskCount);
+  for (int i = 0; i < kTaskCount; ++i) {
+    EXPECT_LT(latencies_us[i], 100'000)
+        << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
+  }
+}
+
+// ── Interval / chain posting latency tests for ParallelTaskRunner ──────────
+
+TEST(ThreadPoolTest, ParallelPostTasksWith500msInterval) {
+  ThreadPool pool({2});
+  scoped_refptr<TaskRunner> runner = pool.CreateParallelTaskRunner();
+  ASSERT_TRUE(runner);
+
+  constexpr int kTaskCount = 10;
+  std::atomic<int> executed{0};
+  std::vector<int64_t> latencies_us(kTaskCount, -1);
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  for (int i = 0; i < kTaskCount; ++i) {
+    const auto t0 = std::chrono::steady_clock::now();
+    runner->PostTask(FROM_HERE, [i, &executed, &latencies_us, &done, t0]() {
+      const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                               std::chrono::steady_clock::now() - t0)
+                               .count();
+      latencies_us[i] = elapsed;
+      if (executed.fetch_add(1) + 1 == kTaskCount) {
+        done.Signal();
+      }
+    });
+    PlatformThread::Sleep(TimeDelta::FromMilliseconds(500));
+  }
+
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(10)));
+  pool.Shutdown();
+
+  EXPECT_EQ(executed.load(), kTaskCount);
+  for (int i = 0; i < kTaskCount; ++i) {
+    EXPECT_LT(latencies_us[i], 100'000)
+        << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
+  }
+}
+
+TEST(ThreadPoolTest, ParallelPostWaitExecuteThenPostNext) {
+  ThreadPool pool({2});
+  scoped_refptr<TaskRunner> runner = pool.CreateParallelTaskRunner();
+  ASSERT_TRUE(runner);
+
+  constexpr int kTaskCount = 10;
+  std::atomic<int> executed{0};
+  std::vector<int64_t> latencies_us(kTaskCount, -1);
+  WaitableEvent task_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+
+  for (int i = 0; i < kTaskCount; ++i) {
+    const auto t0 = std::chrono::steady_clock::now();
+    runner->PostTask(FROM_HERE, [i, &executed, &latencies_us, &task_done, t0]() {
+      const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                               std::chrono::steady_clock::now() - t0)
+                               .count();
+      latencies_us[i] = elapsed;
+      executed.fetch_add(1);
+      task_done.Signal();
+    });
+
+    ASSERT_TRUE(task_done.TimedWait(std::chrono::seconds(5)))
+        << "task " << i << " did not finish in time";
+
+    if (i < kTaskCount - 1) {
+      PlatformThread::Sleep(TimeDelta::FromMilliseconds(200));
+    }
+  }
+
+  pool.Shutdown();
+
+  EXPECT_EQ(executed.load(), kTaskCount);
+  for (int i = 0; i < kTaskCount; ++i) {
+    EXPECT_LT(latencies_us[i], 100'000)
+        << "task " << i << " end-to-end latency " << latencies_us[i] << " us";
+  }
+}
+
 } // namespace
 } // namespace nei
