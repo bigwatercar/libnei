@@ -16,6 +16,7 @@
 #include <neixx/common/location.h>
 #include <neixx/files/file_path_watcher.h>
 #include <neixx/functional/bind.h>
+#include <neixx/io/io_thread.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/message_loop/message_pump_io.h>
 #include <neixx/task/message_loop/message_pump_type.h>
@@ -96,15 +97,13 @@ protected:
     temp_dir_ = CreateTempDir();
     ASSERT_FALSE(temp_dir_.empty());
 
-    Thread::Options opts;
-    opts.message_pump_type = MessagePumpType::IO;
-    ASSERT_TRUE(io_thread_.StartWithOptions(opts));
-    io_runner_ = io_thread_.GetTaskRunner();
+    IOThread::Start();
+    io_runner_ = GetGlobalIOTaskRunner();
     ASSERT_TRUE(io_runner_);
   }
 
   void TearDown() override {
-    io_thread_.Stop();
+    IOThread::ResetForTesting();
     if (!temp_dir_.empty()) {
       RemoveTempDir(temp_dir_);
     }
@@ -115,7 +114,6 @@ protected:
   }
 
   std::string temp_dir_;
-  Thread io_thread_{"fpw_io_thread"};
   scoped_refptr<SingleThreadTaskRunner> io_runner_;
 };
 

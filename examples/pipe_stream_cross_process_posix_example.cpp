@@ -17,11 +17,10 @@
 #include <neixx/common/platform_handle.h>
 #include <neixx/common/at_exit.h>
 #include <neixx/io/io_buffer.h>
+#include <neixx/io/io_thread.h>
 #include <neixx/io/pipe_stream.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
-#include <neixx/threading/thread.h>
 
 namespace {
 
@@ -40,17 +39,14 @@ BufferHolder AcquireBuffer(std::size_t size) {
 }
 
 bool RunChild(int read_fd, int write_fd) {
-  nei::Thread io_thread("pipe-stream-posix-demo-child-io");
-  nei::Thread::Options options;
-  options.message_pump_type = nei::MessagePumpType::IO;
-  if (!io_thread.StartWithOptions(options)) {
+  nei::IOThread::Start();
+  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = nei::GetGlobalIOTaskRunner();
+  if (!io_runner) {
     std::cerr << "[child] Failed to start IO thread." << std::endl;
     close(read_fd);
     close(write_fd);
     return false;
   }
-
-  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
   nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> ok{false};
 
@@ -91,22 +87,18 @@ bool RunChild(int read_fd, int write_fd) {
   });
 
   const bool finished = done.TimedWait(std::chrono::seconds(10));
-  io_thread.Stop();
   return finished && ok.load(std::memory_order_acquire);
 }
 
 bool RunParent(pid_t child_pid, int write_fd, int read_fd) {
-  nei::Thread io_thread("pipe-stream-posix-demo-parent-io");
-  nei::Thread::Options options;
-  options.message_pump_type = nei::MessagePumpType::IO;
-  if (!io_thread.StartWithOptions(options)) {
+  nei::IOThread::Start();
+  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = nei::GetGlobalIOTaskRunner();
+  if (!io_runner) {
     std::cerr << "[parent] Failed to start IO thread." << std::endl;
     close(write_fd);
     close(read_fd);
     return false;
   }
-
-  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
   nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   std::string response;
   std::atomic<bool> ok{false};
@@ -139,7 +131,6 @@ bool RunParent(pid_t child_pid, int write_fd, int read_fd) {
   const bool finished = done.TimedWait(std::chrono::seconds(10));
   int status = 0;
   const pid_t waited = waitpid(child_pid, &status, 0);
-  io_thread.Stop();
 
   if (!finished || !ok.load(std::memory_order_acquire) || waited != child_pid || !WIFEXITED(status)
       || WEXITSTATUS(status) != 0) {

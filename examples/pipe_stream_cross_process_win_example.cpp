@@ -15,11 +15,10 @@
 #include <neixx/common/platform_handle.h>
 #include <neixx/common/at_exit.h>
 #include <neixx/io/io_buffer.h>
+#include <neixx/io/io_thread.h>
 #include <neixx/io/pipe_stream.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
-#include <neixx/threading/thread.h>
 
 namespace {
 
@@ -85,17 +84,14 @@ bool RunChild(const std::string &read_pipe_name, const std::string &write_pipe_n
     return false;
   }
 
-  nei::Thread io_thread("pipe-stream-win-demo-child-io");
-  nei::Thread::Options options;
-  options.message_pump_type = nei::MessagePumpType::IO;
-  if (!io_thread.StartWithOptions(options)) {
+  nei::IOThread::Start();
+  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = nei::GetGlobalIOTaskRunner();
+  if (!io_runner) {
     std::cerr << "[child] Failed to start IO thread." << std::endl;
     CloseHandle(read_handle);
     CloseHandle(write_handle);
     return false;
   }
-
-  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
   nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> ok{false};
 
@@ -136,7 +132,6 @@ bool RunChild(const std::string &read_pipe_name, const std::string &write_pipe_n
   });
 
   const bool finished = done.TimedWait(std::chrono::seconds(10));
-  io_thread.Stop();
   return finished && ok.load(std::memory_order_acquire);
 }
 
@@ -203,10 +198,9 @@ bool RunParent() {
     return false;
   }
 
-  nei::Thread io_thread("pipe-stream-win-demo-parent-io");
-  nei::Thread::Options options;
-  options.message_pump_type = nei::MessagePumpType::IO;
-  if (!io_thread.StartWithOptions(options)) {
+  nei::IOThread::Start();
+  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = nei::GetGlobalIOTaskRunner();
+  if (!io_runner) {
     std::cerr << "[parent] Failed to start IO thread." << std::endl;
     TerminateProcess(pi.hProcess, 1);
     WaitForSingleObject(pi.hProcess, INFINITE);
@@ -216,8 +210,6 @@ bool RunParent() {
     CloseHandle(read_server);
     return false;
   }
-
-  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
   nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   std::string response;
   std::atomic<bool> ok{false};
@@ -254,7 +246,6 @@ bool RunParent() {
   GetExitCodeProcess(pi.hProcess, &exit_code);
   CloseHandle(pi.hThread);
   CloseHandle(pi.hProcess);
-  io_thread.Stop();
 
   if (!finished || !ok.load(std::memory_order_acquire) || exit_code != 0) {
     std::cerr << "[parent] Demo failed, child_exit=" << exit_code << ", response='" << response << "'" << std::endl;

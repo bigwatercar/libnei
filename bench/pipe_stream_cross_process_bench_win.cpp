@@ -19,11 +19,10 @@
 #include <neixx/common/location.h>
 #include <neixx/common/platform_handle.h>
 #include <neixx/io/io_buffer.h>
+#include <neixx/io/io_thread.h>
 #include <neixx/io/pipe_stream.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
-#include <neixx/threading/thread.h>
 
 namespace {
 
@@ -236,16 +235,14 @@ bool RunChild(const std::string &read_pipe_name,
     return false;
   }
 
-  nei::Thread io_thread("pipe-stream-xproc-bench-child-io");
-  nei::Thread::Options options;
-  options.message_pump_type = nei::MessagePumpType::IO;
-  if (!io_thread.StartWithOptions(options)) {
+  nei::IOThread::Start();
+  auto io_runner = nei::GetGlobalIOTaskRunner();
+  if (!io_runner) {
     CloseHandle(read_handle);
     CloseHandle(write_handle);
     return false;
   }
 
-  auto io_runner = io_thread.GetTaskRunner();
   nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> ok{false};
   io_runner->PostTask(FROM_HERE, [io_runner, &done, &ok, read_handle, write_handle, payload_size, iterations]() {
@@ -268,7 +265,6 @@ bool RunChild(const std::string &read_pipe_name,
   });
 
   const bool finished = done.TimedWait(std::chrono::seconds(60));
-  io_thread.Stop();
   return finished && ok.load(std::memory_order_acquire);
 }
 
@@ -369,10 +365,9 @@ bool RunParent(std::size_t payload_size, int iterations, Stats *stats_out) {
     return false;
   }
 
-  nei::Thread io_thread("pipe-stream-xproc-bench-parent-io");
-  nei::Thread::Options options;
-  options.message_pump_type = nei::MessagePumpType::IO;
-  if (!io_thread.StartWithOptions(options)) {
+  nei::IOThread::Start();
+  auto io_runner = nei::GetGlobalIOTaskRunner();
+  if (!io_runner) {
     TerminateProcess(pi.hProcess, 1);
     WaitForSingleObject(pi.hProcess, INFINITE);
     CloseHandle(pi.hThread);
@@ -381,8 +376,6 @@ bool RunParent(std::size_t payload_size, int iterations, Stats *stats_out) {
     CloseHandle(read_server);
     return false;
   }
-
-  auto io_runner = io_thread.GetTaskRunner();
   nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> ok{false};
   std::shared_ptr<ParentLoopState> state = std::make_shared<ParentLoopState>();
@@ -417,7 +410,6 @@ bool RunParent(std::size_t payload_size, int iterations, Stats *stats_out) {
   GetExitCodeProcess(pi.hProcess, &exit_code);
   CloseHandle(pi.hThread);
   CloseHandle(pi.hProcess);
-  io_thread.Stop();
 
   if (!finished || !ok.load(std::memory_order_acquire) || exit_code != 0) {
     return false;

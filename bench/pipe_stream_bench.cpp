@@ -15,11 +15,10 @@
 #include <neixx/common/location.h>
 #include <neixx/common/platform_handle.h>
 #include <neixx/io/io_buffer.h>
+#include <neixx/io/io_thread.h>
 #include <neixx/io/pipe_stream.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
-#include <neixx/threading/thread.h>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -299,18 +298,10 @@ int main(int argc, char *argv[]) {
       1024 * 1024,
   };
 
-  nei::Thread io_thread("pipe-stream-bench-io");
-  nei::Thread::Options options;
-  options.message_pump_type = nei::MessagePumpType::IO;
-  if (!io_thread.StartWithOptions(options)) {
-    std::cerr << "Failed to start IO thread." << std::endl;
-    return 1;
-  }
-
-  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
+  nei::IOThread::Start();
+  const nei::scoped_refptr<nei::SingleThreadTaskRunner> io_runner = nei::GetGlobalIOTaskRunner();
   if (!io_runner) {
     std::cerr << "Failed to acquire IO task runner." << std::endl;
-    io_thread.Stop();
     return 1;
   }
 
@@ -334,6 +325,5 @@ int main(int argc, char *argv[]) {
     PrintRow(result);
   }
 
-  io_thread.Stop();
   return all_ok ? 0 : 1;
 }

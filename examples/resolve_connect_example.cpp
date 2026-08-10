@@ -24,41 +24,17 @@
 
 #include <neixx/common/at_exit.h>
 #include <neixx/io/io_buffer.h>
+#include <neixx/io/io_thread.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/net/address_list.h>
 #include <neixx/net/host_resolver.h>
 #include <neixx/net/ip_end_point.h>
 #include <neixx/net/tcp_client_socket.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
 #include <neixx/task/thread_pool_instance.h>
-#include <neixx/threading/thread.h>
 
 namespace {
-
-class IoThread {
-public:
-  explicit IoThread(const std::string &name) {
-    nei::Thread::Options opts;
-    opts.message_pump_type = nei::MessagePumpType::IO;
-    thread_ = std::make_unique<nei::Thread>(name);
-    thread_->StartWithOptions(opts);
-    runner_ = thread_->GetTaskRunner();
-  }
-
-  ~IoThread() {
-    thread_->Stop();
-  }
-
-  nei::scoped_refptr<nei::SingleThreadTaskRunner> runner() const {
-    return runner_;
-  }
-
-private:
-  std::unique_ptr<nei::Thread> thread_;
-  nei::scoped_refptr<nei::SingleThreadTaskRunner> runner_;
-};
 
 struct State {
   nei::WaitableEvent done{nei::WaitableEvent::ResetPolicy::kAutomatic, false};
@@ -71,10 +47,10 @@ void RunDemo(const std::string &host, uint16_t port) {
   std::cout << "Host: " << host << "  Port: " << port << std::endl;
   std::cout << std::endl;
 
-  IoThread io_thread("demo-io");
+  nei::IOThread::Start();
   nei::net::HostResolver resolver;
   auto state = std::make_shared<State>();
-  auto io_runner = io_thread.runner();
+  auto io_runner = nei::GetGlobalIOTaskRunner();
 
   std::cout << "[1] Resolving " << host << " ..." << std::endl;
 

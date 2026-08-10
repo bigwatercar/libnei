@@ -23,11 +23,10 @@
 #include <neixx/common/location.h>
 #include <neixx/common/platform_handle.h>
 #include <neixx/io/io_buffer.h>
+#include <neixx/io/io_thread.h>
 #include <neixx/io/pipe_stream.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
-#include <neixx/threading/thread.h>
 
 namespace {
 
@@ -207,18 +206,14 @@ bool RunParent(std::size_t payload_size, int iterations, Stats *stats_out) {
   close(parent_to_child[0]);
   close(child_to_parent[1]);
 
-  auto *io_thread = new nei::Thread("pipe-stream-xproc-bench-parent-io");
-  nei::Thread::Options options;
-  options.message_pump_type = nei::MessagePumpType::IO;
-  if (!io_thread->StartWithOptions(options)) {
+  nei::IOThread::Start();
+  auto io_runner = nei::GetGlobalIOTaskRunner();
+  if (!io_runner) {
     close(parent_to_child[1]);
     close(child_to_parent[0]);
     waitpid(pid, nullptr, 0);
-    delete io_thread;
     return false;
   }
-
-  auto io_runner = io_thread->GetTaskRunner();
   nei::WaitableEvent done(nei::WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> ok{false};
   std::vector<double> latencies_us;
@@ -264,7 +259,6 @@ bool RunParent(std::size_t payload_size, int iterations, Stats *stats_out) {
 
   int status = 0;
   const pid_t waited = waitpid(pid, &status, 0);
-  (void)io_thread;
 
   if (!finished || waited != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
     return false;

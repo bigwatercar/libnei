@@ -13,10 +13,10 @@
 #include <neixx/common/location.h>
 #include <neixx/io/async_stream.h>
 #include <neixx/io/io_buffer.h>
+#include <neixx/io/io_thread.h>
 #include <neixx/io/stream_reader.h>
 #include <neixx/io/stream_writer.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
 #include <neixx/threading/thread.h>
 
@@ -187,28 +187,23 @@ void RunOneScenarioAsync(nei::scoped_refptr<nei::TaskRunner> io_runner,
 } // namespace
 
 int main() {
-  nei::Thread io_thread("demo-io-thread");
-  nei::Thread::Options io_options;
-  io_options.message_pump_type = nei::MessagePumpType::IO;
-  if (!io_thread.StartWithOptions(io_options)) {
-    std::cerr << "Failed to start IO thread" << std::endl;
+  nei::IOThread::Start();
+  const nei::scoped_refptr<nei::TaskRunner> io_runner = nei::GetGlobalIOTaskRunner();
+  if (!io_runner) {
+    std::cerr << "Failed to acquire IO task runner" << std::endl;
     return 1;
   }
 
   nei::Thread logic_thread("demo-logic-thread");
   if (!logic_thread.Start()) {
     std::cerr << "Failed to start logic thread" << std::endl;
-    io_thread.Stop();
     return 1;
   }
 
-  const nei::scoped_refptr<nei::TaskRunner> io_runner = io_thread.GetTaskRunner();
   const nei::scoped_refptr<nei::TaskRunner> logic_runner = logic_thread.GetTaskRunner();
-
-  if (!io_runner || !logic_runner) {
+  if (!logic_runner) {
     std::cerr << "Failed to get task runners" << std::endl;
     logic_thread.Stop();
-    io_thread.Stop();
     return 1;
   }
 
@@ -220,12 +215,10 @@ int main() {
   if (!done.TimedWait(std::chrono::seconds(10))) {
     std::cerr << "Demo timed out" << std::endl;
     logic_thread.Stop();
-    io_thread.Stop();
     return 1;
   }
 
   logic_thread.Stop();
-  io_thread.Stop();
 
   if (!ok.load(std::memory_order_acquire)) {
     std::cerr << "stream_reader_writer_demo FAILED" << std::endl;

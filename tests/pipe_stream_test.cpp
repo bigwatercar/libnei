@@ -18,13 +18,11 @@
 #include <neixx/common/location.h>
 #include <neixx/io/async_stream.h>
 #include <neixx/io/io_buffer.h>
+#include <neixx/io/io_thread.h>
 #include <neixx/io/pipe_stream.h>
 #include <neixx/common/platform_handle.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/task/message_loop/message_pump_io.h>
-#include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
-#include <neixx/threading/thread.h>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -197,15 +195,13 @@ protected:
     // with no readers (peer disconnect tests).
     signal(SIGPIPE, SIG_IGN);
 #endif
-    Thread::Options opts;
-    opts.message_pump_type = MessagePumpType::IO;
-    ASSERT_TRUE(io_thread_.StartWithOptions(opts));
-    io_runner_ = io_thread_.GetTaskRunner();
+    IOThread::Start();
+    io_runner_ = GetGlobalIOTaskRunner();
     ASSERT_TRUE(io_runner_);
   }
 
   void TearDown() override {
-    io_thread_.Stop();
+    IOThread::ResetForTesting();
   }
 
   // Enable tracing and return path for trace output file.
@@ -226,7 +222,6 @@ protected:
     return CreateAsyncPipePair(read_h, write_h);
   }
 
-  Thread io_thread_{"pipe-stream-test-io"};
   scoped_refptr<SingleThreadTaskRunner> io_runner_;
 };
 

@@ -13,8 +13,8 @@
 #include <neixx/io/file_stream_adapters.h>
 #include <neixx/io/async_line_reader.h>
 #include <neixx/io/io_buffer.h>
+#include <neixx/io/io_thread.h>
 #include <neixx/synchronization/waitable_event.h>
-#include <neixx/task/message_loop/message_pump_type.h>
 #include <neixx/task/task_runner.h>
 #include <neixx/threading/thread.h>
 #if __cplusplus >= 202002L
@@ -44,17 +44,14 @@ std::filesystem::path MakeTempFilePath(const char *name_hint) {
 }
 
 TEST(FileInputStreamAdapterTest, BridgesAsyncFileAndAsyncLineReader) {
-  Thread io_thread("file-stream-adapter-io");
-  Thread::Options io_options;
-  io_options.message_pump_type = MessagePumpType::IO;
-  ASSERT_TRUE(io_thread.StartWithOptions(io_options));
+  IOThread::Start();
+  scoped_refptr<SingleThreadTaskRunner> io_runner = GetGlobalIOTaskRunner();
+  ASSERT_TRUE(io_runner);
 
   Thread background_thread("file-stream-adapter-bg");
   ASSERT_TRUE(background_thread.Start());
 
-  scoped_refptr<SingleThreadTaskRunner> io_runner = io_thread.GetTaskRunner();
   scoped_refptr<SingleThreadTaskRunner> bg_runner = background_thread.GetTaskRunner();
-  ASSERT_TRUE(io_runner);
   ASSERT_TRUE(bg_runner);
 
   const std::filesystem::path path = MakeTempFilePath("line_bridge");
@@ -139,7 +136,7 @@ TEST(FileInputStreamAdapterTest, BridgesAsyncFileAndAsyncLineReader) {
   ASSERT_TRUE(read_close_barrier.TimedWait(std::chrono::seconds(10)));
 
   background_thread.Stop();
-  io_thread.Stop();
+  IOThread::ResetForTesting();
 
   std::error_code ec;
   (void)std::filesystem::remove(path, ec);
