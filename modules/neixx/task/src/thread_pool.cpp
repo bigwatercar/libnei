@@ -636,7 +636,10 @@ private:
 // can reference it before Impl is fully defined.
 // =============================================================================
 struct SharedWorker {
-  std::vector<internal::PooledTaskQueue *> queues; // Guarded by Impl::lock_.
+  // Guarded by queues_lock_.  Producers (CreateSingleThreadTaskRunner under
+  // Impl::lock_) push; consumer (SharedWorkerThread::ThreadMain) iterates.
+  Lock queues_lock_;
+  std::vector<internal::PooledTaskQueue *> queues;
   WaitableEvent wake_event{WaitableEvent::ResetPolicy::kAutomatic, false};
   std::atomic<bool> should_stop{false};
 };
@@ -730,6 +733,9 @@ private:
       bool did_work = false;
 
       // Round-robin through all assigned queues looking for work.
+      // Copy the queue list under the lock so that concurrent runner
+      // creation (push_back) is safe.
+      AutoLock queues_lock(shared_->queues_lock_);
       for (internal::PooledTaskQueue *queue : shared_->queues) {
         if (queue->is_shutdown()) {
           continue;
@@ -1026,7 +1032,10 @@ public:
     task_source_.RegisterTaskQueue(raw_queue);
     delayed_task_manager_.AddQueue(raw_queue);
 
-    sw->queues.push_back(raw_queue);
+    {
+      AutoLock queues_lock(sw->queues_lock_);
+      sw->queues.push_back(raw_queue);
+    }
 
     // When a task is posted to this queue, wake the shared worker.
     raw_queue->SetOnTaskPostedCallback([sw]() { sw->wake_event.Signal(); });
@@ -1035,7 +1044,12 @@ public:
         [this](TaskShutdownBehavior /*shutdown_behavior*/) { task_source_.NotifyTaskPosted(); });
 
     // Spawn the shared worker thread if this is the first queue in the group.
-    if (sw->queues.size() == 1) {
+    bool is_first_queue = false;
+    {
+      AutoLock queues_lock(sw->queues_lock_);
+      is_first_queue = (sw->queues.size() == 1);
+    }
+    if (is_first_queue) {
       std::string worker_name = "nei-shared-sb";
       worker_name += std::to_string(key);
 
