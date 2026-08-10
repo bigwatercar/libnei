@@ -6,9 +6,9 @@
 #include <neixx/common/path_service.h>
 #include "path_service_impl.h"
 
-#include <neixx/common/singleton.h>
-
 #include <climits>
+
+#include <neixx/common/singleton.h>
 
 namespace nei {
 

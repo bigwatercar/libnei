@@ -6,8 +6,8 @@
 #include <atomic>
 #include <mutex>
 
-#include <nei/debug/check.h>
 #include <nei/build/nei_export.h>
+#include <nei/debug/check.h>
 #include <neixx/common/at_exit.h>
 
 namespace nei {

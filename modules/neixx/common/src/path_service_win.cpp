@@ -7,12 +7,12 @@
 
 #include "path_service_impl.h"
 
-#include "nei/debug/check.h"
-#include "neixx/strings/string_util.h"
-
 #include <windows.h>
 #include <KnownFolders.h>
 #include <shlobj.h>
+
+#include "nei/debug/check.h"
+#include "neixx/strings/string_util.h"
 
 namespace nei {
 

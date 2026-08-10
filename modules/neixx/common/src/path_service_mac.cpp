@@ -7,13 +7,13 @@
 
 #include "path_service_impl.h"
 
-#include "nei/debug/check.h"
-
 #include <mach-o/dyld.h>
 #include <sys/syslimits.h>
 
 #include <cstdlib>
 #include <string>
+
+#include "nei/debug/check.h"
 
 namespace nei {
 

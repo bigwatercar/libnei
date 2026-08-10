@@ -7,14 +7,14 @@
 
 #include "path_service_impl.h"
 
-#include "nei/debug/check.h"
-
 #include <pwd.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <cstdlib>
 #include <string>
+
+#include "nei/debug/check.h"
 
 namespace nei {
 
