@@ -161,3 +161,88 @@ TEST(UtilsUuidTest, GeneratesRfc4122V4String) {
   EXPECT_EQ(uuids.size(), 1000U);
   EXPECT_TRUE(saw_strong != 0 || saw_degraded != 0);
 }
+
+TEST(UtilsUuidTest, FromStringParsesCanonicalForms) {
+  struct Case {
+    const char *input;
+    const char *hex;
+  };
+
+  const Case cases[] = {
+      {"00000000-0000-0000-0000-000000000000", "00000000000000000000000000000000"},
+      {"12345678-1234-5678-9abc-def012345678", "12345678123456789abcdef012345678"},
+      {"ABCDEF01-2345-6789-ABCD-EF0123456789", "abcdef0123456789abcdef0123456789"},
+      {"{12345678-1234-5678-9abc-def012345678}", "12345678123456789abcdef012345678"},
+      {"{ABCDEF01-2345-6789-ABCD-EF0123456789}", "abcdef0123456789abcdef0123456789"},
+  };
+
+  for (const Case &c : cases) {
+    std::array<uint8_t, NEI_UUID_BINARY_SIZE> uuid{};
+    ASSERT_EQ(nei_uuid_from_string(c.input, uuid.data()), 0) << c.input;
+    EXPECT_EQ(ToHex(uuid.data(), uuid.size()), c.hex) << c.input;
+  }
+}
+
+TEST(UtilsUuidTest, FromStringRoundTripsWithToString) {
+  for (int i = 0; i < 100; ++i) {
+    std::array<uint8_t, NEI_UUID_BINARY_SIZE> uuid{};
+    std::array<uint8_t, NEI_UUID_BINARY_SIZE> parsed{};
+    std::array<char, NEI_UUID_STRING_SIZE> s{};
+    ASSERT_GE(nei_uuid4_generate(uuid.data()), 0);
+    ASSERT_EQ(nei_uuid_to_string(uuid.data(), s.data()), 0);
+    ASSERT_EQ(nei_uuid_from_string(s.data(), parsed.data()), 0);
+    EXPECT_EQ(ToHex(uuid.data(), uuid.size()), ToHex(parsed.data(), parsed.size()));
+  }
+}
+
+TEST(UtilsUuidTest, FromStringRejectsInvalidInput) {
+  std::array<uint8_t, NEI_UUID_BINARY_SIZE> uuid{};
+
+  const char *invalid[] = {
+      "",
+      "not-a-uuid",
+      "12345678-1234-5678-9abc-def01234567",
+      "12345678-1234-5678-9abc-def0123456789",
+      "12345678-1234-5678-9abc-def01234567g",
+      "12345678-1234-5678-9abc-def01234567-",
+      "{12345678-1234-5678-9abc-def012345678",
+      "12345678-1234-5678-9abc-def012345678}",
+      "{12345678-1234-5678-9abc-def01234567g}",
+  };
+
+  for (const char *s : invalid) {
+    EXPECT_EQ(nei_uuid_from_string(s, uuid.data()), NEI_UUID_ERR_INVALID_FORMAT) << s;
+  }
+  EXPECT_EQ(nei_uuid_from_string(nullptr, uuid.data()), NEI_UUID_ERR_INVALID_ARG);
+  EXPECT_EQ(nei_uuid_from_string("12345678-1234-5678-9abc-def012345678", nullptr), NEI_UUID_ERR_INVALID_ARG);
+}
+
+TEST(UtilsUuidTest, CompareOrdersLexicographically) {
+  std::array<uint8_t, NEI_UUID_BINARY_SIZE> a{};
+  std::array<uint8_t, NEI_UUID_BINARY_SIZE> b{};
+  ASSERT_EQ(nei_uuid_from_string("00000000-0000-0000-0000-000000000000", a.data()), 0);
+  ASSERT_EQ(nei_uuid_from_string("00000000-0000-0000-0000-000000000001", b.data()), 0);
+
+  EXPECT_LT(nei_uuid_compare(a.data(), b.data()), 0);
+  EXPECT_GT(nei_uuid_compare(b.data(), a.data()), 0);
+  EXPECT_EQ(nei_uuid_compare(a.data(), a.data()), 0);
+}
+
+TEST(UtilsUuidTest, CompareAndEqualHandleNullAndCase) {
+  std::array<uint8_t, NEI_UUID_BINARY_SIZE> a{};
+  std::array<uint8_t, NEI_UUID_BINARY_SIZE> b{};
+  std::array<uint8_t, NEI_UUID_BINARY_SIZE> braced{};
+  ASSERT_EQ(nei_uuid_from_string("12345678-1234-5678-9abc-def012345678", a.data()), 0);
+  ASSERT_EQ(nei_uuid_from_string("12345678-1234-5678-9ABC-DEF012345678", b.data()), 0);
+  ASSERT_EQ(nei_uuid_from_string("{12345678-1234-5678-9abc-def012345678}", braced.data()), 0);
+
+  EXPECT_EQ(nei_uuid_compare(nullptr, nullptr), 0);
+  EXPECT_LT(nei_uuid_compare(nullptr, a.data()), 0);
+  EXPECT_GT(nei_uuid_compare(a.data(), nullptr), 0);
+
+  EXPECT_EQ(nei_uuid_equal(a.data(), b.data()), 1);
+  EXPECT_EQ(nei_uuid_equal(a.data(), braced.data()), 1);
+  EXPECT_EQ(nei_uuid_equal(nullptr, a.data()), 0);
+  EXPECT_EQ(nei_uuid_equal(a.data(), nullptr), 0);
+  EXPECT_EQ(nei_uuid_equal(nullptr, nullptr), 0);
+}
