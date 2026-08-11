@@ -143,7 +143,7 @@
 | Test | Frequency | Root Cause | Status |
 |------|-----------|------------|:---:|
 | `PipeStreamTest.PosixYieldQuotaPreventsStarvation` | ~30% | 竞态：marker 在 read-done signal 前排队 | ✅ 已修复 |
-| `ChildProcessTest.LaunchWithStdinPipeEchoesToStdout` | ~10% (Release only) | Pty/pipe teardown race | ⚠️ 已知 |
+| `ChildProcessTest.LaunchWithStdinPipeEchoesToStdout` | ~10% (Release only) | Pty/pipe teardown race — resolved by IOThread sharing | ✅ 已修复 |
 | `HostResolverTest.*` (7 tests) | Always (WSL) | WSL 无 IPv6 / 外网 DNS | ✅ 已跳过 |
 
 ### Windows (MSVC)
