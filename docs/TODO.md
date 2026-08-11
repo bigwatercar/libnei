@@ -108,6 +108,30 @@
 - **PipeStream direct dispatch continuation**: batch-quota-exhausted 路径可直连
   而非经 `PostTask`。低优先级 — 当前设计正确。
 
+### P3 — CMake `COMPILER_IS_*` 检测审查遗留（2026-08-11, `eb7431d`）
+
+新增基于 `CMAKE_C_COMPILER_FRONTEND_VARIANT` 的 `COMPILER_IS_MSVC/GNU/CLANG/APPLE_CLANG`
+检测（顶层 `CMakeLists.txt` + `3rdparty/CMakeLists.txt` 消费）。审查发现以下遗留：
+
+- 🔴 **clang-cl 归类缺陷**：`_frontend_is_msvc` 分支只设 `COMPILER_IS_MSVC`，clang-cl
+  （FRONTEND_VARIANT=MSVC）永不会设 `COMPILER_IS_CLANG`。与源码 `#if defined(__clang__)`
+  （clang-cl 也定义）语义不一致。修复：该分支内再按 `_compiler_is_clang` 同时设
+  `COMPILER_IS_CLANG`（clang-cl 应同时是 MSVC 前端 + Clang）。
+- 🔴 **AppleClang WARNING 噪音**：`message(WARNING ...)` 对受支持的编译器每次 configure
+  都警告，应改 `STATUS` 或删除。
+- 🟡 **死代码**：`COMPILER_IS_GNU`/`COMPILER_IS_CLANG`/`COMPILER_IS_APPLE_CLANG` 仅在
+  STATUS 打印出现，全仓库无消费点（仅 `COMPILER_IS_MSVC` 被用）。为未来用途可保留，
+  否则属过度设计。
+- 🟡 **单语言检测 vs 全局 flag**：只用 `CMAKE_C_COMPILER_*` 判断，而 `add_compile_options`
+  （`/W4`、`/utf-8`、`/Zc:__cplusplus`）对 C/CXX 均生效。C/CXX 编译器不同时会误判
+  （旧 `MSVC` 变量是"任一语言为 MSVC 即真"）。
+- 🟡 **`tests/CMakeLists.txt:92` 漏改**：仍有裸 `if(MSVC)`（`/FS`）。clang-cl 下无功能
+  影响，但迁移不彻底，应替换为 `COMPILER_IS_MSVC`。
+- 🟡 **mbedtls genex→全局 if 行为变化**：`$<$<C_COMPILER_ID:MSVC>:/WX- /W3>` → 全局
+  `if(COMPILER_IS_MSVC)`。对 clang-cl 是改进（旧 genex 漏压制），但失去按目标语言精度。
+- ⚪ **GNU 前端 else 分支过宽**：非 Clang 的 GNU 前端编译器被一律当 `COMPILER_IS_GNU`，
+  建议加注释说明假设。
+
 ---
 
 ## Known Flaky Tests 🔧 2026-08-10 (大部分已修复)
