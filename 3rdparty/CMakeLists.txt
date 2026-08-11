@@ -31,7 +31,7 @@ set_target_properties(c-ares PROPERTIES C_STANDARD_REQUIRED ON)
 # that triggers /W4 warnings (C4456 shadowing, C4267 size_t truncation,
 # C4706 assignment-in-conditional, etc.).  These are upstream-accepted
 # patterns; we silence them at the target level rather than patching.
-if(MSVC)
+if(COMPILER_IS_MSVC)
   target_compile_options(c-ares PRIVATE /W3 /wd4456 /wd4267 /wd4706)
 endif()
 
@@ -80,8 +80,8 @@ set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_SAVED})
 # subjected to our project's /W4 strictness.
 set(_mbedtls_targets mbedtls mbedx509 mbedcrypto p256m everest)
 foreach(tgt IN LISTS _mbedtls_targets)
-  if(TARGET ${tgt})
-    target_compile_options(${tgt} PRIVATE $<$<C_COMPILER_ID:MSVC>:/WX- /W3>)
+  if(TARGET ${tgt} AND COMPILER_IS_MSVC)
+    target_compile_options(${tgt} PRIVATE /WX- /W3)
   endif()
 endforeach()
 unset(_mbedtls_targets)

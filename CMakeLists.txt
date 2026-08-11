@@ -36,11 +36,57 @@ set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN YES)
 
+# cmake-format: off
+string(REGEX MATCH "^Clang" _compiler_is_clang "${CMAKE_C_COMPILER_ID}")
+string(REGEX MATCH "^GNU" _compiler_is_gnu "${CMAKE_C_COMPILER_ID}")
+string(REGEX MATCH "^MSVC" _compiler_is_msvc "${CMAKE_C_COMPILER_ID}")
+string(COMPARE EQUAL "${CMAKE_C_COMPILER_FRONTEND_VARIANT}" "MSVC" _frontend_is_msvc)
+string(COMPARE EQUAL "${CMAKE_C_COMPILER_FRONTEND_VARIANT}" "GNU" _frontend_is_gnu)
+string(COMPARE EQUAL "${CMAKE_C_COMPILER_FRONTEND_VARIANT}" "AppleClang" _frontend_is_apple_clang)
+# cmake-format: on
+
+if(_frontend_is_msvc)
+  set(COMPILER_IS_MSVC TRUE)
+elseif(_frontend_is_gnu)
+  if(_compiler_is_clang)
+    set(COMPILER_IS_CLANG TRUE)
+  else()
+    set(COMPILER_IS_GNU TRUE)
+  endif()
+elseif(_frontend_is_apple_clang)
+  set(COMPILER_IS_APPLE_CLANG TRUE)
+  message(
+    WARNING
+      "AppleClang frontend detected. Treating as Clang for feature detection."
+  )
+  set(COMPILER_IS_CLANG TRUE)
+else()
+  # Unknown compiler frontend. Assume COMPILER_ID is sufficient for feature
+  # detection.
+  if(_compiler_is_msvc)
+    set(COMPILER_IS_MSVC TRUE)
+  elseif(_compiler_is_gnu)
+    set(COMPILER_IS_GNU TRUE)
+  elseif(_compiler_is_clang)
+    set(COMPILER_IS_CLANG TRUE)
+  endif()
+endif()
+unset(_compiler_is_msvc)
+unset(_compiler_is_gnu)
+unset(_compiler_is_clang)
+unset(_frontend_is_msvc)
+unset(_frontend_is_gnu)
+unset(_frontend_is_apple_clang)
+
+message(STATUS "COMPILER_IS_MSVC: ${COMPILER_IS_MSVC}")
+message(STATUS "COMPILER_IS_GNU: ${COMPILER_IS_GNU}")
+message(STATUS "COMPILER_IS_CLANG: ${COMPILER_IS_CLANG}")
+
 # Treat source and execution character sets as UTF-8 on MSVC. Without this flag,
 # MSVC encodes \uXXXX escapes in narrow string literals using the system ANSI
 # code page (e.g. CP936), producing C4819 warnings and incorrect byte sequences
 # at runtime.
-if(MSVC)
+if(COMPILER_IS_MSVC)
   add_compile_options(/utf-8)
 endif()
 
@@ -88,13 +134,13 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
 endif()
 
 if(NEI_ENABLE_WARNINGS)
-  if(MSVC)
+  if(COMPILER_IS_MSVC)
     add_compile_options(/W4 /permissive-)
   else()
     add_compile_options(-Wall -Wextra -Wpedantic)
   endif()
   if(NEI_TREAT_WARNINGS_AS_ERRORS)
-    if(MSVC)
+    if(COMPILER_IS_MSVC)
       add_compile_options(/WX)
     else()
       add_compile_options(-Werror)
@@ -111,7 +157,7 @@ add_library(nei::nei ALIAS nei)
 # Platform definitions
 if(WIN32)
   target_compile_definitions(nei PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
-  if(MSVC)
+  if(COMPILER_IS_MSVC)
     # /Zc:__cplusplus — MSVC reports 199711L by default even under /std:c++17.
     # This flag makes __cplusplus reflect the actual standard version (e.g.
     # 201703L for C++17).  Applied at the top-level nei target so that C++
