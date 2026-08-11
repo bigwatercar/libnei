@@ -35,6 +35,7 @@ add_executable(
   base64_test.cpp
   buffer_stream_test.cpp
   strong_alias_test.cpp
+  url_test.cpp
   cancelable_callback_test.cpp
   once_callback_test.cpp
   checksum_hash_test.cpp
