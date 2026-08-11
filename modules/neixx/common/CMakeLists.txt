@@ -6,6 +6,7 @@ target_sources(
           include/neixx/common/path_service.h
           include/neixx/common/platform_handle.h
           include/neixx/common/singleton.h
+          include/neixx/common/strong_alias.h
           include/neixx/common/time.h
           include/neixx/common/time_source.h
           src/at_exit.cpp
