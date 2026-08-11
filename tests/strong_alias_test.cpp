@@ -101,11 +101,168 @@ TEST(StrongAliasTest, ConstValueAccess) {
 
 TEST(StrongAliasTest, DifferentTagsAreDistinctTypes) {
   // This test just verifies the types exist and are distinct.
-  // The real proof is that swapping DogID/CatID in a function call
-  // produces a compile error.
   DogID dog(1);
   CatID cat(1);
-  EXPECT_EQ(dog.value(), cat.value()); // same int value, different types
+  EXPECT_EQ(dog.value(), cat.value());
+}
+
+// =============================================================================
+// Policy-based customization tests
+// =============================================================================
+
+// ---- Arithmetic ----
+
+using Offset = StrongAlias<struct OffsetTag,
+                           int,
+                           StrongAliasPolicy::Equality | StrongAliasPolicy::Ordering | StrongAliasPolicy::Arithmetic>;
+
+TEST(StrongAliasTest, ArithmeticAdd) {
+  Offset a(10), b(20);
+  EXPECT_EQ((a + b).value(), 30);
+}
+
+TEST(StrongAliasTest, ArithmeticSubtract) {
+  Offset a(30), b(10);
+  EXPECT_EQ((a - b).value(), 20);
+}
+
+TEST(StrongAliasTest, ArithmeticMultiply) {
+  Offset a(5), b(6);
+  EXPECT_EQ((a * b).value(), 30);
+}
+
+TEST(StrongAliasTest, ArithmeticDivide) {
+  Offset a(30), b(6);
+  EXPECT_EQ((a / b).value(), 5);
+}
+
+TEST(StrongAliasTest, ArithmeticCompoundAdd) {
+  Offset a(10);
+  a += Offset(5);
+  EXPECT_EQ(a.value(), 15);
+}
+
+TEST(StrongAliasTest, ArithmeticCompoundSubtract) {
+  Offset a(10);
+  a -= Offset(3);
+  EXPECT_EQ(a.value(), 7);
+}
+
+TEST(StrongAliasTest, ArithmeticUnaryMinus) {
+  Offset a(10);
+  EXPECT_EQ((-a).value(), -10);
+}
+
+// ---- Increment ----
+
+using Counter = StrongAlias<struct CounterTag, int, StrongAliasPolicy::Equality | StrongAliasPolicy::Increment>;
+
+TEST(StrongAliasTest, IncrementPrefix) {
+  Counter c(1);
+  EXPECT_EQ((++c).value(), 2);
+  EXPECT_EQ(c.value(), 2);
+}
+
+TEST(StrongAliasTest, IncrementPostfix) {
+  Counter c(1);
+  Counter old = c++;
+  EXPECT_EQ(old.value(), 1);
+  EXPECT_EQ(c.value(), 2);
+}
+
+TEST(StrongAliasTest, DecrementPrefix) {
+  Counter c(5);
+  EXPECT_EQ((--c).value(), 4);
+  EXPECT_EQ(c.value(), 4);
+}
+
+TEST(StrongAliasTest, DecrementPostfix) {
+  Counter c(5);
+  Counter old = c--;
+  EXPECT_EQ(old.value(), 5);
+  EXPECT_EQ(c.value(), 4);
+}
+
+// ---- Bitwise ----
+
+using Flags = StrongAlias<struct FlagsTag, unsigned, StrongAliasPolicy::Equality | StrongAliasPolicy::Bitwise>;
+
+TEST(StrongAliasTest, BitwiseAnd) {
+  EXPECT_EQ((Flags(0b1100u) & Flags(0b1010u)).value(), 0b1000u);
+}
+
+TEST(StrongAliasTest, BitwiseOr) {
+  EXPECT_EQ((Flags(0b1100u) | Flags(0b0011u)).value(), 0b1111u);
+}
+
+TEST(StrongAliasTest, BitwiseXor) {
+  EXPECT_EQ((Flags(0b1111u) ^ Flags(0b0101u)).value(), 0b1010u);
+}
+
+TEST(StrongAliasTest, BitwiseNot) {
+  EXPECT_EQ((~Flags(0u)).value(), ~0u);
+}
+
+TEST(StrongAliasTest, BitwiseCompound) {
+  Flags a(0b1100u);
+  a &= Flags(0b1010u);
+  EXPECT_EQ(a.value(), 0b1000u);
+  a |= Flags(0b0011u);
+  EXPECT_EQ(a.value(), 0b1011u);
+  a ^= Flags(0b1111u);
+  EXPECT_EQ(a.value(), 0b0100u);
+}
+
+// ---- Implicit ----
+
+using RawInt = StrongAlias<struct RawIntTag, int, StrongAliasPolicy::Implicit>;
+
+static void AcceptRaw(RawInt) {
+}
+
+TEST(StrongAliasTest, ImplicitConstruction) {
+  RawInt r = 42; // OK
+  EXPECT_EQ(r.value(), 42);
+}
+
+TEST(StrongAliasTest, ImplicitPassToFunction) {
+  AcceptRaw(10);         // implicit from int
+  AcceptRaw(RawInt(10)); // explicit also works
+}
+
+// ---- None policy ----
+
+using Bare = StrongAlias<struct BareTag, int, StrongAliasPolicy::None>;
+
+TEST(StrongAliasTest, BareNonePolicyStillConstructable) {
+  Bare b(42);
+  EXPECT_EQ(b.value(), 42);
+}
+
+// ---- HasPolicy utility ----
+
+TEST(StrongAliasTest, HasPolicyUtility) {
+  EXPECT_TRUE(HasPolicy(StrongAliasPolicy::Equality | StrongAliasPolicy::Ordering, StrongAliasPolicy::Equality));
+  EXPECT_FALSE(HasPolicy(StrongAliasPolicy::Equality, StrongAliasPolicy::Ordering));
+}
+
+// ---- Convenience aliases ----
+
+using DefSA = DefaultStrongAlias<struct DefTag, int>;
+using FullSA = FullStrongAlias<struct FullTag, int>;
+
+TEST(StrongAliasTest, DefaultAliasHasComparison) {
+  DefSA a(1), b(2);
+  EXPECT_LT(a, b);
+}
+
+TEST(StrongAliasTest, FullAliasHasAllOperations) {
+  FullSA a(2), b(3);
+  EXPECT_LT(a, b);
+  auto c = a + b;
+  EXPECT_EQ(c.value(), 5);
+  ++c;
+  EXPECT_EQ(c.value(), 6);
 }
 
 } // namespace
