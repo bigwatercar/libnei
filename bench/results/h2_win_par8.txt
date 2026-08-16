@@ -1,0 +1,9 @@
+=== HTTP/2 loopback throughput (TLS, h2) ===
+requests        20000
+concurrency     8
+completed       20000
+elapsed_s       0.434
+req/s           46075.9
+mean_rtt_us     173.5
+min_rtt_us      50.2
+max_rtt_us      739.9

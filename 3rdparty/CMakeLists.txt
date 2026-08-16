@@ -85,3 +85,16 @@ foreach(tgt IN LISTS _mbedtls_targets)
   endif()
 endforeach()
 unset(_mbedtls_targets)
+
+# ---------------------------------------------------------------------------
+# llhttp (MIT) — Node.js HTTP/1.1 parser (v9.2.1)
+# ---------------------------------------------------------------------------
+# Build as a static library.  Pure C99, minimal dependencies.
+add_subdirectory(llhttp)
+
+# ---------------------------------------------------------------------------
+# nghttp2 (MIT) — HTTP/2 protocol library (v1.70.0, lib-only vendoring)
+# ---------------------------------------------------------------------------
+# Build as a static library.  See 3rdparty/nghttp2/README.md for the
+# vendoring scope.  No generated config.h is required.
+add_subdirectory(nghttp2)

@@ -40,6 +40,24 @@ target_link_libraries(memory_monitor_example PRIVATE nei::nei)
 add_executable(resolve_connect_example resolve_connect_example.cpp)
 target_link_libraries(resolve_connect_example PRIVATE nei::nei)
 
+add_executable(http_smoke_example http_smoke_example.cpp)
+target_link_libraries(http_smoke_example PRIVATE nei::nei)
+
+add_executable(http_downloader_example http_downloader_example.cpp)
+target_link_libraries(http_downloader_example PRIVATE nei::nei)
+
+add_executable(http_echo_server_example http_echo_server_example.cpp)
+target_link_libraries(http_echo_server_example PRIVATE nei::nei)
+if(WIN32)
+  target_link_libraries(http_echo_server_example PRIVATE ws2_32)
+endif()
+
+add_executable(http_client_example http_client_example.cpp)
+target_link_libraries(http_client_example PRIVATE nei::nei)
+if(WIN32)
+  target_link_libraries(http_client_example PRIVATE ws2_32)
+endif()
+
 if(WIN32)
   add_executable(
     pipe_stream_cross_process_win_example
@@ -72,6 +90,10 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_copy_runtime_dlls(elevated_process_example)
   nei_copy_runtime_dlls(memory_monitor_example)
   nei_copy_runtime_dlls(resolve_connect_example)
+  nei_copy_runtime_dlls(http_smoke_example)
+  nei_copy_runtime_dlls(http_downloader_example)
+  nei_copy_runtime_dlls(http_echo_server_example)
+  nei_copy_runtime_dlls(http_client_example)
 
   nei_set_utf8_encoding(log_example)
   nei_set_utf8_encoding(log_immediate_crash_example)
@@ -87,4 +109,5 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_set_utf8_encoding(elevated_process_example)
   nei_set_utf8_encoding(memory_monitor_example)
   nei_set_utf8_encoding(resolve_connect_example)
+  nei_set_utf8_encoding(http_downloader_example)
 endif()

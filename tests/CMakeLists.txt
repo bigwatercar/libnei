@@ -105,6 +105,13 @@ target_include_directories(
           ${PROJECT_SOURCE_DIR}/3rdparty/mbedtls/include
 )
 
+# Internal implementation files that tests need direct access to (not exported
+# from the DLL on Windows because they lack NEI_API).
+target_sources(nei_tests PRIVATE
+  ${PROJECT_SOURCE_DIR}/modules/neixx/net/src/websocket/websocket_frame.cpp
+  ${PROJECT_SOURCE_DIR}/modules/neixx/net/src/websocket/websocket_handshake.cpp
+)
+
 include(GoogleTest)
 #
 # Avoid running the test executable during build time on Windows shared builds

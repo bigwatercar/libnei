@@ -96,8 +96,19 @@ endif()
 
 add_executable(tcp_throughput_bench tcp_throughput_bench.cpp)
 target_link_libraries(tcp_throughput_bench PRIVATE nei::nei)
+
+add_executable(http_throughput_bench http_throughput_bench.cpp)
+target_link_libraries(http_throughput_bench PRIVATE nei::nei)
+
+add_executable(http2_throughput_bench http2_throughput_bench.cpp)
+target_link_libraries(
+  http2_throughput_bench PRIVATE nei::nei mbedtls mbedx509 mbedcrypto
+)
+
 if(WIN32)
   target_link_libraries(tcp_throughput_bench PRIVATE ws2_32)
+  target_link_libraries(http_throughput_bench PRIVATE ws2_32)
+  target_link_libraries(http2_throughput_bench PRIVATE ws2_32)
 endif()
 
 add_executable(tls_throughput_bench tls_throughput_bench.cpp)
@@ -174,6 +185,7 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_copy_runtime_dlls(tcp_cross_bench)
   nei_copy_runtime_dlls(tcp_throughput_bench)
   nei_copy_runtime_dlls(tls_throughput_bench)
+  nei_copy_runtime_dlls(http_throughput_bench)
 
   nei_set_utf8_encoding(log_bench)
   nei_set_utf8_encoding(string_append_bench)
@@ -192,6 +204,7 @@ if(WIN32 AND BUILD_SHARED_LIBS)
   nei_set_utf8_encoding(tcp_cross_bench)
   nei_set_utf8_encoding(tcp_throughput_bench)
   nei_set_utf8_encoding(tls_throughput_bench)
+  nei_set_utf8_encoding(http_throughput_bench)
 
   if(NEI_BENCHMARK_SPDLOG AND TARGET log_bench_compare)
     nei_copy_runtime_dlls(log_bench_compare)

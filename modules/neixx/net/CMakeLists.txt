@@ -67,4 +67,53 @@ target_link_libraries(nei PRIVATE cares)
 # mbedTLS — TLS/SSL library (3rdparty/)
 target_link_libraries(nei PRIVATE mbedtls)
 
+# HTTP/1.1 module (3rdparty/llhttp)
+set(NEIXX_NET_HTTP_SOURCES
+    include/neixx/net/http/http_common.h
+    include/neixx/net/http/http_parser.h
+    include/neixx/net/http/http_request.h
+    include/neixx/net/http/http_response.h
+    include/neixx/net/http/http_response_writer.h
+    include/neixx/net/http/http_server.h
+    include/neixx/net/http/http_client.h
+    include/neixx/net/http/http_client_pool.h
+    include/neixx/net/http/http_file_transfer.h
+    src/http/http_common.cpp
+    src/http/http_parser.cpp
+    src/http/http_request.cpp
+    src/http/http_response.cpp
+    src/http/http_response_writer.cpp
+    src/http/http_engine_internal.h
+    src/http/http_server.cpp
+    src/http/http_client.cpp
+    src/http/http_client_pool.cpp
+    src/http/http_file_transfer.cpp
+)
+target_sources(nei PRIVATE ${NEIXX_NET_HTTP_SOURCES})
+target_link_libraries(nei PRIVATE llhttp)
+
+# HTTP/2 module (3rdparty/nghttp2)
+set(NEIXX_NET_HTTP2_SOURCES
+    include/neixx/net/http/http2_client_session.h
+    src/http2/http2_client_session.cpp
+    src/http2/http2_engine.cpp
+    src/http2/nghttp2_internal.h
+)
+target_sources(nei PRIVATE ${NEIXX_NET_HTTP2_SOURCES})
+target_link_libraries(nei PRIVATE nghttp2)
+
+# WebSocket module (RFC 6455)
+set(NEIXX_NET_WEBSOCKET_SOURCES
+    include/neixx/net/websocket/websocket_frame.h
+    include/neixx/net/websocket/websocket_connection.h
+    include/neixx/net/websocket/websocket_client.h
+    src/websocket/websocket_handshake.cpp
+    src/websocket/websocket_handshake_internal.h
+    src/websocket/websocket_frame.cpp
+    src/websocket/websocket_frame_internal.h
+    src/websocket/websocket_connection.cpp
+    src/websocket/websocket_client.cpp
+)
+target_sources(nei PRIVATE ${NEIXX_NET_WEBSOCKET_SOURCES})
+
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

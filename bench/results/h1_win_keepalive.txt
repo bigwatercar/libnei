@@ -1,0 +1,12 @@
+HTTP Throughput Benchmark
+Requests: 20000
+Mode: keep-alive
+
+=== HTTP Throughput Benchmark ===
+Mode:        keep-alive
+Requests:    20000
+Elapsed:     0.804 s
+Throughput:  24878.1 req/s
+Avg latency: 39.7 us
+Min latency: 31.0 us
+Max latency: 579.6 us
