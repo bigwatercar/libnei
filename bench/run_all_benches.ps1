@@ -124,6 +124,10 @@ $singleBenches = @(
     @{Name="tcp_throughput";             Exe="tcp_throughput_bench.exe";             Args=@()},
     @{Name="tcp_conn_stress";            Exe="tcp_conn_stress_bench.exe";            Args=@()},
     @{Name="tls_throughput";             Exe="tls_throughput_bench.exe";             Args=@()},
+    @{Name="http_throughput";            Exe="http_throughput_bench.exe";            Args=@("20000")},
+    @{Name="http2_throughput_seq";       Exe="http2_throughput_bench.exe";           Args=@("10000","1")},
+    @{Name="http2_throughput_par8";      Exe="http2_throughput_bench.exe";           Args=@("10000","8")},
+    @{Name="http2_throughput_par64";     Exe="http2_throughput_bench.exe";           Args=@("10000","64")},
     @{Name="parallel_runner";            Exe="parallel_runner_bench.exe";            Args=@()},
     @{Name="task_priority_perf";         Exe="task_priority_perf_demo.exe";          Args=@()}
 )

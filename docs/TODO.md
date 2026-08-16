@@ -223,12 +223,13 @@
 | `HostResolverTest.ResolveDualStack` | Always (no DNS) | 需外网 DNS | ✅ 已跳过 |
 | `HostResolverTest.ResolveIPv4Only` | Always (no DNS) | 需外网 DNS | ✅ 已跳过 |
 | `HttpStressFixture.ServerDestroyDuringTraffic` | e04 原代码 ~80% | server 销毁窗口内连接被 Orphan → drain-read 互等死锁（Windows 回环/IOCP 特有） | ✅ 已修复（`3cd8036`，18/18 通过） |
+| `TcpSocketTest.ClientOrphanDrainReadEOF` | 全量偶发（WSL ~1/50 必现挂起） | 主线程析构 server 时 IO 线程仍运行 teardown 触发的 accept 回调 → 触碰 TestBody 已析构的 WaitableEvent mutex → 永久挂起（gdb 实锤） | ✅ 已修复（`29591ec` + `30dac78` fence 排序，300/300 双平台） |
 
 ### TSan 专项（RelWithDebInfo）
 
 | Test | 状态 | Root Cause | Status |
 |------|------|-----------|:---:|
-| `LogCTest.ConcurrentFirstUseInitializationStress` | TSan 失败 | TSan 慢速时序 | ✅ 已跳过 |
+| `LogCTest.ConcurrentFirstUseInitializationStress` | TSan 失败 | TSan 慢速时序 | ✅ 已修复（`8b122e2` 日志初始化自锁，竞态根因消除） |
 | `TlsSocketTest.LargePayloadBioCompaction` | TSan 失败 | TSan 慢速时序 | ✅ 已跳过 |
 | `ThreadPoolTest.DelayedTaskRunsWithoutImmediateKick` | 全量 ~1/18 偶发 | auto-reset wake_event 丢唤醒 | ✅ 已加固 |
 
@@ -280,6 +281,11 @@
 ---
 
 ## 最近完成（记录，2026-07 ~ 08）
+
+- **TSan 全量清零（2026-08-16，`42b3a75`/`8b122e2`/`30dac78`）** — 全量重扫（排除环境 DNS 与已知慢速挂起项）0 竞态报告：HttpClient 任意线程探针指针竞态（`conn_mutex_` 边界锁范式）、日志配置表初始化自锁 + slot 不可变发布、mbedtls vendored 关闭 `MBEDTLS_DEBUG_C`（异步 TLS teardown 经 `ssl->conf` 的 UAF）、测试侧 fence 排序与 `shared_ptr<State>` 捕获。
+- **HttpRequestHandle 单请求句柄（2026-08-16，`9129fec`）** — `HttpClient::Send*` 返回可拷贝值类型句柄：`is_valid()`/`Cancel()`（h2 `RST_STREAM(CANCEL)` 仅该流失败、h1 关连接）/`SetPriority()`（h2 RFC 7540 `PRIORITY` 帧、h1 记录）；`Http2ClientSession::CancelStream/SetStreamPriority` 公开；句柄经 `WeakPtrThreadSafe<HttpClient>` + generation + 共享 `atomic<bool>` 定位，不持有客户端；顺带修复握手期 busy Send 污染暂存请求的既有 bug。8 用例双平台过。
+- **Windows Release 全量 bench + 新基线（2026-08-16，`71788de`/`12cc01f`）** — `bench/results/baseline_(Ultra9-185H)_20260816_windows.md`；Pipe 16 KB+ 较 08-11 基线 +91%~+167%（写队列重构），TLS +14.5%；修复 TLS/HTTP2 吞吐 bench 的 Mbed TLS 线程回调缺失（此前静默失败）。
+- **g_nei_logger 库诊断通道（2026-08-16，`37e933e`）** — 库内诊断默认静默、按需 stdout；底层类型 uintptr_t（不暴露 log.h）。
 
 - **ipc 模块专测 + 3 类库 bug 修复** ✅ 2026-08-14 — 新增 `tests/ipc_test.cpp`（11 用例：MessageChannel 8 + RpcEndpoint 3，
   内存双工流 LoopbackDuplexStream 驱动，覆盖往返/保序/分片/合帧/坏 magic/超长帧/优雅关闭排水/错误态丢弃/RPC 往返/超时/错误 abort）。
