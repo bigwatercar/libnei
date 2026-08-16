@@ -95,6 +95,14 @@ public:
 
   void Close() override;
 
+  // Aborts the connection immediately: closes the socket outright, drops all
+  // in-flight I/O and pending user callbacks, and completes the peer's
+  // pending read with EOF/RST.  Unlike Close()/Orphan() there is no graceful
+  // flush or drain.  Use when the connection is being torn down mid-protocol
+  // (e.g. a server destroyed mid-request) and the peer must be unblocked
+  // immediately.
+  void Abort();
+
   // ---- Graceful Shutdown -----------------------------------------------
 
   // Shuts down the write side (POSIX: SHUT_WR, Windows: SD_SEND), sending
@@ -133,6 +141,16 @@ public:
   // Stops the keep-alive health monitor.  Safe to call multiple times
   // and from any thread (posts a task to the IO thread if needed).
   void StopKeepAliveMonitor();
+
+  // Idle-probe for keep-alive reuse.  Returns true if the connection is
+  // alive and idle (safe to reuse); false if the peer has closed it (FIN),
+  // the socket is closed locally, or unexpected data is pending.  Synchronous
+  // and non-blocking (sockets are created in non-blocking mode).
+  //
+  // Thread safety: callable from any thread when the socket is idle — no
+  // in-flight I/O (e.g. the HTTP connection pool calls it from Acquire(),
+  // which is any-thread and serialized by the pool's internal mutex).
+  bool Peek();
 
   // ---- AsyncOutputStream -----------------------------------------------
 

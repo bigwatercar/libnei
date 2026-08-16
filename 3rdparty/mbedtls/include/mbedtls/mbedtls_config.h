@@ -1520,8 +1520,14 @@
  * \def MBEDTLS_SELF_TEST
  *
  * Enable the checkup functions (*_self_test).
+ *
+ * Disabled: when enabled, Mbed TLS keeps global timing-attack counters
+ * (ecp.c mul_count/add_count/dbl_count) that are incremented on every field
+ * multiplication. Those globals are not thread-safe, so concurrent ECDH
+ * handshakes on multiple threads race on them under TSan. libnei does not use
+ * the *_self_test() checkup functions.
  */
-#define MBEDTLS_SELF_TEST
+//#define MBEDTLS_SELF_TEST
 
 /**
  * \def MBEDTLS_SHA256_SMALLER
@@ -2140,9 +2146,13 @@
  *
  * Requires: MBEDTLS_THREADING_C
  *
- * Uncomment this to allow your own alternate threading implementation.
+ * Enabled: the application registers std::mutex based callbacks via
+ * mbedtls_threading_set_alt() (see libnei net/ssl_context.cpp) so that the
+ * shared PSA/CTR_DRBG global state is race-free under concurrent TLS
+ * handshakes on multiple threads (TLS 1.3 always draws randomness from the
+ * global PSA RNG regardless of per-context RNG config).
  */
-//#define MBEDTLS_THREADING_ALT
+#define MBEDTLS_THREADING_ALT
 
 /**
  * \def MBEDTLS_THREADING_PTHREAD
@@ -3733,9 +3743,12 @@
  * You will have to enable either MBEDTLS_THREADING_ALT or
  * MBEDTLS_THREADING_PTHREAD.
  *
+ * Enabled: libnei runs concurrent TLS handshakes on multiple threads
+ * (HTTP/1.1 and HTTP/2 stress tests), which requires this layer.
+ *
  * Enable this layer to allow use of mutexes within Mbed TLS
  */
-//#define MBEDTLS_THREADING_C
+#define MBEDTLS_THREADING_C
 
 /**
  * \def MBEDTLS_TIMING_C

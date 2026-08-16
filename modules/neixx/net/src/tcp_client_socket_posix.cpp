@@ -150,10 +150,16 @@ void TCPClientSocket::Impl::Orphan() {
     write_buf_.reset();
   }
 
-  // No pending write  --  proceed with graceful shutdown immediately.
+  // No pending write  --  flush-then-close immediately (no drain read; see
+  // header notes).  Funnel Close() to the IO thread so fd_ is only touched
+  // there.
   if (!closed_) {
-    ShutdownWrite();
-    StartOrphanDrain();
+    DCHECK_MSG(io_runner_, "Orphan: io_runner_ is null");
+    if (io_runner_ && !io_runner_->BelongsToCurrentThread()) {
+      io_runner_->PostTask(FROM_HERE, BindOnce([](scoped_refptr<Impl> self) { self->Close(); }, WrapRefCounted(this)));
+      return;
+    }
+    Close();
   } else {
     // Close() was called before the shell destructor (e.g. user called
     // sock->Close() and then let the unique_ptr go out of scope).
@@ -164,36 +170,46 @@ void TCPClientSocket::Impl::Orphan() {
 }
 
 void TCPClientSocket::Impl::OnOrphanWriteFlushed() {
-  // All buffered data has been written  --  now safe to send FIN.
-  ShutdownWrite();
-  StartOrphanDrain();
+  // The pending write has flushed (data reached the kernel); close now.
+  // No drain read -- see Orphan().
+  Close();
 }
 
-void TCPClientSocket::Impl::StartOrphanDrain() {
-  // Must post to the IO thread  --  ReadAsync requires it, and Orphan()
-  // may be called from any thread (e.g. the shell's destructor).
-  DCHECK_MSG(io_runner_, "StartOrphanDrain: io_runner_ is null");
-  if (io_runner_) {
-    io_runner_->PostTask(FROM_HERE,
-                         BindOnce(
-                             [](scoped_refptr<Impl> self) {
-                               // Mark the upcoming read as a drain so PostReadResult does not
-                               // drop its callback even when orphaned_ is true.
-                               self->is_drain_read_in_flight_ = true;
-                               auto drain_buf = MakeRefCounted<IOBufferWithSize>(4096);
-                               self->ReadAsync(std::move(drain_buf), 4096, [self](bool success, std::size_t n) {
-                                 // EOF or error  --  close the socket, which
-                                 // triggers ReleaseSelfHoldIfNeeded().
-                                 if (!success || n == 0) {
-                                   self->Close();
-                                   return;
-                                 }
-                                 // Data received during drain  --  re-issue the
-                                 // read to keep draining until the peer sends FIN.
-                                 self->StartOrphanDrain();
-                               });
-                             },
-                             WrapRefCounted(this)));
+void TCPClientSocket::Impl::Abort() {
+  if (orphaned_.exchange(true))
+    return;
+
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    // Clear the keep-alive dead callback (same rationale as Orphan()).
+    keep_alive_dead_cb_ = {};
+    // Clear all user callbacks to prevent UAF -- no flush, drop everything.
+    connect_cb_ = {};
+    read_cb_ = {};
+    read_buf_.reset();
+    write_cb_ = {};
+    write_buf_.reset();
+
+    // Take self-hold reference under lock.
+    if (!has_self_ref_) {
+      has_self_ref_ = true;
+      this->AddRef();
+    }
+  }
+
+  if (!closed_) {
+    // Immediate close: drop any in-flight I/O and complete the peer's pending
+    // read with EOF/RST.  Funnel Close() to the IO thread so fd_ is only
+    // touched there.
+    DCHECK_MSG(io_runner_, "Abort: io_runner_ is null");
+    if (io_runner_ && !io_runner_->BelongsToCurrentThread()) {
+      io_runner_->PostTask(FROM_HERE, BindOnce([](scoped_refptr<Impl> self) { self->Close(); }, WrapRefCounted(this)));
+      return;
+    }
+    Close();
+  } else {
+    // Close() was called before the shell destructor — release self-hold.
+    ReleaseSelfHoldIfNeeded();
   }
 }
 
@@ -281,6 +297,29 @@ bool TCPClientSocket::Impl::DoConnect(const IPEndPoint &addr, TCPClientSocket::C
   DCHECK_MSG(pump, "Connect: pump null  --  not on IO thread");
 
   write_controller_.StartWatching(pump, fd_, MessagePumpForIO::FdWatchController::Mode::WRITE, this);
+
+  // Re-check the connect status AFTER registering with epoll.  The pump
+  // uses edge-triggered notifications; if the handshake finished (or
+  // failed) in the window between connect() and EPOLL_CTL_ADD, no
+  // readiness event will ever be delivered and the callback would hang
+  // forever.  TSan widens this window enough to reproduce reliably.
+  {
+    int err = 0;
+    socklen_t err_len = sizeof(err);
+    if (getsockopt(fd_, SOL_SOCKET, SO_ERROR, &err, &err_len) == 0) {
+      if (err == 0) {
+        // Already connected.
+        connected_ = true;
+        write_controller_.StopWatching();
+        PostConnectResult(true);
+      } else if (err != EINPROGRESS) {
+        // Handshake already failed.
+        write_controller_.StopWatching();
+        PostConnectResult(false);
+      }
+      // err == EINPROGRESS: still connecting — wait for the epoll event.
+    }
+  }
   return true;
 }
 
@@ -447,7 +486,11 @@ void TCPClientSocket::Impl::OnFileCanWriteWithoutBlocking(NativeIOHandle /*handl
   std::size_t offset = write_offset_;
   lock.unlock();
 
-  ssize_t n = write(fd_, buf->data() + offset, len - offset);
+  // MSG_NOSIGNAL: a write to a peer that already closed its side raises
+  // EPIPE; without this flag the kernel delivers SIGPIPE and kills the
+  // whole process (e.g. a client that Close()d mid-upload while the server
+  // is still writing its response).
+  ssize_t n = send(fd_, buf->data() + offset, len - offset, MSG_NOSIGNAL);
   if (n > 0) {
     std::size_t new_offset = offset + static_cast<std::size_t>(n);
     if (new_offset >= len) {
@@ -525,14 +568,8 @@ void TCPClientSocket::Impl::PostReadResult(AsyncInputStream::IOReadCallback cb, 
       io_runner_->PostTask(FROM_HERE,
                            BindOnce(
                                [](scoped_refptr<Impl> self, AsyncInputStream::IOReadCallback c, bool s, std::size_t n) {
-                                 // If the Impl was orphaned between read completion and
-                                 // task execution, only drop user-level callbacks.  Drain
-                                 // reads (posted by StartOrphanDrain to detect peer EOF)
-                                 // must still execute so that Close() → ReleaseSelfHold
-                                 // runs and the self-hold is released.
-                                 if (self->orphaned_ && !self->is_drain_read_in_flight_)
+                                 if (self->orphaned_)
                                    return;
-                                 self->is_drain_read_in_flight_ = false;
                                  c(s, n);
                                },
                                WrapRefCounted(this),
@@ -680,6 +717,22 @@ void TCPClientSocket::Impl::StopKeepAliveMonitor() {
     std::unique_lock<std::mutex> lock(mutex_);
     keep_alive_dead_cb_ = {};
   }
+}
+
+bool TCPClientSocket::Impl::Peek() {
+  // Idle probe for keep-alive reuse: callable from any thread when the socket
+  // is idle (no in-flight I/O).  The socket is O_NONBLOCK, so recv(MSG_PEEK)
+  // returns immediately instead of blocking.
+  if (closed_.load() || fd_ < 0)
+    return false;
+  char c = 0;
+  ssize_t rc = recv(fd_, &c, 1, MSG_PEEK | MSG_DONTWAIT);
+  if (rc > 0)
+    return false; // Pending data — unexpected on an idle keep-alive connection.
+  if (rc == 0)
+    return false; // Peer sent FIN (graceful close).
+  // rc < 0: alive and idle when the only cause is would-block.
+  return errno == EAGAIN || errno == EWOULDBLOCK;
 }
 
 void TCPClientSocket::Impl::OnKeepAliveCheck() {

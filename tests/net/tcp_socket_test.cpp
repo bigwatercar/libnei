@@ -793,7 +793,7 @@ TEST_F(TcpSocketTest, OrphanedWhileConnectInFlight) {
 // socket options that cannot be directly observed from userspace without
 // platform-specific introspection (TCP_INFO / getsockopt).
 //
-// The IPv6Loopback test in udp_socket_unittest.cpp validates the IPv6
+// The IPv6Loopback test in udp_socket_test.cpp validates the IPv6
 // data path; TCP's IPv6 dual-stack behavior is implicitly covered by
 // the existing handshake / transfer tests when ::1 is used.
 //
@@ -934,6 +934,18 @@ TEST_F(TcpSocketTest, ServerDoesNotCrashUnderFdPressure) {
 
   ASSERT_TRUE(all_done.TimedWait(std::chrono::seconds(10)));
 
+  // Client Connect() callbacks complete as soon as the kernel queues the
+  // connection in the listen backlog; the server-side accept processing
+  // (epoll dispatch + accept callback) runs afterwards on the same IO
+  // thread and may lag the final connects.  Wait for the accept loop to
+  // drain before asserting, otherwise this flakes when the assertion runs
+  // before a single accept callback has fired (WSL: accepted == 0 at
+  // assertion time while all 200 clients already connected).
+  const auto settle_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (accepted.load() < kClients - 5 && std::chrono::steady_clock::now() < settle_deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
   int accepted_count = accepted.load();
   EXPECT_GE(accepted_count, kClients - 5) << "Server accepted " << accepted_count << " out of " << kClients
                                           << " clients.  Accept loop may be blocking or too slow.";
@@ -1042,7 +1054,8 @@ TEST_F(TcpSocketTest, ClientOrphanDrainReadEOF) {
     io_runner_->PostTask(FROM_HERE, [&drain]() { drain.Signal(); });
     ASSERT_TRUE(drain.TimedWait(std::chrono::seconds(5)));
 
-    // Orphan the accepted client — triggers ShutdownWrite + StartOrphanDrain.
+    // Orphan the accepted client — flushes any in-flight write then closes
+    // (no drain read: a peer waiting for a response never FINs).
     io_runner_->PostTask(FROM_HERE, [&]() { accepted_client.reset(); });
 
     // Flush to let Orphan drain complete.

@@ -65,12 +65,23 @@ public:
   void StartKeepAliveMonitor(TimeDelta check_interval, OnceCallback<void()> on_dead);
   void StopKeepAliveMonitor();
 
+  // Idle-probe for keep-alive reuse (see TCPClientSocket::Peek).
+  bool Peek();
+
   ~Impl();
 
   // Called by the shell when it is being destroyed.  If the socket hasn't
-  // been explicitly closed, initiates graceful shutdown (SD_SEND), cancels
-  // pending user callbacks, and self-holds until the peer's EOF arrives.
+  // been explicitly closed, flushes any in-flight write and then closes the
+  // socket, cancels pending user callbacks, and releases the self-hold.
+  // Deliberately does NOT drain the read side to the peer's EOF: a peer that
+  // is waiting for a response never sends its FIN, so draining would hang.
   void Orphan();
+
+  // Aborts the connection immediately: closes the socket outright and drops
+  // all in-flight I/O and pending user callbacks (the peer's pending read
+  // completes with EOF/RST).  For protocol layers that know the socket is
+  // being torn down mid-protocol (e.g. a server destroyed mid-request).
+  void Abort();
 
 private:
   // MessagePumpForIO::CompletionWatcher
@@ -97,6 +108,10 @@ private:
   std::atomic<bool> orphaned_{false};
   std::atomic<bool> write_shutdown_{false};
 
+  // True while a WSASend is in flight (set in WriteAsync, cleared in
+  // OnIOCompleted(kWrite)).  Only accessed on the IO thread.
+  bool write_in_flight_ = false;
+
   // IOCP watcher controller  --  registers socket with the pump's completion port.
   MessagePumpForIO::FdWatchController controller_;
 
@@ -108,11 +123,13 @@ private:
   // Thread safety validation.
   DECLARE_THREAD_CHECKER(thread_checker_);
 
-  // Called when a pending write completes during orphan shutdown.
+  // Called when a pending write completes during orphan shutdown.  At this
+  // point the write data is accepted by the kernel, so the socket can close.
   void OnOrphanWriteFlushed();
 
-  // Starts background drain read after orphan shutdown.
-  void StartOrphanDrain();
+  // Runs on the IO thread after Orphan(): closes the socket now, or waits
+  // for the in-flight write to flush first (OnOrphanWriteFlushed -> Close()).
+  void StartOrphanClose();
 
   // Physical socket + watcher cleanup  --  must run on the IO thread.
   void DoCloseCleanup(SOCKET s);
@@ -175,10 +192,6 @@ struct TcpOverlappedContext {
   // completes and OnIOCompleted destroys this context, the ref is released.
   scoped_refptr<TCPClientSocket::Impl> self_ref;
 
-  // If true, this is a drain read posted by StartOrphanDrain().  OnIOCompleted
-  // must NOT fire the user callback when orphaned_ is set.
-  bool is_drain_read = false;
-
   // Resets all fields to default state for safe re-use via object caching.
   // Caller MUST have already extracted self_ref before calling Reset().
   void Reset() {
@@ -188,7 +201,6 @@ struct TcpOverlappedContext {
     write_cb = {};
     connect_cb = {};
     self_ref.reset();
-    is_drain_read = false;
     std::memset(&overlapped, 0, sizeof(OVERLAPPED));
     // op intentionally preserved  --  caller re-sets it on Acquire.
   }

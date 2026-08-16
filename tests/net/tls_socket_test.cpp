@@ -14,9 +14,11 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
@@ -34,6 +36,7 @@
 #include <neixx/net/ip_end_point.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/net/ssl_context.h>
+#include "mbedtls_threading.h"
 #include <neixx/net/tcp_client_socket.h>
 #include <neixx/net/tcp_server_socket.h>
 #include <neixx/net/tls_client_socket.h>
@@ -57,6 +60,10 @@ struct TestCert {
 };
 
 TestCert GenerateSelfSignedCert() {
+  // The test binary links its own copy of Mbed TLS, so register the threading
+  // callbacks for that copy before any direct Mbed TLS call here.
+  nei::net::internal::EnsureMbedtlsThreading();
+
   mbedtls_pk_context key;
   mbedtls_x509write_cert crt;
   mbedtls_ctr_drbg_context drbg;
@@ -469,6 +476,111 @@ TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
   // Verify byte-for-byte match.
   ASSERT_EQ(recv_buf->size(), kPayloadSize);
   EXPECT_EQ(*recv_buf, *payload) << "10 MB TLS round-trip: data corruption detected!";
+}
+
+// =============================================================================
+// Test 4b — SingleLargeWriteNoPartialDataLoss (大缓冲单次写完整性)
+// =============================================================================
+//
+// A SINGLE WriteAsync with a multi-megabyte buffer must deliver every byte
+// to the peer and complete with the full length.  The TLS layer stages
+// ciphertext in a BIO send queue and flushes it through the transport one
+// write at a time; transports may complete such writes PARTIALLY
+// (WSASend/write can accept fewer bytes than requested).  Before the fix
+// the un-flushed remainder of a partially-completed write was popped and
+// dropped — this test would then hang waiting for the missing tail or fail
+// the byte compare below.  The server-side read delay creates send-buffer
+// backpressure so the partial-write path is exercised deterministically.
+// Unlike LargePayloadBioCompaction (which re-drives the write per callback
+// and tolerates partial writes), this test issues exactly ONE WriteAsync
+// call.
+
+TEST_F(TlsSocketTest, SingleLargeWriteNoPartialDataLoss) {
+#if defined(__SANITIZE_THREAD__)
+  GTEST_SKIP() << "TSan instrumentation makes large-payload TLS test timeout";
+#endif
+  uint16_t port = FindFreePort();
+  ASSERT_NE(port, 0);
+
+  constexpr size_t kPayloadSize = 2 * 1024 * 1024; // 2 MB
+  auto payload = std::make_shared<std::vector<unsigned char>>(kPayloadSize);
+  for (size_t i = 0; i < kPayloadSize; ++i)
+    (*payload)[i] = static_cast<unsigned char>((i * 31 + 7) & 0xFF);
+
+  // ---- Server: accept, receive the full payload, verify pattern ----
+  auto recv_buf = std::make_shared<std::vector<unsigned char>>();
+  recv_buf->reserve(kPayloadSize);
+  auto server_done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto server_ok = std::make_shared<std::atomic<bool>>(false);
+
+  auto server = std::make_shared<TLSServerSocket>(&server_ctx_);
+  srv_runner_->PostTask(FROM_HERE, [&, server_done]() {
+    ASSERT_TRUE(server->Listen(
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+        1,
+        [&, server_done](bool ok, std::unique_ptr<TLSClientSocket> tls) {
+          ASSERT_TRUE(ok);
+          auto tls_shared = std::make_shared<TLSClientSocket>(std::move(*tls));
+          auto offset = std::make_shared<size_t>(0);
+          auto do_read = std::make_shared<std::function<void()>>();
+          *do_read = [=]() {
+            size_t remain = kPayloadSize - *offset;
+            if (remain == 0) {
+              server_ok->store(*recv_buf == *payload);
+              server_done->Signal();
+              return;
+            }
+            // Request SMALL reads: a huge read request lets the kernel
+            // autotune a huge receive window, which swallows the whole
+            // payload and removes all backpressure on the sender.
+            size_t want = std::min(remain, size_t(32 * 1024));
+            auto chunk = MakeRefCounted<IOBufferWithSize>(want);
+            tls_shared->ReadAsync(chunk, want, [=](bool s, size_t n) {
+              if (!s || n == 0) {
+                server_done->Signal();
+                return;
+              }
+              recv_buf->insert(recv_buf->end(), chunk->data(), chunk->data() + n);
+              *offset += n;
+              // Deliberate backpressure: drain the socket slowly so the
+              // sender's kernel send buffer fills up and the non-blocking
+              // transport completes writes PARTIALLY — exactly the
+              // condition the library fix must survive.
+              std::this_thread::sleep_for(std::chrono::milliseconds(30));
+              (*do_read)();
+            });
+          };
+          (*do_read)();
+        },
+        srv_runner_));
+  });
+
+  // ---- Client: connect, then issue exactly ONE WriteAsync ----
+  auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), &client_ctx_);
+  auto client_done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto write_ok = std::make_shared<std::atomic<bool>>(false);
+
+  io_runner_->PostTask(FROM_HERE, [&, client_done]() {
+    client->Connect(
+        IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
+        [&, client_done](bool ok) {
+          ASSERT_TRUE(ok);
+          auto send_buf = MakeRefCounted<IOBufferWithSize>(kPayloadSize);
+          std::memcpy(send_buf->data(), payload->data(), kPayloadSize);
+          // Core assertion: a single WriteAsync must complete with the
+          // FULL length — no data may be silently dropped behind it.
+          client->WriteAsync(send_buf, kPayloadSize, [=](bool s, size_t n) {
+            write_ok->store(s && n == kPayloadSize);
+            client_done->Signal();
+          });
+        },
+        io_runner_);
+  });
+
+  ASSERT_TRUE(client_done->TimedWait(std::chrono::seconds(30))) << "single large TLS write never completed";
+  EXPECT_TRUE(write_ok->load()) << "WriteAsync must report the full payload length";
+  ASSERT_TRUE(server_done->TimedWait(std::chrono::seconds(60))) << "server never received the full payload";
+  ASSERT_TRUE(server_ok->load()) << "2 MB single-write TLS transfer: data corruption or loss detected!";
 }
 
 // =============================================================================

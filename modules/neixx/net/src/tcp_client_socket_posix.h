@@ -56,15 +56,25 @@ public:
   void StartKeepAliveMonitor(TimeDelta check_interval, OnceCallback<void()> on_dead);
   void StopKeepAliveMonitor();
 
+  // Idle-probe for keep-alive reuse (see TCPClientSocket::Peek).
+  bool Peek();
+
   // RefCountedThreadSafe release path  --  calls Close() and then the
   // implicit destructor chain.
   ~Impl();
 
   // Called by the shell when it is being destroyed.  If the socket hasn't
-  // been explicitly closed, initiates graceful shutdown (SHUT_WR), cancels
-  // pending user callbacks to prevent UAF, and self-holds a reference so
-  // the Impl stays alive in the background until the peer's EOF arrives.
+  // been explicitly closed, flushes any in-flight write and then closes the
+  // socket, cancels pending user callbacks to prevent UAF, and releases the
+  // self-hold.  Deliberately does NOT drain to the peer's EOF: a peer waiting
+  // for a response never sends its FIN, so draining would hang forever.
   void Orphan();
+
+  // Aborts the connection immediately: closes the socket outright and drops
+  // all in-flight I/O and pending user callbacks (the peer's pending read
+  // completes with EOF/RST).  For protocol layers that know the socket is
+  // being torn down mid-protocol (e.g. a server destroyed mid-request).
+  void Abort();
 
 private:
   // MessagePumpForIO::Watcher
@@ -78,9 +88,8 @@ private:
   void PostReadResult(AsyncInputStream::IOReadCallback cb, bool success, std::size_t bytes);
   void PostWriteResult(AsyncOutputStream::IOWriteCallback cb, bool success, std::size_t bytes);
 
-  // Starts a background read to drain the peer's EOF after orphaning.
-  void StartOrphanDrain();
-  // Called when a pending write completes during orphan shutdown.
+  // Called when a pending write completes during orphan shutdown.  At this
+  // point the write data is accepted by the kernel, so the socket can close.
   void OnOrphanWriteFlushed();
   // Releases the self-hold reference if held (must be called under mutex_).
   void ReleaseSelfHoldIfNeeded();
@@ -120,17 +129,8 @@ private:
 
   // Self-hold flag (protected by mutex_).  When true, the Impl holds an
   // extra reference to itself for background graceful shutdown.  Set by
-  // Orphan(), cleared and released by Close() or drain completion.
+  // Orphan()/Abort(), cleared and released by Close().
   bool has_self_ref_ = false;
-
-  // Set by StartOrphanDrain before posting a drain read.  PostReadResult
-  // must NOT drop the drain callback even when orphaned_ is true, otherwise
-  // Close() never runs and the self-hold leaks.
-  //
-  // Thread-safety: all accesses happen on the dedicated IO thread (the Impl
-  // is bound to a single io_runner_).  If Multi-Reactor worker dispatch is
-  // added in the future, this should become std::atomic<bool>.
-  bool is_drain_read_in_flight_ = false;
 
   // ---- Keep-Alive ------------------------------------------------
   void OnKeepAliveCheck();

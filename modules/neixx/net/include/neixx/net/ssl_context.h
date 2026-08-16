@@ -111,6 +111,9 @@ public:
   // TLSClientSocket.
   void SetAlpnProtocols(const std::vector<std::string> &protocols);
 
+  // Returns the configured ALPN protocol list (empty if never set).
+  const std::vector<std::string> &alpn_protocols() const;
+
   // ---------------------------------------------------------------------------
   // Internal accessors — for TLSClientSocket / TLSServerSocket Impl
   // ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ public:
     cb_ = std::move(cb);
     selector_ = std::move(selector);
     runner_ = std::move(runner);
-    server_ = std::make_shared<TCPServerSocket>();
+    server_ = std::make_unique<TCPServerSocket>();
     return server_->Listen(
         addr,
         backlog,
@@ -29,8 +29,20 @@ public:
   }
 
   void Close() {
-    if (server_)
+    if (server_) {
       server_->Close();
+      // Drop the underlying TCPServerSocket. The accept callback chain holds
+      // a self-reference back to this Impl (the RunnerSelector captures
+      // scoped_refptr<Impl>), forming a reference cycle Impl -> server_ ->
+      // worker_selector_ -> Impl. Close() moves the accept callback out, but
+      // the worker_selector_ is only released when TCPServerSocket::Impl is
+      // destroyed — which cannot happen while we still own it here. Resetting
+      // our unique_ptr lets the TCPServerSocket die once its in-flight
+      // teardown task completes, breaking the cycle (otherwise
+      // TLSServerSocket::Impl + TCPServerSocket leak, visible under valgrind
+      // as definite losses).
+      server_.reset();
+    }
   }
 
   void SetKeepAlive(const KeepAliveConfig &config) {
@@ -72,7 +84,7 @@ private:
   // of this server AND every connection it accepts (each TLS session
   // references its mbedtls config / DRBG / certs).
   SSLContext *ctx_;
-  std::shared_ptr<TCPServerSocket> server_;
+  std::unique_ptr<TCPServerSocket> server_;
   AcceptCallback cb_;
   RunnerSelector selector_;
   scoped_refptr<SingleThreadTaskRunner> runner_;

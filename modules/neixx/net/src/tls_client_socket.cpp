@@ -37,9 +37,12 @@ struct TlsBioCtx {
 
   // Write path: BioSend wraps ciphertext into IOBufferWithSize and
   // pushes here.  FlushBio drains the queue with write serialization.
+  // |offset| tracks how many bytes of this record have already been
+  // accepted by the transport (WSASend/write may complete partially).
   struct SendRecord {
     scoped_refptr<IOBuffer> buf;
     size_t len = 0;
+    size_t offset = 0;
   };
 
   std::deque<SendRecord> send_queue;
@@ -132,6 +135,7 @@ public:
     }
     write_buf_ = std::move(buf);
     write_len_ = len;
+    write_offset_ = 0;
     write_cb_ = std::move(cb);
     TryWriteEncrypt();
   }
@@ -147,6 +151,30 @@ public:
     // send_queue or a WriteAsync still in flight, we wait for the
     // transport write to finish and drain send_queue, then close.
     CloseAfterFlush();
+  }
+
+  void ShutdownWrite() {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    if (state_ != State::Connected)
+      return;
+    // The user-facing write completion fires as soon as mbedtls accepts the
+    // plaintext — the ciphertext may still be draining through the transport.
+    // shutdown(SD_SEND) with an in-flight WSASend cancels the send, so defer
+    // the half-close until the send queue is fully flushed.
+    shutdown_write_pending_ = true;
+    ShutdownWriteAfterFlush();
+  }
+
+  void ShutdownWriteAfterFlush() {
+    if (!bio_.send_queue.empty() || write_in_flight_) {
+      if (!write_in_flight_ && !bio_.send_queue.empty())
+        FlushBio();
+      return; // FlushBio completion re-enters here
+    }
+    if (!shutdown_write_pending_)
+      return;
+    shutdown_write_pending_ = false;
+    transport_->ShutdownWrite();
   }
 
   void Orphan() {
@@ -167,11 +195,12 @@ public:
     state_ = State::Closed;
     ClearPending();
 
-    // Destroy the TCP shell on its owning sequence. Its destructor enters
-    // TCPClientSocket::Impl::Orphan(), which marks in-flight IOCP callbacks
-    // orphaned and suppresses late connect/read/write dispatch. Close() is
-    // insufficient here: it sets closed_ while a previously queued write can
-    // still reach TCPClientSocket::WriteAsync and trip its DCHECK.
+    // This is an abort-style teardown (no close_notify, no graceful flush):
+    // drop the TCP transport immediately so the peer's pending read completes
+    // promptly with EOF/RST instead of waiting for a response that will never
+    // come.  Abort() marks in-flight IOCP callbacks orphaned and suppresses
+    // late connect/read/write dispatch, then closes the socket outright.
+    transport_->Abort();
     transport_.reset();
   }
 
@@ -209,6 +238,11 @@ public:
 
   void StopKeepAliveMonitor() {
     transport_->StopKeepAliveMonitor();
+  }
+
+  // Idle-probe for keep-alive reuse (see TLSClientSocket::Peek).
+  bool Peek() {
+    return transport_ ? transport_->Peek() : false;
   }
 
 private:
@@ -328,12 +362,27 @@ private:
 
   void TryWriteEncrypt() {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    int ret = mbedtls_ssl_write(&ssl_, reinterpret_cast<const unsigned char *>(write_buf_->data()), write_len_);
+    int ret = mbedtls_ssl_write(
+        &ssl_, reinterpret_cast<const unsigned char *>(write_buf_->data()) + write_offset_, write_len_ - write_offset_);
     if (ret > 0) {
+      write_offset_ += static_cast<size_t>(ret);
+      if (write_offset_ < write_len_) {
+        // The in-memory send BIO filled up before all plaintext was
+        // consumed: flush ciphertext, then resume with the remainder.
+        // mbedtls_ssl_write() must be called again with the same buffer
+        // advanced by the bytes it already consumed.
+        FlushBio();
+        runner_->PostTask(
+            FROM_HERE, BindOnce([](scoped_refptr<Impl> self) { self->TryWriteEncrypt(); }, scoped_refptr<Impl>(this)));
+        return;
+      }
       FlushBio();
+      size_t total = write_len_;
       auto cb = std::move(write_cb_);
       write_buf_.reset();
-      runner_->PostTask(FROM_HERE, BindOnce(std::move(cb), true, static_cast<size_t>(ret)));
+      write_len_ = 0;
+      write_offset_ = 0;
+      runner_->PostTask(FROM_HERE, BindOnce(std::move(cb), true, total));
       return;
     }
     if (ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
@@ -355,17 +404,33 @@ private:
     }
     write_in_flight_ = true;
     auto &front = bio_.send_queue.front();
-    transport_->WriteAsync(
-        front.buf, front.len, [self = scoped_refptr<Impl>(this), on_flushed = std::move(on_flushed)](bool, size_t) {
-          if (self->state_ == State::Closed)
-            return;
-          self->bio_.send_queue.pop_front();
-          self->write_in_flight_ = false;
-          // Drain next — pass on_flushed so it fires only when queue is empty.
-          self->FlushBio(std::move(on_flushed));
-          if (self->state_ == State::Closing)
-            self->CloseAfterFlush();
-        });
+    transport_->WriteAsync(front.buf,
+                           front.len - front.offset,
+                           [self = scoped_refptr<Impl>(this), on_flushed = std::move(on_flushed)](bool ok, size_t n) {
+                             if (self->state_ == State::Closed)
+                               return;
+                             self->write_in_flight_ = false;
+                             if (!ok) {
+                               // Transport failure: stop draining.  The
+                               // user-facing write was already acknowledged
+                               // by mbedtls; late ciphertext loss surfaces
+                               // through subsequent reads/close.
+                               self->bio_.send_queue.clear();
+                             } else {
+                               // The transport may accept fewer bytes than
+                               // requested (partial WSASend/write); retain
+                               // the remainder of this record.
+                               auto &f = self->bio_.send_queue.front();
+                               f.offset += n;
+                               if (f.offset >= f.len)
+                                 self->bio_.send_queue.pop_front();
+                             }
+                             self->FlushBio(std::move(on_flushed));
+                             if (self->shutdown_write_pending_)
+                               self->ShutdownWriteAfterFlush();
+                             if (self->state_ == State::Closing)
+                               self->CloseAfterFlush();
+                           });
   }
 
   // ----- Helpers -----
@@ -403,6 +468,7 @@ private:
   }
 
   bool write_in_flight_ = false;
+  bool shutdown_write_pending_ = false;
 
   State state_ = State::Idle;
   bool handshake_done_ = false;
@@ -421,6 +487,7 @@ private:
   AsyncInputStream::IOReadCallback read_cb_;
   scoped_refptr<IOBuffer> write_buf_;
   size_t write_len_ = 0;
+  size_t write_offset_ = 0; // plaintext bytes already consumed by mbedtls
   AsyncOutputStream::IOWriteCallback write_cb_;
 
   DECLARE_SEQUENCE_CHECKER(sequence_checker_);
@@ -481,6 +548,10 @@ void TLSClientSocket::Close() {
   impl_->Close();
 }
 
+void TLSClientSocket::ShutdownWrite() {
+  impl_->ShutdownWrite();
+}
+
 std::string TLSClientSocket::GetNegotiatedProtocol() const {
   return impl_->GetNegotiatedProtocol();
 }
@@ -495,6 +566,10 @@ void TLSClientSocket::StartKeepAliveMonitor(TimeDelta check_interval, OnceCallba
 
 void TLSClientSocket::StopKeepAliveMonitor() {
   impl_->StopKeepAliveMonitor();
+}
+
+bool TLSClientSocket::Peek() {
+  return impl_ ? impl_->Peek() : false;
 }
 
 } // namespace nei::net

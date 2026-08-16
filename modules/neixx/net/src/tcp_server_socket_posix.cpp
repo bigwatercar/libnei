@@ -86,35 +86,38 @@ void TCPServerSocket::Impl::Close() {
   // TCPClientSocket DoCloseCleanup trampoline pattern).
   if (io_runner_ && !io_runner_->BelongsToCurrentThread()) {
     lock.unlock();
-    io_runner_->PostTask(FROM_HERE, BindOnce([](scoped_refptr<Impl> self) { self->Close(); }, WrapRefCounted(this)));
+    io_runner_->PostTask(FROM_HERE,
+                         BindOnce([](scoped_refptr<Impl> self) { self->ClosePhysical(); }, WrapRefCounted(this)));
     return;
   }
 
-  watch_controller_.StopWatching();
-  if (listen_fd_ >= 0) {
-    close(listen_fd_);
-    listen_fd_ = -1;
-  }
-  if (reserve_fd_ >= 0) {
-    close(reserve_fd_);
-    reserve_fd_ = -1;
-  }
+  ClosePhysicalLocked();
   lock.unlock();
 
   // Release self-hold (allows final deletion).
   ReleaseSelfHoldIfNeeded();
 }
 
-void TCPServerSocket::Impl::Shutdown() {
+// Physical teardown — must run on the IO thread.  mutex_ is NOT held on
+// entry; this is a separate trampoline target because calling Close()
+// again would early-return on closed_.
+void TCPServerSocket::Impl::ClosePhysical() {
   std::unique_lock<std::mutex> lock(mutex_);
-  if (closed_.exchange(true))
-    return;
+  ClosePhysicalLocked();
+  lock.unlock();
+  ReleaseSelfHoldIfNeeded();
+}
 
-  // Silent shutdown  --  clear the callback without firing it.
-  accept_callback_ = {};
-
+// Physical teardown with mutex_ held.
+void TCPServerSocket::Impl::ClosePhysicalLocked() {
   watch_controller_.StopWatching();
   if (listen_fd_ >= 0) {
+    // Drain the accept backlog BEFORE closing the listen fd: on Linux,
+    // close() does NOT reset connections that already completed the
+    // handshake and sit in the backlog — they would hang forever waiting
+    // for an accept that never comes.  Closing the drained sockets
+    // delivers the RST/FIN those clients are waiting for.
+    DrainAcceptBacklogLocked();
     close(listen_fd_);
     listen_fd_ = -1;
   }
@@ -122,9 +125,56 @@ void TCPServerSocket::Impl::Shutdown() {
     close(reserve_fd_);
     reserve_fd_ = -1;
   }
+}
+
+void TCPServerSocket::Impl::Shutdown() {
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (closed_.exchange(true))
+      return;
+
+    // Silent shutdown  --  clear the callback without firing it.
+    accept_callback_ = {};
+  }
+
+  // Physical teardown must run on the IO thread to avoid racing
+  // OnFileCanReadWithoutBlocking's epoll re-arm (watch_controller_.
+  // StartWatching) — the watch controller is not thread-safe.  The
+  // trampoline targets ShutdownPhysical(), NOT Shutdown(): re-entering
+  // Shutdown() would early-return on closed_ and skip the teardown.
+  if (io_runner_ && !io_runner_->BelongsToCurrentThread()) {
+    io_runner_->PostTask(FROM_HERE,
+                         BindOnce([](scoped_refptr<Impl> self) { self->ShutdownPhysical(); }, WrapRefCounted(this)));
+    return;
+  }
+
+  ShutdownPhysical();
+}
+
+// Physical teardown — must run on the IO thread.
+void TCPServerSocket::Impl::ShutdownPhysical() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  ClosePhysicalLocked();
   // NOTE: Do NOT release self-hold here.  Orphan() manages the self-hold
   // lifecycle  --  releasing too early causes UAF if the IO thread is still
   // processing in-flight accepts.
+}
+
+// Called with mutex_ held on the IO thread.  Accepts and immediately
+// closes every connection sitting in the kernel backlog so their peers
+// observe a connection reset instead of hanging forever.
+void TCPServerSocket::Impl::DrainAcceptBacklogLocked() {
+  if (listen_fd_ < 0)
+    return;
+  while (true) {
+    struct sockaddr_storage ignored = {};
+    socklen_t ignored_len = sizeof(ignored);
+    int client_fd =
+        accept4(listen_fd_, reinterpret_cast<struct sockaddr *>(&ignored), &ignored_len, SOCK_NONBLOCK | SOCK_CLOEXEC);
+    if (client_fd < 0)
+      break; // EAGAIN/EWOULDBLOCK: backlog drained (or fd already dead).
+    close(client_fd);
+  }
 }
 
 void TCPServerSocket::Impl::Orphan() {
@@ -239,8 +289,14 @@ void TCPServerSocket::Impl::OnFileCanReadWithoutBlocking(NativeIOHandle /*handle
     {
       std::unique_lock<std::mutex> lock(mutex_);
       if (closed_ || !accept_callback_) {
-        // Server was closed while we were accepting  --  discard.
-        break;
+        // Server was closed while we were accepting  --  discard this
+        // connection AND KEEP DRAINING the backlog: on Linux, closing
+        // the listen fd does NOT reset connections already sitting in
+        // the accept backlog, so any client we skip here would hang
+        // forever waiting for an accept that never comes.
+        lock.unlock();
+        close(client_fd);
+        continue;
       }
       DCHECK_MSG(io_runner_, "OnFileCanRead: io_runner_ is null");
       if (io_runner_) {

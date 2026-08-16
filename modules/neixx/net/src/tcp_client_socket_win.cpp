@@ -36,6 +36,16 @@ LPFN_CONNECTEX GetConnectEx() {
   return fn;
 }
 
+// libnei uses these sockets exclusively for overlapped I/O (WSARecv/WSASend
+// via IOCP), where the blocking mode is irrelevant.  Making every socket
+// non-blocking by default lets synchronous probes such as recv(MSG_PEEK)
+// (used by the HTTP connection pool to detect a peer-closed keep-alive
+// connection) return WSAEWOULDBLOCK instead of blocking the calling thread.
+void SetNonBlocking(SOCKET s) {
+  u_long mode = 1;
+  ioctlsocket(s, FIONBIO, &mode);
+}
+
 } // namespace
 
 // =============================================================================
@@ -68,6 +78,9 @@ TCPClientSocket::Impl::Impl(SOCKET accepted_socket, scoped_refptr<SingleThreadTa
   DCHECK_MSG(io_runner_, "Accepted socket requires io_runner");
   int opt = 1;
   setsockopt(socket_, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<char *>(&opt), sizeof(opt));
+  // Non-blocking by default (see SetNonBlocking comment).  All data I/O is
+  // overlapped so this does not change read/write semantics.
+  SetNonBlocking(socket_);
   // RegisterWithPump() is deferred to first I/O  --  see EnsurePumpRegistered().
 }
 
@@ -139,15 +152,20 @@ void TCPClientSocket::Impl::Orphan() {
   }
 
   if (!closed_) {
-    // Check if there's a pending write  --  if so, wait for flush before FIN.
-    // On Windows, pending writes are tracked via in-flight IOCP contexts,
-    // not a member variable.  We signal intent via orphaned_ and let
-    // OnIOCompleted(kWrite) call OnOrphanWriteFlushed().
-    // Start a drain read to catch the case where no write is pending.
+    // Flush-then-close teardown.  We deliberately do NOT drain the read side
+    // to the peer's EOF: a peer that is waiting for a response will never
+    // send its FIN, so a drain read would hang forever (mutual wait).  Closing
+    // (after any in-flight write flushes) completes the peer's pending read
+    // promptly with EOF/RST.  Pending user callbacks are dropped via the
+    // orphaned_ checks in OnIOCompleted.  All socket_ access happens on the
+    // IO thread via the posted StartOrphanClose().
     DCHECK_MSG(io_runner_, "Orphan: io_runner_ is null");
     if (io_runner_) {
       io_runner_->PostTask(FROM_HERE,
-                           BindOnce([](scoped_refptr<Impl> self) { self->StartOrphanDrain(); }, WrapRefCounted(this)));
+                           BindOnce([](scoped_refptr<Impl> self) { self->StartOrphanClose(); }, WrapRefCounted(this)));
+    } else {
+      // No IO thread -> no in-flight I/O; close directly.
+      Close();
     }
   } else {
     // Close() was called before the shell destructor — release self-hold.
@@ -156,54 +174,52 @@ void TCPClientSocket::Impl::Orphan() {
 }
 
 void TCPClientSocket::Impl::OnOrphanWriteFlushed() {
-  ShutdownWrite();
-  // Drain read has already been posted by Orphan()  --  the read will
-  // see EOF and call Close(), which triggers ReleaseSelfHoldIfNeeded().
+  // The in-flight write has completed (data accepted by the kernel); close
+  // now.  No drain read -- see Orphan().
+  Close();
 }
 
-void TCPClientSocket::Impl::StartOrphanDrain() {
-  // Send FIN before starting the drain read so the peer knows to close.
-  // For the pending-write case OnOrphanWriteFlushed() already sent FIN;
-  // for the no-pending-write case this is the only place that triggers it.
-  // ShutdownWrite() is idempotent (write_shutdown_ exchange guard).
-  ShutdownWrite();
+void TCPClientSocket::Impl::StartOrphanClose() {
+  // Called on the IO thread from Orphan().  If a write is still in flight,
+  // wait for its completion: OnIOCompleted(kWrite) will call
+  // OnOrphanWriteFlushed() -> Close().  Otherwise close now so the peer's
+  // pending read completes promptly.
+  if (write_in_flight_)
+    return;
+  Close();
+}
 
-  // Ensure the socket is bound to the IOCP before issuing WSARecv.
-  // Accepted sockets defer pump registration to the first I/O call;
-  // if Orphan() fires before any ReadAsync/WriteAsync, the socket
-  // would otherwise not be associated with any completion port.
-  EnsurePumpRegistered();
+void TCPClientSocket::Impl::Abort() {
+  if (orphaned_.exchange(true))
+    return;
 
-  auto drain_buf = MakeRefCounted<IOBufferWithSize>(4096);
-  // Mark this read as a drain read so OnIOCompleted won't fire the user
-  // callback when orphaned_ is true.
-  auto *ctx = AcquireReadCtx();
-  ctx->buffer = drain_buf;
-  ctx->buf_len = 4096;
-  ctx->is_drain_read = true;
-  ctx->self_ref = WrapRefCounted(this);
-  // Set a drain callback so OnIOCompleted can trigger Close() on EOF/error
-  // and re-issue reads until the peer shuts down.  This mirrors the POSIX
-  // drain callback behavior.
-  ctx->read_cb = [self = WrapRefCounted(this)](bool success, std::size_t n) {
-    if (!success || n == 0) {
-      self->Close(); // EOF or error  --  triggers ReleaseSelfHoldIfNeeded
-    } else {
-      // Data received during drain  --  keep reading until EOF.
-      self->StartOrphanDrain();
+  // Clear the keep-alive dead callback so the timer (if running) won't
+  // spuriously fire it during teardown (same rationale as Orphan()).
+  keep_alive_dead_cb_ = {};
+
+  // Take self-hold reference under lock.
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!has_self_ref_) {
+      has_self_ref_ = true;
+      this->AddRef();
     }
-  };
+  }
 
-  WSABUF wsa_buf;
-  wsa_buf.buf = reinterpret_cast<CHAR *>(ctx->buffer->data());
-  wsa_buf.len = static_cast<ULONG>(ctx->buf_len);
-
-  DWORD flags = 0;
-  int rc = WSARecv(socket_, &wsa_buf, 1, nullptr, &flags, &ctx->overlapped, nullptr);
-  if (rc == SOCKET_ERROR && WSAGetLastError() != ERROR_IO_PENDING) {
-    // self_ref was set above; RecycleCtx clears it via Reset().
-    RecycleCtx(ctx);
-    Close(); // Cleanup triggers ReleaseSelfHoldIfNeeded.
+  if (!closed_) {
+    // Immediate close: drop any in-flight write/read and complete the peer's
+    // pending read with EOF/RST.  Funnel to the IO thread so socket_ is only
+    // touched there.
+    DCHECK_MSG(io_runner_, "Abort: io_runner_ is null");
+    if (io_runner_) {
+      io_runner_->PostTask(FROM_HERE, BindOnce([](scoped_refptr<Impl> self) { self->Close(); }, WrapRefCounted(this)));
+    } else {
+      // No IO thread -> no in-flight I/O; close directly.
+      Close();
+    }
+  } else {
+    // Close() was called before the shell destructor — release self-hold.
+    ReleaseSelfHoldIfNeeded();
   }
 }
 
@@ -259,6 +275,10 @@ bool TCPClientSocket::Impl::DoConnect(const IPEndPoint &addr, TCPClientSocket::C
       WSASocketW(sa.ss_family, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
   if (socket_ == INVALID_SOCKET)
     return false;
+
+  // Non-blocking by default (see SetNonBlocking comment).  All data I/O is
+  // overlapped so this does not change read/write semantics.
+  SetNonBlocking(socket_);
 
   // Kernel-level TCP stack bypass for localhost (no-op on non-loopback).
   {
@@ -512,9 +532,12 @@ void TCPClientSocket::Impl::WriteAsync(scoped_refptr<IOBuffer> buf,
   wsa_buf.buf = reinterpret_cast<CHAR *>(ctx->buffer->data());
   wsa_buf.len = static_cast<ULONG>(buf_len);
 
+  write_in_flight_ = true; // Cleared in OnIOCompleted(kWrite) on completion.
   int rc = WSASend(socket_, &wsa_buf, 1, nullptr, 0, &ctx->overlapped, nullptr);
 
   if (rc == SOCKET_ERROR && WSAGetLastError() != ERROR_IO_PENDING) {
+    // No completion will be delivered for this operation -- clear the flag.
+    write_in_flight_ = false;
     auto cb = std::move(ctx->write_cb);
     // self_ref was set above; RecycleCtx clears it via Reset().
     RecycleCtx(ctx);
@@ -574,34 +597,31 @@ void TCPClientSocket::Impl::OnIOCompleted(NativeIOHandle /*handle*/,
   }
   case TcpOverlappedContext::Op::kRead: {
     auto cb = std::move(ctx->read_cb);
-    bool is_drain = ctx->is_drain_read;
     scoped_refptr<Impl> self_protector = std::move(ctx->self_ref);
     RecycleCtx(ctx);
-    if (orphaned_ && !is_drain)
-      break;
+    if (orphaned_)
+      break; // Orphan/Abort path -- drop the callback, no user notification.
     if (cb) {
       DCHECK_MSG(io_runner_, "OnIOCompleted(kRead): io_runner_ is null");
       if (io_runner_) {
         io_runner_->PostTask(
             FROM_HERE,
             BindOnce(
-                [](scoped_refptr<Impl> self, AsyncInputStream::IOReadCallback c, bool s, std::size_t n, bool drain) {
-                  // Only skip user callbacks when orphaned; drain
-                  // callbacks must always fire so Close() can run.
-                  if (!drain && self->orphaned_)
+                [](scoped_refptr<Impl> self, AsyncInputStream::IOReadCallback c, bool s, std::size_t n) {
+                  if (self->orphaned_)
                     return;
                   c(s, n);
                 },
                 WrapRefCounted(this),
                 std::move(cb),
                 success,
-                static_cast<std::size_t>(bytes_transferred),
-                is_drain));
+                static_cast<std::size_t>(bytes_transferred)));
       }
     }
     break;
   }
   case TcpOverlappedContext::Op::kWrite: {
+    write_in_flight_ = false; // Completion received for the in-flight write.
     auto cb = std::move(ctx->write_cb);
     scoped_refptr<Impl> self_protector = std::move(ctx->self_ref);
     RecycleCtx(ctx);
@@ -725,6 +745,22 @@ void TCPClientSocket::Impl::StopKeepAliveMonitor() {
 
   keep_alive_timer_.reset();
   keep_alive_dead_cb_ = {};
+}
+
+bool TCPClientSocket::Impl::Peek() {
+  // Idle probe for keep-alive reuse: callable from any thread when the socket
+  // is idle (no in-flight I/O).  Sockets are created non-blocking (FIONBIO),
+  // so recv(MSG_PEEK) returns immediately instead of blocking.
+  if (closed_.load() || socket_ == INVALID_SOCKET)
+    return false;
+  char c = 0;
+  int rc = recv(socket_, &c, 1, MSG_PEEK);
+  if (rc > 0)
+    return false; // Pending data — unexpected on an idle keep-alive connection.
+  if (rc == 0)
+    return false; // Peer sent FIN (graceful close).
+  // rc == SOCKET_ERROR: alive and idle when the only cause is would-block.
+  return WSAGetLastError() == WSAEWOULDBLOCK;
 }
 
 void TCPClientSocket::Impl::OnKeepAliveCheck() {

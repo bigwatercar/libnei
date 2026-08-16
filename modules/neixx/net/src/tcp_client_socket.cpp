@@ -49,6 +49,11 @@ void TCPClientSocket::Close() {
     impl_->Close();
 }
 
+void TCPClientSocket::Abort() {
+  if (impl_)
+    impl_->Abort();
+}
+
 void TCPClientSocket::ShutdownWrite() {
   if (impl_)
     impl_->ShutdownWrite();
@@ -66,6 +71,10 @@ void TCPClientSocket::StartKeepAliveMonitor(TimeDelta check_interval, OnceCallba
 void TCPClientSocket::StopKeepAliveMonitor() {
   if (impl_)
     impl_->StopKeepAliveMonitor();
+}
+
+bool TCPClientSocket::Peek() {
+  return impl_ ? impl_->Peek() : false;
 }
 
 } // namespace nei::net

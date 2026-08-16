@@ -11,7 +11,28 @@
 
 #include <nei/log/log.h>
 
+#include "mbedtls_threading.h"
+
 namespace nei::net {
+
+namespace {
+
+// Register the Mbed TLS threading callbacks at static-initialization time so
+// they are in place before ANY Mbed TLS call in this library copy. This makes
+// concurrent TLS handshakes on multiple threads (HTTP/1.1 + HTTP/2 stress
+// tests) race-free, because TLS 1.3 always draws randomness from the shared
+// global PSA RNG. The SSLContext constructor also calls
+// internal::EnsureMbedtlsThreading() again; the local static makes that a
+// no-op.
+struct MbedtlsThreadingRegistrar {
+  MbedtlsThreadingRegistrar() {
+    internal::EnsureMbedtlsThreading();
+  }
+};
+
+MbedtlsThreadingRegistrar g_mbedtls_threading_registrar;
+
+} // namespace
 
 // =============================================================================
 // SSLContext::Impl
@@ -22,6 +43,9 @@ public:
   explicit Impl(SSLContext::Mode mode)
       : mode_(mode)
       , peer_verify_(mode == SSLContext::Mode::Client ? PeerVerify::kRequired : PeerVerify::kNone) {
+    // Register the threading callbacks before any other Mbed TLS call so that
+    // the shared PSA global state is protected on the very first use.
+    internal::EnsureMbedtlsThreading();
     mbedtls_ssl_config_init(&config_);
     mbedtls_x509_crt_init(&server_cert_);
     mbedtls_pk_init(&private_key_);
@@ -50,8 +74,14 @@ public:
   // ---- Certificate management ----
 
   bool SetCertificate(const std::string &cert_pem, const std::string &key_pem) {
-    int ret = mbedtls_x509_crt_parse(
-        &server_cert_, reinterpret_cast<const unsigned char *>(cert_pem.data()), cert_pem.size());
+    // mbedTLS 3.6 的 x509_crt_parse/pk_parse_key 判定输入为 PEM 的条件是
+    // 缓冲区末尾为 '\0'（buf[buflen-1]=='\0'，见 x509_crt.c）。普通
+    // std::string 的底层缓冲末尾通常是 '\n'，会被误判为 DER 而解析失败，
+    // 因此这里显式复制一份并追加 NUL。
+    std::string cert_nt = cert_pem;
+    cert_nt.push_back('\0');
+    int ret =
+        mbedtls_x509_crt_parse(&server_cert_, reinterpret_cast<const unsigned char *>(cert_nt.data()), cert_nt.size());
     if (ret != 0) {
       char buf[128];
       mbedtls_strerror(ret, buf, sizeof(buf));
@@ -59,10 +89,12 @@ public:
       return false;
     }
 
+    std::string key_nt = key_pem;
+    key_nt.push_back('\0');
     const unsigned char *pwd = nullptr;
     ret = mbedtls_pk_parse_key(&private_key_,
-                               reinterpret_cast<const unsigned char *>(key_pem.data()),
-                               key_pem.size(),
+                               reinterpret_cast<const unsigned char *>(key_nt.data()),
+                               key_nt.size(),
                                pwd,
                                0,
                                mbedtls_ctr_drbg_random,
@@ -85,7 +117,10 @@ public:
   }
 
   bool SetCAChain(const std::string &ca_pem) {
-    int ret = mbedtls_x509_crt_parse(&ca_certs_, reinterpret_cast<const unsigned char *>(ca_pem.data()), ca_pem.size());
+    // 同上：x509_crt_parse 判定 PEM 依赖缓冲区末尾 NUL。
+    std::string ca_nt = ca_pem;
+    ca_nt.push_back('\0');
+    int ret = mbedtls_x509_crt_parse(&ca_certs_, reinterpret_cast<const unsigned char *>(ca_nt.data()), ca_nt.size());
     if (ret != 0)
       return false;
     mbedtls_ssl_conf_ca_chain(&config_, &ca_certs_, nullptr);
@@ -122,6 +157,10 @@ public:
 
   const std::string &hostname() const {
     return hostname_;
+  }
+
+  const std::vector<std::string> &alpn_protocols() const {
+    return alpn_strings_;
   }
 
 private:
@@ -191,6 +230,10 @@ mbedtls_ssl_config *SSLContext::config() {
 
 const std::string &SSLContext::hostname() const {
   return impl_->hostname();
+}
+
+const std::vector<std::string> &SSLContext::alpn_protocols() const {
+  return impl_->alpn_protocols();
 }
 
 } // namespace nei::net

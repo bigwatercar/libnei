@@ -69,6 +69,14 @@ public:
   void WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOWriteCallback callback) override;
   void Close() override;
 
+  // Graceful half-close: sends TCP FIN (no TLS close_notify) and keeps the
+  // socket open for reads.  Used by servers to flush remaining response
+  // bytes to the peer and then drain until the peer closes, instead of a
+  // full Close() which can reset the connection while the peer still has
+  // unread inbound data (Windows RST-on-close).  Must be called on the IO
+  // thread.
+  void ShutdownWrite();
+
   // Returns the ALPN protocol negotiated during the TLS handshake.
   // Empty string if ALPN was not configured or the handshake has not
   // completed.
@@ -86,6 +94,16 @@ public:
 
   // Stops the keep-alive health monitor on the underlying TCP socket.
   void StopKeepAliveMonitor();
+
+  // Idle-probe for keep-alive reuse.  Delegates to the underlying TCP
+  // transport (see TCPClientSocket::Peek): returns true if the connection is
+  // alive and idle (safe to reuse); false if the peer has closed it (FIN),
+  // the socket is closed locally, or unexpected data is pending.  Any pending
+  // data — including an unread TLS close_notify — is treated as not reusable.
+  //
+  // Thread safety: callable from any thread when the socket is idle — no
+  // in-flight I/O (see TCPClientSocket::Peek).
+  bool Peek();
 
 private:
   class Impl;

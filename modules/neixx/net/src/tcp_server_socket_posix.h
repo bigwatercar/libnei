@@ -53,9 +53,23 @@ private:
   void OnFileCanWriteWithoutBlocking(NativeIOHandle /*handle*/) override {
   }
 
+  // Physical teardown (must run on the IO thread).  Separate from
+  // Close()/Shutdown() because those early-return on closed_ when
+  // re-entered via the cross-thread trampoline.
+  void ClosePhysical();
+  void ShutdownPhysical();
+
+  // Physical teardown with mutex_ held (shared by Close/Shutdown paths).
+  void ClosePhysicalLocked();
+
   bool EndPointToSockAddr(const IPEndPoint &ep, ::sockaddr_storage *out, ::socklen_t *out_len);
 
   int CreateListenSocket(const IPEndPoint &addr, int backlog);
+
+  // Called with mutex_ held on the IO thread.  Accepts and immediately
+  // closes every connection in the kernel backlog (Linux keeps backlogged
+  // connections alive after close() of the listen fd).
+  void DrainAcceptBacklogLocked();
 
   int listen_fd_ = -1;
 

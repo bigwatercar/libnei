@@ -135,7 +135,15 @@ void TCPServerSocket::Impl::Close() {
     }
   }
 
-  controller_.StopWatching();
+  // NOTE: Do NOT call controller_.StopWatching() here.  The listen socket
+  // still has in-flight AcceptEx operations (the 64-entry accept pool);
+  // their ABORTED completions must flow through the pump to OnIOCompleted,
+  // which closes the pending client sockets (releasing the local port) and
+  // frees the AcceptContexts.  Erasing the watch would silently drop those
+  // completions, leaking the contexts AND leaving the port half-open so
+  // that subsequent connects stall until TCP timeout (~2s per connect).
+  // The watch is unregistered by the FdWatchController destructor once the
+  // last AcceptContext self_ref is released and Impl is destroyed.
   if (listen_socket_ != INVALID_SOCKET) {
     closesocket(listen_socket_);
     listen_socket_ = INVALID_SOCKET;
@@ -158,7 +166,10 @@ void TCPServerSocket::Impl::Shutdown() {
   // Silent shutdown  --  clear the callback without firing it.
   accept_callback_ = {};
 
-  controller_.StopWatching();
+  // NOTE: Do NOT call controller_.StopWatching() here — same reasoning as
+  // Close() above.  The ABORTED AcceptEx completions must still reach
+  // OnIOCompleted so the pending client sockets are closed and the local
+  // port is released promptly.
   if (listen_socket_ != INVALID_SOCKET) {
     closesocket(listen_socket_);
     listen_socket_ = INVALID_SOCKET;
@@ -334,6 +345,14 @@ void TCPServerSocket::Impl::OnIOCompleted(NativeIOHandle /*handle*/,
       if (io_runner_) {
         // Lock-free dispatch: callback copied under lock, fired outside.
         io_runner_->PostTask(FROM_HERE, BindOnce([](AcceptCallback c) { c(false, nullptr); }, std::move(cb)));
+      }
+    }
+    // If orphaned and this was the last pending accept (e.g. the ABORTED
+    // completions from Shutdown() draining), release the self-hold.
+    {
+      std::unique_lock<std::mutex> lock2(mutex_);
+      if (orphaned_ && pending_accepts_.empty()) {
+        ReleaseSelfHoldUnderLock(lock2);
       }
     }
     return;
