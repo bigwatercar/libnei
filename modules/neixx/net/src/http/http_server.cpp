@@ -262,6 +262,15 @@ struct Http1Connection : public RefCountedThreadSafe<Http1Connection> {
   BodyChunkCallback sr_pending_read; // Waiting read_body callback.
   bool sr_body_done = false;
 
+  // ---- HttpServerRequestHandle tracking (h1 streaming requests) ----
+  // One streaming request at a time per connection; the generation pins the
+  // handle to its request.  The shared active flag is flipped to false when
+  // the request ends (CloseStreaming/Close), which invalidates every handle
+  // copy.
+  int64_t next_request_generation_ = 1;
+  std::atomic<int64_t> active_generation_{0};
+  std::shared_ptr<std::atomic<bool>> active_handle_;
+
   // Watchdog helper for the TLS drain phase (never pins the connection).
   // Must stay last: the factory is destroyed after every other member, so
   // watchdog weak pointers are invalidated before any member goes away.
@@ -365,17 +374,32 @@ struct Http1Connection : public RefCountedThreadSafe<Http1Connection> {
       // Streaming-request routes activate as soon as headers are parsed.
       if (mode == Mode::kHttp && http_delegate.headers_complete()) {
         HttpRequest hdr_req = http_delegate.request();
-        auto sr_handler = shared->FindStreamingRequestHandler(hdr_req.method, std::string(hdr_req.url.path()));
-        if (sr_handler) {
+        auto sr_handler_handle =
+            shared->FindStreamingRequestHandlerWithHandle(hdr_req.method, std::string(hdr_req.url.path()));
+        if (sr_handler_handle) {
           // Body chunks parsed in this Execute() call are already buffered
           // in hdr_req.body — hand them to the streaming queue first.
           if (!hdr_req.body.empty()) {
             DeliverBodyChunk(hdr_req.body.data(), hdr_req.body.size());
           }
           hdr_req.body.clear();
-          BeginStreamingRequest(hdr_req, *sr_handler);
+          BeginStreamingRequestHandle(hdr_req, *sr_handler_handle);
           if (closed) {
             return;
+          }
+        } else {
+          auto sr_handler = shared->FindStreamingRequestHandler(hdr_req.method, std::string(hdr_req.url.path()));
+          if (sr_handler) {
+            // Body chunks parsed in this Execute() call are already buffered
+            // in hdr_req.body — hand them to the streaming queue first.
+            if (!hdr_req.body.empty()) {
+              DeliverBodyChunk(hdr_req.body.data(), hdr_req.body.size());
+            }
+            hdr_req.body.clear();
+            BeginStreamingRequest(hdr_req, *sr_handler);
+            if (closed) {
+              return;
+            }
           }
         }
       }
@@ -395,7 +419,38 @@ struct Http1Connection : public RefCountedThreadSafe<Http1Connection> {
         HttpRequest req = http_delegate.request();
         http_delegate.Reset();
 
-        // Check for streaming route match first.
+        // Check for streaming route match first (handle-aware preferred).
+        {
+          auto stream_handler_handle_opt =
+              shared->FindStreamingHandlerWithHandle(req.method, std::string(req.url.path()));
+          if (stream_handler_handle_opt) {
+            mode = Mode::kStreaming;
+
+            const int64_t generation = next_request_generation_++;
+            auto active = std::make_shared<std::atomic<bool>>(true);
+            active_generation_.store(generation, std::memory_order_relaxed);
+            active_handle_ = active;
+            HttpServerRequestHandle handle = MakeHandle(generation, active);
+
+            auto self = scoped_refptr<Connection>(this);
+            auto respond = [self](const HttpResponse &headers) { self->Respond(headers); };
+            auto write = [self](std::string chunk) { self->WriteStreamChunk(std::move(chunk)); };
+            auto write_io = [self](scoped_refptr<IOBuffer> buf, std::size_t len) {
+              self->WriteStreamChunk(std::move(buf), len);
+            };
+            auto close = [self]() { self->CloseStreaming(); };
+
+            (*stream_handler_handle_opt)(
+                req, handle, std::move(respond), std::move(write), std::move(write_io), std::move(close));
+            // Handler may have already closed the connection; if not,
+            // remaining data is discarded (streaming is one-shot).
+            if (offset < pending_data.size()) {
+              pending_data.erase(0, offset);
+            }
+            return;
+          }
+        }
+
         {
           auto stream_handler_opt = shared->FindStreamingHandler(req.method, std::string(req.url.path()));
           if (stream_handler_opt) {
@@ -679,9 +734,59 @@ struct Http1Connection : public RefCountedThreadSafe<Http1Connection> {
     ResumeReading();
   }
 
+  // Builds the HttpServerRequestHandle for a freshly allocated streaming
+  // request generation (I/O thread).
+  HttpServerRequestHandle MakeHandle(int64_t generation, std::shared_ptr<std::atomic<bool>> active) {
+    nei::WeakPtr<Connection> weak = weak_factory_.GetWeakPtr();
+    return HttpServerRequestHandle::Create(io_runner, std::move(active), [weak, generation]() {
+      if (Connection *c = weak.get())
+        c->CancelRequest(generation);
+    });
+  }
+
+  // Cancels the streaming request identified by |generation| (I/O thread).
+  // HTTP/1.1 cannot abort just one request — the owning connection is
+  // closed (in-flight response fails, like a peer disconnect).
+  void CancelRequest(int64_t generation) {
+    if (closed)
+      return;
+    if (active_generation_.load(std::memory_order_relaxed) != generation)
+      return;
+    Close();
+  }
+
+  // Invalidates every handle copy (request completed for any reason).
+  void MarkRequestDone() {
+    if (active_handle_)
+      active_handle_->store(false, std::memory_order_relaxed);
+  }
+
   // Invoke the streaming-request handler once headers are complete.
   void BeginStreamingRequest(const HttpRequest &req, const StreamingRequestHandler &handler) {
+    // Adapt the legacy handler into the handle-aware shape (the handle is
+    // simply ignored).
+    StreamingRequestHandlerWithHandle adapted = [handler](const HttpRequest &r,
+                                                          HttpServerRequestHandle,
+                                                          ReadBodyFunction read_body,
+                                                          SendHeadersCallback respond,
+                                                          StreamingWriteCallback write,
+                                                          StreamingWriteIoCallback write_io,
+                                                          StreamingCloseCallback close) {
+      handler(r, std::move(read_body), std::move(respond), std::move(write), std::move(write_io), std::move(close));
+    };
+    BeginStreamingRequestHandle(req, adapted);
+  }
+
+  // Handle-aware variant: builds the per-request handle and hands it to the
+  // handler.
+  void BeginStreamingRequestHandle(const HttpRequest &req, const StreamingRequestHandlerWithHandle &handler) {
     mode = Mode::kStreamingRequest;
+
+    const int64_t generation = next_request_generation_++;
+    auto active = std::make_shared<std::atomic<bool>>(true);
+    active_generation_.store(generation, std::memory_order_relaxed);
+    active_handle_ = active;
+    HttpServerRequestHandle handle = MakeHandle(generation, active);
 
     auto self = scoped_refptr<Connection>(this);
 
@@ -697,7 +802,8 @@ struct Http1Connection : public RefCountedThreadSafe<Http1Connection> {
     http_delegate.ForwardBodyTo([self](const char *data, size_t len) { self->DeliverBodyChunk(data, len); });
 
     // Invoke the handler (it may synchronously pull chunks and/or close).
-    handler(req, std::move(read_body), std::move(respond), std::move(write), std::move(write_io), std::move(close));
+    handler(
+        req, handle, std::move(read_body), std::move(respond), std::move(write), std::move(write_io), std::move(close));
   }
 
   void WriteResponse(const std::string &wire_data) {
@@ -757,6 +863,9 @@ struct Http1Connection : public RefCountedThreadSafe<Http1Connection> {
   void Close() {
     if (closed.exchange(true))
       return;
+    // Any streaming request in flight dies with the connection — invalidate
+    // its handle(s).
+    MarkRequestDone();
     if (io_runner && !io_runner->BelongsToCurrentThread()) {
       auto self = scoped_refptr<Connection>(this);
       io_runner->PostTask(FROM_HERE, [self]() { self->DoClose(); });
@@ -971,6 +1080,18 @@ void HttpServer::AddStreamingRoute(HttpMethod method, std::string_view path, Str
 
 void HttpServer::AddStreamingRequestRoute(HttpMethod method, std::string_view path, StreamingRequestHandler handler) {
   impl_->shared->AddStreamingRequest(method, std::string(path), std::move(handler));
+}
+
+void HttpServer::AddStreamingRouteWithHandle(HttpMethod method,
+                                             std::string_view path,
+                                             StreamingHttpHandlerWithHandle handler) {
+  impl_->shared->AddStreamingWithHandle(method, std::string(path), std::move(handler));
+}
+
+void HttpServer::AddStreamingRequestRouteWithHandle(HttpMethod method,
+                                                    std::string_view path,
+                                                    StreamingRequestHandlerWithHandle handler) {
+  impl_->shared->AddStreamingRequestWithHandle(method, std::string(path), std::move(handler));
 }
 
 void HttpServer::AddWebSocketRoute(std::string_view path, WebSocketHandler handler) {

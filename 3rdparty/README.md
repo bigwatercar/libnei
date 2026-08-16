@@ -14,4 +14,3 @@
   `SSLContext`, whose lifetime cannot be guaranteed once the asynchronous
   `TLSClientSocket` teardown runs on the IO thread (TSan heap-use-after-free).
   libnei never uses the Mbed TLS debug callbacks, so the module is not needed.
-

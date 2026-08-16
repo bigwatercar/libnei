@@ -26,6 +26,9 @@ target_sources(nei_tests PRIVATE http_client_mux_test.cpp)
 # Per-request handle (HttpRequestHandle) cancel/priority tests
 target_sources(nei_tests PRIVATE http_request_handle_test.cpp)
 
+# Server-side per-request handle (HttpServerRequestHandle) tests
+target_sources(nei_tests PRIVATE http_server_request_handle_test.cpp)
+
 # HTTP/WebSocket multi-threaded stress tests
 target_sources(nei_tests PRIVATE http_multithread_stress_test.cpp)
 

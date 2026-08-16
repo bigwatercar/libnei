@@ -75,6 +75,7 @@ set(NEIXX_NET_HTTP_SOURCES
     include/neixx/net/http/http_response.h
     include/neixx/net/http/http_response_writer.h
     include/neixx/net/http/http_server.h
+    include/neixx/net/http/http_server_request_handle.h
     include/neixx/net/http/http_client.h
     include/neixx/net/http/http_client_pool.h
     include/neixx/net/http/http_request_handle.h
@@ -86,6 +87,7 @@ set(NEIXX_NET_HTTP_SOURCES
     src/http/http_response_writer.cpp
     src/http/http_engine_internal.h
     src/http/http_server.cpp
+    src/http/http_server_request_handle.cpp
     src/http/http_client.cpp
     src/http/http_client_pool.cpp
     src/http/http_request_handle.cpp

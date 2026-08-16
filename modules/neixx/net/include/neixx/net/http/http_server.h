@@ -17,6 +17,7 @@
 #include <neixx/memory/ref_counted.h>
 #include <neixx/net/http/http_request.h>
 #include <neixx/net/http/http_response.h>
+#include <neixx/net/http/http_server_request_handle.h>
 #include <neixx/net/websocket/websocket_connection.h>
 #include <neixx/net/websocket/websocket_frame.h>
 #include <neixx/task/task_runner.h>
@@ -137,6 +138,23 @@ using StreamingRequestHandler = std::function<void(const HttpRequest &req,
                                                    StreamingWriteIoCallback write_io,
                                                    StreamingCloseCallback close)>;
 
+// Handle-aware variants of the streaming handlers.  Identical shapes with
+// one extra first argument: an HttpServerRequestHandle that allows the
+// handler (or any thread holding a copy) to cancel the in-flight request.
+using StreamingHttpHandlerWithHandle = std::function<void(const HttpRequest &req,
+                                                          HttpServerRequestHandle handle,
+                                                          SendHeadersCallback respond,
+                                                          StreamingWriteCallback write,
+                                                          StreamingWriteIoCallback write_io,
+                                                          StreamingCloseCallback close)>;
+using StreamingRequestHandlerWithHandle = std::function<void(const HttpRequest &req,
+                                                             HttpServerRequestHandle handle,
+                                                             ReadBodyFunction read_body,
+                                                             SendHeadersCallback respond,
+                                                             StreamingWriteCallback write,
+                                                             StreamingWriteIoCallback write_io,
+                                                             StreamingCloseCallback close)>;
+
 NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
 
 class NEI_API HttpServer {
@@ -170,6 +188,18 @@ public:
   // |read_body|.  Use for large uploads.  The handler MUST call |close|
   // exactly once.
   void AddStreamingRequestRoute(HttpMethod method, std::string_view path, StreamingRequestHandler handler);
+
+  // Handle-aware streaming route (see StreamingHttpHandlerWithHandle).
+  // The handler receives an HttpServerRequestHandle as its second argument:
+  // Cancel() aborts the request (h1 closes the connection, h2 sends
+  // RST_STREAM); is_valid() reports whether the request is still in flight.
+  void AddStreamingRouteWithHandle(HttpMethod method, std::string_view path, StreamingHttpHandlerWithHandle handler);
+
+  // Handle-aware streaming-request route (see
+  // StreamingRequestHandlerWithHandle).
+  void AddStreamingRequestRouteWithHandle(HttpMethod method,
+                                          std::string_view path,
+                                          StreamingRequestHandlerWithHandle handler);
 
   // Start listening on a plain TCP socket.  Requires a running
   // MessagePumpForIO on the calling thread, or provide |io_runner|.

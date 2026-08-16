@@ -167,6 +167,10 @@ private:
     bool close_requested = false;
     bool deferred = false; // data provider answered DEFERRED
 
+    // HttpServerRequestHandle liveness flag: flipped to false when the
+    // stream closes (any reason) — invalidates every handle copy.
+    std::shared_ptr<std::atomic<bool>> active_handle;
+
     struct Block {
       scoped_refptr<IOBuffer> buf;
       std::size_t len = 0;
@@ -332,7 +336,12 @@ private:
 
   static int OnStreamCloseCallback(nghttp2_session *, int32_t stream_id, uint32_t, void *user_data) {
     auto *conn = static_cast<Http2ServerConnection *>(user_data);
-    conn->streams_.erase(stream_id);
+    auto it = conn->streams_.find(stream_id);
+    if (it == conn->streams_.end())
+      return 0;
+    if (it->second->active_handle)
+      it->second->active_handle->store(false, std::memory_order_relaxed);
+    conn->streams_.erase(it);
     conn->MaybeCloseAfterDrain();
     return 0;
   }
@@ -383,6 +392,13 @@ private:
       DispatchStreamingRequest(st, std::move(lookup.streaming_request), std::move(lookup.params), end_stream);
       return;
     }
+    if (lookup.has_streaming_request_handle) {
+      st->mode = Mode::kStreamingRequest;
+      st->dispatched = true;
+      DispatchStreamingRequestWithHandle(
+          st, std::move(lookup.streaming_request_handle), std::move(lookup.params), end_stream);
+      return;
+    }
     st->mode = Mode::kBuffered;
     if (end_stream) {
       st->end_stream = true;
@@ -412,6 +428,12 @@ private:
       InvokeStreaming(st, std::move(req), std::move(lookup.streaming));
       return;
     }
+    if (lookup.has_streaming_handle) {
+      if (!lookup.params.empty())
+        req.route_params = std::move(lookup.params);
+      InvokeStreamingWithHandle(st, std::move(req), std::move(lookup.streaming_handle));
+      return;
+    }
     if (!lookup.params.empty())
       req.route_params = std::move(lookup.params);
     SubmitSimpleResponse(st, lookup.has_simple ? lookup.simple(req) : DefaultNotFound());
@@ -438,6 +460,35 @@ private:
       DeliverBody(st);
   }
 
+  void DispatchStreamingRequestWithHandle(StreamState *st,
+                                          StreamingRequestHandlerWithHandle handler,
+                                          RouteParams params,
+                                          bool end_stream) {
+    HttpRequest req = BuildRequest(st);
+    if (!params.empty())
+      req.route_params = std::move(params);
+    if (end_stream)
+      st->end_stream = true;
+
+    const int32_t id = st->id;
+    auto active = std::make_shared<std::atomic<bool>>(true);
+    st->active_handle = active;
+    HttpServerRequestHandle handle = MakeHandle(id, active);
+
+    auto self = WrapRefCounted(this);
+    handler(
+        req,
+        handle,
+        [self, id](BodyChunkCallback cb) { self->OnReadBody(id, std::move(cb)); },
+        [self, id](const HttpResponse &headers) { self->OnRespond(id, headers); },
+        [self, id](std::string data) { self->OnWrite(id, std::move(data)); },
+        [self, id](scoped_refptr<IOBuffer> buf, std::size_t len) { self->OnWriteIo(id, std::move(buf), len); },
+        [self, id]() { self->OnCloseStream(id); });
+
+    if (st->end_stream && st->read_body_waiting)
+      DeliverBody(st);
+  }
+
   void InvokeStreaming(StreamState *st, HttpRequest req, StreamingHttpHandler handler) {
     auto self = WrapRefCounted(this);
     int32_t id = st->id;
@@ -447,6 +498,43 @@ private:
         [self, id](std::string data) { self->OnWrite(id, std::move(data)); },
         [self, id](scoped_refptr<IOBuffer> buf, std::size_t len) { self->OnWriteIo(id, std::move(buf), len); },
         [self, id]() { self->OnCloseStream(id); });
+  }
+
+  void InvokeStreamingWithHandle(StreamState *st, HttpRequest req, StreamingHttpHandlerWithHandle handler) {
+    const int32_t id = st->id;
+    auto active = std::make_shared<std::atomic<bool>>(true);
+    st->active_handle = active;
+    HttpServerRequestHandle handle = MakeHandle(id, active);
+
+    auto self = WrapRefCounted(this);
+    handler(
+        req,
+        handle,
+        [self, id](const HttpResponse &headers) { self->OnRespond(id, headers); },
+        [self, id](std::string data) { self->OnWrite(id, std::move(data)); },
+        [self, id](scoped_refptr<IOBuffer> buf, std::size_t len) { self->OnWriteIo(id, std::move(buf), len); },
+        [self, id]() { self->OnCloseStream(id); });
+  }
+
+  // Builds the HttpServerRequestHandle for a stream (I/O thread).
+  HttpServerRequestHandle MakeHandle(int32_t stream_id, std::shared_ptr<std::atomic<bool>> active) {
+    WeakPtr<Http2Connection> weak = weak_ptr_factory_.GetWeakPtr();
+    return HttpServerRequestHandle::Create(runner_, std::move(active), [weak, stream_id]() {
+      if (Http2Connection *c = weak.get())
+        c->CancelStream(stream_id);
+    });
+  }
+
+  // Cancels one in-flight stream by submitting RST_STREAM(CANCEL) (I/O
+  // thread, never inside an nghttp2 callback — the handle hops here).
+  void CancelStream(int32_t stream_id) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    if (closed_ || closing_)
+      return;
+    if (!GetStream(stream_id))
+      return;
+    nghttp2_submit_rst_stream(session_, NGHTTP2_FLAG_NONE, stream_id, NGHTTP2_CANCEL);
+    Pump();
   }
 
   static HttpResponse DefaultNotFound() {

@@ -98,7 +98,7 @@ inline std::optional<RouteParams> MatchPattern(const std::vector<std::string> &p
 // Connection state machines (defined in their per-protocol .cpp files)
 // ---------------------------------------------------------------------------
 struct Http1Connection; // http_server.cpp
-struct Http2Connection; // http2/http2_server.cpp
+class Http2Connection;  // http2/http2_engine.cpp
 
 // ---------------------------------------------------------------------------
 // HttpSharedState — ref-counted, captured by accept callbacks and connections
@@ -110,8 +110,12 @@ public:
   struct DispatchResult {
     bool has_streaming_request = false;
     StreamingRequestHandler streaming_request;
+    bool has_streaming_request_handle = false;
+    StreamingRequestHandlerWithHandle streaming_request_handle;
     bool has_streaming = false;
     StreamingHttpHandler streaming;
+    bool has_streaming_handle = false;
+    StreamingHttpHandlerWithHandle streaming_handle;
     bool has_simple = false;
     HttpHandler simple;
     RouteParams params;
@@ -140,6 +144,16 @@ public:
   void AddStreamingRequest(HttpMethod method, std::string path, StreamingRequestHandler handler) {
     std::lock_guard<std::mutex> lock(routes_mutex_);
     streaming_request_routes_[RouteKey{method, std::move(path)}] = std::move(handler);
+  }
+
+  void AddStreamingWithHandle(HttpMethod method, std::string path, StreamingHttpHandlerWithHandle handler) {
+    std::lock_guard<std::mutex> lock(routes_mutex_);
+    streaming_routes_handle_[RouteKey{method, std::move(path)}] = std::move(handler);
+  }
+
+  void AddStreamingRequestWithHandle(HttpMethod method, std::string path, StreamingRequestHandlerWithHandle handler) {
+    std::lock_guard<std::mutex> lock(routes_mutex_);
+    streaming_request_routes_handle_[RouteKey{method, std::move(path)}] = std::move(handler);
   }
 
   void AddWebSocket(std::string path, WebSocketHandler handler) {
@@ -173,6 +187,24 @@ public:
     return std::nullopt;
   }
 
+  std::optional<StreamingHttpHandlerWithHandle> FindStreamingHandlerWithHandle(HttpMethod method,
+                                                                               const std::string &path) {
+    std::lock_guard<std::mutex> lock(routes_mutex_);
+    auto it = streaming_routes_handle_.find(RouteKey{method, path});
+    if (it != streaming_routes_handle_.end())
+      return it->second;
+    return std::nullopt;
+  }
+
+  std::optional<StreamingRequestHandlerWithHandle> FindStreamingRequestHandlerWithHandle(HttpMethod method,
+                                                                                         const std::string &path) {
+    std::lock_guard<std::mutex> lock(routes_mutex_);
+    auto it = streaming_request_routes_handle_.find(RouteKey{method, path});
+    if (it != streaming_request_routes_handle_.end())
+      return it->second;
+    return std::nullopt;
+  }
+
   // Copies matched handlers out under the lock (HTTP/2 dispatch path).
   DispatchResult Lookup(HttpMethod method, const std::string &path) {
     DispatchResult result;
@@ -184,10 +216,20 @@ public:
       result.has_streaming_request = true;
       result.streaming_request = sit->second;
     }
+    auto shit = streaming_request_routes_handle_.find(key);
+    if (shit != streaming_request_routes_handle_.end()) {
+      result.has_streaming_request_handle = true;
+      result.streaming_request_handle = shit->second;
+    }
     auto fit = streaming_routes_.find(key);
     if (fit != streaming_routes_.end()) {
       result.has_streaming = true;
       result.streaming = fit->second;
+    }
+    auto fhit = streaming_routes_handle_.find(key);
+    if (fhit != streaming_routes_handle_.end()) {
+      result.has_streaming_handle = true;
+      result.streaming_handle = fhit->second;
     }
     auto it = routes_.find(key);
     if (it != routes_.end()) {
@@ -319,7 +361,9 @@ private:
   std::unordered_map<RouteKey, HttpHandler, RouteKeyHash> routes_;
   std::vector<PatternRoute> pattern_routes_;
   std::unordered_map<RouteKey, StreamingHttpHandler, RouteKeyHash> streaming_routes_;
+  std::unordered_map<RouteKey, StreamingHttpHandlerWithHandle, RouteKeyHash> streaming_routes_handle_;
   std::unordered_map<RouteKey, StreamingRequestHandler, RouteKeyHash> streaming_request_routes_;
+  std::unordered_map<RouteKey, StreamingRequestHandlerWithHandle, RouteKeyHash> streaming_request_routes_handle_;
   std::unordered_map<std::string, WebSocketHandler> ws_routes_;
 
   std::mutex conn_mutex_;
