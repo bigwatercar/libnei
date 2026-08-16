@@ -104,6 +104,11 @@ add_executable(http2_throughput_bench http2_throughput_bench.cpp)
 target_link_libraries(
   http2_throughput_bench PRIVATE nei::nei mbedtls mbedx509 mbedcrypto
 )
+# The bench calls Mbed TLS directly (cert generation) and therefore links
+# its own copy — it must be able to register threading callbacks for it.
+target_include_directories(
+  http2_throughput_bench PRIVATE ${PROJECT_SOURCE_DIR}/modules/neixx/net/src
+)
 
 if(WIN32)
   target_link_libraries(tcp_throughput_bench PRIVATE ws2_32)
@@ -114,6 +119,10 @@ endif()
 add_executable(tls_throughput_bench tls_throughput_bench.cpp)
 target_link_libraries(
   tls_throughput_bench PRIVATE nei::nei mbedtls mbedx509 mbedcrypto
+)
+# See http2_throughput_bench above — same reason.
+target_include_directories(
+  tls_throughput_bench PRIVATE ${PROJECT_SOURCE_DIR}/modules/neixx/net/src
 )
 if(WIN32)
   target_link_libraries(tls_throughput_bench PRIVATE ws2_32)

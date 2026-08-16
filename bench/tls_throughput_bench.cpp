@@ -52,6 +52,11 @@
 #include <neixx/task/task_runner.h>
 #include <neixx/threading/thread.h>
 
+// This binary links its own copy of Mbed TLS (nei.dll does not export the
+// symbols) — register threading callbacks for that copy before any direct
+// Mbed TLS call (rsa_gen_key etc. fail without them).
+#include "mbedtls_threading.h"
+
 namespace {
 
 using Clock = std::chrono::high_resolution_clock;
@@ -65,6 +70,8 @@ struct TestCert {
 };
 
 TestCert GenerateSelfSignedCert() {
+  nei::net::internal::EnsureMbedtlsThreading();
+
   mbedtls_pk_context key;
   mbedtls_x509write_cert crt;
   mbedtls_ctr_drbg_context drbg;
