@@ -264,9 +264,11 @@ static nei_log_config_st *_nei_log_get_config_fast(nei_log_config_handle_t handl
     /* Slow path: repopulate the full TLS cache under the read-lock so that
      * the pointer array and the snapshot value are mutually consistent.
      * (The snapshot is only bumped under the write-lock, so reading it while
-     * holding the read-lock gives a stable value paired with the array.) */
-    _nei_log_config_lock_read();
+     * holding the read-lock gives a stable value paired with the array.
+     * Initialization happens BEFORE taking the read lock — ensure_config
+     * self-locks with the write lock.) */
     _nei_log_ensure_config_table_initialized();
+    _nei_log_config_lock_read();
     snap = _nei_log_config_snapshot_load();
     memcpy(_s_tls_config_ptrs, s_config_ptrs, sizeof(_s_tls_config_ptrs));
     _nei_log_config_unlock_read();

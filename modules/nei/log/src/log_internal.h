@@ -277,12 +277,16 @@ typedef struct _nei_log_default_file_sink_ctx_st {
 
 #define _NEI_LOG_MAX_CONFIGS 16U // includes default config
 
-/* Global variables - defined in log_config.c */
+/* Global variables - defined in log_config.c.
+ * s_custom_configs holds the in-place storage for slot 0 (the default
+ * config, which callers may mutate in place via nei_log_default_config).
+ * Slots 1+ are published as immutable malloc'd copies by
+ * nei_log_add_config (replacement, never in-place rewrites — see there). */
 extern nei_log_config_st *s_config_ptrs[_NEI_LOG_MAX_CONFIGS];
 extern nei_log_config_st s_custom_configs[_NEI_LOG_MAX_CONFIGS];
 extern uint8_t s_config_used[_NEI_LOG_MAX_CONFIGS];
 extern _nei_log_atomic32_t s_config_active_emit_counts[_NEI_LOG_MAX_CONFIGS];
-extern int s_config_table_initialized;
+extern _nei_log_atomic32_t s_config_table_initialized;
 #if defined(_WIN32)
 extern volatile LONGLONG s_config_snapshot;
 #else

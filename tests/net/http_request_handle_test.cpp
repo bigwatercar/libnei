@@ -235,20 +235,25 @@ TEST_F(HttpRequestHandleTest, H1CancelInFlightClosesConnection) {
   WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
   std::unique_ptr<HttpResponse> result;
   bool got_response = false;
-  client_runner_->PostTask(FROM_HERE, [this, client, addr, &handle, &done, &result, &got_response]() mutable {
-    handle = client->Send(MakeGet("/never"),
-                          addr,
-                          &client_h1_ctx_,
-                          client_runner_,
-                          [&done, &result, &got_response](std::unique_ptr<HttpResponse> resp) {
-                            result = std::move(resp);
-                            got_response = true;
-                            done.Signal();
-                          });
-    ASSERT_TRUE(handle.is_valid());
-  });
+  WaitableEvent published(WaitableEvent::ResetPolicy::kAutomatic, false);
+  client_runner_->PostTask(FROM_HERE,
+                           [this, client, addr, &handle, &done, &result, &got_response, &published]() mutable {
+                             handle = client->Send(MakeGet("/never"),
+                                                   addr,
+                                                   &client_h1_ctx_,
+                                                   client_runner_,
+                                                   [&done, &result, &got_response](std::unique_ptr<HttpResponse> resp) {
+                                                     result = std::move(resp);
+                                                     got_response = true;
+                                                     done.Signal();
+                                                   });
+                             ASSERT_TRUE(handle.is_valid());
+                             published.Signal();
+                           });
 
-  // 等服务器响应头到达（请求确在途），再从非 I/O 线程取消。
+  // 等句柄发布（Signal 建立 happens-before），再等响应头到达（请求确在
+  // 途），最后从非 I/O 线程取消。
+  ASSERT_TRUE(published.TimedWait(std::chrono::seconds(15)));
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
   EXPECT_TRUE(handle.is_valid());
   handle.Cancel();
@@ -288,6 +293,7 @@ TEST_F(HttpRequestHandleTest, H2CancelOneStreamLeavesSessionUsable) {
   bool hang_got = false;
   bool hello_ok = false;
   HttpRequestHandle hang_handle;
+  WaitableEvent hang_published(WaitableEvent::ResetPolicy::kAutomatic, false);
 
   client_runner_->PostTask(FROM_HERE, [&]() mutable {
     hang_handle = client->Send(MakeGet("/never"),
@@ -300,7 +306,10 @@ TEST_F(HttpRequestHandleTest, H2CancelOneStreamLeavesSessionUsable) {
                                  hang_done.Signal();
                                });
     ASSERT_TRUE(hang_handle.is_valid());
+    hang_published.Signal();
   });
+  // 主线程读取 hang_handle 前先与 I/O 线程的写入同步。
+  ASSERT_TRUE(hang_published.TimedWait(std::chrono::seconds(15)));
 
   // 等 h2 会话建立（hang 已提交在途），再发第二个请求——否则第二个 Send
   // 会在握手中 busy 失败。
@@ -389,14 +398,18 @@ TEST_F(HttpRequestHandleTest, H2HandleCopiesShareState) {
   HttpRequestHandle handle;
   WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
   bool ok = false;
-  client_runner_->PostTask(FROM_HERE, [this, client, addr, &handle, &done, &ok]() mutable {
+  WaitableEvent published(WaitableEvent::ResetPolicy::kAutomatic, false);
+  client_runner_->PostTask(FROM_HERE, [this, client, addr, &handle, &done, &ok, &published]() mutable {
     handle = client->Send(
         MakeGet("/hello"), addr, &client_auto_ctx_, client_runner_, [&done, &ok](std::unique_ptr<HttpResponse> resp) {
           ok = resp != nullptr;
           done.Signal();
         });
     ASSERT_TRUE(handle.is_valid());
+    published.Signal();
   });
+  // 拷贝前先与 I/O 线程的句柄写入同步。
+  ASSERT_TRUE(published.TimedWait(std::chrono::seconds(15)));
   HttpRequestHandle copy = handle;
   EXPECT_EQ(handle.is_valid(), copy.is_valid());
   ASSERT_TRUE(done.TimedWait(std::chrono::seconds(15)));

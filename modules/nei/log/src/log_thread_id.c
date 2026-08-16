@@ -66,8 +66,8 @@ int _nei_log_config_wants_thread_id(nei_log_config_handle_t config_handle) {
     return s_tls_tid_config_want;
   }
 
-  _nei_log_config_lock_read();
   _nei_log_ensure_config_table_initialized();
+  _nei_log_config_lock_read();
   if (_nei_log_slot_from_handle(config_handle, &slot) == 0 && s_config_used[slot] != 0U) {
     const nei_log_config_st *cfg = s_config_ptrs[slot];
     if (cfg != NULL && cfg->log_thread_id != 0) {

@@ -43,6 +43,10 @@ class HttpClient;
 // request state machine.  Operations on a completed (or invalid) handle are
 // no-ops.
 //
+// Threading contract: calling methods on ONE handle object from multiple
+// threads concurrently is NOT synchronized — copy the handle first and use
+// the copies independently (copies share the same underlying state).
+//
 // Lifetime: handles do not keep the HttpClient alive.  After the request
 // completes (or the client is destroyed) the handle becomes inert.
 NEI_SUPPRESS_MSC_WARNING_4251_BEGIN

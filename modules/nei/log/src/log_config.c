@@ -2,12 +2,15 @@
 
 #pragma region config table
 
-/* Global configuration table */
+/* Global configuration table.
+ * s_custom_configs provides the in-place storage for slot 0 (the default
+ * config — mutable by design via nei_log_default_config).  Slots 1+ hold
+ * immutable malloc'd copies installed by nei_log_add_config. */
 nei_log_config_st *s_config_ptrs[_NEI_LOG_MAX_CONFIGS];
 nei_log_config_st s_custom_configs[_NEI_LOG_MAX_CONFIGS];
 uint8_t s_config_used[_NEI_LOG_MAX_CONFIGS];
 _nei_log_atomic32_t s_config_active_emit_counts[_NEI_LOG_MAX_CONFIGS];
-int s_config_table_initialized = 0;
+_nei_log_atomic32_t s_config_table_initialized;
 #if defined(_WIN32)
 volatile LONGLONG s_config_snapshot = 1;
 #else
@@ -24,7 +27,17 @@ pthread_rwlock_t s_config_lock = PTHREAD_RWLOCK_INITIALIZER;
 #pragma region implementation
 
 void _nei_log_ensure_config_table_initialized(void) {
-  if (s_config_table_initialized) {
+  if (_NEI_LOG_ATOMIC_LOAD32(&s_config_table_initialized) != 0U) {
+    return;
+  }
+
+  /* Self-locking: callers invoke this from OUTSIDE any config lock.  The
+   * write lock serializes the one-time table initialization against
+   * readers that hold the read lock; the atomic flag is the lock-free
+   * fast-path check (double-checked locking). */
+  _nei_log_config_lock_write();
+  if (_NEI_LOG_ATOMIC_LOAD32(&s_config_table_initialized) != 0U) {
+    _nei_log_config_unlock_write();
     return;
   }
 
@@ -38,7 +51,8 @@ void _nei_log_ensure_config_table_initialized(void) {
   _nei_log_fill_default_config(&s_custom_configs[0]);
   s_config_ptrs[0] = &s_custom_configs[0];
 
-  s_config_table_initialized = 1;
+  _NEI_LOG_ATOMIC_STORE32(&s_config_table_initialized, 1U);
+  _nei_log_config_unlock_write();
 }
 
 void _nei_log_fill_default_config(nei_log_config_st *cfg) {
@@ -139,8 +153,8 @@ const nei_log_config_st *_nei_log_acquire_config_for_emit(nei_log_config_handle_
   }
   *out_slot = (size_t)-1;
 
-  _nei_log_config_lock_read();
   _nei_log_ensure_config_table_initialized();
+  _nei_log_config_lock_read();
   if (_nei_log_slot_from_handle(handle, &slot) == 0 && s_config_used[slot] != 0U) {
     cfg = s_config_ptrs[slot];
     if (cfg != NULL) {
@@ -213,8 +227,8 @@ int nei_log_add_config(const nei_log_config_st *config, nei_log_config_handle_t 
     return -1;
   }
 
-  _nei_log_config_lock_write();
   _nei_log_ensure_config_table_initialized();
+  _nei_log_config_lock_write();
 
   // Find a free slot for new config (slot 0 is reserved for default).
   size_t free_slot = (size_t)-1;
@@ -229,9 +243,23 @@ int nei_log_add_config(const nei_log_config_st *config, nei_log_config_handle_t 
     return -1;
   }
 
+  /* Publish an immutable private copy instead of rewriting the slot in
+   * place: readers may still be dereferencing the previous incarnation of
+   * this slot through their lock-free TLS pointer cache (the snapshot bump
+   * only tells them to refresh, it cannot fence in-flight fast-path reads).
+   * Replacing the pointer keeps those reads race-free and tearing-free.
+   * Old copies are intentionally never freed — config churn is rare and the
+   * structure is small; freeing would be a use-after-free against the TLS
+   * caches. */
+  nei_log_config_st *copy = (nei_log_config_st *)malloc(sizeof(*copy));
+  if (copy == NULL) {
+    _nei_log_config_unlock_write();
+    return -1;
+  }
+  memcpy(copy, config, sizeof(*copy));
+
   s_config_used[free_slot] = 1U;
-  memcpy(&s_custom_configs[free_slot], config, sizeof(*config));
-  s_config_ptrs[free_slot] = &s_custom_configs[free_slot];
+  s_config_ptrs[free_slot] = copy;
   _nei_log_config_snapshot_bump();
   if (out_handle != NULL) {
     *out_handle = _nei_log_make_handle_from_slot(free_slot);
@@ -246,8 +274,8 @@ void nei_log_remove_config(nei_log_config_handle_t handle) {
   nei_log_sink_st *sinks_to_release[NEI_LOG_MAX_SINKS_OF_CONFIG];
   size_t num_sinks = 0;
 
-  _nei_log_config_lock_write();
   _nei_log_ensure_config_table_initialized();
+  _nei_log_config_lock_write();
   if (_nei_log_slot_from_handle(handle, &slot) != 0 || s_config_used[slot] == 0U) {
     _nei_log_config_unlock_write();
     return;
@@ -364,8 +392,8 @@ int nei_log_remove_sink(nei_log_config_st *config, nei_log_sink_st *sink) {
 nei_log_config_st *nei_log_get_config(nei_log_config_handle_t handle) {
   nei_log_config_st *cfg = NULL;
   size_t slot = 0U;
-  _nei_log_config_lock_read();
   _nei_log_ensure_config_table_initialized();
+  _nei_log_config_lock_read();
   if (_nei_log_slot_from_handle(handle, &slot) != 0 || s_config_used[slot] == 0U) {
     _nei_log_config_unlock_read();
     return NULL;
@@ -378,8 +406,8 @@ nei_log_config_st *nei_log_get_config(nei_log_config_handle_t handle) {
 nei_log_config_st *nei_log_default_config(void) {
   nei_log_config_st *cfg = NULL;
 
-  _nei_log_config_lock_read();
   _nei_log_ensure_config_table_initialized();
+  _nei_log_config_lock_read();
   cfg = s_config_ptrs[0];
   _nei_log_config_unlock_read();
 
@@ -387,10 +415,10 @@ nei_log_config_st *nei_log_default_config(void) {
     return cfg;
   }
 
-  /* Slow path: first access initializes the default config under a write
-   * lock, but the common case (post-init) only takes the read lock. */
+  /* Defensive slow path (unreachable in practice — ensure_config above
+   * always installs slot 0).  No lock-taking inside: the write lock is
+   * already held here. */
   _nei_log_config_lock_write();
-  _nei_log_ensure_config_table_initialized();
   if (s_config_ptrs[0] == NULL) {
     s_config_used[0] = 1U;
     s_config_ptrs[0] = &s_custom_configs[0];
