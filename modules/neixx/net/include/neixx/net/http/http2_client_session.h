@@ -126,6 +126,19 @@ public:
                                 ResponseBodyCallback on_body,
                                 StreamCloseCallback on_close);
 
+  // Aborts one in-flight stream by sending RST_STREAM(CANCEL).  Only the
+  // target stream fails (its StreamCloseCallback fires with clean=false);
+  // the session and other streams are unaffected.  No-op if the stream is
+  // unknown or the session is not connected.  Safe from any thread (posted
+  // to the I/O thread when called off-thread).
+  void CancelStream(int32_t stream_id);
+
+  // Sends an RFC 7540 PRIORITY frame for |stream_id| (urgency [0,7], 0 =
+  // highest).  Advisory: it does not guarantee server-side scheduling.  No-op
+  // if the stream is unknown or the session is not connected.  Safe from any
+  // thread.
+  void SetStreamPriority(int32_t stream_id, int32_t priority);
+
   // Begin graceful shutdown: sends GOAWAY, lets in-flight streams finish,
   // then closes the TLS transport.  Safe from any thread.
   void Close();

@@ -79,6 +79,12 @@ struct Http2ClientSession::Impl {
     int raw_status = 0;
     bool headers_delivered = false;
     bool end_stream_delivered = false;
+
+    // Set by CancelStream(): the local side submitted RST_STREAM for this
+    // stream.  nghttp2 then reports the final close with error_code 0 when
+    // the peer ends the stream normally, which would be misread as a clean
+    // completion — locally_reset forces clean=false regardless.
+    bool locally_reset = false;
   };
 
   std::atomic<State> state{State::kIdle};
@@ -384,14 +390,16 @@ struct Http2ClientSession::Impl {
     impl->streams.erase(it);
 
     // A clean close without a delivered END_STREAM means the body simply
-    // ended with the final frame: synthesize the done signal.
-    if (error_code == 0 && !ctx->end_stream_delivered) {
+    // ended with the final frame: synthesize the done signal.  Locally reset
+    // streams never count as clean, even when the peer ends them normally
+    // (nghttp2 then reports error_code 0).
+    if (error_code == 0 && !ctx->locally_reset && !ctx->end_stream_delivered) {
       ctx->end_stream_delivered = true;
       if (ctx->headers_delivered && ctx->on_body)
         ctx->on_body(stream_id, nullptr, 0, true);
     }
     if (ctx->on_close)
-      ctx->on_close(stream_id, error_code == 0);
+      ctx->on_close(stream_id, error_code == 0 && !ctx->locally_reset);
 
     impl->MaybeCloseAfterDrain();
     return 0;
@@ -697,6 +705,42 @@ struct Http2ClientSession::Impl {
   }
 
   // -------------------------------------------------------------------------
+  // Per-stream control (CancelStream / SetStreamPriority)
+  // -------------------------------------------------------------------------
+  // Both entry points are called on the I/O thread (the public shell posts
+  // here when invoked off-thread).
+  void CancelStreamImpl(int32_t stream_id) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    if (state.load() != State::kConnected)
+      return;
+    auto it = streams.find(stream_id);
+    if (it == streams.end())
+      return; // unknown / already closed
+    it->second->locally_reset = true;
+    nghttp2_submit_rst_stream(session, NGHTTP2_FLAG_NONE, stream_id, NGHTTP2_CANCEL);
+    PumpSession();
+  }
+
+  void SetStreamPriorityImpl(int32_t stream_id, int32_t priority) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    if (state.load() != State::kConnected)
+      return;
+    if (streams.find(stream_id) == streams.end())
+      return;
+    if (priority < 0)
+      priority = 0;
+    else if (priority > 7)
+      priority = 7;
+    // RFC 7540 weight is 1..256 (1 = least preferred); map urgency 0..7
+    // (0 = highest) to descending weights anchored at the root.
+    const int32_t weight = 1 + (7 - priority) * 32;
+    nghttp2_priority_spec spec;
+    nghttp2_priority_spec_init(&spec, stream_id, weight, 0);
+    nghttp2_submit_priority(session, NGHTTP2_FLAG_NONE, stream_id, &spec);
+    PumpSession();
+  }
+
+  // -------------------------------------------------------------------------
   // Teardown
   // -------------------------------------------------------------------------
   // Entry point for Close().  Idle sessions finalize inline on any thread;
@@ -871,6 +915,28 @@ int32_t Http2ClientSession::SubmitRequestWithBody(const HttpRequest &request,
                                                   StreamCloseCallback on_close) {
   return impl_->SubmitRequestImpl(
       request, std::move(body_provider), std::move(on_headers), std::move(on_body), std::move(on_close));
+}
+
+void Http2ClientSession::CancelStream(int32_t stream_id) {
+  // Per-stream control must run on the I/O thread; hop when needed.
+  scoped_refptr<SingleThreadTaskRunner> runner = impl_->GetIoRunner();
+  if (runner && !runner->BelongsToCurrentThread()) {
+    auto self = scoped_refptr<Http2ClientSession>(this);
+    runner->PostTask(FROM_HERE, [self, stream_id]() { self->impl_->CancelStreamImpl(stream_id); });
+    return;
+  }
+  impl_->CancelStreamImpl(stream_id);
+}
+
+void Http2ClientSession::SetStreamPriority(int32_t stream_id, int32_t priority) {
+  scoped_refptr<SingleThreadTaskRunner> runner = impl_->GetIoRunner();
+  if (runner && !runner->BelongsToCurrentThread()) {
+    auto self = scoped_refptr<Http2ClientSession>(this);
+    runner->PostTask(FROM_HERE,
+                     [self, stream_id, priority]() { self->impl_->SetStreamPriorityImpl(stream_id, priority); });
+    return;
+  }
+  impl_->SetStreamPriorityImpl(stream_id, priority);
 }
 
 void Http2ClientSession::Close() {

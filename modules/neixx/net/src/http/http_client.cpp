@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <neixx/common/location.h>
 #include <neixx/io/io_buffer.h>
@@ -161,12 +162,34 @@ struct HttpClient::Impl {
     HttpClient::BodyChunkCallback on_body;          // streaming mode
     std::unique_ptr<HttpResponse> response;         // buffered-mode aggregation
     bool body_done = false;                         // streaming done delivered
+    int64_t generation = 0;                         // handle tracking
+    std::shared_ptr<std::atomic<bool>> active;      // handle liveness flag
   };
 
   std::unordered_map<int32_t, std::unique_ptr<H2Pending>> h2_pending;
   // In-flight h2 stream count (atomic so Peek() can read it from any thread;
   // the pool requires "no request in flight" before reusing a client).
   std::atomic<int> h2_inflight{0};
+
+  // ---- HttpRequestHandle tracking (h2) ----
+  // Request generation → h2 stream id (populated on submit, erased on
+  // stream close).  Generations cancelled before the submit task ran are
+  // recorded in |cancelled_generations_| and rejected by SubmitViaH2.
+  std::unordered_map<int64_t, int32_t> gen_to_stream_;
+  std::unordered_set<int64_t> cancelled_generations_;
+
+  // ---- HttpRequestHandle tracking (h1 in-flight + h2 handshake staging) ----
+  // The two cases are mutually exclusive (one request at a time until the
+  // protocol is known), so a single in-flight slot serves both.  Generations
+  // are allocated on the Send thread; the I/O thread reads the in-flight
+  // generation in CancelGeneration (cross-thread posts order it after Send).
+  // 0 means no request in flight.
+  int64_t next_generation_ = 1;
+  std::atomic<int64_t> in_flight_generation_{0};
+  std::shared_ptr<std::atomic<bool>> in_flight_active_;
+  // Advisory priority of the in-flight h1 request (no scheduling effect —
+  // recorded so SetPriority remains observable for tests/debugging).
+  int32_t last_h1_priority_ = -1;
 
   // Atomic so Close()/is_connected() may be called from any thread.
   // The state machine itself is driven by Send() on the calling thread
@@ -209,39 +232,58 @@ struct HttpClient::Impl {
     response_delegate->status_provider = [this]() { return response_parser->status_code(); };
   }
 
+  // Builds the HttpRequestHandle for a freshly allocated generation.
+  HttpRequestHandle MakeHandle(HttpClient *client, int64_t generation, std::shared_ptr<std::atomic<bool>> active) {
+    return HttpRequestHandle::Create(
+        io_runner, client->weak_factory_.GetWeakPtr(FROM_HERE), generation, std::move(active));
+  }
+
   // Sets up a request and begins the connect/write pipeline.  Shared by the
-  // buffered Send() and streaming SendStreaming() paths.
-  void StartRequest(HttpClient *client,
-                    const HttpRequest &request,
-                    const net::IPEndPoint &endpoint,
-                    net::SSLContext *ssl_ctx,
-                    scoped_refptr<SingleThreadTaskRunner> io_runner,
-                    HttpClient::ResponseCallback callback) {
+  // buffered Send() and streaming SendStreaming() paths.  Returns the
+  // per-request handle (invalid when the request could not start — in that
+  // case the callback has already been invoked with nullptr).
+  HttpRequestHandle StartRequest(HttpClient *client,
+                                 const HttpRequest &request,
+                                 const net::IPEndPoint &endpoint,
+                                 net::SSLContext *ssl_ctx,
+                                 scoped_refptr<SingleThreadTaskRunner> io_runner,
+                                 HttpClient::ResponseCallback callback) {
     if (state == State::kClosed) {
       if (callback)
         callback(nullptr);
-      return;
+      return HttpRequestHandle();
     }
 
     this->io_runner = std::move(io_runner);
     this->ssl_ctx = ssl_ctx;
-    this->pending_h2_request = request;
+
+    const int64_t generation = next_generation_++;
+    auto active = std::make_shared<std::atomic<bool>>(true);
 
     // Established h2 session: submit on it directly (concurrent Send is
     // allowed — each request is routed by its stream id).
     if (proto == Proto::kHttp2 && h2_session && h2_session->is_connected()) {
-      PostH2Submit(client, request, std::move(callback));
-      return;
+      PostH2Submit(client, request, std::move(callback), generation, active);
+      return MakeHandle(client, generation, std::move(active));
     }
 
     // h1 semantics (and h2-before-handshake): one request at a time.
     if (state != State::kIdle) {
       if (callback)
         callback(nullptr);
-      return;
+      return HttpRequestHandle();
     }
 
+    // Stage the request only once the start is accepted: a rejected
+    // (busy) Send must not clobber the request staged for the in-progress
+    // handshake (it would be submitted by OnH2Ready instead of the real
+    // one).
+    this->pending_h2_request = request;
+
     this->callback = std::move(callback);
+    in_flight_generation_.store(generation, std::memory_order_relaxed);
+    in_flight_active_ = active;
+    last_h1_priority_ = -1;
 
     wire_request = SerializeRequest(request, /*include_body=*/!upload_streaming);
 
@@ -256,12 +298,13 @@ struct HttpClient::Impl {
     upload_done = false;
 
     auto self = scoped_refptr<HttpClient>(client);
+    HttpRequestHandle handle = MakeHandle(client, generation, active);
 
     // If we already have a live socket (keep-alive reuse), skip connect.
     if (tcp_socket || tls_socket) {
       state = State::kWriting;
       DoWriteRequest(client);
-      return;
+      return handle;
     }
 
     state = State::kConnecting;
@@ -278,6 +321,7 @@ struct HttpClient::Impl {
       if (!ok)
         Finish(client, nullptr);
     }
+    return handle;
   }
 
   // ---- state machine ------------------------------------------------
@@ -530,25 +574,47 @@ struct HttpClient::Impl {
     if (state == State::kClosed)
       return;
     state = State::kIdle;
-    SubmitViaH2(client, std::move(pending_h2_request), std::move(callback));
+    const int64_t generation = in_flight_generation_.load(std::memory_order_relaxed);
+    std::shared_ptr<std::atomic<bool>> active = std::move(in_flight_active_);
+    in_flight_generation_.store(0, std::memory_order_relaxed);
+    SubmitViaH2(client, std::move(pending_h2_request), std::move(callback), generation, std::move(active));
     callback = nullptr;
   }
 
   // Hops to the I/O thread when needed (SubmitRequest* must run there).
-  void PostH2Submit(HttpClient *client, const HttpRequest &request, HttpClient::ResponseCallback callback) {
+  void PostH2Submit(HttpClient *client,
+                    const HttpRequest &request,
+                    HttpClient::ResponseCallback callback,
+                    int64_t generation,
+                    std::shared_ptr<std::atomic<bool>> active) {
     auto self = scoped_refptr<HttpClient>(client);
     if (io_runner && !io_runner->BelongsToCurrentThread()) {
-      io_runner->PostTask(FROM_HERE, [self, request, cb = std::move(callback)]() mutable {
-        self->impl_->SubmitViaH2(self.get(), request, std::move(cb));
+      io_runner->PostTask(FROM_HERE, [self, request, cb = std::move(callback), generation, active]() mutable {
+        self->impl_->SubmitViaH2(self.get(), request, std::move(cb), generation, active);
       });
       return;
     }
-    SubmitViaH2(client, request, std::move(callback));
+    SubmitViaH2(client, request, std::move(callback), generation, std::move(active));
   }
 
   // Submits one request over the established h2 session (I/O thread).
-  void SubmitViaH2(HttpClient *client, const HttpRequest &request, HttpClient::ResponseCallback callback) {
+  void SubmitViaH2(HttpClient *client,
+                   const HttpRequest &request,
+                   HttpClient::ResponseCallback callback,
+                   int64_t generation,
+                   std::shared_ptr<std::atomic<bool>> active) {
     if (!h2_session || !h2_session->is_connected()) {
+      if (active)
+        active->store(false, std::memory_order_relaxed);
+      if (callback)
+        callback(nullptr);
+      return;
+    }
+
+    // Reject requests cancelled before the submit task ran.
+    if (cancelled_generations_.erase(generation) > 0) {
+      if (active)
+        active->store(false, std::memory_order_relaxed);
       if (callback)
         callback(nullptr);
       return;
@@ -556,6 +622,8 @@ struct HttpClient::Impl {
 
     auto pending = std::make_unique<H2Pending>();
     pending->callback = std::move(callback);
+    pending->generation = generation;
+    pending->active = std::move(active);
     if (streaming) {
       // Streaming response: headers/body straight through to the user hooks
       // stored on the delegate by SendStreaming.
@@ -626,6 +694,8 @@ struct HttpClient::Impl {
     }
 
     if (id < 0) {
+      if (pending->active)
+        pending->active->store(false, std::memory_order_relaxed);
       if (pending->on_body && !pending->body_done)
         pending->on_body(nullptr, 0, true);
       if (pending->callback)
@@ -633,6 +703,7 @@ struct HttpClient::Impl {
       return;
     }
     h2_pending.emplace(id, std::move(pending));
+    gen_to_stream_.emplace(generation, id);
     h2_inflight.fetch_add(1, std::memory_order_relaxed);
     (void)client;
   }
@@ -645,7 +716,10 @@ struct HttpClient::Impl {
       return;
     std::unique_ptr<H2Pending> pending = std::move(it->second);
     h2_pending.erase(it);
+    gen_to_stream_.erase(pending->generation);
     h2_inflight.fetch_sub(1, std::memory_order_relaxed);
+    if (pending->active)
+      pending->active->store(false, std::memory_order_relaxed);
     if (pending->callback) {
       if (clean && pending->response)
         pending->callback(std::move(pending->response));
@@ -656,6 +730,50 @@ struct HttpClient::Impl {
     // Streaming: synthesize the done signal if the stream died uncleanly.
     if (!clean && pending->on_body && !pending->body_done)
       pending->on_body(nullptr, 0, true);
+  }
+
+  // -------------------------------------------------------------------
+  // HttpRequestHandle support — must run on the I/O thread.
+  // -------------------------------------------------------------------
+
+  // Cancels the request identified by |generation|.  See
+  // HttpRequestHandle::Cancel for the protocol-specific semantics.
+  void CancelGeneration(HttpClient *client, int64_t generation) {
+    if (state == State::kClosed)
+      return;
+    if (proto == Proto::kHttp2) {
+      auto it = gen_to_stream_.find(generation);
+      if (it == gen_to_stream_.end()) {
+        // Not yet submitted (queued behind the I/O-thread hop, or staged
+        // during the session handshake): SubmitViaH2 will reject it.
+        cancelled_generations_.insert(generation);
+        return;
+      }
+      if (h2_session)
+        h2_session->CancelStream(it->second);
+      return;
+    }
+    // h1: the single-request connection model cannot abort just one request,
+    // so the owning connection is closed (in-flight request fails, client
+    // becomes terminal — same as Close()).
+    if (in_flight_generation_.load(std::memory_order_relaxed) == generation && state != State::kIdle) {
+      Finish(client, nullptr);
+    }
+  }
+
+  // Sets the advisory priority of the request identified by |generation|.
+  void SetGenerationPriority(HttpClient *client, int64_t generation, int32_t priority) {
+    (void)client;
+    if (state == State::kClosed)
+      return;
+    if (proto == Proto::kHttp2) {
+      auto it = gen_to_stream_.find(generation);
+      if (it != gen_to_stream_.end() && h2_session)
+        h2_session->SetStreamPriority(it->second, priority);
+      return;
+    }
+    // h1: advisory only — recorded, no scheduling effect.
+    last_h1_priority_ = priority;
   }
 
   void Finish(HttpClient *client, std::unique_ptr<HttpResponse> response) {
@@ -672,13 +790,19 @@ struct HttpClient::Impl {
       }
       for (auto &entry : h2_pending) {
         H2Pending &p = *entry.second;
+        if (p.active)
+          p.active->store(false, std::memory_order_relaxed);
         if (p.on_body && !p.body_done)
           p.on_body(nullptr, 0, true);
         if (p.callback)
           p.callback(nullptr);
       }
       h2_pending.clear();
+      gen_to_stream_.clear();
+      cancelled_generations_.clear();
       h2_inflight.store(0, std::memory_order_relaxed);
+      if (in_flight_active_)
+        in_flight_active_->store(false, std::memory_order_relaxed);
       if (callback) {
         auto cb = std::move(callback);
         callback = nullptr;
@@ -686,6 +810,11 @@ struct HttpClient::Impl {
       }
       return;
     }
+
+    // h1: mark the in-flight request complete before delivering the callback
+    // so a concurrent handle check observes the finished state first.
+    if (in_flight_active_)
+      in_flight_active_->store(false, std::memory_order_relaxed);
 
     bool keep_alive = response && response->keep_alive();
 
@@ -744,11 +873,19 @@ HttpClient::~HttpClient() {
   impl_->Finish(this, nullptr);
 }
 
-void HttpClient::Send(const HttpRequest &request,
-                      const net::IPEndPoint &endpoint,
-                      net::SSLContext *ssl_ctx,
-                      scoped_refptr<SingleThreadTaskRunner> io_runner,
-                      ResponseCallback callback) {
+void HttpClient::CancelRequestInternal(int64_t generation) {
+  impl_->CancelGeneration(this, generation);
+}
+
+void HttpClient::SetRequestPriorityInternal(int64_t generation, int32_t priority) {
+  impl_->SetGenerationPriority(this, generation, priority);
+}
+
+HttpRequestHandle HttpClient::Send(const HttpRequest &request,
+                                   const net::IPEndPoint &endpoint,
+                                   net::SSLContext *ssl_ctx,
+                                   scoped_refptr<SingleThreadTaskRunner> io_runner,
+                                   ResponseCallback callback) {
   // Buffered mode: clear any streaming hooks left over from a prior
   // SendStreaming / SendBody, then start the request.
   impl_->streaming = false;
@@ -756,15 +893,15 @@ void HttpClient::Send(const HttpRequest &request,
   impl_->body_provider = nullptr;
   impl_->response_delegate->on_headers_cb = nullptr;
   impl_->response_delegate->on_body_cb = nullptr;
-  impl_->StartRequest(this, request, endpoint, ssl_ctx, std::move(io_runner), std::move(callback));
+  return impl_->StartRequest(this, request, endpoint, ssl_ctx, std::move(io_runner), std::move(callback));
 }
 
-void HttpClient::SendStreaming(const HttpRequest &request,
-                               const net::IPEndPoint &endpoint,
-                               net::SSLContext *ssl_ctx,
-                               scoped_refptr<SingleThreadTaskRunner> io_runner,
-                               ResponseHeadersCallback on_headers,
-                               BodyChunkCallback on_body) {
+HttpRequestHandle HttpClient::SendStreaming(const HttpRequest &request,
+                                            const net::IPEndPoint &endpoint,
+                                            net::SSLContext *ssl_ctx,
+                                            scoped_refptr<SingleThreadTaskRunner> io_runner,
+                                            ResponseHeadersCallback on_headers,
+                                            BodyChunkCallback on_body) {
   // Streaming mode: deliver headers/body via the delegate hooks.  No response
   // callback — completion is signalled by on_body(nullptr, 0, true).
   impl_->streaming = true;
@@ -772,15 +909,15 @@ void HttpClient::SendStreaming(const HttpRequest &request,
   impl_->body_provider = nullptr;
   impl_->response_delegate->on_headers_cb = std::move(on_headers);
   impl_->response_delegate->on_body_cb = std::move(on_body);
-  impl_->StartRequest(this, request, endpoint, ssl_ctx, std::move(io_runner), ResponseCallback());
+  return impl_->StartRequest(this, request, endpoint, ssl_ctx, std::move(io_runner), ResponseCallback());
 }
 
-void HttpClient::SendBody(const HttpRequest &request,
-                          const net::IPEndPoint &endpoint,
-                          net::SSLContext *ssl_ctx,
-                          scoped_refptr<SingleThreadTaskRunner> io_runner,
-                          RequestBodyProvider body_provider,
-                          ResponseCallback callback) {
+HttpRequestHandle HttpClient::SendBody(const HttpRequest &request,
+                                       const net::IPEndPoint &endpoint,
+                                       net::SSLContext *ssl_ctx,
+                                       scoped_refptr<SingleThreadTaskRunner> io_runner,
+                                       RequestBodyProvider body_provider,
+                                       ResponseCallback callback) {
   // Streaming upload: request body is pushed by |body_provider|.  Headers are
   // serialized without the buffered body; the response is delivered normally.
   impl_->streaming = false;
@@ -789,7 +926,7 @@ void HttpClient::SendBody(const HttpRequest &request,
   impl_->upload_streaming = true;
   impl_->body_provider = std::move(body_provider);
   impl_->upload_chunked = EqualsCaseInsensitiveASCII(request.GetHeaderValue("Transfer-Encoding"), "chunked");
-  impl_->StartRequest(this, request, endpoint, ssl_ctx, std::move(io_runner), std::move(callback));
+  return impl_->StartRequest(this, request, endpoint, ssl_ctx, std::move(io_runner), std::move(callback));
 }
 
 void HttpClient::Close() {

@@ -77,6 +77,7 @@ set(NEIXX_NET_HTTP_SOURCES
     include/neixx/net/http/http_server.h
     include/neixx/net/http/http_client.h
     include/neixx/net/http/http_client_pool.h
+    include/neixx/net/http/http_request_handle.h
     include/neixx/net/http/http_file_transfer.h
     src/http/http_common.cpp
     src/http/http_parser.cpp
@@ -87,6 +88,7 @@ set(NEIXX_NET_HTTP_SOURCES
     src/http/http_server.cpp
     src/http/http_client.cpp
     src/http/http_client_pool.cpp
+    src/http/http_request_handle.cpp
     src/http/http_file_transfer.cpp
 )
 target_sources(nei PRIVATE ${NEIXX_NET_HTTP_SOURCES})

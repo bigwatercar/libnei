@@ -10,7 +10,9 @@
 #include <nei/build/compiler_specific.h>
 #include <nei/build/nei_export.h>
 #include <neixx/memory/ref_counted.h>
+#include <neixx/memory/weak_ptr.h>
 #include <neixx/net/http/http_request.h>
+#include <neixx/net/http/http_request_handle.h>
 #include <neixx/net/http/http_response.h>
 #include <neixx/task/task_runner.h>
 
@@ -40,6 +42,9 @@ namespace net::http {
 //     I/O thread the request was bound to.
 //   - Close / is_connected: any thread, any time — internally synchronized
 //     (Close is posted to the I/O thread when called off-thread).
+//   - The returned HttpRequestHandle: see http_request_handle.h — safe from
+//     any thread; Cancel() on an HTTP/1.1 request closes this client's
+//     connection and leaves the client terminal (like Close).
 
 NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
 
@@ -70,11 +75,17 @@ public:
   HttpClient(const HttpClient &) = delete;
   HttpClient &operator=(const HttpClient &) = delete;
 
-  void Send(const HttpRequest &request,
-            const net::IPEndPoint &endpoint,
-            net::SSLContext *ssl_ctx,
-            scoped_refptr<SingleThreadTaskRunner> io_runner,
-            ResponseCallback callback);
+  // Sends |request| and returns a per-request handle for cancellation and
+  // priority control (see HttpRequestHandle).  The return value is optional:
+  // ignore it for plain fire-and-forget use.  Returns an invalid handle when
+  // the request cannot start (client closed, or a request is already in
+  // flight on the HTTP/1.1 path — in that case |callback| is invoked
+  // synchronously with nullptr).
+  HttpRequestHandle Send(const HttpRequest &request,
+                         const net::IPEndPoint &endpoint,
+                         net::SSLContext *ssl_ctx,
+                         scoped_refptr<SingleThreadTaskRunner> io_runner,
+                         ResponseCallback callback);
 
   // Like Send, but delivers the response incrementally instead of buffering
   // the whole body: |on_headers| fires first with status + headers, then
@@ -82,22 +93,22 @@ public:
   // All callbacks run on |io_runner|.  Memory stays bounded regardless of body
   // size.  The connection is only reusable (keep-alive) if the body is drained
   // to the done signal.
-  void SendStreaming(const HttpRequest &request,
-                     const net::IPEndPoint &endpoint,
-                     net::SSLContext *ssl_ctx,
-                     scoped_refptr<SingleThreadTaskRunner> io_runner,
-                     ResponseHeadersCallback on_headers,
-                     BodyChunkCallback on_body);
+  HttpRequestHandle SendStreaming(const HttpRequest &request,
+                                  const net::IPEndPoint &endpoint,
+                                  net::SSLContext *ssl_ctx,
+                                  scoped_refptr<SingleThreadTaskRunner> io_runner,
+                                  ResponseHeadersCallback on_headers,
+                                  BodyChunkCallback on_body);
 
   // Like Send, but streams the request body from |body_provider| instead of
   // buffering request.body.  The provider must invoke its callback on the I/O
   // thread.  The response is delivered via |callback|.
-  void SendBody(const HttpRequest &request,
-                const net::IPEndPoint &endpoint,
-                net::SSLContext *ssl_ctx,
-                scoped_refptr<SingleThreadTaskRunner> io_runner,
-                RequestBodyProvider body_provider,
-                ResponseCallback callback);
+  HttpRequestHandle SendBody(const HttpRequest &request,
+                             const net::IPEndPoint &endpoint,
+                             net::SSLContext *ssl_ctx,
+                             scoped_refptr<SingleThreadTaskRunner> io_runner,
+                             RequestBodyProvider body_provider,
+                             ResponseCallback callback);
 
   // Close the underlying connection and put the client in a terminal state.
   // Safe to call multiple times.
@@ -119,13 +130,29 @@ public:
   bool Peek() const;
 
 private:
+  friend class HttpRequestHandle;
+
+  // Invoked by HttpRequestHandle on the request's I/O thread (see
+  // http_request_handle.cpp for the liveness protocol).
+  void CancelRequestInternal(int64_t generation);
+  void SetRequestPriorityInternal(int64_t generation, int32_t priority);
+
   struct Impl;
   std::unique_ptr<Impl> impl_;
+  // Must be the last member (invalidated on destruction).
+  WeakPtrFactory<HttpClient> weak_factory_{this};
 };
 
 NEI_SUPPRESS_MSC_WARNING_4251_END
 
 } // namespace net::http
+} // namespace nei
+
+namespace nei {
+// Thread-safe weak references: handles may dereference the weak pointer from
+// the request's I/O thread while the factory was bound to the Send thread.
+template <>
+struct WeakPtrThreadSafe<net::http::HttpClient> : std::true_type {};
 } // namespace nei
 
 #endif // NEIXX_NET_HTTP_HTTP_CLIENT_H_

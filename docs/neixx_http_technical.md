@@ -275,6 +275,7 @@ HTTP/1.1 特有头（`Connection`/`Keep-Alive`/`Transfer-Encoding`/`Upgrade`）
 | `Http2ServerTest`（9 用例） | 路由/模式参数/404、64KB 上传、4MB 响应、流式、1MB 流式请求、8 流并发、Shutdown 排空 | ✅ 双平台 |
 | `Http2ClientSessionTest`（8 用例） | 内嵌 nghttp2 测试服务器、大响应、大上传、8 流并发 | ✅ 双平台 |
 | `HttpClientMuxTest`（13 用例） | 融合客户端：ALPN 自动协商 h2 / 指定 http1.1 回落 h1 / 无 ALPN 兜底 h1 / 严格 h2 对 h1 服务器失败 / **ALPN 响应矩阵（4×4：不设置、h1+h2、仅 h1、仅 h2；HTTP 引擎 + WebSocket 可达性双验证，含仅-h2 拒绝语义）** / h2 并发 Send（8 并发）/ h1 并发拒绝 / 流式与 Body 上传 / 会话复用 / 池多桶（ssl_ctx 分桶）/ Flush | ✅ 双平台 + ASAN + TSan + valgrind |
+| `HttpRequestHandleTest`（8 用例） | 协议无关单请求句柄：h1/h2 生命周期、h1 取消关连接、h2 单流 RST 会话复用、双协议 SetPriority、跨线程取消、句柄拷贝共享 | ✅ 双平台 |
 | `Http2StressFixture` / `http2_multithread_stress_test` | 3000 请求多路复用、并发路由注册、流量中销毁、churn、上传中途 Close | ✅ 双平台 + ASAN + TSan |
 | 全量回归 | Windows 903（895 PASSED + 8 SKIPPED 网络用例）；WSL 双平台全量 | ✅ |
 
@@ -309,4 +310,12 @@ HTTP/1.1 特有头（`Connection`/`Keep-Alive`/`Transfer-Encoding`/`Upgrade`）
   `:protocol`），复用统一路由表映射到现有 `WebSocketHandler`。
 - 服务端推送（server push）默认关闭（`ENABLE_PUSH=0`）。
 - h2 连接级流控窗口 64 KiB 保持默认，按需再调优。
-- 单请求句柄（`HttpRequestHandle`，协议无关的取消/优先级）为后续工作项。
+- **单请求句柄已落地**（2026-08-16）：`HttpClient::Send*` 返回 `HttpRequestHandle`
+  （值类型、可拷贝、协议无关）：`is_valid()` 请求在途查询；`Cancel()` 任意线程——
+  h2 发送 `RST_STREAM(CANCEL)`（仅该流失败，会话可复用），h1 关闭所属连接
+  （HTTP/1.1 单请求模型，客户端随之终止，同 `Close()`）；`SetPriority()`
+  [0,7]——h2 发送 RFC 7540 `PRIORITY` 帧（weight=1+(7-p)×32），h1 仅记录无调度
+  效果。句柄不持有客户端（线程安全 `WeakPtr` + 每请求 generation + 共享
+  `atomic<bool>` 活跃标志），请求完成后操作自动 no-op。底层
+  `Http2ClientSession::CancelStream/SetStreamPriority` 对直接使用会话的用户
+  同样开放。
