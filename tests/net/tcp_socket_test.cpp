@@ -1054,19 +1054,32 @@ TEST_F(TcpSocketTest, ClientOrphanDrainReadEOF) {
     io_runner_->PostTask(FROM_HERE, [&drain]() { drain.Signal(); });
     ASSERT_TRUE(drain.TimedWait(std::chrono::seconds(5)));
 
-    // Orphan the accepted client — flushes any in-flight write then closes
-    // (no drain read: a peer waiting for a response never FINs).
-    io_runner_->PostTask(FROM_HERE, [&]() { accepted_client.reset(); });
-
-    // Flush to let Orphan drain complete.
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Orphan the accepted client on the IO thread and WAIT for the reset to
+    // complete before returning: |accepted_client| is a TestBody-local
+    // shared_ptr written by the accept callback and this task — the main
+    // thread must not destroy the object concurrently.
+    WaitableEvent orphaned(WaitableEvent::ResetPolicy::kAutomatic, false);
+    io_runner_->PostTask(FROM_HERE, [&]() {
+      accepted_client.reset();
+      orphaned.Signal();
+    });
+    ASSERT_TRUE(orphaned.TimedWait(std::chrono::seconds(5)));
   }
 
-  // Close server — must not crash or hang.
-  io_runner_->PostTask(FROM_HERE, [&server]() { server->Close(); });
-  WaitableEvent cleanup(WaitableEvent::ResetPolicy::kAutomatic, false);
-  io_runner_->PostTask(FROM_HERE, [&cleanup]() { cleanup.Signal(); });
-  ASSERT_TRUE(cleanup.TimedWait(std::chrono::seconds(5)));
+  // Close and destroy the server ON the IO thread, signalling only after the
+  // destructor has run.  The server teardown synchronously fires the accept
+  // callback (ok=false), which touches |client_accepted| — a TestBody-local
+  // WaitableEvent.  Destroying the server from the main thread (or returning
+  // before its teardown completes) lets that callback run after the stack
+  // events are destroyed → UAF/mutex hang.  Waiting here makes the teardown
+  // fully synchronous with respect to the TestBody locals.
+  WaitableEvent teardown(WaitableEvent::ResetPolicy::kAutomatic, false);
+  io_runner_->PostTask(FROM_HERE, [&server, &teardown]() {
+    server->Close();
+    server.reset();
+    teardown.Signal();
+  });
+  ASSERT_TRUE(teardown.TimedWait(std::chrono::seconds(5)));
 }
 
 } // namespace
