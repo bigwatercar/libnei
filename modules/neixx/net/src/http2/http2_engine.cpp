@@ -37,9 +37,16 @@ namespace nei::net::http::internal {
 class Http2Connection;
 } // namespace nei::net::http::internal
 
-// WeakPtrThreadSafe 特化：drain watchdog 在 PostDelayedTask 回调线程（可能
-// 非 I/O 线程）解引用 Http2Connection 的弱引用，跳过跨线程检查。安全前提：
-// 注册表 h2_connections_ 持有强引用，对象仅在 I/O 线程的 FinalTeardown 中注销。
+// WeakPtrThreadSafe 特化：跳过 WeakPtr 跨线程解引用的调试检查。审计
+// （2026-08-16）确认 Http2Connection 的 WeakPtr 只有两个使用方，且两者都
+// 通过 runner_ 投递后在 I/O 线程解引用：
+//   1. drain watchdog（ProcessClose 的 PostDelayedTask 回调）；
+//   2. HttpServerRequestHandle 的 cancel/set-priority lambda（MakeHandle，
+//      句柄把调用 hop 到 runner_ 后才执行）。
+// 两者都发生在 I/O 线程、且注册表 h2_connections_ 持强引用直到
+// FinalTeardown（I/O 线程注销），因此同线程解引用不存在竞态。特化保留作
+// 纵深防御：debug 构建下若未来新增了真实跨线程解引用路径，也能避免
+// WeakPtr 的线程亲和 FATAL（但调用方仍须自行保证对象存活）。
 namespace nei {
 template <>
 struct WeakPtrThreadSafe<net::http::internal::Http2Connection> : std::true_type {};
@@ -185,8 +192,10 @@ private:
   scoped_refptr<internal::HttpSharedState> shared_;
   std::function<void(Http2ServerConnection *)> on_closed_;
 
-  // Drain watchdog 的弱引用源（对象由 h2_connections_ 注册表强持有，
-  // FinalTeardown 在 I/O 线程注销；WeakPtrThreadSafe 特化见文件尾）。
+  // 弱引用源，两个使用方（均经 runner_ 在 I/O 线程解引用）：drain
+  // watchdog 与 HttpServerRequestHandle 的 cancel/set-priority lambda。
+  // 对象由 h2_connections_ 注册表强持有，FinalTeardown 在 I/O 线程注销；
+  // WeakPtrThreadSafe 特化见文件尾。
   WeakPtrFactory<Http2Connection> weak_ptr_factory_{this};
 
   nghttp2_session *session_ = nullptr;
@@ -517,12 +526,23 @@ private:
   }
 
   // Builds the HttpServerRequestHandle for a stream (I/O thread).
+  // The captured lambdas run only on this connection's I/O thread (the
+  // handle hops there before invoking them), so the weak dereferences are
+  // same-thread; the WeakPtrThreadSafe specialization at the top of this
+  // file is for the drain watchdog, not for this path.
   HttpServerRequestHandle MakeHandle(int32_t stream_id, std::shared_ptr<std::atomic<bool>> active) {
     WeakPtr<Http2Connection> weak = weak_ptr_factory_.GetWeakPtr();
-    return HttpServerRequestHandle::Create(runner_, std::move(active), [weak, stream_id]() {
-      if (Http2Connection *c = weak.get())
-        c->CancelStream(stream_id);
-    });
+    return HttpServerRequestHandle::Create(
+        runner_,
+        std::move(active),
+        [weak, stream_id]() {
+          if (Http2Connection *c = weak.get())
+            c->CancelStream(stream_id);
+        },
+        [weak, stream_id](int32_t priority) {
+          if (Http2Connection *c = weak.get())
+            c->SetStreamPriority(stream_id, priority);
+        });
   }
 
   // Cancels one in-flight stream by submitting RST_STREAM(CANCEL) (I/O
@@ -534,6 +554,29 @@ private:
     if (!GetStream(stream_id))
       return;
     nghttp2_submit_rst_stream(session_, NGHTTP2_FLAG_NONE, stream_id, NGHTTP2_CANCEL);
+    Pump();
+  }
+
+  // Applies an advisory priority to one in-flight stream (I/O thread):
+  // sends an RFC 7540 PRIORITY frame telling the peer how to prioritize
+  // this stream.  Out-of-range values are clamped to 0..7.  Mirrors
+  // Http2ClientSession::SetStreamPriorityImpl (same weight formula).
+  void SetStreamPriority(int32_t stream_id, int32_t priority) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    if (closed_ || closing_)
+      return;
+    if (!GetStream(stream_id))
+      return;
+    if (priority < 0)
+      priority = 0;
+    else if (priority > 7)
+      priority = 7;
+    // RFC 7540 weight is 1..256 (1 = least preferred); map urgency 0..7
+    // (0 = highest) to descending weights anchored at the root.
+    const int32_t weight = 1 + (7 - priority) * 32;
+    nghttp2_priority_spec spec;
+    nghttp2_priority_spec_init(&spec, stream_id, weight, 0);
+    nghttp2_submit_priority(session_, NGHTTP2_FLAG_NONE, stream_id, &spec);
     Pump();
   }
 

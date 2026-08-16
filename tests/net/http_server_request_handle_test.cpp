@@ -22,11 +22,14 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <thread>
 
 #include <neixx/common/location.h>
+#include <neixx/common/time.h>
+#include <neixx/io/io_buffer.h>
 #include <neixx/net/http/http_client.h>
 #include <neixx/net/http/http_common.h>
 #include <neixx/net/http/http_server.h>
@@ -146,6 +149,10 @@ protected:
   // main thread (happens-before via WaitableEvent signal/wait).
   HttpServerRequestHandle server_handle_;
   WaitableEvent handle_published_{WaitableEvent::ResetPolicy::kAutomatic, false};
+  // Signaled by the /cancel-late delayed task after it re-invokes every
+  // response callback (proves the no-op callbacks completed without
+  // crashing).
+  WaitableEvent late_callbacks_done_{WaitableEvent::ResetPolicy::kAutomatic, false};
 
   void RegisterRoutes(HttpServer &server) {
     server.AddRoute(HttpMethod::kGet, "/hello", [](const HttpRequest &) {
@@ -190,6 +197,39 @@ protected:
                                          resp.headers.push_back({"Content-Type", "text/plain"});
                                          respond(resp);
                                          // Intentionally never write/close.
+                                       });
+
+    // Publishes the handle, sends one chunk, then — 300ms later, after the
+    // test cancelled the request — re-invokes every response callback.
+    // Cancellation must make respond/write/write_io/close no-ops.
+    server.AddStreamingRouteWithHandle(HttpMethod::kGet,
+                                       "/cancel-late",
+                                       [this](const HttpRequest &,
+                                              HttpServerRequestHandle handle,
+                                              SendHeadersCallback respond,
+                                              StreamingWriteCallback write,
+                                              StreamingWriteIoCallback write_io,
+                                              StreamingCloseCallback close) {
+                                         server_handle_ = handle;
+                                         handle_published_.Signal();
+                                         HttpResponse resp;
+                                         resp.SetStatus(HttpStatusCode::kOk);
+                                         respond(resp);
+                                         write("first");
+                                         srv_runner_->PostDelayedTask(
+                                             FROM_HERE,
+                                             [respond, write, write_io, close, this]() {
+                                               HttpResponse second;
+                                               second.SetStatus(HttpStatusCode::kOk);
+                                               respond(second); // no-op after cancel
+                                               write("second"); // no-op
+                                               auto buf = scoped_refptr<IOBuffer>(new IOBufferWithSize(16));
+                                               std::memset(buf->data(), 'x', 16);
+                                               write_io(std::move(buf), 16); // no-op
+                                               close();                      // no-op
+                                               late_callbacks_done_.Signal();
+                                             },
+                                             TimeDelta::FromMilliseconds(300));
                                        });
 
     // Streaming-request route: publishes the handle, then pulls one body
@@ -249,6 +289,10 @@ TEST_F(HttpServerRequestHandleTest, EmptyHandleIsInert) {
   HttpServerRequestHandle empty;
   EXPECT_FALSE(empty.is_valid());
   empty.Cancel();
+  empty.SetPriority(0);
+  empty.SetPriority(7);
+  empty.SetPriority(100);
+  empty.SetPriority(-5);
   EXPECT_FALSE(empty.is_valid());
 
   HttpServerRequestHandle copy = empty;
@@ -461,6 +505,182 @@ TEST_F(HttpServerRequestHandleTest, H2HandleLifecycleAfterClose) {
   for (int i = 0; i < 100 && server_handle_.is_valid(); ++i)
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
   EXPECT_FALSE(server_handle_.is_valid());
+  client->Close();
+}
+
+// h2：SetPriority（含越界钳制）不破坏在途请求与后续取消；会话保持可用。
+TEST_F(HttpServerRequestHandleTest, H2SetPriorityThenCancelWorks) {
+  auto client = scoped_refptr<HttpClient>(new HttpClient());
+  IPEndPoint addr(IPAddress::FromIPv4(127, 0, 0, 1), port_);
+
+  WaitableEvent hang_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::unique_ptr<HttpResponse> hang_result;
+  bool hang_got = false;
+  client_runner_->PostTask(FROM_HERE, [&]() mutable {
+    client->Send(MakeGet("/hang"),
+                 addr,
+                 &client_auto_ctx_,
+                 client_runner_,
+                 [&hang_done, &hang_result, &hang_got](std::unique_ptr<HttpResponse> resp) {
+                   hang_result = std::move(resp);
+                   hang_got = true;
+                   hang_done.Signal();
+                 });
+  });
+
+  ASSERT_TRUE(handle_published_.TimedWait(std::chrono::seconds(15)));
+  for (int i = 0; i < 100 && !client->is_connected(); ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  ASSERT_TRUE(client->is_connected());
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  // 主线程（非 I/O 线程）设置优先级：0/7 边界与越界钳制。
+  EXPECT_TRUE(server_handle_.is_valid());
+  server_handle_.SetPriority(0);
+  server_handle_.SetPriority(7);
+  server_handle_.SetPriority(100);
+  server_handle_.SetPriority(-5);
+  EXPECT_TRUE(server_handle_.is_valid());
+
+  // 优先级帧不干扰取消流。
+  server_handle_.Cancel();
+  ASSERT_TRUE(hang_done.TimedWait(std::chrono::seconds(15)));
+  EXPECT_TRUE(hang_got);
+  EXPECT_EQ(nullptr, hang_result) << "cancelled h2 stream must fail with nullptr";
+  for (int i = 0; i < 100 && server_handle_.is_valid(); ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  EXPECT_FALSE(server_handle_.is_valid());
+  EXPECT_TRUE(client->is_connected());
+  client->Close();
+}
+
+// h1：SetPriority 仅记录（无线路效果），不破坏取消流程。
+TEST_F(HttpServerRequestHandleTest, H1SetPriorityThenCancelWorks) {
+  auto client = scoped_refptr<HttpClient>(new HttpClient());
+  IPEndPoint addr(IPAddress::FromIPv4(127, 0, 0, 1), port_);
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::unique_ptr<HttpResponse> result;
+  bool got_response = false;
+  client_runner_->PostTask(FROM_HERE, [&]() mutable {
+    client->Send(MakeGet("/hang"),
+                 addr,
+                 &client_h1_ctx_,
+                 client_runner_,
+                 [&done, &result, &got_response](std::unique_ptr<HttpResponse> resp) {
+                   result = std::move(resp);
+                   got_response = true;
+                   done.Signal();
+                 });
+  });
+
+  ASSERT_TRUE(handle_published_.TimedWait(std::chrono::seconds(15)));
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  EXPECT_TRUE(server_handle_.is_valid());
+  server_handle_.SetPriority(3);
+  server_handle_.SetPriority(100);
+  server_handle_.SetPriority(-5);
+  EXPECT_TRUE(server_handle_.is_valid());
+  server_handle_.Cancel();
+
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(15)));
+  EXPECT_TRUE(got_response);
+  EXPECT_EQ(nullptr, result) << "cancelled h1 request must fail with nullptr";
+  for (int i = 0; i < 100 && server_handle_.is_valid(); ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  EXPECT_FALSE(server_handle_.is_valid());
+  EXPECT_FALSE(client->is_connected());
+  client->Close();
+}
+
+// h1：取消后 handler 继续调用 respond/write/write_io/close 均为 no-op
+// （/cancel-late 延迟任务全量重放，不崩溃、不发送）。
+TEST_F(HttpServerRequestHandleTest, H1CancelThenHandlerCallbacksAreNoop) {
+  auto client = scoped_refptr<HttpClient>(new HttpClient());
+  IPEndPoint addr(IPAddress::FromIPv4(127, 0, 0, 1), port_);
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::unique_ptr<HttpResponse> result;
+  bool got_response = false;
+  client_runner_->PostTask(FROM_HERE, [&]() mutable {
+    client->Send(MakeGet("/cancel-late"),
+                 addr,
+                 &client_h1_ctx_,
+                 client_runner_,
+                 [&done, &result, &got_response](std::unique_ptr<HttpResponse> resp) {
+                   result = std::move(resp);
+                   got_response = true;
+                   done.Signal();
+                 });
+  });
+
+  ASSERT_TRUE(handle_published_.TimedWait(std::chrono::seconds(15)));
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  EXPECT_TRUE(server_handle_.is_valid());
+  server_handle_.Cancel();
+
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(15)));
+  EXPECT_TRUE(got_response);
+  EXPECT_EQ(nullptr, result) << "cancelled h1 request must fail with nullptr";
+  EXPECT_FALSE(client->is_connected());
+
+  // 延迟任务在服务器 I/O 线程重放全部回调——必须完成且不崩溃。
+  ASSERT_TRUE(late_callbacks_done_.TimedWait(std::chrono::seconds(10)));
+  client->Close();
+}
+
+// h2：取消后 handler 继续调用 respond/write/write_io/close 均为 no-op；
+// 会话保持可用。
+TEST_F(HttpServerRequestHandleTest, H2CancelThenHandlerCallbacksAreNoop) {
+  auto client = scoped_refptr<HttpClient>(new HttpClient());
+  IPEndPoint addr(IPAddress::FromIPv4(127, 0, 0, 1), port_);
+
+  WaitableEvent hang_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent hello_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::unique_ptr<HttpResponse> hang_result;
+  bool hang_got = false;
+  bool hello_ok = false;
+  client_runner_->PostTask(FROM_HERE, [&]() mutable {
+    client->Send(MakeGet("/cancel-late"),
+                 addr,
+                 &client_auto_ctx_,
+                 client_runner_,
+                 [&hang_done, &hang_result, &hang_got](std::unique_ptr<HttpResponse> resp) {
+                   hang_result = std::move(resp);
+                   hang_got = true;
+                   hang_done.Signal();
+                 });
+  });
+
+  ASSERT_TRUE(handle_published_.TimedWait(std::chrono::seconds(15)));
+  for (int i = 0; i < 100 && !client->is_connected(); ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  ASSERT_TRUE(client->is_connected());
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  EXPECT_TRUE(server_handle_.is_valid());
+  server_handle_.Cancel();
+
+  ASSERT_TRUE(hang_done.TimedWait(std::chrono::seconds(15)));
+  EXPECT_TRUE(hang_got);
+  EXPECT_EQ(nullptr, hang_result) << "cancelled h2 stream must fail with nullptr";
+
+  // 延迟任务重放全部回调——必须完成且不崩溃。
+  ASSERT_TRUE(late_callbacks_done_.TimedWait(std::chrono::seconds(10)));
+
+  // 会话仍可用。
+  EXPECT_TRUE(client->is_connected());
+  client_runner_->PostTask(FROM_HERE, [&]() {
+    client->Send(MakeGet("/hello"),
+                 addr,
+                 &client_auto_ctx_,
+                 client_runner_,
+                 [&hello_done, &hello_ok](std::unique_ptr<HttpResponse> resp) {
+                   hello_ok = resp != nullptr;
+                   hello_done.Signal();
+                 });
+  });
+  ASSERT_TRUE(hello_done.TimedWait(std::chrono::seconds(15)));
+  EXPECT_TRUE(hello_ok);
   client->Close();
 }
 

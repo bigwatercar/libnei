@@ -21,14 +21,22 @@ struct HttpServerRequestHandle::Impl {
   scoped_refptr<SingleThreadTaskRunner> io_runner;
   std::shared_ptr<std::atomic<bool>> active; // null ⇒ empty/invalid handle
   std::function<void()> cancel_fn;           // runs on the I/O thread
+  std::function<void(int)> set_priority_fn;  // runs on the I/O thread
 
-  // Runs on the request's I/O thread (see file header for the safety
+  // Both run on the request's I/O thread (see file header for the safety
   // protocol).
   void CancelOnIO() {
     if (!active || !active->load(std::memory_order_relaxed))
       return;
     if (cancel_fn)
       cancel_fn();
+  }
+
+  void SetPriorityOnIO(int32_t priority) {
+    if (!active || !active->load(std::memory_order_relaxed))
+      return;
+    if (set_priority_fn)
+      set_priority_fn(priority);
   }
 };
 
@@ -41,12 +49,14 @@ HttpServerRequestHandle &HttpServerRequestHandle::operator=(HttpServerRequestHan
 
 HttpServerRequestHandle HttpServerRequestHandle::Create(scoped_refptr<SingleThreadTaskRunner> io_runner,
                                                         std::shared_ptr<std::atomic<bool>> active,
-                                                        std::function<void()> cancel_fn) {
+                                                        std::function<void()> cancel_fn,
+                                                        std::function<void(int)> set_priority_fn) {
   HttpServerRequestHandle handle;
   handle.impl_ = std::make_shared<Impl>();
   handle.impl_->io_runner = std::move(io_runner);
   handle.impl_->active = std::move(active);
   handle.impl_->cancel_fn = std::move(cancel_fn);
+  handle.impl_->set_priority_fn = std::move(set_priority_fn);
   return handle;
 }
 
@@ -63,6 +73,17 @@ void HttpServerRequestHandle::Cancel() {
     return;
   }
   impl_->CancelOnIO();
+}
+
+void HttpServerRequestHandle::SetPriority(int32_t priority) {
+  if (!impl_)
+    return;
+  if (impl_->io_runner && !impl_->io_runner->BelongsToCurrentThread()) {
+    std::shared_ptr<Impl> impl = impl_;
+    impl->io_runner->PostTask(FROM_HERE, [impl, priority]() { impl->SetPriorityOnIO(priority); });
+    return;
+  }
+  impl_->SetPriorityOnIO(priority);
 }
 
 } // namespace net::http

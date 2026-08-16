@@ -735,13 +735,21 @@ struct Http1Connection : public RefCountedThreadSafe<Http1Connection> {
   }
 
   // Builds the HttpServerRequestHandle for a freshly allocated streaming
-  // request generation (I/O thread).
+  // request generation (I/O thread).  HTTP/1.1 has no per-request priority
+  // channel, so the set-priority action is a no-op (null).
   HttpServerRequestHandle MakeHandle(int64_t generation, std::shared_ptr<std::atomic<bool>> active) {
     nei::WeakPtr<Connection> weak = weak_factory_.GetWeakPtr();
-    return HttpServerRequestHandle::Create(io_runner, std::move(active), [weak, generation]() {
-      if (Connection *c = weak.get())
-        c->CancelRequest(generation);
-    });
+    // The cancel lambda runs only on this connection's I/O thread (the
+    // handle hops there before invoking it), so the weak dereference is
+    // same-thread — no WeakPtrThreadSafe specialization needed here.
+    return HttpServerRequestHandle::Create(
+        io_runner,
+        std::move(active),
+        [weak, generation]() {
+          if (Connection *c = weak.get())
+            c->CancelRequest(generation);
+        },
+        /*set_priority_fn=*/nullptr);
   }
 
   // Cancels the streaming request identified by |generation| (I/O thread).

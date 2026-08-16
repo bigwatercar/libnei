@@ -1,6 +1,6 @@
 ﻿# libnei — TODO & Roadmap
 
-**Updated**: 2026-08-14
+**Updated**: 2026-08-16
 
 ---
 
@@ -282,6 +282,8 @@
 
 ## 最近完成（记录，2026-07 ~ 08）
 
+- **HttpServerRequestHandle 服务端句柄（2026-08-16，`fc68a72`）** — 服务端流式路由可拿到可拷贝值类型句柄：`is_valid()` / `Cancel()`（h2 `RST_STREAM(CANCEL)` 仅该流失败、h1 关连接）/ `SetPriority()`（h2 RFC 7540 `PRIORITY` 帧 weight=1+(7-p)*32、h1 仅记录）。取消后 handler 的 respond/write/write_io/close 回调变 no-op（测试重放验证）。新增 `AddStreamingRouteWithHandle` / `AddStreamingRequestRouteWithHandle`；句柄经 WeakPtr + 共享 `atomic<bool>` active 标志定位，不持有连接。10 用例双平台过。
+- **句柄功能消毒器复查（2026-08-16）** — 旧 ASAN/valgrind 扫描早于句柄代码落地，已重跑：Windows ASAN 全量 912/912、WSL TSan 全量 891/891（排除已知环境失败）、valgrind 定向 6/6 0 errors。
 - **TSan 全量清零（2026-08-16，`42b3a75`/`8b122e2`/`30dac78`）** — 全量重扫（排除环境 DNS 与已知慢速挂起项）0 竞态报告：HttpClient 任意线程探针指针竞态（`conn_mutex_` 边界锁范式）、日志配置表初始化自锁 + slot 不可变发布、mbedtls vendored 关闭 `MBEDTLS_DEBUG_C`（异步 TLS teardown 经 `ssl->conf` 的 UAF）、测试侧 fence 排序与 `shared_ptr<State>` 捕获。
 - **HttpRequestHandle 单请求句柄（2026-08-16，`9129fec`）** — `HttpClient::Send*` 返回可拷贝值类型句柄：`is_valid()`/`Cancel()`（h2 `RST_STREAM(CANCEL)` 仅该流失败、h1 关连接）/`SetPriority()`（h2 RFC 7540 `PRIORITY` 帧、h1 记录）；`Http2ClientSession::CancelStream/SetStreamPriority` 公开；句柄经 `WeakPtrThreadSafe<HttpClient>` + generation + 共享 `atomic<bool>` 定位，不持有客户端；顺带修复握手期 busy Send 污染暂存请求的既有 bug。8 用例双平台过。
 - **Windows Release 全量 bench + 新基线（2026-08-16，`71788de`/`12cc01f`）** — `bench/results/baseline_(Ultra9-185H)_20260816_windows.md`；Pipe 16 KB+ 较 08-11 基线 +91%~+167%（写队列重构），TLS +14.5%；修复 TLS/HTTP2 吞吐 bench 的 Mbed TLS 线程回调缺失（此前静默失败）。

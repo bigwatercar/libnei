@@ -31,6 +31,10 @@ namespace net::http {
 //         connection keeps serving other streams.
 //       * HTTP/1.1: the single-request connection model cannot abort just
 //         one request, so the owning connection is closed.
+//   - SetPriority(): advisory priority (0 = highest … 7 = lowest, out-of-
+//     range clamped).  HTTP/2 sends an RFC 7540 PRIORITY frame (weight
+//     1 + (7-p)*32) telling the peer how to prioritize this stream;
+//     HTTP/1.1 records the value (no wire effect).
 //
 // After cancellation, the handler's write/close callbacks become no-ops —
 // the handler should stop producing and return promptly.
@@ -62,15 +66,22 @@ public:
   // handle is invalid.  Any thread.
   void Cancel();
 
+  // Advisory priority: 0 = highest, 7 = lowest (out-of-range clamped).
+  // See the class comment for protocol-specific semantics.  No-op when the
+  // handle is invalid.  Any thread.
+  void SetPriority(int32_t priority);
+
   // Built by the server engines when they dispatch a streaming handler.
   // Public only because the engine implementations (HTTP/1.1 connection
   // class, internal HTTP/2 connection class) construct handles directly;
-  // it is NOT part of the user-facing API.  |cancel_fn| runs on the
-  // request's I/O thread (the handle hops there when Cancel() is called
-  // off-thread) and performs the protocol-specific abort.
+  // it is NOT part of the user-facing API.  |cancel_fn| and
+  // |set_priority_fn| run on the request's I/O thread (the handle hops
+  // there when called off-thread) and perform the protocol-specific
+  // action; either may be null to make that operation a no-op.
   static HttpServerRequestHandle Create(scoped_refptr<SingleThreadTaskRunner> io_runner,
                                         std::shared_ptr<std::atomic<bool>> active,
-                                        std::function<void()> cancel_fn);
+                                        std::function<void()> cancel_fn,
+                                        std::function<void(int)> set_priority_fn);
 
 private:
   struct Impl;
