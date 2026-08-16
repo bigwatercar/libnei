@@ -133,7 +133,7 @@ struct PullReadState {
 static void IssuePullRead(const std::shared_ptr<PullReadState> &state);
 
 static void IssuePullRead(const std::shared_ptr<PullReadState> &state) {
-  scoped_refptr<IOBufferWithSize> sized_buf = IOBufferPool::GetInstance().AcquireBuffer(kTestReadBufSize);
+  scoped_refptr<PooledIOBuffer> sized_buf = IOBufferPool::GetInstance().AcquireBuffer(kTestReadBufSize);
   scoped_refptr<IOBuffer> buf(sized_buf.get());
   state->stream->ReadAsync(buf, kTestReadBufSize, [state, buf](bool ok, std::size_t bytes) mutable {
     if (!ok || bytes == 0) {
@@ -228,6 +228,13 @@ TEST(ChildProcessTest, LaunchFromProcessServiceIoThreadDoesNotDeadlock) {
 }
 
 TEST(ChildProcessTest, LaunchMultipleProcessesWithSharedProcessService) {
+  // Reset the shared global IOThread singleton up front: IsRunning() below
+  // reflects the process-wide singleton, and earlier ProcessService tests
+  // (e.g. LaunchFromProcessServiceIoThreadDoesNotDeadlock) have already
+  // started it.  Without the reset the EXPECT_FALSE assumption only holds
+  // when this test runs first in the process.
+  IOThread::ResetForTesting();
+
   const scoped_refptr<ProcessService> service = ProcessService::Create();
   ASSERT_TRUE(service);
   EXPECT_FALSE(service->IsRunning());
@@ -288,7 +295,11 @@ TEST(ChildProcessTest, LaunchMultipleProcessesWithSharedProcessService) {
 }
 
 TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
-  WaitableEvent line_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  // Heap-allocated: the pull-read loop's on_chunk callback may fire on the
+  // IO thread AFTER this test body returns (a data-bearing read callback can
+  // still be in flight when the process is torn down).  Capturing a stack
+  // event by reference would be a use-after-free in that window.
+  auto line_done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
   WaitableEvent terminated_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   auto state = std::make_shared<LaunchTestState>();
   state->process_service = ProcessService::Create();
@@ -318,14 +329,16 @@ TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
     } else {
       auto pull = std::make_shared<PullReadState>();
       pull->stream = stdout_stream;
-      pull->on_chunk = [state, &line_done](const char *data, std::size_t n) {
+      pull->on_chunk = [state, line_done](const char *data, std::size_t n) {
+        if (state->saw_line.load(std::memory_order_acquire))
+          return; // Line already found — stop re-scanning / re-signaling.
         state->captured_bytes.insert(state->captured_bytes.end(), data, data + n);
         const std::string text(state->captured_bytes.begin(), state->captured_bytes.end());
         for (const auto &line : SplitLines(text)) {
           if (line == "child-out") {
             state->captured_line = line;
             state->saw_line.store(true, std::memory_order_release);
-            line_done.Signal();
+            line_done->Signal();
             break;
           }
         }
@@ -337,7 +350,7 @@ TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
     }
   }
 
-  const bool line_arrived = line_done.TimedWait(std::chrono::seconds(5));
+  const bool line_arrived = line_done->TimedWait(std::chrono::seconds(5));
   if (!line_arrived) {
     const std::string captured(state->captured_bytes.begin(), state->captured_bytes.end());
     ADD_FAILURE() << "Timed out waiting echoed line; captured='" << captured << "'";
@@ -361,7 +374,11 @@ TEST(ChildProcessTest, LaunchWithStdoutPipeReadsLine) {
 }
 
 TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
-  WaitableEvent line_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  // Heap-allocated: the pull-read loop's on_chunk callback may fire on the
+  // IO thread AFTER this test body returns (a data-bearing read callback can
+  // still be in flight when the process is torn down).  Capturing a stack
+  // event by reference would be a use-after-free in that window.
+  auto line_done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
   WaitableEvent write_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   WaitableEvent terminated_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   auto state = std::make_shared<LaunchTestState>();
@@ -394,14 +411,16 @@ TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
       // Start pull-read loop on stdout.
       auto pull = std::make_shared<PullReadState>();
       pull->stream = stdout_stream;
-      pull->on_chunk = [state, &line_done](const char *data, std::size_t n) {
+      pull->on_chunk = [state, line_done](const char *data, std::size_t n) {
+        if (state->saw_line.load(std::memory_order_acquire))
+          return; // Line already found — stop re-scanning / re-signaling.
         state->captured_bytes.insert(state->captured_bytes.end(), data, data + n);
         const std::string text(state->captured_bytes.begin(), state->captured_bytes.end());
         for (const auto &line : SplitLines(text)) {
           if (line == "echo-through-stdin") {
             state->captured_line = line;
             state->saw_line.store(true, std::memory_order_release);
-            line_done.Signal();
+            line_done->Signal();
             break;
           }
         }
@@ -411,7 +430,7 @@ TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
 
       // Write the stdin payload using new IOBuffer-based WriteAsync.
       const std::string payload = "echo-through-stdin\n";
-      scoped_refptr<IOBufferWithSize> wbuf_sized = IOBufferPool::GetInstance().AcquireBuffer(payload.size());
+      scoped_refptr<PooledIOBuffer> wbuf_sized = IOBufferPool::GetInstance().AcquireBuffer(payload.size());
       scoped_refptr<IOBuffer> wbuf(wbuf_sized.get());
       std::memcpy(wbuf->data(), payload.data(), payload.size());
       stdin_stream->WriteAsync(wbuf, payload.size(), [state, &write_done](bool success, std::size_t /*bytes*/) {
@@ -424,7 +443,7 @@ TEST(ChildProcessTest, LaunchWithStdinPipeEchoesToStdout) {
     }
   }
 
-  ASSERT_TRUE(line_done.TimedWait(std::chrono::seconds(5)));
+  ASSERT_TRUE(line_done->TimedWait(std::chrono::seconds(5)));
   ASSERT_TRUE(write_done.TimedWait(std::chrono::seconds(5)));
   ASSERT_TRUE(terminated_done.TimedWait(std::chrono::seconds(5)));
   state->process.reset();

@@ -25,7 +25,7 @@ namespace {
 constexpr std::size_t kBufferSize = 4096;
 
 struct BufferHolder {
-  nei::scoped_refptr<nei::IOBufferWithSize> sized;
+  nei::scoped_refptr<nei::PooledIOBuffer> sized;
   nei::scoped_refptr<nei::IOBuffer> buf;
 };
 

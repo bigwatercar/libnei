@@ -80,10 +80,10 @@ void AsyncLineReader::IssueNextRead(const std::shared_ptr<State> &state) {
   }
 
   // Acquire a 4 KiB IOBuffer from the pool.  scoped_refptr does not support
-  // implicit upcasting, so hold the concrete IOBufferWithSize reference and
+  // implicit upcasting, so hold the concrete PooledIOBuffer reference and
   // construct an IOBuffer scoped_refptr from its raw pointer explicitly.
-  scoped_refptr<IOBufferWithSize> sized_buf = IOBufferPool::GetInstance().AcquireBuffer(kChunkSize);
-  scoped_refptr<IOBuffer> buf(sized_buf.get());
+  scoped_refptr<PooledIOBuffer> pooled_buf = IOBufferPool::GetInstance().AcquireBuffer(kChunkSize);
+  scoped_refptr<IOBuffer> buf(pooled_buf.get());
 
   // The lambda captures buf by value (scoped_refptr) so the buffer region
   // stays alive until the callback fires, even if the caller discards its
@@ -96,7 +96,7 @@ void AsyncLineReader::IssueNextRead(const std::shared_ptr<State> &state) {
       state->text_buffer.append(reinterpret_cast<const char *>(buf->data()), bytes_read);
     }
     // Release our ref on buf now; the pool recycle hook (if set) will
-    // return it automatically via IOBufferWithSize::~IOBufferWithSize().
+    // return it automatically via PooledIOBuffer::~PooledIOBuffer().
     buf.reset();
 
     OnChunkReceived(state, ok, bytes_read);

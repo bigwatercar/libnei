@@ -99,18 +99,8 @@ IOThread *IOThread::Get() {
 
 // static
 void IOThread::Shutdown() {
-  IOThread *snapshot = nullptr;
-  {
-    AutoLock lock(g_lock);
-    snapshot = g_io_thread.load(std::memory_order_relaxed);
-  }
-  if (snapshot) {
-    snapshot->Stop();
-  }
-}
-
-// static
-void IOThread::ResetForTesting() {
+  // Full teardown: stop the thread, destroy the singleton, and clear the
+  // global pointer so a later Start() rebuilds a fresh IO thread.  Idempotent.
   AutoLock lock(g_lock);
   IOThread *snapshot = g_io_thread.load(std::memory_order_relaxed);
   if (snapshot) {
@@ -118,7 +108,15 @@ void IOThread::ResetForTesting() {
     delete snapshot;
     g_io_thread.store(nullptr, std::memory_order_release);
   }
+  // Allow Start() to re-register the AtExit cleanup on restart.
   g_shutdown_registered.store(false, std::memory_order_release);
+}
+
+// static
+void IOThread::ResetForTesting() {
+  // Backward-compatible alias.  Shutdown() already performs the full,
+  // restartable teardown; this name is kept for existing callers.
+  Shutdown();
 }
 
 scoped_refptr<SingleThreadTaskRunner> IOThread::task_runner() const {

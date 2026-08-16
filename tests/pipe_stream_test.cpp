@@ -172,7 +172,7 @@ bool WriteAll(const PlatformHandle &write_handle, const void *data, std::size_t 
 // backing IOBufferWithSize alive inside the callback lambda.
 // ---------------------------------------------------------------------------
 struct IOBufHolder {
-  scoped_refptr<IOBufferWithSize> sized;
+  scoped_refptr<PooledIOBuffer> sized;
   scoped_refptr<IOBuffer> buf;
 };
 

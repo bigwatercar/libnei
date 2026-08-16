@@ -32,6 +32,7 @@ add_executable(
   stream_reader_writer_test.cpp
   io_buffer_test.cpp
   io_thread_test.cpp
+  ipc_test.cpp
   base64_test.cpp
   buffer_stream_test.cpp
   strong_alias_test.cpp
@@ -139,5 +140,20 @@ if(WIN32 AND BUILD_SHARED_LIBS)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_RUNTIME_DLLS:nei_tests> $<TARGET_FILE_DIR:nei>
     COMMAND_EXPAND_LISTS
+  )
+endif()
+
+# MSVC AddressSanitizer links against clang_rt.asan_dynamic-x86_64.dll, which
+# lives next to cl.exe in the toolchain directory.  Copy it next to
+# nei_tests.exe so ASAN binaries run without PATH tricks.
+if(MSVC AND CMAKE_CXX_FLAGS MATCHES "/fsanitize=address")
+  get_filename_component(_nei_msvc_bin_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+  add_custom_command(
+    TARGET nei_tests
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_nei_msvc_bin_dir}/clang_rt.asan_dynamic-x86_64.dll"
+            $<TARGET_FILE_DIR:nei_tests>
+    COMMENT "Copying ASAN runtime DLL next to nei_tests.exe"
   )
 endif()

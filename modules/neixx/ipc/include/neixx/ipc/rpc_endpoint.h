@@ -99,9 +99,7 @@ public:
 
 private:
   class Impl;
-  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
-  std::unique_ptr<Impl> impl_;
-  NEI_SUPPRESS_MSC_WARNING_4251_END
+  Impl *impl_ = nullptr; // Raw pointer  --  lifetime managed by RefCountedThreadSafe
 };
 
 } // namespace nei

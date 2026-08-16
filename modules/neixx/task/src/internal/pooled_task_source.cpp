@@ -550,11 +550,19 @@ void PooledTaskSource::Shutdown() {
 
 void PooledTaskSource::NotifyWorkAvailable() {
   wake_generation_.fetch_add(1, std::memory_order_acq_rel);
+  // Signal UNDER wait_lock_: a notification fired between the worker's
+  // generation check and wait_cv_.Wait() would otherwise be lost (cv
+  // notifications have no memory).  The worker holds wait_lock_ while
+  // deciding to sleep, and Wait() atomically releases it — so with the
+  // lock held here the signal can only land on a waiter.  Same pattern as
+  // Shutdown() below.
+  AutoLock wait_lock(wait_lock_);
   wait_cv_.Signal();
 }
 
 void PooledTaskSource::NotifyDedicatedWorkAvailable() {
   wake_generation_.fetch_add(1, std::memory_order_acq_rel);
+  AutoLock wait_lock(wait_lock_);
   wait_cv_.Broadcast();
 }
 

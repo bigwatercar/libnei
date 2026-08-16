@@ -42,8 +42,8 @@ class AsyncOutputStream;
 //      executes exclusively on this runner.
 //
 //  |client_task_runner|  --  all user callbacks (MessageReceivedCallback and
-//      ErrorCallback) are delivered on this runner via PostTask + WeakPtr
-//      trampoline.  No user code ever executes on the I/O runner.
+//      ErrorCallback) are delivered on this runner via PostTask + scoped_refptr
+//      self-hold trampoline.  No user code ever executes on the I/O runner.
 //
 // This explicit dependency-injection design eliminates all implicit
 // thread-environment capture (no ThreadTaskRunnerHandle::Get()), making
@@ -57,17 +57,20 @@ class AsyncOutputStream;
 // Lifetime
 // --------
 // The underlying streams are NOT owned by MessageChannel and must outlive
-// it.  Destroying the MessageChannel implicitly calls Close() and prevents
-// any further callbacks from firing (via WeakPtr invalidation).
+// it.  Destroying the MessageChannel implicitly calls Close().  The Impl is
+// RefCountedThreadSafe: in-flight I/O and posted tasks hold scoped_refptr
+// self-holds, so the Impl survives until the last task releases it and no
+// callback can ever run against a destroyed object.
 // ---------------------------------------------------------------------------
 class NEI_API MessageChannel final {
 public:
   // A single complete message frame (8-byte header already stripped).
-  // The payload is allocated from IOBufferPool  --  no std::vector or new.
+  // The payload is an exact-size IOBufferWithSize whose size() equals the
+  // payload length.
   using Message = scoped_refptr<IOBufferWithSize>;
 
   // Invoked once per complete received message on |client_task_runner|.
-  // The message carries ownership of the payload buffer (pool-allocated).
+  // The message carries ownership of the exact-size payload buffer.
   using MessageReceivedCallback = std::function<void(Message message)>;
 
   // Invoked exactly once on |client_task_runner| when an unrecoverable
@@ -100,11 +103,21 @@ public:
 
   // Enqueue a message for asynchronous transmission.  The payload is
   // framed with [4-byte LE length][4-byte LE magic] and written to the
-  // underlying stream when the write pipeline is available.
+  // underlying stream when the write pipeline is available.  The message's
+  // exact size() is used as the payload length.
   //
   // If the channel is already in an error state or has been closed, the
   // message is silently dropped.
   void Send(Message message);
+
+  // Pooled-buffer overload: |payload| may be a PooledIOBuffer whose capacity
+  // is bucket-normalized, so the semantic payload length must be passed
+  // explicitly in |payload_len|.  Bytes [0, payload_len) are framed and sent;
+  // the bucket-normalized capacity never reaches the wire.
+  //
+  // If the channel is already in an error state or has been closed, the
+  // message is silently dropped.
+  void Send(scoped_refptr<IOBuffer> payload, std::size_t payload_len);
 
   // Initiate graceful shutdown.  No further reads will be issued.
   // Pending writes are drained before the ErrorCallback is invoked
@@ -113,9 +126,7 @@ public:
 
 private:
   class Impl;
-  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
-  std::unique_ptr<Impl> impl_;
-  NEI_SUPPRESS_MSC_WARNING_4251_END
+  Impl *impl_ = nullptr; // Raw pointer  --  lifetime managed by RefCountedThreadSafe
 };
 
 } // namespace nei

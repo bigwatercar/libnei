@@ -182,6 +182,19 @@
         "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address",
         "NEI_BUILD_BENCHMARKS": "OFF"
       }
+    },
+    {
+      "name": "linux-gcc-tsan",
+      "displayName": "Linux GCC TSan",
+      "description": "Debug build for Linux with GCC + ThreadSanitizer",
+      "inherits": "linux-gcc-debug-shared",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer -g",
+        "CMAKE_C_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer -g",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=thread",
+        "NEI_BUILD_BENCHMARKS": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -244,6 +257,10 @@
     {
       "name": "linux-gcc-debug-asan",
       "configurePreset": "linux-gcc-debug-asan"
+    },
+    {
+      "name": "linux-gcc-tsan",
+      "configurePreset": "linux-gcc-tsan"
     }
   ],
   "testPresets": [

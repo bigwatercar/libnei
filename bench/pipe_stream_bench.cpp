@@ -35,7 +35,7 @@ constexpr std::size_t kDefaultTotalBytes = 64 * 1024 * 1024;
 constexpr std::size_t kReadBufferSize = 256 * 1024;
 
 struct BufferHolder {
-  nei::scoped_refptr<nei::IOBufferWithSize> sized;
+  nei::scoped_refptr<nei::PooledIOBuffer> sized;
   nei::scoped_refptr<nei::IOBuffer> buf;
 };
 

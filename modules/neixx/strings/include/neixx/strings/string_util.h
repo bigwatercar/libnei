@@ -58,6 +58,10 @@ Compare(std::u16string_view lhs, std::u16string_view rhs, CompareCase compare_ca
 NEI_API int Compare(std::u8string_view lhs, std::u8string_view rhs, CompareCase compare_case = CompareCase::kSensitive);
 #endif
 
+// ASCII-only case-insensitive equality.  Terser equivalent of
+// Compare(lhs, rhs, CompareCase::kInsensitiveASCII) == 0.
+NEI_API bool EqualsCaseInsensitiveASCII(std::string_view lhs, std::string_view rhs);
+
 NEI_API std::string TrimWhitespace(std::string_view input, TrimPositions positions = TrimPositions::kAll);
 NEI_API std::u16string TrimWhitespace(std::u16string_view input, TrimPositions positions = TrimPositions::kAll);
 #if __cplusplus >= 202002L

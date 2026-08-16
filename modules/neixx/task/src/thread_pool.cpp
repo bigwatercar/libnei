@@ -733,37 +733,44 @@ private:
       bool did_work = false;
 
       // Round-robin through all assigned queues looking for work.
-      // Copy the queue list under the lock so that concurrent runner
-      // creation (push_back) is safe.
-      AutoLock queues_lock(shared_->queues_lock_);
-      for (internal::PooledTaskQueue *queue : shared_->queues) {
-        if (queue->is_shutdown()) {
-          continue;
-        }
-
-        if (!queue->HasImmediateWork()) {
-          continue;
-        }
-
-        if (source_->AssignDedicatedWorker(queue)) {
-          internal::SetCurrentPooledTaskQueue(queue);
-          ProcessTaskBatch(queue);
-          internal::SetCurrentPooledTaskQueue(nullptr);
-
-          source_->ReleaseDedicatedQueue(queue);
-          if (delayed_task_manager_ != nullptr) {
-            delayed_task_manager_->OnQueueUpdated(queue);
+      // The queue list is iterated in place while holding queues_lock_ so
+      // that concurrent runner creation (push_back under the same lock)
+      // cannot mutate the vector mid-iteration.
+      {
+        AutoLock queues_lock(shared_->queues_lock_);
+        for (internal::PooledTaskQueue *queue : shared_->queues) {
+          if (queue->is_shutdown()) {
+            continue;
           }
-          did_work = true;
-        }
-      }
 
-      if (shared_->should_stop.load(std::memory_order_acquire)) {
-        break;
+          if (!queue->HasImmediateWork()) {
+            continue;
+          }
+
+          if (source_->AssignDedicatedWorker(queue)) {
+            internal::SetCurrentPooledTaskQueue(queue);
+            ProcessTaskBatch(queue);
+            internal::SetCurrentPooledTaskQueue(nullptr);
+
+            source_->ReleaseDedicatedQueue(queue);
+            if (delayed_task_manager_ != nullptr) {
+              delayed_task_manager_->OnQueueUpdated(queue);
+            }
+            did_work = true;
+          }
+        }
+
+        if (shared_->should_stop.load(std::memory_order_acquire)) {
+          break;
+        }
       }
 
       if (!did_work) {
         // No queue had work — wait for a wake-up from a new task post.
+        // Deliberately wait WITHOUT holding queues_lock_: holding it across
+        // the (up to reclaim_time_) wait starves CreateSingleThreadTaskRunner,
+        // which needs queues_lock_ to register a new SHARED queue, for the
+        // full reclaim cycle on every idle wait.
         shared_->wake_event.TimedWait(std::chrono::milliseconds(reclaim_time_.InMilliseconds()));
       }
     }

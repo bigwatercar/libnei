@@ -74,11 +74,11 @@ TEST(IOBufferTest, IOBufferPoolNormalizesHotBucketSizes) {
   IOBufferPool &pool = IOBufferPool::GetInstance();
   pool.PurgeMemory();
 
-  scoped_refptr<IOBufferWithSize> b1 = pool.AcquireBuffer(1);
-  scoped_refptr<IOBufferWithSize> b4k = pool.AcquireBuffer(4096);
-  scoped_refptr<IOBufferWithSize> b4k_plus = pool.AcquireBuffer(4097);
-  scoped_refptr<IOBufferWithSize> b64k = pool.AcquireBuffer(65536);
-  scoped_refptr<IOBufferWithSize> large = pool.AcquireBuffer(70000);
+  scoped_refptr<PooledIOBuffer> b1 = pool.AcquireBuffer(1);
+  scoped_refptr<PooledIOBuffer> b4k = pool.AcquireBuffer(4096);
+  scoped_refptr<PooledIOBuffer> b4k_plus = pool.AcquireBuffer(4097);
+  scoped_refptr<PooledIOBuffer> b64k = pool.AcquireBuffer(65536);
+  scoped_refptr<PooledIOBuffer> large = pool.AcquireBuffer(70000);
 
   ASSERT_TRUE(b1);
   ASSERT_TRUE(b4k);
@@ -86,11 +86,11 @@ TEST(IOBufferTest, IOBufferPoolNormalizesHotBucketSizes) {
   ASSERT_TRUE(b64k);
   ASSERT_TRUE(large);
 
-  EXPECT_EQ(b1->size(), 4096u);
-  EXPECT_EQ(b4k->size(), 4096u);
-  EXPECT_EQ(b4k_plus->size(), 65536u);
-  EXPECT_EQ(b64k->size(), 65536u);
-  EXPECT_EQ(large->size(), 70000u);
+  EXPECT_EQ(b1->capacity(), 4096u);
+  EXPECT_EQ(b4k->capacity(), 4096u);
+  EXPECT_EQ(b4k_plus->capacity(), 65536u);
+  EXPECT_EQ(b64k->capacity(), 65536u);
+  EXPECT_EQ(large->capacity(), 70000u);
 }
 
 TEST(IOBufferTest, IOBufferPoolReusesReleased4KBuffer) {
@@ -100,16 +100,16 @@ TEST(IOBufferTest, IOBufferPoolReusesReleased4KBuffer) {
 
   unsigned char *first_ptr = nullptr;
   {
-    scoped_refptr<IOBufferWithSize> first = pool.AcquireBuffer(1024);
+    scoped_refptr<PooledIOBuffer> first = pool.AcquireBuffer(1024);
     ASSERT_TRUE(first);
-    ASSERT_EQ(first->size(), 4096u);
+    ASSERT_EQ(first->capacity(), 4096u);
     first_ptr = first->data();
     ASSERT_NE(first_ptr, nullptr);
   }
 
-  scoped_refptr<IOBufferWithSize> second = pool.AcquireBuffer(2048);
+  scoped_refptr<PooledIOBuffer> second = pool.AcquireBuffer(2048);
   ASSERT_TRUE(second);
-  ASSERT_EQ(second->size(), 4096u);
+  ASSERT_EQ(second->capacity(), 4096u);
   ASSERT_NE(second->data(), nullptr);
   EXPECT_EQ(second->data(), first_ptr);
 }

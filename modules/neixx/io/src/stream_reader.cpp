@@ -1,6 +1,5 @@
 #include <neixx/io/stream_reader.h>
 
-#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
@@ -47,7 +46,7 @@ void StreamReader::ReadBytes(std::size_t bytes_to_read, ReadBytesCallback user_c
     return;
   }
 
-  scoped_refptr<IOBufferWithSize> sized_buffer = IOBufferPool::GetInstance().AcquireBuffer(bytes_to_read);
+  scoped_refptr<PooledIOBuffer> sized_buffer = IOBufferPool::GetInstance().AcquireBuffer(bytes_to_read);
   scoped_refptr<IOBuffer> base_buffer(sized_buffer.get());
 
   auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
@@ -73,9 +72,12 @@ void StreamReader::ReadBytes(std::size_t bytes_to_read, ReadBytesCallback user_c
 
               std::vector<std::uint8_t> output;
               if (success && bytes_read > 0) {
-                const std::size_t bounded = (std::min)(bytes_read, sized_buffer->size());
+                // NOTE: do NOT bound by sized_buffer->size() here  --  the
+                // pooled buffer's size() is bucket-normalized (>= bytes_to_read)
+                // and is NOT a semantic data length.  bytes_read is the exact
+                // amount the stream produced.
                 const std::uint8_t *begin = reinterpret_cast<const std::uint8_t *>(sized_buffer->data());
-                output.assign(begin, begin + bounded);
+                output.assign(begin, begin + bytes_read);
               } else {
                 success = false;
               }
@@ -99,7 +101,7 @@ void StreamReader::ReadString(std::size_t bytes_to_read, ReadStringCallback user
     return;
   }
 
-  scoped_refptr<IOBufferWithSize> sized_buffer = IOBufferPool::GetInstance().AcquireBuffer(bytes_to_read);
+  scoped_refptr<PooledIOBuffer> sized_buffer = IOBufferPool::GetInstance().AcquireBuffer(bytes_to_read);
   scoped_refptr<IOBuffer> base_buffer(sized_buffer.get());
 
   auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
@@ -123,8 +125,9 @@ void StreamReader::ReadString(std::size_t bytes_to_read, ReadStringCallback user
 
               std::string output;
               if (success && bytes_read > 0) {
-                const std::size_t bounded = (std::min)(bytes_read, sized_buffer->size());
-                output.assign(reinterpret_cast<const char *>(sized_buffer->data()), bounded);
+                // See ReadBytes: bytes_read is the semantic length; the pooled
+                // buffer's size() is bucket-normalized and must not bound it.
+                output.assign(reinterpret_cast<const char *>(sized_buffer->data()), bytes_read);
               } else {
                 success = false;
               }

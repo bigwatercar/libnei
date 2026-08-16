@@ -33,7 +33,7 @@ constexpr int kDefaultIterations = 5000;
 constexpr std::size_t kDefaultPayloadSize = 64;
 
 struct BufferHolder {
-  nei::scoped_refptr<nei::IOBufferWithSize> sized;
+  nei::scoped_refptr<nei::PooledIOBuffer> sized;
   nei::scoped_refptr<nei::IOBuffer> buf;
 };
 
@@ -143,7 +143,7 @@ void ReadExact(const std::shared_ptr<nei::PipeInputStream> &stream, std::size_t 
 
 struct WriteExactState : public std::enable_shared_from_this<WriteExactState> {
   std::shared_ptr<nei::PipeOutputStream> stream;
-  nei::scoped_refptr<nei::IOBufferWithSize> base;
+  nei::scoped_refptr<nei::PooledIOBuffer> base;
   std::size_t total = 0;
   std::size_t offset = 0;
   WriteExactCallback callback;
@@ -166,7 +166,7 @@ struct WriteExactState : public std::enable_shared_from_this<WriteExactState> {
 };
 
 void WriteExact(const std::shared_ptr<nei::PipeOutputStream> &stream,
-                const nei::scoped_refptr<nei::IOBufferWithSize> &buffer,
+                const nei::scoped_refptr<nei::PooledIOBuffer> &buffer,
                 std::size_t bytes,
                 WriteExactCallback callback) {
   auto state = std::make_shared<WriteExactState>();
@@ -271,7 +271,7 @@ bool RunChild(const std::string &read_pipe_name,
 struct ParentLoopState : public std::enable_shared_from_this<ParentLoopState> {
   std::shared_ptr<nei::PipeInputStream> input;
   std::shared_ptr<nei::PipeOutputStream> output;
-  nei::scoped_refptr<nei::IOBufferWithSize> payload;
+  nei::scoped_refptr<nei::PooledIOBuffer> payload;
   std::size_t payload_size = 0;
   int iterations = 0;
   int current = 0;

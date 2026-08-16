@@ -8,11 +8,9 @@
 #include <vector>
 
 #include <nei/debug/check.h>
-#include <neixx/common/location.h>
+#include <neixx/functional/bind.h>
 #include <neixx/io/async_stream.h>
 #include <neixx/io/io_buffer.h>
-#include <neixx/functional/bind.h>
-#include <neixx/memory/weak_ptr.h>
 #include <neixx/task/bind_post_task.h>
 #include <neixx/task/task_runner.h>
 
@@ -62,8 +60,15 @@ uint32_t ReadUint32LE(const uint8_t *src) {
 // ===========================================================================
 // MessageChannel::Impl
 // ===========================================================================
+//
+// Lifetime model: Impl is RefCountedThreadSafe.  Every task / I/O callback
+// posted across threads captures a scoped_refptr self-hold (WrapRefCounted),
+// so the Impl outlives every in-flight operation: the shell may drop its
+// reference at any time, but the object is only destroyed on the thread that
+// releases the final reference, after all posted work has completed.  A
+// destroyed shell therefore cannot UAF a late callback.
 
-class MessageChannel::Impl final {
+class MessageChannel::Impl final : public RefCountedThreadSafe<Impl> {
 public:
   // Explicit dependency injection: both TaskRunners are supplied by the
   // caller.  No implicit thread-environment capture.
@@ -74,19 +79,17 @@ public:
       : io_task_runner_(std::move(io_task_runner))
       , client_task_runner_(std::move(client_task_runner))
       , read_stream_(read_stream)
-      , write_stream_(write_stream)
-      , weak_factory_(this, FROM_HERE) {
+      , write_stream_(write_stream) {
     DCHECK(io_task_runner_ != nullptr);
     DCHECK(client_task_runner_ != nullptr);
     DCHECK(read_stream_ != nullptr);
     DCHECK(write_stream_ != nullptr);
   }
 
-  ~Impl() {
-    // Invalidate all outstanding WeakPtrs so that any in-flight I/O
-    // callbacks become no-ops before member destructors run.
-    weak_factory_.InvalidateWeakPtrs(FROM_HERE);
-  }
+  // Destruction is only reachable when the last scoped_refptr is released,
+  // i.e. after every posted task and I/O callback has already completed.
+  // No explicit invalidation step is needed  --  no work can be in flight.
+  ~Impl() = default;
 
   // =========================================================================
   // Public API (called from MessageChannel  --  ANY thread)
@@ -103,24 +106,22 @@ public:
     }
 
     // Kick off the first read on the I/O thread via BindPostTask.
-    auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-    BindPostTask(io_task_runner_, BindOnce([weak_this]() {
-                   if (!weak_this)
-                     return;
-                   weak_this->BeginRead();
-                 }))
-        .Run();
+    auto self = WrapRefCounted(this);
+    BindPostTask(io_task_runner_, BindOnce([self]() { self->BeginRead(); })).Run();
   }
 
-  void Send(MessageChannel::Message message) {
+  void Send(scoped_refptr<IOBuffer> payload, std::size_t payload_len) {
     // Build the framed wire buffer: [4-byte LE length][4-byte LE magic][payload].
-    const std::size_t payload_len = message ? message->size() : 0;
+    // Pooled allocation: PooledIOBuffer exposes no size(), so the frame length
+    // travels alongside the buffer (PendingWrite::len) and is what actually
+    // goes on the wire  --  bucket-normalized capacity never leaks out.
+    DCHECK(payload_len == 0 || payload != nullptr);
     const std::size_t framed_len = kHeaderSize + payload_len;
     auto framed_buf = IOBufferPool::GetInstance().AcquireBuffer(framed_len);
     WriteUint32LE(reinterpret_cast<uint8_t *>(framed_buf->data()), static_cast<uint32_t>(payload_len));
     WriteUint32LE(reinterpret_cast<uint8_t *>(framed_buf->data()) + 4, kMagicWord);
     if (payload_len > 0) {
-      std::memcpy(framed_buf->data() + kHeaderSize, message->data(), payload_len);
+      std::memcpy(framed_buf->data() + kHeaderSize, payload->data(), payload_len);
     }
 
     bool need_issue = false;
@@ -128,7 +129,7 @@ public:
       std::lock_guard<std::mutex> guard(lock_);
       if (error_signaled_ || closing_)
         return;
-      pending_writes_.push_back(std::move(framed_buf));
+      pending_writes_.push_back(PendingWrite{std::move(framed_buf), framed_len});
       if (!write_in_flight_) {
         write_in_flight_ = true;
         need_issue = true;
@@ -137,13 +138,8 @@ public:
 
     if (need_issue) {
       // Delegate the actual write to io_task_runner_ via BindPostTask.
-      auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-      BindPostTask(io_task_runner_, BindOnce([weak_this]() {
-                     if (!weak_this)
-                       return;
-                     weak_this->IssueNextWrite();
-                   }))
-          .Run();
+      auto self = WrapRefCounted(this);
+      BindPostTask(io_task_runner_, BindOnce([self]() { self->IssueNextWrite(); })).Run();
     }
   }
 
@@ -190,30 +186,26 @@ private:
     read_in_flight_ = true;
 
     // Acquire a recycled 64 KiB buffer from the pool.
-    scoped_refptr<IOBufferWithSize> sized_buf = IOBufferPool::GetInstance().AcquireBuffer(kReadChunkSize);
+    scoped_refptr<PooledIOBuffer> sized_buf = IOBufferPool::GetInstance().AcquireBuffer(kReadChunkSize);
     scoped_refptr<IOBuffer> base_buf(sized_buf.get());
 
-    auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
+    auto self = WrapRefCounted(this);
     scoped_refptr<SingleThreadTaskRunner> io_runner = io_task_runner_;
 
     // Raw I/O callback may fire on any thread  --  trampoline to
     // io_task_runner_ via BindPostTask where the state machine lives.
     read_stream_->ReadAsync(std::move(base_buf),
                             kReadChunkSize,
-                            [weak_this, io_runner, sized_buf](bool success, std::size_t bytes_read) mutable {
-                              if (!weak_this)
-                                return;
-                              BindPostTask(io_runner, BindOnce([weak_this, success, bytes_read, sized_buf]() mutable {
-                                             if (!weak_this)
-                                               return;
-                                             weak_this->OnDataReceived(success, bytes_read, std::move(sized_buf));
+                            [self, io_runner, sized_buf](bool success, std::size_t bytes_read) mutable {
+                              BindPostTask(io_runner, BindOnce([self, success, bytes_read, sized_buf]() mutable {
+                                             self->OnDataReceived(success, bytes_read, std::move(sized_buf));
                                            }))
                                   .Run();
                             });
   }
 
   // Called on io_task_runner_ after each ReadAsync completes.
-  void OnDataReceived(bool success, std::size_t bytes_read, scoped_refptr<IOBufferWithSize> read_buf) {
+  void OnDataReceived(bool success, std::size_t bytes_read, scoped_refptr<PooledIOBuffer> read_buf) {
     // read_buf keeps the I/O buffer alive until this scope ends; its
     // destructor returns storage to IOBufferPool automatically.
 
@@ -265,11 +257,9 @@ private:
         cb = on_message_;
       }
       if (cb) {
-        auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
+        auto self = WrapRefCounted(this);
         BindPostTask(client_task_runner_,
-                     BindOnce([weak_this, cb = std::move(cb), messages = std::move(completed_messages)]() mutable {
-                       if (!weak_this)
-                         return;
+                     BindOnce([self, cb = std::move(cb), messages = std::move(completed_messages)]() mutable {
                        for (MessageChannel::Message &msg : messages) {
                          cb(std::move(msg));
                        }
@@ -292,17 +282,27 @@ private:
     }
 
     // ---- Phase 3: issue the next read (on io_task_runner_) -------------
+    //
+    // NOTE: BeginRead() re-acquires lock_ internally, so it must NOT be
+    // called while lock_ is held (std::mutex is non-recursive).  Decide
+    // under the lock, act outside it.
 
+    bool should_begin_read = false;
     {
       std::lock_guard<std::mutex> guard(lock_);
       if (!error_signaled_ && !closing_) {
-        // OK to call BeginRead()  --  we are on io_task_runner_.
-        BeginRead();
+        should_begin_read = true;
       } else if (closing_ && !error_signaled_) {
         // Stream closed gracefully by the remote side (EOF) while
         // we were draining.  Signal completion.
         SignalErrorLocked();
       }
+    }
+
+    if (should_begin_read) {
+      // OK to call BeginRead()  --  we are on io_task_runner_ and the
+      // lock is not held.
+      BeginRead();
     }
 
     // If SignalErrorLocked was called in Phase 3, deliver to client.
@@ -363,9 +363,10 @@ private:
           break;
         }
 
-        // Extract the complete payload into a pool-allocated buffer.
-        // No std::vector or new  --  zero-copy-pool allocation.
-        scoped_refptr<IOBufferWithSize> msg_buf = IOBufferPool::GetInstance().AcquireBuffer(current_message_size_);
+        // Extract the complete payload into an exact-size buffer: the
+        // delivered Message's size() must equal the payload length
+        // (bucket normalization would corrupt the semantic size).
+        scoped_refptr<IOBufferWithSize> msg_buf(new IOBufferWithSize(current_message_size_));
         if (current_message_size_ > 0) {
           std::memcpy(msg_buf->data(), receive_buffer_.data() + consume_offset_, current_message_size_);
         }
@@ -412,7 +413,7 @@ private:
   // are re-submitted on the next write cycle via current_write_offset_.
   // Called exclusively on io_task_runner_.
   void IssueNextWrite() {
-    scoped_refptr<IOBufferWithSize> write_buf;
+    scoped_refptr<PooledIOBuffer> write_buf;
     std::size_t remaining = 0;
     bool queue_empty_and_closing = false;
 
@@ -422,10 +423,10 @@ private:
         return;
 
       if (current_write_buf_) {
-        // Continuing a partial write  --  the buffer is still at the front
+        // Continuing a partial write  --  the entry is still at the front
         // of pending_writes_, current_write_offset_ tracks progress.
         write_buf = current_write_buf_;
-        remaining = write_buf->size() - current_write_offset_;
+        remaining = current_write_len_ - current_write_offset_;
       } else if (pending_writes_.empty()) {
         // No more work.  If we are closing, signal completion.
         write_in_flight_ = false;
@@ -435,11 +436,13 @@ private:
         }
       } else {
         // Start a new write from the front of the queue.
-        // The buffer is NOT popped until fully written.
-        current_write_buf_ = pending_writes_.front();
+        // The entry is NOT popped until fully written.
+        const PendingWrite &front = pending_writes_.front();
+        current_write_buf_ = front.buf;
+        current_write_len_ = front.len;
         current_write_offset_ = 0;
         write_buf = current_write_buf_;
-        remaining = write_buf->size();
+        remaining = current_write_len_;
       }
     }
 
@@ -463,19 +466,15 @@ private:
     // Create a windowed view into the remaining bytes.
     scoped_refptr<WrappedIOBuffer> write_slice(new WrappedIOBuffer(write_buf->data() + current_write_offset_));
 
-    auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
+    auto self = WrapRefCounted(this);
     scoped_refptr<SingleThreadTaskRunner> io_runner = io_task_runner_;
 
     write_stream_->WriteAsync(
         scoped_refptr<IOBuffer>(write_slice.get()),
         remaining,
-        [weak_this, io_runner, write_buf, write_slice](bool success, std::size_t bytes_written) mutable {
-          if (!weak_this)
-            return;
-          BindPostTask(io_runner, BindOnce([weak_this, success, bytes_written]() mutable {
-                         if (!weak_this)
-                           return;
-                         weak_this->OnWriteComplete(success, bytes_written);
+        [self, io_runner, write_buf, write_slice](bool success, std::size_t bytes_written) mutable {
+          BindPostTask(io_runner, BindOnce([self, success, bytes_written]() mutable {
+                         self->OnWriteComplete(success, bytes_written);
                        }))
               .Run();
         });
@@ -497,17 +496,19 @@ private:
           pending_writes_.pop_front();
           current_write_buf_.reset();
           current_write_offset_ = 0;
+          current_write_len_ = 0;
         }
         SignalErrorLocked();
         should_signal_error = true;
       } else {
         current_write_offset_ += bytes_written;
 
-        if (current_write_offset_ >= current_write_buf_->size()) {
+        if (current_write_offset_ >= current_write_len_) {
           // Buffer fully written  --  pop it from the queue.
           pending_writes_.pop_front();
           current_write_buf_.reset();
           current_write_offset_ = 0;
+          current_write_len_ = 0;
 
           if (pending_writes_.empty() && closing_) {
             // All pending writes drained and we were asked to close.
@@ -562,18 +563,13 @@ private:
     on_message_ = MessageChannel::MessageReceivedCallback();
   }
 
-  // Posts an error callback to client_task_runner_ via BindPostTask with
-  // WeakPtr protection.  Must be called OUTSIDE the lock.
+  // Posts an error callback to client_task_runner_ via BindPostTask with a
+  // scoped_refptr self-hold.  Must be called OUTSIDE the lock.
   void PostErrorToClient(MessageChannel::ErrorCallback error_cb) {
     if (!error_cb)
       return;
-    auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-    BindPostTask(client_task_runner_, BindOnce([weak_this, cb = std::move(error_cb)]() mutable {
-                   if (!weak_this)
-                     return;
-                   cb();
-                 }))
-        .Run();
+    auto self = WrapRefCounted(this);
+    BindPostTask(client_task_runner_, BindOnce([self, cb = std::move(error_cb)]() mutable { cb(); })).Run();
   }
 
   // =========================================================================
@@ -606,9 +602,16 @@ private:
   MessageChannel::MessageReceivedCallback on_message_;
   MessageChannel::ErrorCallback on_error_;
 
-  // Queue of framed buffers waiting to be written.
-  // Each entry is [4-byte LE length][payload].
-  std::deque<scoped_refptr<IOBufferWithSize>> pending_writes_;
+  // One framed write in flight or queued.  The buffer is pool-allocated
+  // (no size()); len is the exact frame length to put on the wire.
+  struct PendingWrite {
+    scoped_refptr<PooledIOBuffer> buf;
+    std::size_t len = 0;
+  };
+
+  // Queue of framed writes waiting to go out.
+  // Each frame is [4-byte LE length][4-byte LE magic][payload].
+  std::deque<PendingWrite> pending_writes_;
 
   bool write_in_flight_ = false;
   bool started_ = false;
@@ -628,21 +631,24 @@ private:
   // Whether a ReadAsync is currently in flight.
   bool read_in_flight_ = false;
 
-  // Current in-flight write buffer (NOT popped from pending_writes_ until
-  // every byte is accepted by the kernel).  Together with
-  // current_write_offset_ this defends against partial writes where the
-  // OS buffer accepts fewer bytes than requested  --  the remaining bytes
-  // are re-submitted in the next write cycle instead of being lost.
-  scoped_refptr<IOBufferWithSize> current_write_buf_;
+  // Current in-flight write (the entry is NOT popped from pending_writes_
+  // until every byte is accepted by the kernel).  Together with
+  // current_write_offset_ / current_write_len_ this defends against partial
+  // writes where the OS buffer accepts fewer bytes than requested  --  the
+  // remaining bytes are re-submitted in the next write cycle instead of
+  // being lost.  current_write_len_ is the exact frame length (the pooled
+  // buffer exposes no size()).
+  scoped_refptr<PooledIOBuffer> current_write_buf_;
   std::size_t current_write_offset_ = 0;
+  std::size_t current_write_len_ = 0;
 
   // ---- Synchronization ----
 
   std::mutex lock_;
 
-  // ---- Lifetime (MUST be declared last) ----
-
-  WeakPtrFactory<Impl> weak_factory_;
+  // NOTE: no WeakPtrFactory is needed.  Lifetime is governed by
+  // RefCountedThreadSafe self-holds (WrapRefCounted) captured by every
+  // cross-thread task, which guarantee the Impl outlives all posted work.
 };
 
 // ===========================================================================
@@ -653,18 +659,31 @@ MessageChannel::MessageChannel(scoped_refptr<SingleThreadTaskRunner> io_task_run
                                scoped_refptr<SequencedTaskRunner> client_task_runner,
                                AsyncInputStream *read_stream,
                                AsyncOutputStream *write_stream)
-    : impl_(
-          std::make_unique<Impl>(std::move(io_task_runner), std::move(client_task_runner), read_stream, write_stream)) {
+    : impl_(new Impl(std::move(io_task_runner), std::move(client_task_runner), read_stream, write_stream)) {
+  impl_->AddRef(); // Shell holds one reference.
 }
 
-MessageChannel::~MessageChannel() = default;
+MessageChannel::~MessageChannel() {
+  // Graceful shutdown: stop the read loop and drain pending writes.  Any
+  // task still in flight keeps the Impl alive through its self-hold.
+  impl_->Close();
+  impl_->Release(); // Release shell's reference.
+  impl_ = nullptr;
+}
 
 void MessageChannel::StartReading(MessageReceivedCallback on_message, ErrorCallback on_error) {
   impl_->StartReading(std::move(on_message), std::move(on_error));
 }
 
 void MessageChannel::Send(Message message) {
-  impl_->Send(std::move(message));
+  // The Message carries its exact semantic size; forward to the
+  // explicit-length core path.
+  impl_->Send(message ? scoped_refptr<IOBuffer>(message.get()) : scoped_refptr<IOBuffer>(),
+              message ? message->size() : 0u);
+}
+
+void MessageChannel::Send(scoped_refptr<IOBuffer> payload, std::size_t payload_len) {
+  impl_->Send(std::move(payload), payload_len);
 }
 
 void MessageChannel::Close() {

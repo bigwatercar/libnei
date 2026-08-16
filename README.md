@@ -25,7 +25,7 @@ This library is developed with the assistance of AI-powered coding assistants. L
 |--------|-------------|
 | `log` | High-performance async logging with MPSC lock-free ring buffer, multiple sinks, and runtime configuration |
 | `core` | Byte-order conversion (`endian.h`), floating-point control (`float_ctrl.h`), encoding (`encoding.h`), file utilities (`file_util.h`), path utilities (`path_util.h`), cryptographically secure random (`random.h`), time utilities (`time.h`) |
-| `macros` | Export macros (`NEI_API`), platform detection, compiler-specific macros, common typedefs |
+| `build` | Export macros (`NEI_API`), platform detection, compiler-specific macros, common typedefs |
 | `debug` | Assertion and check macros (`CHECK` / `DCHECK` / `NOTREACHED`) |
 | `xdr` | XDR-style data serialization / deserialization |
 | `utils` | Cryptography & encoding: Base64, CRC32, MD5, SHA-1, SHA-256, UUID (RFC 4122 v4), Flake ID (distributed unique ID) |
@@ -38,16 +38,19 @@ This library is developed with the assistance of AI-powered coding assistants. L
 | `task` | Async task framework: `TaskRunner`, `SequencedTaskRunner`, `ThreadPool` with priority scheduling, delayed tasks, shutdown policies, `ScopedBlockingCall` compensation workers |
 | `threading` | Cross-platform thread wrapper (`Thread` / `PlatformThread`), thread-local storage |
 | `synchronization` | `Lock`, `ConditionVariable`, `WaitableEvent` |
-| `memory` | `scoped_refptr` / `RefCounted` reference counting, `WeakPtr` / `WeakPtrFactory` (use-after-free-safe async callbacks), `SharedMemory` (cross-platform shared memory regions & mappings) |
+| `memory` | `scoped_refptr` / `RefCounted` reference counting, `WeakPtr` / `WeakPtrFactory` (use-after-free-safe async callbacks), `SharedMemory` (cross-platform shared memory regions & mappings), `SmallObjectAllocator` (per-size-class lock-free pooling), `MemoryPressureMonitor`, `PassKey` |
 | `functional` | Type-safe `OnceCallback` / `RepeatingCallback` / `BindOnce` / `BindRepeating` / `CancelableCallback` |
 | `io` | `IOBuffer` buffer hierarchy, `StreamReader` / `StreamWriter`, async file I/O, `AsyncLineReader`, `PipeStream` (async pipe/socket endpoints) |
 | `files` | `FilePathWatcher` — cross-platform file system change monitoring (inotify / ReadDirectoryChangesW) |
 | `strings` | String utilities: `SplitString`, `StringPrintf`, UTF conversions, CJK width detection, text normalization |
-| `common` | `AtExitManager`, `NoDestructor`, `Singleton`, `TimeSource`, thread checkers (`SequenceChecker` / `ThreadChecker`), `PlatformHandle` |
+| `common` | `AtExitManager`, `NoDestructor`, `Singleton`, `PathService`, `Location`, `StrongAlias`, `ScopedHandle` / `ScopedFd`, `TimeSource`, thread checkers (`SequenceChecker` / `ThreadChecker`), `PlatformHandle` |
 | `command_line` | Command-line argument parsing |
-| `net` | `TCPServerSocket` / `TCPClientSocket` (cross-platform async TCP), `UDPSocket`, `HostResolver` (async DNS via c-ares) |
+| `net` | Async sockets: `TCPClientSocket` / `TCPServerSocket` (IOCP / epoll), `TLSClientSocket` / `TLSServerSocket` / `SSLContext` (mbedTLS), `UDPSocket`; `HostResolver` (async DNS via c-ares) |
+| `net/http` | Async HTTP/1.1: `HttpClient` (streaming request/response with backpressure), `HttpServer` (route dispatch, TCP + TLS), `HttpParser` (llhttp), `HttpFileTransfer` (bounded-memory file download/upload), `HttpClientPool` |
+| `net/websocket` | RFC 6455: `WebSocketClient` / `WebSocketConnection` / `WebSocketFrame` (text / binary / ping, TCP + TLS) |
 | `ipc` | `MessageChannel` / `RpcEndpoint` — inter-process communication abstractions |
 | `process` | Child process management, process utilities, privilege elevation |
+| `url` | RFC 3986 / WHATWG-compliant URL parsing (`Url`, zero-copy `string_view` accessors), percent-encoding (`url_encoding.h`) |
 | `trace_event` | Lightweight trace event instrumentation (optional) |
 | `log` | C++ log header wrapper |
 
@@ -67,23 +70,24 @@ This library is developed with the assistance of AI-powered coding assistants. L
 git clone https://github.com/bigwatercar/libnei.git
 cd libnei
 
-# Configure (example: Windows VS2022 Debug Shared)
-cmake --preset windows-vs2022-debug-shared
+# Configure (example: Windows VS2022 Shared — multi-config generator)
+cmake --preset windows-vs2022-shared
 
-# Build
-cmake --build build/windows-vs2022-debug-shared --config Debug
+# Build (multi-config; pick Debug or Release)
+cmake --build build/windows-vs2022-shared --config Debug
 
 # Run tests (optional)
-cd build/windows-vs2022-debug-shared && ctest -C Debug
+cd build/windows-vs2022-shared && ctest -C Debug
 ```
 
 ### Preset Matrix
 
-| Platform | Generator | Debug | Release | Debug Shared | Release Shared |
-|----------|-----------|-------|---------|-------------|----------------|
-| Windows | Ninja (MSVC) | `windows-msvc-debug` | `windows-msvc-release` | `windows-msvc-debug-shared` | `windows-msvc-release-shared` |
-| Windows | Visual Studio 2022 | `windows-vs2022-debug` | `windows-vs2022-release` | `windows-vs2022-debug-shared` | `windows-vs2022-release-shared` |
-| Linux (WSL) | Ninja (GCC) | `linux-gcc-debug` | `linux-gcc-release` | `linux-gcc-debug-shared` | `linux-gcc-release-shared` |
+| Platform | Generator | Presets |
+|----------|-----------|---------|
+| Windows | Ninja (MSVC) | `windows-msvc-debug` · `windows-msvc-release` · `windows-msvc-debug-shared` · `windows-msvc-release-shared` |
+| Windows | Visual Studio 2022 (multi-config) | `windows-vs2022-static` · `windows-vs2022-shared` (choose `--config Debug` / `--config Release`) |
+| Linux (WSL) | Ninja (GCC) | `linux-gcc-debug` · `linux-gcc-release` · `linux-gcc-debug-shared` · `linux-gcc-release-shared` |
+| Sanitizers | Ninja | `windows-msvc-debug-asan` · `linux-gcc-debug-asan` · `linux-gcc-tsan` |
 
 ### CMake Options
 
@@ -94,6 +98,11 @@ cd build/windows-vs2022-debug-shared && ctest -C Debug
 | `NEI_BUILD_DEMOS` | `ON` | Build demo programs |
 | `NEI_BUILD_NEIXX` | `ON` | Build C++ components (set `OFF` to build C-only) |
 | `NEI_ENABLE_TRACE_EVENTS` | `ON` | Enable trace event instrumentation |
+| `NEI_ENABLE_WARNINGS` | `ON` | Enable strict warnings (`/W4` on MSVC, `-Wall -Wextra -Wpedantic` elsewhere) |
+| `NEI_TREAT_WARNINGS_AS_ERRORS` | `OFF` | Treat warnings as errors (`/WX` / `-Werror`) |
+| `NEI_ENABLE_LONG_BENCH_TESTS` | `OFF` | Enable long-running benchmark tests in CTest |
+| `NEI_ENABLE_PARALLEL_DIAGNOSTICS` | `OFF` | Per-task parallel scheduler diagnostics (disable for ~8-22% higher `PostTask` throughput) |
+| `NEI_ENABLE_ALLOCATOR_DIAGNOSTICS` | `OFF` | Per-allocation `SmallObjectAllocator` diagnostics (disable to reduce hot-path atomic overhead) |
 | `BUILD_SHARED_LIBS` | `ON` | Build shared library (`OFF` for static) |
 | `NEI_LOG_RING_SLOTS` | `256` | Log ring buffer slot count (must be power of two, ≥ 64) |
 
@@ -103,7 +112,7 @@ cd build/windows-vs2022-debug-shared && ctest -C Debug
 
 ```bash
 # Install to a prefix directory
-cmake --install build/windows-vs2022-release-shared --prefix /path/to/install
+cmake --install build/windows-vs2022-shared --config Release --prefix /path/to/install
 ```
 
 In your `CMakeLists.txt`:
@@ -159,6 +168,8 @@ Headers live under each module's `include/` directory with a unified prefix:
 | [NoDestructor](docs/neixx_no_destructor_technical.md) | Non-destructible static objects |
 | [AtExitManager](docs/neixx_at_exit_technical.md) | At-exit callback management |
 | [Thread / Sequence Checker](docs/neixx_thread_sequence_checker_technical.md) | Thread safety checkers |
+| [Thread-Local Storage](docs/neixx_thread_local_technical.md) | Thread-local storage (TLS) |
+| [TLS (mbedTLS) & Secure Sockets](docs/neixx_tls_technical.md) | SSL context, TLS client/server sockets |
 | [String Utilities](docs/neixx_strings_technical.md) | String processing |
 | [Command Line](docs/neixx_command_line_technical.md) | Command-line argument parsing |
 | [Child Process](docs/neixx_child_process_technical.md) | Child process management |

@@ -118,8 +118,8 @@ int main() {
     {
       auto buf_4k = pool.AcquireBuffer(4096);
       auto buf_64k = pool.AcquireBuffer(65536);
-      std::printf("Acquired 4K buffer:  %p, size=%zu\n", static_cast<void *>(buf_4k->data()), buf_4k->size());
-      std::printf("Acquired 64K buffer: %p, size=%zu\n", static_cast<void *>(buf_64k->data()), buf_64k->size());
+      std::printf("Acquired 4K buffer:  %p, capacity=%zu\n", static_cast<void *>(buf_4k->data()), buf_4k->capacity());
+      std::printf("Acquired 64K buffer: %p, capacity=%zu\n", static_cast<void *>(buf_64k->data()), buf_64k->capacity());
     }
 
     // -------------------------------------------------------------------

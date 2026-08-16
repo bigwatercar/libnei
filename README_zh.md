@@ -25,7 +25,7 @@ Chromium 的 `//base` 目录包含大量精心设计的跨平台基础设施—�
 |------|------|
 | `log` | 高性能异步日志系统，MPSC 无锁环形缓冲区，支持多 sink、运行时动态配置 |
 | `core` | 字节序转换（`endian.h`）、浮点控制（`float_ctrl.h`）、编码（`encoding.h`）、文件工具（`file_util.h`）、路径工具（`path_util.h`）、加密安全随机数（`random.h`）、时间工具（`time.h`） |
-| `macros` | 导出宏（`NEI_API`）、平台检测、编译器特定宏、公共类型定义 |
+| `build` | 导出宏（`NEI_API`）、平台检测、编译器特定宏、公共类型定义 |
 | `debug` | 断言与检查宏（`CHECK` / `DCHECK` / `NOTREACHED`） |
 | `xdr` | XDR 风格数据序列化 / 反序列化 |
 | `utils` | 密码学与编码工具：Base64、CRC32、MD5、SHA-1、SHA-256、UUID (RFC 4122 v4)、Flake ID（分布式唯一 ID） |
@@ -38,16 +38,19 @@ Chromium 的 `//base` 目录包含大量精心设计的跨平台基础设施—�
 | `task` | 异步任务框架：`TaskRunner`、`SequencedTaskRunner`、`ThreadPool`，支持优先级调度、延迟任务、关闭策略、`ScopedBlockingCall` 补偿 worker |
 | `threading` | 跨平台线程封装（`Thread` / `PlatformThread`）、线程局部存储 |
 | `synchronization` | `Lock`、`ConditionVariable`、`WaitableEvent` |
-| `memory` | `scoped_refptr` / `RefCounted` 引用计数、`WeakPtr` / `WeakPtrFactory`（防 use-after-free 异步回调）、`SharedMemory`（跨平台共享内存区域与映射） |
+| `memory` | `scoped_refptr` / `RefCounted` 引用计数、`WeakPtr` / `WeakPtrFactory`（防 use-after-free 异步回调）、`SharedMemory`（跨平台共享内存区域与映射）、`SmallObjectAllocator`（按尺寸分类的无锁小对象池）、`MemoryPressureMonitor`、`PassKey` |
 | `functional` | 类型安全的 `OnceCallback` / `RepeatingCallback` / `BindOnce` / `BindRepeating` / `CancelableCallback` |
 | `io` | `IOBuffer` 缓冲区体系、`StreamReader` / `StreamWriter`、异步文件读写、`AsyncLineReader`、`PipeStream`（异步 pipe/socket 端点） |
 | `files` | `FilePathWatcher` — 跨平台文件系统变更监控（inotify / ReadDirectoryChangesW） |
 | `strings` | 字符串工具：`SplitString`、`StringPrintf`、UTF 编码转换、CJK 宽度检测、文本规范化 |
-| `common` | `AtExitManager`、`NoDestructor`、`Singleton`、`TimeSource`、线程检查器（`SequenceChecker` / `ThreadChecker`）、`PlatformHandle` |
+| `common` | `AtExitManager`、`NoDestructor`、`Singleton`、`PathService`、`Location`、`StrongAlias`、`ScopedHandle` / `ScopedFd`、`TimeSource`、线程检查器（`SequenceChecker` / `ThreadChecker`）、`PlatformHandle` |
 | `command_line` | 命令行参数解析 |
-| `net` | `TCPServerSocket` / `TCPClientSocket`（跨平台异步 TCP）、`UDPSocket`、`HostResolver`（基于 c-ares 的异步 DNS） |
+| `net` | 异步套接字：`TCPClientSocket` / `TCPServerSocket`（IOCP / epoll）、`TLSClientSocket` / `TLSServerSocket` / `SSLContext`（mbedTLS）、`UDPSocket`；`HostResolver`（基于 c-ares 的异步 DNS） |
+| `net/http` | 异步 HTTP/1.1：`HttpClient`（流式请求/响应，带背压）、`HttpServer`（路由分发，TCP + TLS）、`HttpParser`（llhttp）、`HttpFileTransfer`（内存有界的大文件下载/上传）、`HttpClientPool` |
+| `net/websocket` | RFC 6455：`WebSocketClient` / `WebSocketConnection` / `WebSocketFrame`（文本 / 二进制 / ping，TCP + TLS） |
 | `ipc` | `MessageChannel` / `RpcEndpoint` — 进程间通信抽象 |
 | `process` | 子进程管理、进程工具函数、权限提升 |
+| `url` | 符合 RFC 3986 / WHATWG 的 URL 解析（`Url`，零拷贝 `string_view` 访问器）、百分号编码（`url_encoding.h`） |
 | `trace_event` | 轻量级 trace event 埋点（可选编译） |
 | `log` | C++ 层 log 头文件封装 |
 
@@ -67,23 +70,24 @@ Chromium 的 `//base` 目录包含大量精心设计的跨平台基础设施—�
 git clone https://github.com/bigwatercar/libnei.git
 cd libnei
 
-# 配置（以 Windows VS2022 Debug Shared 为例）
-cmake --preset windows-vs2022-debug-shared
+# 配置（以 Windows VS2022 Shared 为例——多配置生成器）
+cmake --preset windows-vs2022-shared
 
-# 编译
-cmake --build build/windows-vs2022-debug-shared --config Debug
+# 编译（多配置；选择 Debug 或 Release）
+cmake --build build/windows-vs2022-shared --config Debug
 
 # 运行测试（可选）
-cd build/windows-vs2022-debug-shared && ctest -C Debug
+cd build/windows-vs2022-shared && ctest -C Debug
 ```
 
 ### 预设配置矩阵
 
-| 平台 | 生成器 | Debug | Release | Debug Shared | Release Shared |
-|------|--------|-------|---------|-------------|----------------|
-| Windows | Ninja (MSVC) | `windows-msvc-debug` | `windows-msvc-release` | `windows-msvc-debug-shared` | `windows-msvc-release-shared` |
-| Windows | Visual Studio 2022 | `windows-vs2022-debug` | `windows-vs2022-release` | `windows-vs2022-debug-shared` | `windows-vs2022-release-shared` |
-| Linux (WSL) | Ninja (GCC) | `linux-gcc-debug` | `linux-gcc-release` | `linux-gcc-debug-shared` | `linux-gcc-release-shared` |
+| 平台 | 生成器 | 预设 |
+|------|--------|------|
+| Windows | Ninja (MSVC) | `windows-msvc-debug` · `windows-msvc-release` · `windows-msvc-debug-shared` · `windows-msvc-release-shared` |
+| Windows | Visual Studio 2022（多配置） | `windows-vs2022-static` · `windows-vs2022-shared`（通过 `--config Debug` / `--config Release` 选择） |
+| Linux (WSL) | Ninja (GCC) | `linux-gcc-debug` · `linux-gcc-release` · `linux-gcc-debug-shared` · `linux-gcc-release-shared` |
+| Sanitizer | Ninja | `windows-msvc-debug-asan` · `linux-gcc-debug-asan` · `linux-gcc-tsan` |
 
 ### CMake 选项
 
@@ -94,6 +98,11 @@ cd build/windows-vs2022-debug-shared && ctest -C Debug
 | `NEI_BUILD_DEMOS` | `ON` | 构建示例程序 |
 | `NEI_BUILD_NEIXX` | `ON` | 编译 C++ 组件（设为 `OFF` 则仅构建 C 部分） |
 | `NEI_ENABLE_TRACE_EVENTS` | `ON` | 启用 trace event 埋点 |
+| `NEI_ENABLE_WARNINGS` | `ON` | 启用严格警告（MSVC 下 `/W4`，其他平台 `-Wall -Wextra -Wpedantic`） |
+| `NEI_TREAT_WARNINGS_AS_ERRORS` | `OFF` | 将警告视为错误（`/WX` / `-Werror`） |
+| `NEI_ENABLE_LONG_BENCH_TESTS` | `OFF` | 在 CTest 中启用长时运行的基准测试 |
+| `NEI_ENABLE_PARALLEL_DIAGNOSTICS` | `OFF` | 并行调度器按任务诊断（关闭可提升约 8-22% 的 `PostTask` 吞吐） |
+| `NEI_ENABLE_ALLOCATOR_DIAGNOSTICS` | `OFF` | `SmallObjectAllocator` 按次分配诊断（关闭可降低热路径原子操作开销） |
 | `BUILD_SHARED_LIBS` | `ON` | 构建动态库（`OFF` 为静态库） |
 | `NEI_LOG_RING_SLOTS` | `256` | 日志环形缓冲区槽位数（必须为 2 的幂，≥ 64） |
 
@@ -103,7 +112,7 @@ cd build/windows-vs2022-debug-shared && ctest -C Debug
 
 ```bash
 # 安装到指定目录
-cmake --install build/windows-vs2022-release-shared --prefix /path/to/install
+cmake --install build/windows-vs2022-shared --config Release --prefix /path/to/install
 ```
 
 在你的 `CMakeLists.txt` 中：
@@ -159,6 +168,8 @@ target_link_libraries(your_target PRIVATE nei::nei)
 | [NoDestructor 技术文档](docs/neixx_no_destructor_technical.md) | 禁止析构的静态对象 |
 | [AtExitManager 技术文档](docs/neixx_at_exit_technical.md) | 退出时回调管理 |
 | [Thread / Sequence Checker 技术文档](docs/neixx_thread_sequence_checker_technical.md) | 线程安全检查器 |
+| [线程局部存储技术文档](docs/neixx_thread_local_technical.md) | 线程局部存储（TLS） |
+| [TLS (mbedTLS) 与安全套接字技术文档](docs/neixx_tls_technical.md) | SSL 上下文、TLS 客户端/服务端套接字 |
 | [字符串工具技术文档](docs/neixx_strings_technical.md) | 字符串处理 |
 | [命令行解析技术文档](docs/neixx_command_line_technical.md) | 命令行参数解析 |
 | [子进程技术文档](docs/neixx_child_process_technical.md) | 子进程管理 |

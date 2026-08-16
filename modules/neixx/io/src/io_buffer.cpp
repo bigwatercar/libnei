@@ -59,24 +59,29 @@ IOBuffer::IOBuffer(unsigned char *data)
 IOBuffer::~IOBuffer() = default;
 
 IOBufferWithSize::IOBufferWithSize(std::size_t size)
-    : IOBufferWithSize(size, std::make_unique<unsigned char[]>(std::max<std::size_t>(1u, size)), nullptr, nullptr) {
+    : IOBuffer(nullptr)
+    , storage_(std::make_unique<unsigned char[]>(std::max<std::size_t>(1u, size)))
+    , size_(size) {
+  set_data(storage_.get());
 }
 
-IOBufferWithSize::IOBufferWithSize(std::size_t size,
-                                   std::unique_ptr<unsigned char[]> storage,
-                                   RecycleFunc recycle_func,
-                                   void *recycle_context)
+IOBufferWithSize::~IOBufferWithSize() = default;
+
+PooledIOBuffer::PooledIOBuffer(std::size_t capacity,
+                               std::unique_ptr<unsigned char[]> storage,
+                               RecycleFunc recycle_func,
+                               void *recycle_context)
     : IOBuffer(storage.get())
     , storage_(std::move(storage))
-    , size_(size)
+    , capacity_(capacity)
     , recycle_func_(recycle_func)
     , recycle_context_(recycle_context) {
   DCHECK(storage_ != nullptr);
 }
 
-IOBufferWithSize::~IOBufferWithSize() {
+PooledIOBuffer::~PooledIOBuffer() {
   if (recycle_func_ != nullptr && storage_ != nullptr) {
-    recycle_func_(recycle_context_, size_, std::move(storage_));
+    recycle_func_(recycle_context_, capacity_, std::move(storage_));
   }
 }
 
@@ -144,7 +149,7 @@ IOBufferPool &IOBufferPool::GetInstance() {
   return *Singleton<IOBufferPool, LeakySingletonTraits<IOBufferPool>>::GetInstance();
 }
 
-scoped_refptr<IOBufferWithSize> IOBufferPool::AcquireBuffer(std::size_t size) {
+scoped_refptr<PooledIOBuffer> IOBufferPool::AcquireBuffer(std::size_t size) {
   DCHECK_GT(size, 0u);
   const std::size_t normalized_size = NormalizeBucketSize(std::max<std::size_t>(1u, size));
 
@@ -162,15 +167,15 @@ scoped_refptr<IOBufferWithSize> IOBufferPool::AcquireBuffer(std::size_t size) {
     storage = std::make_unique<unsigned char[]>(normalized_size);
   }
 
-  IOBufferWithSize::RecycleFunc recycle_func = nullptr;
+  PooledIOBuffer::RecycleFunc recycle_func = nullptr;
   void *recycle_context = nullptr;
   if (IsPooledBucket(normalized_size)) {
     recycle_func = &IOBufferPool::RecycleStorageThunk;
     recycle_context = this;
   }
 
-  return scoped_refptr<IOBufferWithSize>(
-      new IOBufferWithSize(normalized_size, std::move(storage), recycle_func, recycle_context));
+  return scoped_refptr<PooledIOBuffer>(
+      new PooledIOBuffer(normalized_size, std::move(storage), recycle_func, recycle_context));
 }
 
 void IOBufferPool::SetBucketLimitForTesting(std::size_t bucket_size, std::size_t max_cached_blocks) {

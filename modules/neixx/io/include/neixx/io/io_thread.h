@@ -39,10 +39,13 @@ public:
   // Returns the singleton, or nullptr if not started.
   static IOThread *Get();
 
-  // Manual shutdown (AtExit also invokes).  Idempotent.
+  // Full teardown: stops the IO thread, destroys the singleton, and clears
+  // the global pointer so the IO thread can be restarted with Start().
+  // Idempotent (a second call is a no-op).  Also invoked by AtExit.
   static void Shutdown();
 
-  // Reset for testing — shuts down, deletes, and clears the singleton.
+  // Backward-compatible alias for Shutdown().  Kept for existing callers;
+  // prefer Shutdown().
   static void ResetForTesting();
 
   // The IO thread's SingleThreadTaskRunner.  All async IO callbacks should

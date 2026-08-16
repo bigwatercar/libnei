@@ -54,14 +54,17 @@ class IOBufferPool;
 
 // Owns a contiguous heap allocation with explicit byte size metadata.
 //
-// This is the primary concrete buffer for read/write operations. Instances can
-// optionally return their storage to IOBufferPool during destruction.
+// This is the primary concrete buffer when the buffer itself must carry its
+// exact byte length (e.g. delivered message payloads).  Storage is freed on
+// destruction; pool recycling is provided exclusively by PooledIOBuffer.
 class NEI_API IOBufferWithSize : public IOBuffer {
 public:
   // Allocates a buffer with `size` bytes.
   explicit IOBufferWithSize(std::size_t size);
 
-  // Number of valid bytes in this allocation.
+  // Number of valid bytes in this allocation.  For directly-constructed
+  // instances this equals the requested size and may serve as a semantic
+  // data length (e.g. delivered message payloads).
   std::size_t size() const {
     return size_;
   }
@@ -70,20 +73,50 @@ public:
   IOBufferWithSize &operator=(const IOBufferWithSize &) = delete;
 
 protected:
-  using RecycleFunc = void (*)(void *context, std::size_t block_size, std::unique_ptr<unsigned char[]> storage);
-
-  IOBufferWithSize(std::size_t size,
-                   std::unique_ptr<unsigned char[]> storage,
-                   RecycleFunc recycle_func,
-                   void *recycle_context);
   ~IOBufferWithSize() override;
 
 private:
-  friend class IOBufferPool;
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   std::unique_ptr<unsigned char[]> storage_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
   std::size_t size_ = 0;
+};
+
+// Pool-allocated byte buffer.  Deliberately exposes NO size()  --  the
+// allocation extent is bucket-normalized by IOBufferPool and is an
+// implementation detail, never a semantic data length.  Callers must track
+// data lengths explicitly (bytes_read / bytes_written / explicit len
+// parameters).  If the buffer itself must carry its exact size, use
+// IOBufferWithSize directly instead of pooling.
+//
+// capacity() reports the normalized allocation extent for callers that
+// legitimately need the storage bound (e.g. zeroing the whole block).
+class NEI_API PooledIOBuffer final : public IOBuffer {
+public:
+  // Normalized allocation capacity in bytes.
+  std::size_t capacity() const {
+    return capacity_;
+  }
+
+  PooledIOBuffer(const PooledIOBuffer &) = delete;
+  PooledIOBuffer &operator=(const PooledIOBuffer &) = delete;
+
+private:
+  friend class IOBufferPool;
+
+  using RecycleFunc = void (*)(void *context, std::size_t block_size, std::unique_ptr<unsigned char[]> storage);
+
+  // Constructed exclusively by IOBufferPool.
+  PooledIOBuffer(std::size_t capacity,
+                 std::unique_ptr<unsigned char[]> storage,
+                 RecycleFunc recycle_func,
+                 void *recycle_context);
+  ~PooledIOBuffer() override;
+
+  NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
+  std::unique_ptr<unsigned char[]> storage_;
+  NEI_SUPPRESS_MSC_WARNING_4251_END
+  std::size_t capacity_ = 0;
   RecycleFunc recycle_func_ = nullptr;
   void *recycle_context_ = nullptr;
 };
@@ -148,8 +181,13 @@ public:
   // Acquires a reusable buffer. For hot bucket sizes (4KB and 64KB), this
   // avoids repetitive heap churn by reusing cached blocks.
   //
-  // Returned buffer size may be normalized to a hot bucket size.
-  scoped_refptr<IOBufferWithSize> AcquireBuffer(std::size_t size);
+  // Returns a PooledIOBuffer that exposes no size(): its capacity() is the
+  // bucket-normalized allocation extent and must NOT be used as a semantic
+  // data length (frame length, write length, delivered payload size).
+  // Track the requested length separately and pass it explicitly; if the
+  // buffer itself must carry its exact size, construct IOBufferWithSize
+  // directly instead of pooling.
+  scoped_refptr<PooledIOBuffer> AcquireBuffer(std::size_t size);
 
   // Test hooks for deterministic pool behavior verification.
   void SetBucketLimitForTesting(std::size_t bucket_size, std::size_t max_cached_blocks);

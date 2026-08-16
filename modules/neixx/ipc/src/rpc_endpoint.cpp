@@ -11,7 +11,6 @@
 #include <neixx/functional/bind.h>
 #include <neixx/io/io_buffer.h>
 #include <neixx/ipc/message_channel.h>
-#include <neixx/memory/weak_ptr.h>
 #include <neixx/task/bind_post_task.h>
 #include <neixx/task/task_runner.h>
 #include <neixx/task/timer.h>
@@ -52,17 +51,28 @@ uint64_t ReadUint64LE(const uint8_t *src) {
 
 // ---- RPC frame builder ----------------------------------------------------
 
-scoped_refptr<IOBufferWithSize>
-BuildRpcFrame(uint8_t type, uint64_t request_id, scoped_refptr<IOBufferWithSize> payload) {
+// A built RPC frame: pooled storage (no size()) plus the exact frame
+// length, which MessageChannel::Send consumes as the payload length.
+struct RpcFrame {
+  scoped_refptr<PooledIOBuffer> buf;
+  std::size_t len = 0;
+};
+
+RpcFrame BuildRpcFrame(uint8_t type, uint64_t request_id, scoped_refptr<IOBufferWithSize> payload) {
   const std::size_t payload_len = payload ? payload->size() : 0;
   const std::size_t total = kRpcHeaderSize + payload_len;
-  auto buf = IOBufferPool::GetInstance().AcquireBuffer(total);
-  buf->data()[0] = type;
-  WriteUint64LE(reinterpret_cast<uint8_t *>(buf->data()) + 1, request_id);
+  // Pooled allocation: PooledIOBuffer carries no size(), so the frame
+  // length travels alongside the buffer and is passed explicitly to
+  // MessageChannel::Send (bucket capacity never reaches the wire).
+  RpcFrame frame;
+  frame.buf = IOBufferPool::GetInstance().AcquireBuffer(total);
+  frame.len = total;
+  frame.buf->data()[0] = type;
+  WriteUint64LE(reinterpret_cast<uint8_t *>(frame.buf->data()) + 1, request_id);
   if (payload_len > 0) {
-    std::memcpy(buf->data() + kRpcHeaderSize, payload->data(), payload_len);
+    std::memcpy(frame.buf->data() + kRpcHeaderSize, payload->data(), payload_len);
   }
-  return buf;
+  return frame;
 }
 
 // Parses the RPC header from the beginning of |buf|.
@@ -79,7 +89,8 @@ ParseRpcFrame(scoped_refptr<IOBufferWithSize> buf, uint8_t *out_type, uint64_t *
   if (payload_len == 0) {
     return nullptr;
   }
-  auto payload = IOBufferPool::GetInstance().AcquireBuffer(payload_len);
+  // Exact-size: the delivered payload's size() must equal the payload length.
+  auto payload = scoped_refptr<IOBufferWithSize>(new IOBufferWithSize(payload_len));
   std::memcpy(payload->data(), data + kRpcHeaderSize, payload_len);
   return payload;
 }
@@ -89,8 +100,14 @@ ParseRpcFrame(scoped_refptr<IOBufferWithSize> buf, uint8_t *out_type, uint64_t *
 // ===========================================================================
 // RpcEndpoint::Impl
 // ===========================================================================
+//
+// Lifetime model: Impl is RefCountedThreadSafe.  The MessageChannel
+// registered callbacks and every posted task capture scoped_refptr self-holds
+// (WrapRefCounted), so the Impl outlives all in-flight work.  The shell's
+// destructor calls TearDown() to close the channel; once the channel releases
+// its callback references the Impl is destroyed on the releasing thread.
 
-class RpcEndpoint::Impl final {
+class RpcEndpoint::Impl final : public RefCountedThreadSafe<Impl> {
 public:
   Impl(scoped_refptr<SingleThreadTaskRunner> io_task_runner,
        scoped_refptr<SequencedTaskRunner> client_task_runner,
@@ -98,19 +115,26 @@ public:
        AsyncOutputStream *write_stream)
       : io_task_runner_(std::move(io_task_runner))
       , client_task_runner_(std::move(client_task_runner))
-      , channel_(std::make_unique<MessageChannel>(io_task_runner_, client_task_runner_, read_stream, write_stream))
-      , weak_factory_(this, FROM_HERE) {
+      , channel_(std::make_unique<MessageChannel>(io_task_runner_, client_task_runner_, read_stream, write_stream)) {
     DCHECK(io_task_runner_ != nullptr);
     DCHECK(client_task_runner_ != nullptr);
   }
 
-  ~Impl() {
-    weak_factory_.InvalidateWeakPtrs(FROM_HERE);
-  }
+  // Reached only when the last scoped_refptr is released  --  the channel's
+  // callbacks have already been cleared by TearDown(), so no in-flight work
+  // remains.  Destroying channel_ here runs MessageChannel's graceful close.
+  ~Impl() = default;
 
   // =========================================================================
   // Public API
   // =========================================================================
+
+  // Stops the underlying channel: cancels further reads, drains pending
+  // writes, and delivers the error callback (which in turn releases the
+  // channel's references to this Impl).
+  void TearDown() {
+    channel_->Close();
+  }
 
   void Start(ErrorHandler on_error) {
     std::lock_guard<std::mutex> guard(lock_);
@@ -118,13 +142,17 @@ public:
     if (!request_handler_)
       return; // handler not set yet  --  caller error
 
-    channel_->StartReading([this](MessageChannel::Message msg) { OnMessageReceived(std::move(msg)); },
-                           [this]() { OnChannelError(); });
+    // Capture a self-hold for both callbacks: MessageChannel keeps them
+    // alive for its whole lifetime, which in turn keeps this Impl alive
+    // until the channel is torn down.  No raw-this UAF is possible.
+    auto self = WrapRefCounted(this);
+    channel_->StartReading([self](MessageChannel::Message msg) { self->OnMessageReceived(std::move(msg)); },
+                           [self]() { self->OnChannelError(); });
   }
 
   void SendOneWay(MessageBuffer payload) {
     auto frame = BuildRpcFrame(kOneWay, 0, std::move(payload));
-    channel_->Send(std::move(frame));
+    channel_->Send(std::move(frame.buf), frame.len);
   }
 
   void SendRequest(MessageBuffer payload, TimeDelta timeout, ResponseCallback on_response) {
@@ -145,16 +173,13 @@ public:
 
     // Build and send the RPC frame.
     auto frame = BuildRpcFrame(kRequest, request_id, std::move(payload));
-    channel_->Send(std::move(frame));
+    channel_->Send(std::move(frame.buf), frame.len);
 
     // Post timer installation to client_task_runner_ (OneShotTimer::Start
     // must be called on its bound sequence).
-    auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-    BindPostTask(client_task_runner_, BindOnce([weak_this, request_id, timeout]() mutable {
-                   if (!weak_this)
-                     return;
-                   weak_this->InstallTimeoutTimer(request_id, timeout);
-                 }))
+    auto self = WrapRefCounted(this);
+    BindPostTask(client_task_runner_,
+                 BindOnce([self, request_id, timeout]() mutable { self->InstallTimeoutTimer(request_id, timeout); }))
         .Run();
   }
 
@@ -192,14 +217,13 @@ private:
       }
       if (handler) {
         // Create a ReplyCallback that captures the request_id and sends
-        // the response back through the channel.
-        auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
-        ReplyCallback reply_cb = [weak_this, request_id](MessageBuffer response) {
-          if (!weak_this)
-            return;
+        // the response back through the channel.  The self-hold keeps the
+        // endpoint alive for the whole reply window.
+        auto self = WrapRefCounted(this);
+        ReplyCallback reply_cb = [self, request_id](MessageBuffer response) {
           auto frame = BuildRpcFrame(kResponse, request_id, std::move(response));
           // channel_->Send() is thread-safe.
-          weak_this->channel_->Send(std::move(frame));
+          self->channel_->Send(std::move(frame.buf), frame.len);
         };
         handler(std::move(payload), std::move(reply_cb));
       }
@@ -287,13 +311,9 @@ private:
       return;
     }
 
-    auto weak_this = weak_factory_.GetWeakPtr(FROM_HERE);
+    auto self = WrapRefCounted(this);
     auto timer = std::make_unique<OneShotTimer>(client_task_runner_);
-    timer->Start(FROM_HERE, timeout, BindOnce([weak_this, request_id]() {
-                   if (!weak_this)
-                     return;
-                   weak_this->OnRequestTimeout(request_id);
-                 }));
+    timer->Start(FROM_HERE, timeout, BindOnce([self, request_id]() { self->OnRequestTimeout(request_id); }));
     it->second.timer = std::move(timer);
   }
 
@@ -350,9 +370,9 @@ private:
 
   std::atomic<uint64_t> next_request_id_{1};
 
-  // ---- Lifetime (MUST be declared last) ----
-
-  WeakPtrFactory<Impl> weak_factory_;
+  // NOTE: no WeakPtrFactory is needed.  Lifetime is governed by
+  // RefCountedThreadSafe self-holds (WrapRefCounted) plus the channel's
+  // registered callbacks, which keep the Impl alive until TearDown().
 };
 
 // ===========================================================================
@@ -363,11 +383,15 @@ RpcEndpoint::RpcEndpoint(scoped_refptr<SingleThreadTaskRunner> io_task_runner,
                          scoped_refptr<SequencedTaskRunner> client_task_runner,
                          AsyncInputStream *read_stream,
                          AsyncOutputStream *write_stream)
-    : impl_(
-          std::make_unique<Impl>(std::move(io_task_runner), std::move(client_task_runner), read_stream, write_stream)) {
+    : impl_(new Impl(std::move(io_task_runner), std::move(client_task_runner), read_stream, write_stream)) {
+  impl_->AddRef(); // Shell holds one reference.
 }
 
-RpcEndpoint::~RpcEndpoint() = default;
+RpcEndpoint::~RpcEndpoint() {
+  impl_->TearDown();
+  impl_->Release(); // Release shell's reference.
+  impl_ = nullptr;
+}
 
 void RpcEndpoint::Start(ErrorHandler on_error) {
   impl_->Start(std::move(on_error));

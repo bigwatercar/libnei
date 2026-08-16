@@ -235,6 +235,10 @@ int Compare(std::string_view lhs, std::string_view rhs, CompareCase compare_case
   return CompareT<char>(lhs, rhs, compare_case);
 }
 
+bool EqualsCaseInsensitiveASCII(std::string_view lhs, std::string_view rhs) {
+  return Compare(lhs, rhs, CompareCase::kInsensitiveASCII) == 0;
+}
+
 int Compare(std::u16string_view lhs, std::u16string_view rhs, CompareCase compare_case) {
   return CompareT<char16_t>(lhs, rhs, compare_case);
 }

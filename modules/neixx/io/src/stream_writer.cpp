@@ -54,7 +54,7 @@ void StreamWriter::WriteString(std::string_view text, WriteCallback user_callbac
   }
 
   const std::size_t len = text.size();
-  scoped_refptr<IOBufferWithSize> sized_buffer = IOBufferPool::GetInstance().AcquireBuffer(len);
+  scoped_refptr<PooledIOBuffer> sized_buffer = IOBufferPool::GetInstance().AcquireBuffer(len);
   std::memcpy(sized_buffer->data(), text.data(), len);
   scoped_refptr<IOBuffer> base_buffer(sized_buffer.get());
 

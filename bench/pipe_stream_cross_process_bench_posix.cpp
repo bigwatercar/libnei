@@ -37,7 +37,7 @@ constexpr int kDefaultIterations = 5000;
 constexpr std::size_t kDefaultPayloadSize = 64;
 
 struct BufferHolder {
-  nei::scoped_refptr<nei::IOBufferWithSize> sized;
+  nei::scoped_refptr<nei::PooledIOBuffer> sized;
   nei::scoped_refptr<nei::IOBuffer> buf;
 };
 
@@ -145,7 +145,7 @@ bool RunChild(int read_fd, int write_fd, std::size_t payload_size, int iteration
 struct BenchLoop : public std::enable_shared_from_this<BenchLoop> {
   std::shared_ptr<nei::PipeInputStream> input;
   std::shared_ptr<nei::PipeOutputStream> output;
-  nei::scoped_refptr<nei::IOBufferWithSize> payload;
+  nei::scoped_refptr<nei::PooledIOBuffer> payload;
   nei::scoped_refptr<nei::IOBuffer> payload_view;
   BufferHolder read_holder;
   std::size_t payload_size = 0;
