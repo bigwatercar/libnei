@@ -2,15 +2,19 @@
 
 ## 1. 文档概述
 
-本文档对 `neixx/net` 网络子系统的全部公开组件进行综合技术说明，涵盖数据结构层（`IPAddress` / `IPEndPoint` / `AddressList`）、DNS 解析层（`HostResolver`）、传输层（`TCPClientSocket` / `TCPServerSocket` / `UDPSocket` / `TLSClientSocket` / `TLSServerSocket`）的 API 语义、线程模型、跨平台架构、生命周期管理、测试覆盖与性能基准。
+本文档对 `neixx/net` 网络子系统的全部公开组件进行综合技术说明，涵盖数据结构层（`IPAddress` / `IPEndPoint` / `AddressList`）、DNS 解析层（`HostResolver`）、传输层（`TCPClientSocket` / `TCPServerSocket` / `UDPSocket` / `TLSClientSocket` / `TLSServerSocket`）、应用层（HTTP/1.1 Server+Client、WebSocket、连接池、Keep-Alive）的 API 语义、线程模型、跨平台架构、生命周期管理、测试覆盖与性能基准。
 
 本文档基于以下源码：
 
-- `modules/neixx/net/include/neixx/net/*.h`（8 个公开头文件）
-- `modules/neixx/net/src/*.cpp` / `*.h`（20 个实现文件）
-- `tests/net/*.cpp`（3 个测试文件，41 个测试用例）
-- `bench/tcp_*.cpp`（4 个网络性能基准测试）
-- `bench/tls_throughput_bench.cpp`（TLS 吞吐量基准测试）
+- `modules/neixx/net/include/neixx/net/*.h`（23 个公开头文件：11 顶层 + 9 http + 3 websocket）
+- `modules/neixx/net/src/*.cpp` / `*.h`（实现文件）
+- `tests/net/*.cpp`（TCP/TLS/UDP/DNS/HTTP/WebSocket/连接池 测试）
+- `bench/tcp_*.cpp` / `tls_throughput_bench.cpp` / `http_throughput_bench.cpp`（网络性能基准测试）
+
+> 本文档为旧版综合参考。HTTP/WebSocket/连接池等最新子系统的权威说明见：
+> - `neixx_http_client_pool_idle_probe_technical.md`（连接池 CLOSE_WAIT 修复：idle timeout + Peek 探活）
+> - `neixx_tls_technical.md`（TLS + Keep-Alive）
+> - 下节「模块现状」
 
 ## 2. 模块总览
 
@@ -36,15 +40,29 @@ neixx/net/
 ├── 传输层（UDP）
 │   └── UDPSocket          — 异步 UDP 数据报套接字（独立接口，不继承流接口）
 │
+├── 应用层（HTTP）
+│   ├── HttpServer            — 统一异步 HTTP 服务器（HTTP/1.1 + HTTP/2 单端口 ALPN 分流；
+│   │                            路由、流式响应、TLS、WebSocket 升级）
+│   ├── HttpClient            — 异步 HTTP/1.1 客户端（缓冲/流式下载 SendStreaming/流式上传 SendBody）
+│   ├── Http2ClientSession    — HTTP/2 客户端（多路复用 SubmitRequest/SubmitRequestWithBody）
+│   ├── HttpFileTransfer      — 大文件便捷层（DownloadToFile / UploadFromFile）
+│   ├── Http1Parser           — 基于 llhttp 的 HTTP/1.1 解析器（增量 OnBody + chunked）
+│   └── HttpClientPool        — keep-alive 连接池（idle timeout + Peek 探活）
+│
+├── 应用层（WebSocket）
+│   ├── WebSocketClient       — WebSocket 客户端
+│   ├── WebSocketConnection   — WebSocket 连接
+│   └── WebSocketFrame        — 帧编解码
+│
 └── 平台基础设施
     └── WsaInit / EnsureWsa — Windows Winsock 一次性初始化（POSIX 空操作）
 ```
 
-**文件统计**：30 个文件（8 公共头 + 22 实现），~5,100 行代码
+**文件统计**：23 个公开头文件（11 顶层 + 9 http + 3 websocket）+ 对应实现文件
 
-**测试统计**：42 个测试用例（TCP 12 + DNS 21 + UDP 11），四象限全量 ~2,300 测试
+**测试统计**：全量回归 839+ 测试 / 110 suites（2026-08-14 Windows Release），net 覆盖 TCP/TLS/UDP/DNS/HTTP/WebSocket/连接池
 
-**性能基准**：5 个网络 benchmark（TCP 吞吐量、连接压力、RTT、跨系统、TLS 吞吐量）
+**性能基准**：TCP 吞吐、连接压力(C10K)、RTT、跨系统、TLS 吞吐、HTTP 吞吐（keep-alive 回环 24.7k req/s）
 
 ---
 
@@ -472,6 +490,53 @@ class TLSServerSocket {
 
 **结论**：16KB 是甜点——恰好填满一个 TLS 记录，零浪费，跨平台一致。
 超过 16KB 时 mbedTLS 截断，多余缓冲空间浪费且增加 PostTask 往返开销。
+
+### 6.4 mbedTLS 线程化 — 并发 TLS 握手安全（2026-08-15）
+
+**问题**：WSL TSan 在 HTTP/1.1 + HTTP/2 多线程压力测试（`Http2StressFixture.*`）
+下发现 vendored mbedTLS 3.6.3 的两处**真实数据竞争**：
+
+1. **全局 PSA RNG**（`library/ctr_drbg.c` → `psa_crypto.c` 的 `global_data`）：
+   TLS 1.3 密钥交换**始终**从 mbedTLS **全局 PSA 随机源**取随机数
+   （`mbedtls_psa_get_random` → `mbedtls_ctr_drbg_random`），并非 `SSLContext`
+   通过 `mbedtls_ssl_conf_rng` 设置的每上下文 ctr_drbg。两个线程并发握手
+   （srv IO 线程 + client IO 线程）即竞争。全局 PSA 状态仅在
+   `MBEDTLS_THREADING_C` 启用时受互斥保护。
+2. **`MBEDTLS_SELF_TEST` 全局计数器**（`library/ecp.c` 的
+   `mul_count/add_count/dbl_count`）：每次域乘法自增，无锁；并发 ECDH 竞争。
+   libnei 不使用 `*_self_test()`，纯属编译进二进制。
+
+**修复**：
+
+| 文件 | 改动 |
+|---|---|
+| `3rdparty/mbedtls/include/mbedtls/mbedtls_config.h` | 启用 `MBEDTLS_THREADING_C` + `MBEDTLS_THREADING_ALT`；禁用 `MBEDTLS_SELF_TEST` |
+| `3rdparty/mbedtls/include/mbedtls/threading_alt.h`（新） | 定义 `mbedtls_threading_mutex_t { void* mutex; }`——不透明指针指向 C++ `std::mutex`，C 兼容 |
+| `modules/neixx/net/src/mbedtls_threading.h`（新） | 内联 `nei::net::internal::EnsureMbedtlsThreading()`：经 `mbedtls_threading_set_alt` 注册 `std::mutex` 回调（每二进制/DSO 一次，`static` 局部幂等） |
+| `modules/neixx/net/src/ssl_context.cpp` | 静态注册器 `MbedtlsThreadingRegistrar` 库加载时自动注册；`SSLContext` 构造再调一次作双保险 |
+
+**关键点：同一进程存在两份独立 mbedTLS 副本**。mbedTLS 同时链接进
+`libnei`（POSIX 隐藏可见性、Windows DLL 不导出静态库符号）与测试可执行文件
+`nei_tests`（`test_cert.h` / `tls_socket_test.cpp` 直接调用 `mbedtls_*`）。
+每份副本各有独立的线程化全局，须**各自注册**：
+
+- `libnei` 副本：由 `ssl_context.cpp` 静态注册器在库加载时自动完成——**正常业务
+  代码无需手动调用** `EnsureMbedtlsThreading()`（走 `SSLContext` / `TLSClientSocket`
+  即自动生效）。
+- 测试可执行文件副本：`test_cert.h` 的 `Generate()` 与 `tls_socket_test.cpp` 的
+  `GenerateSelfSignedCert()` 在首次直接 mbedTLS 调用前手动注册。缺少注册时证书
+  生成会以 `MBEDTLS_ERR_THREADING_BAD_INPUT_DATA (-0x1C)`（ALT 默认桩
+  `threading_mutex_fail`）失败。
+
+**顺带修复（valgrind 发现）**：`TLSServerSocket::Impl::Close()` 增加
+`server_.reset()`，断开 `Impl -> server_ -> worker_selector_ -> Impl` 引用环
+（`TCPServerSocket::Close()` 只移出 `accept_callback_`，未清除 `worker_selector_`）。
+否则每个 TLS 服务器关闭后泄漏监听器（`TLSServerSocket::Impl` + `TCPServerSocket`）。
+
+**验证**（2026-08-15）：
+- WSL TSan：`Http2StressFixture.*` 5/5 通过，零 ThreadSanitizer 告警。
+- WSL Release / Windows Debug / Windows Release：TLS + H2 + 压力 35/35。
+- valgrind（WSL Release）：无非法读写；监听器引用环泄漏消除。
 
 ---
 

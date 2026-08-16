@@ -414,7 +414,7 @@ IOBufferPool& IOBufferPool::GetInstance() {
 class NEI_API IOBufferPool {
 public:
     static IOBufferPool& GetInstance();
-    scoped_refptr<IOBufferWithSize> AcquireBuffer(std::size_t size);
+    scoped_refptr<PooledIOBuffer> AcquireBuffer(std::size_t size);
     void PurgeMemory();
 
 private:

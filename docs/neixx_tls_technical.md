@@ -19,7 +19,7 @@ modules/neixx/net/
       ├── tls_client_socket.cpp     # 内存 BIO + 异步握手状态机 + 加解密
       └── tls_server_socket.cpp     # TCP accept → TLS 握手
 tests/net/
-  └── tls_socket_unittest.cpp       # 4 测试 (CertGeneration, BasicHandshake, etc.)
+  └── tls_socket_test.cpp        # 4 测试 (CertGeneration, BasicHandshake, etc.)
 ```
 
 ---
