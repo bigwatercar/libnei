@@ -13,6 +13,7 @@
 #include <cstring>
 #include <deque>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -196,6 +197,12 @@ struct HttpClient::Impl {
   // and by I/O callbacks on the bound I/O thread — callers must not
   // invoke Send() concurrently on the same instance.
   std::atomic<State> state{State::kIdle};
+  // Guards the connection pointer members (tcp_socket / tls_socket /
+  // h2_session, and proto) against any-thread is_connected()/Peek() probes
+  // racing with pointer writes in Send()/OnConnectComplete()/Finish().
+  // The state-machine internals use the members directly on their owning
+  // threads; only the cross-thread probe/write boundary takes the lock.
+  mutable std::mutex conn_mutex_;
   std::unique_ptr<net::TCPClientSocket> tcp_socket;
   std::unique_ptr<net::TLSClientSocket> tls_socket;
   net::SSLContext *ssl_ctx = nullptr;
@@ -254,8 +261,13 @@ struct HttpClient::Impl {
       return HttpRequestHandle();
     }
 
-    this->io_runner = std::move(io_runner);
-    this->ssl_ctx = ssl_ctx;
+    // io_runner is read by Close() from any thread — publish it under the
+    // connection lock.
+    {
+      std::lock_guard<std::mutex> lock(conn_mutex_);
+      this->io_runner = std::move(io_runner);
+      this->ssl_ctx = ssl_ctx;
+    }
 
     const int64_t generation = next_generation_++;
     auto active = std::make_shared<std::atomic<bool>>(true);
@@ -301,7 +313,14 @@ struct HttpClient::Impl {
     HttpRequestHandle handle = MakeHandle(client, generation, active);
 
     // If we already have a live socket (keep-alive reuse), skip connect.
-    if (tcp_socket || tls_socket) {
+    // Probe under the lock: an any-thread is_connected()/Peek() may run
+    // concurrently with this Send.
+    bool have_socket = false;
+    {
+      std::lock_guard<std::mutex> lock(conn_mutex_);
+      have_socket = (tcp_socket || tls_socket);
+    }
+    if (have_socket) {
       state = State::kWriting;
       DoWriteRequest(client);
       return handle;
@@ -309,13 +328,20 @@ struct HttpClient::Impl {
 
     state = State::kConnecting;
 
+    // Create the socket under the lock (pointer write); connect outside it.
+    {
+      std::lock_guard<std::mutex> lock(conn_mutex_);
+      if (ssl_ctx) {
+        auto tcp = std::make_unique<net::TCPClientSocket>();
+        tls_socket = std::make_unique<net::TLSClientSocket>(std::move(tcp), ssl_ctx);
+      } else {
+        tcp_socket = std::make_unique<net::TCPClientSocket>();
+      }
+    }
     if (ssl_ctx) {
-      auto tcp = std::make_unique<net::TCPClientSocket>();
-      tls_socket = std::make_unique<net::TLSClientSocket>(std::move(tcp), ssl_ctx);
       tls_socket->Connect(
           endpoint, [self](bool ok) { self->impl_->OnConnectComplete(self.get(), ok); }, this->io_runner);
     } else {
-      tcp_socket = std::make_unique<net::TCPClientSocket>();
       bool ok = tcp_socket->Connect(
           endpoint, [self](bool success) { self->impl_->OnConnectComplete(self.get(), success); }, this->io_runner);
       if (!ok)
@@ -341,9 +367,13 @@ struct HttpClient::Impl {
     // list is non-empty and excludes "http/1.1" (strict-h2 client): that
     // connection cannot carry h1, so the request fails.
     if (tls_socket && tls_socket->GetNegotiatedProtocol() == "h2") {
-      proto = Proto::kHttp2;
-      h2_session = scoped_refptr<Http2ClientSession>(new Http2ClientSession());
-      auto tls = std::move(tls_socket);
+      std::unique_ptr<net::TLSClientSocket> tls;
+      {
+        std::lock_guard<std::mutex> lock(conn_mutex_);
+        proto = Proto::kHttp2;
+        h2_session = scoped_refptr<Http2ClientSession>(new Http2ClientSession());
+        tls = std::move(tls_socket);
+      }
       auto self = scoped_refptr<HttpClient>(client);
       h2_session->AdoptConnected(std::move(tls), this->io_runner, [self](bool ok, std::string) {
         if (!ok) {
@@ -777,16 +807,27 @@ struct HttpClient::Impl {
   }
 
   void Finish(HttpClient *client, std::unique_ptr<HttpResponse> response) {
-    if (proto == Proto::kHttp2) {
+    // Snapshot proto under the lock: Finish() may run on the Send thread
+    // (synchronous connect failure / destruction) while OnConnectComplete()
+    // upgrades proto on the I/O thread.
+    Proto current_proto;
+    {
+      std::lock_guard<std::mutex> lock(conn_mutex_);
+      current_proto = proto;
+    }
+    if (current_proto == Proto::kHttp2) {
       // h2 teardown: close the session and fail every in-flight request.
       // This is only reached by Close()/destruction/connect failure — normal
       // completion is delivered per stream in FinishH2Stream.
       State prev = state.exchange(State::kClosed);
       if (prev == State::kClosed)
         return;
-      if (h2_session) {
-        h2_session->Close();
-        h2_session.reset();
+      {
+        std::lock_guard<std::mutex> lock(conn_mutex_);
+        if (h2_session) {
+          h2_session->Close();
+          h2_session.reset();
+        }
       }
       for (auto &entry : h2_pending) {
         H2Pending &p = *entry.second;
@@ -826,13 +867,16 @@ struct HttpClient::Impl {
       State prev = state.exchange(State::kClosed);
       if (prev == State::kClosed)
         return;
-      if (tcp_socket) {
-        tcp_socket->Close();
-        tcp_socket.reset();
-      }
-      if (tls_socket) {
-        tls_socket->Close();
-        tls_socket.reset();
+      {
+        std::lock_guard<std::mutex> lock(conn_mutex_);
+        if (tcp_socket) {
+          tcp_socket->Close();
+          tcp_socket.reset();
+        }
+        if (tls_socket) {
+          tls_socket->Close();
+          tls_socket.reset();
+        }
       }
     } else {
       // Keep-alive reuse only runs on the I/O thread (response path).
@@ -932,7 +976,11 @@ HttpRequestHandle HttpClient::SendBody(const HttpRequest &request,
 void HttpClient::Close() {
   // Safe from any thread: when called off the I/O thread, the close is
   // posted there so it serializes with in-flight I/O callbacks.
-  scoped_refptr<SingleThreadTaskRunner> runner = impl_->io_runner;
+  scoped_refptr<SingleThreadTaskRunner> runner;
+  {
+    std::lock_guard<std::mutex> lock(impl_->conn_mutex_);
+    runner = impl_->io_runner;
+  }
   if (runner && !runner->BelongsToCurrentThread()) {
     auto self = scoped_refptr<HttpClient>(this);
     runner->PostTask(FROM_HERE, [self]() { self->impl_->Finish(self.get(), nullptr); });
@@ -942,6 +990,8 @@ void HttpClient::Close() {
 }
 
 bool HttpClient::is_connected() const {
+  // Cross-thread probe: serialize with pointer writes in Send/Finish.
+  std::lock_guard<std::mutex> lock(impl_->conn_mutex_);
   if (impl_->proto == Impl::Proto::kHttp2)
     return impl_->state.load() != Impl::State::kClosed && impl_->h2_session && impl_->h2_session->is_connected();
   return impl_->state.load() == Impl::State::kIdle && (impl_->tcp_socket || impl_->tls_socket);
@@ -950,7 +1000,9 @@ bool HttpClient::is_connected() const {
 bool HttpClient::Peek() const {
   // Idle probe: only meaningful when the client is in the Idle state.  The
   // pool calls this before reusing a keep-alive connection to detect a peer
-  // that has closed the idle connection (CLOSE_WAIT).
+  // that has closed the idle connection (CLOSE_WAIT).  Runs under the
+  // connection lock (non-blocking) so pointer reads stay race-free.
+  std::lock_guard<std::mutex> lock(impl_->conn_mutex_);
   if (impl_->proto == Impl::Proto::kHttp2)
     return impl_->state.load() != Impl::State::kClosed && impl_->h2_session && impl_->h2_session->is_connected()
            && impl_->h2_inflight.load(std::memory_order_relaxed) == 0;
