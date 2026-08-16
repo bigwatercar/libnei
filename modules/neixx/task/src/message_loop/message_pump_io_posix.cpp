@@ -18,7 +18,9 @@
 #include <sys/eventfd.h>
 #include <unistd.h>
 
+#include <nei/build/nei_global.h>
 #include <nei/debug/check.h>
+#include <nei/log/log.h>
 #include <neixx/synchronization/lock.h>
 #include <neixx/threading/platform_thread.h>
 #include <neixx/threading/thread_local.h>
@@ -61,13 +63,13 @@ public:
   MessagePumpForIOState() {
     epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
     if (epoll_fd_ < 0) {
-      std::fprintf(stderr, "[MessagePumpForIO] epoll_create1 failed: %s\n", std::strerror(errno));
+      NEI_LOG_C(g_nei_logger, NEI_L_ERROR, "[MessagePumpForIO] epoll_create1 failed: %s", std::strerror(errno));
       return;
     }
 
     event_fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (event_fd_ < 0) {
-      std::fprintf(stderr, "[MessagePumpForIO] eventfd failed: %s\n", std::strerror(errno));
+      NEI_LOG_C(g_nei_logger, NEI_L_ERROR, "[MessagePumpForIO] eventfd failed: %s", std::strerror(errno));
       (void)close(epoll_fd_);
       epoll_fd_ = -1;
       return;
@@ -82,7 +84,7 @@ public:
     // with a real user fd that happens to have the same numeric value.
     ev.data.fd = event_fd_;
     if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, event_fd_, &ev) != 0) {
-      std::fprintf(stderr, "[MessagePumpForIO] epoll_ctl ADD wakefd failed: %s\n", std::strerror(errno));
+      NEI_LOG_C(g_nei_logger, NEI_L_ERROR, "[MessagePumpForIO] epoll_ctl ADD wakefd failed: %s", std::strerror(errno));
       (void)close(event_fd_);
       (void)close(epoll_fd_);
       event_fd_ = -1;

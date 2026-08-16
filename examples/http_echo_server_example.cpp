@@ -29,6 +29,7 @@
 #include <string>
 #include <thread>
 
+#include <nei/build/nei_global.h>
 #include <nei/log/log.h>
 #include <neixx/command_line/command_line.h>
 #include <neixx/common/at_exit.h>
@@ -144,6 +145,9 @@ int main(int argc, char **argv) {
       nei_log_release_sink(sink);
     nei_log_update_config();
   }
+  // 开启库内部诊断日志（SSL/TLS 错误等），独立 stdout 通道，AtExit 时由
+  // nei_log_shutdown 统一回收。
+  nei_enable_diagnostic_message_to_stdout();
 #if defined(_WIN32)
   (void)argc;
   (void)argv;

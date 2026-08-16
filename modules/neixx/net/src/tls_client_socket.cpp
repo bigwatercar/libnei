@@ -8,6 +8,7 @@
 #include <mbedtls/ssl.h>
 #include <mbedtls/error.h>
 
+#include <nei/build/nei_global.h>
 #include <nei/debug/check.h>
 #include <nei/log/log.h>
 #include <neixx/functional/bind.h>
@@ -255,7 +256,7 @@ private:
     if (state_ == State::Closed || state_ == State::Closing)
       return;
     if (!ok) {
-      NEI_LOG(NEI_L_ERROR, "[TLSClientSocket] TCP connect failed");
+      NEI_LOG_C(g_nei_logger, NEI_L_ERROR, "[TLSClientSocket] TCP connect failed");
       NotifyConnect(false);
       return;
     }
@@ -293,7 +294,7 @@ private:
       // WANT_WRITE with empty send buffer, or other error.
       char err[128];
       mbedtls_strerror(ret, err, sizeof(err));
-      NEI_LOG(NEI_L_ERROR, "[TLSClientSocket] handshake failed: %s (%d)", err, ret);
+      NEI_LOG_C(g_nei_logger, NEI_L_ERROR, "[TLSClientSocket] handshake failed: %s (%d)", err, ret);
       NotifyConnect(false);
       return;
     }
@@ -308,7 +309,11 @@ private:
       // or we enter an infinite spin (ReadAsync → EOF →
       // RunHandshakeLoop → WANT_READ → ReadAsync → EOF → ...).
       if (!ok || n == 0) {
-        NEI_LOG(NEI_L_ERROR, "[TLSClientSocket] transport read failed during handshake (ok=%d, n=%zu)", ok, n);
+        NEI_LOG_C(g_nei_logger,
+                  NEI_L_ERROR,
+                  "[TLSClientSocket] transport read failed during handshake (ok=%d, n=%zu)",
+                  ok,
+                  n);
         self->NotifyConnect(false);
         return;
       }

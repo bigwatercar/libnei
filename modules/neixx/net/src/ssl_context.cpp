@@ -9,6 +9,7 @@
 #include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
 
+#include <nei/build/nei_global.h>
 #include <nei/log/log.h>
 
 #include "mbedtls_threading.h"
@@ -85,7 +86,7 @@ public:
     if (ret != 0) {
       char buf[128];
       mbedtls_strerror(ret, buf, sizeof(buf));
-      NEI_LOG(NEI_L_ERROR, "[SSLContext] cert parse: %s", buf);
+      NEI_LOG_C(g_nei_logger, NEI_L_ERROR, "[SSLContext] cert parse: %s", buf);
       return false;
     }
 
@@ -102,7 +103,7 @@ public:
     if (ret != 0) {
       char buf[128];
       mbedtls_strerror(ret, buf, sizeof(buf));
-      NEI_LOG(NEI_L_ERROR, "[SSLContext] key parse: %s", buf);
+      NEI_LOG_C(g_nei_logger, NEI_L_ERROR, "[SSLContext] key parse: %s", buf);
       return false;
     }
 
@@ -110,7 +111,7 @@ public:
     if (ret != 0) {
       char buf[128];
       mbedtls_strerror(ret, buf, sizeof(buf));
-      NEI_LOG(NEI_L_ERROR, "[SSLContext] conf_own_cert: %s", buf);
+      NEI_LOG_C(g_nei_logger, NEI_L_ERROR, "[SSLContext] conf_own_cert: %s", buf);
       return false;
     }
     return true;

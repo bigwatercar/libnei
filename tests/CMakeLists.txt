@@ -50,6 +50,7 @@ add_executable(
   flake_id_test.cpp
   lock_test.cpp
   log_test.cpp
+  nei_global_test.cpp
   functional_test.cpp
   small_object_allocator_test.cpp
   memory_pressure_monitor_test.cpp

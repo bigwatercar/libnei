@@ -2,6 +2,8 @@ target_sources(
   nei
   PRIVATE include/nei/build/compiler_specific.h
           include/nei/build/nei_export.h
+          include/nei/build/nei_global.h
+          nei_global.c
 )
 
 target_include_directories(
