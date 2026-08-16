@@ -403,7 +403,11 @@ TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
   auto server_ok = std::make_shared<std::atomic<bool>>(false);
 
   auto server = std::make_shared<TLSServerSocket>(&server_ctx_);
-  srv_runner_->PostTask(FROM_HERE, [&, server_done]() {
+  // Listen 经 srv_runner_ 异步投递；客户端 Connect 经 io_runner_ 异步投递。
+  // 用事件等 Listen 就绪再发起连接（否则客户端可能先于服务器 bind/listen
+  // 完成而收到 ECONNREFUSED，见 SingleLargeWriteNoPartialDataLoss flaky）。
+  auto listen_done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
+  srv_runner_->PostTask(FROM_HERE, [&, server_done, listen_done]() {
     ASSERT_TRUE(server->Listen(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
         1,
@@ -433,7 +437,9 @@ TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
           (*do_read)();
         },
         srv_runner_));
+    listen_done->Signal();
   });
+  ASSERT_TRUE(listen_done->TimedWait(std::chrono::seconds(5))) << "server Listen never completed";
 
   // ---- Client: connect, send whole payload ----
   auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), &client_ctx_);
@@ -514,7 +520,11 @@ TEST_F(TlsSocketTest, SingleLargeWriteNoPartialDataLoss) {
   auto server_ok = std::make_shared<std::atomic<bool>>(false);
 
   auto server = std::make_shared<TLSServerSocket>(&server_ctx_);
-  srv_runner_->PostTask(FROM_HERE, [&, server_done]() {
+  // Listen 经 srv_runner_ 异步投递；客户端 Connect 经 io_runner_ 异步投递。
+  // 两者无同步时客户端可能先于服务器 bind/listen 完成而收到 ECONNREFUSED
+  // （间歇性 "TCP connect failed" flaky）——用事件等 Listen 就绪再发起连接。
+  auto listen_done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
+  srv_runner_->PostTask(FROM_HERE, [&, server_done, listen_done]() {
     ASSERT_TRUE(server->Listen(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
         1,
@@ -553,7 +563,9 @@ TEST_F(TlsSocketTest, SingleLargeWriteNoPartialDataLoss) {
           (*do_read)();
         },
         srv_runner_));
+    listen_done->Signal();
   });
+  ASSERT_TRUE(listen_done->TimedWait(std::chrono::seconds(5))) << "server Listen never completed";
 
   // ---- Client: connect, then issue exactly ONE WriteAsync ----
   auto client = std::make_shared<TLSClientSocket>(std::make_unique<TCPClientSocket>(), &client_ctx_);

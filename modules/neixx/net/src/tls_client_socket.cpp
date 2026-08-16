@@ -6,8 +6,10 @@
 #include <deque>
 
 #include <mbedtls/ssl.h>
+#include <mbedtls/error.h>
 
 #include <nei/debug/check.h>
+#include <nei/log/log.h>
 #include <neixx/functional/bind.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/task/sequence_checker.h>
@@ -253,6 +255,7 @@ private:
     if (state_ == State::Closed || state_ == State::Closing)
       return;
     if (!ok) {
+      NEI_LOG(NEI_L_ERROR, "[TLSClientSocket] TCP connect failed");
       NotifyConnect(false);
       return;
     }
@@ -288,6 +291,9 @@ private:
       }
 
       // WANT_WRITE with empty send buffer, or other error.
+      char err[128];
+      mbedtls_strerror(ret, err, sizeof(err));
+      NEI_LOG(NEI_L_ERROR, "[TLSClientSocket] handshake failed: %s (%d)", err, ret);
       NotifyConnect(false);
       return;
     }
@@ -302,6 +308,7 @@ private:
       // or we enter an infinite spin (ReadAsync → EOF →
       // RunHandshakeLoop → WANT_READ → ReadAsync → EOF → ...).
       if (!ok || n == 0) {
+        NEI_LOG(NEI_L_ERROR, "[TLSClientSocket] transport read failed during handshake (ok=%d, n=%zu)", ok, n);
         self->NotifyConnect(false);
         return;
       }
