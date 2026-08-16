@@ -684,6 +684,69 @@ TEST_F(HttpServerRequestHandleTest, H2CancelThenHandlerCallbacksAreNoop) {
   client->Close();
 }
 
+// h2 streaming-request 路由：读 body 途中 SetPriority（含越界钳制）不破坏
+// 取消流程，会话保持可用。
+TEST_F(HttpServerRequestHandleTest, H2StreamingRequestSetPriorityThenCancelWorks) {
+  auto client = scoped_refptr<HttpClient>(new HttpClient());
+  IPEndPoint addr(IPAddress::FromIPv4(127, 0, 0, 1), port_);
+
+  WaitableEvent hang_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  WaitableEvent hello_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  std::unique_ptr<HttpResponse> hang_result;
+  bool hang_got = false;
+  bool hello_ok = false;
+  client_runner_->PostTask(FROM_HERE, [this, client, addr, &hang_done, &hang_result, &hang_got]() mutable {
+    client->Send(MakePost("/upload", "hello world body"),
+                 addr,
+                 &client_auto_ctx_,
+                 client_runner_,
+                 [&hang_done, &hang_result, &hang_got](std::unique_ptr<HttpResponse> resp) {
+                   hang_result = std::move(resp);
+                   hang_got = true;
+                   hang_done.Signal();
+                 });
+  });
+
+  // 服务器 streaming-request handler 已发布句柄（body 读取挂起中）。
+  ASSERT_TRUE(handle_published_.TimedWait(std::chrono::seconds(15)));
+  for (int i = 0; i < 100 && !client->is_connected(); ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  ASSERT_TRUE(client->is_connected());
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  // 主线程设置优先级：边界与越界钳制。
+  EXPECT_TRUE(server_handle_.is_valid());
+  server_handle_.SetPriority(0);
+  server_handle_.SetPriority(7);
+  server_handle_.SetPriority(100);
+  server_handle_.SetPriority(-5);
+  EXPECT_TRUE(server_handle_.is_valid());
+
+  server_handle_.Cancel();
+  ASSERT_TRUE(hang_done.TimedWait(std::chrono::seconds(15)));
+  EXPECT_TRUE(hang_got);
+  EXPECT_EQ(nullptr, hang_result) << "cancelled h2 upload stream must fail with nullptr";
+  for (int i = 0; i < 100 && server_handle_.is_valid(); ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  EXPECT_FALSE(server_handle_.is_valid());
+
+  // 会话仍可用。
+  EXPECT_TRUE(client->is_connected());
+  client_runner_->PostTask(FROM_HERE, [&]() {
+    client->Send(MakeGet("/hello"),
+                 addr,
+                 &client_auto_ctx_,
+                 client_runner_,
+                 [&hello_done, &hello_ok](std::unique_ptr<HttpResponse> resp) {
+                   hello_ok = resp != nullptr;
+                   hello_done.Signal();
+                 });
+  });
+  ASSERT_TRUE(hello_done.TimedWait(std::chrono::seconds(15)));
+  EXPECT_TRUE(hello_ok);
+  client->Close();
+}
+
 } // namespace
 } // namespace net::http
 } // namespace nei

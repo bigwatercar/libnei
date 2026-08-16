@@ -270,6 +270,11 @@ struct Http1Connection : public RefCountedThreadSafe<Http1Connection> {
   int64_t next_request_generation_ = 1;
   std::atomic<int64_t> active_generation_{0};
   std::shared_ptr<std::atomic<bool>> active_handle_;
+  // Advisory priority of the in-flight request.  HTTP/1.1 has no wire
+  // channel for priority — recorded only, for symmetry with
+  // HttpRequestHandle's h1 behavior (no scheduling effect).  Written on
+  // the I/O thread only.
+  int32_t last_request_priority_ = -1;
 
   // Watchdog helper for the TLS drain phase (never pins the connection).
   // Must stay last: the factory is destroyed after every other member, so
@@ -736,7 +741,8 @@ struct Http1Connection : public RefCountedThreadSafe<Http1Connection> {
 
   // Builds the HttpServerRequestHandle for a freshly allocated streaming
   // request generation (I/O thread).  HTTP/1.1 has no per-request priority
-  // channel, so the set-priority action is a no-op (null).
+  // channel, so SetPriority only records the value (mirrors the client-side
+  // HttpRequestHandle h1 behavior).
   HttpServerRequestHandle MakeHandle(int64_t generation, std::shared_ptr<std::atomic<bool>> active) {
     nei::WeakPtr<Connection> weak = weak_factory_.GetWeakPtr();
     // The cancel lambda runs only on this connection's I/O thread (the
@@ -749,7 +755,18 @@ struct Http1Connection : public RefCountedThreadSafe<Http1Connection> {
           if (Connection *c = weak.get())
             c->CancelRequest(generation);
         },
-        /*set_priority_fn=*/nullptr);
+        [weak](int32_t priority) {
+          if (Connection *c = weak.get())
+            c->RecordRequestPriority(priority);
+        });
+  }
+
+  // Records the advisory priority of the in-flight request (I/O thread;
+  // h1 has no wire effect).
+  void RecordRequestPriority(int32_t priority) {
+    if (closed)
+      return;
+    last_request_priority_ = priority;
   }
 
   // Cancels the streaming request identified by |generation| (I/O thread).
