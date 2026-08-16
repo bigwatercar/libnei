@@ -34,24 +34,33 @@ bool RunRepeatedMultiWorkerJobs(uint64_t *total_done) {
     for (int i = 0; i < kRepeatedIterations && !finished.load(std::memory_order_relaxed); ++i) {
       // Vary worker counts to hit the multi-worker completion path.
       const int w = (i % 3 == 0) ? 4 : (i % 3 == 1) ? 8 : 16;
-      std::atomic<uint64_t> done{0};
+      // Heap state captured BY VALUE by the job callbacks: they run on pool
+      // worker threads while |w|/|done| would otherwise live on this
+      // thread's stack (TSan data race between the GetMaxConcurrency read
+      // of |w| and the next loop iteration writing it).
+      struct JobState {
+        std::atomic<uint64_t> done{0};
+        int workers;
+      };
+      auto state = std::make_shared<JobState>();
+      state->workers = w;
       auto h = PostJob(
           FROM_HERE,
           TaskTraits(),
-          [&](JobDelegate *d) {
+          [state](JobDelegate *d) {
             for (int n = 0; n < 64 && !d->ShouldYield(); ++n) {
-              if (done.fetch_add(1, std::memory_order_relaxed) >= kPerJobBudget - 1) {
+              if (state->done.fetch_add(1, std::memory_order_relaxed) >= kPerJobBudget - 1) {
                 break;
               }
             }
           },
-          [&](size_t) -> size_t {
-            const uint64_t v = done.load(std::memory_order_relaxed);
-            return v >= kPerJobBudget ? 0 : static_cast<size_t>(w);
+          [state](size_t) -> size_t {
+            const uint64_t v = state->done.load(std::memory_order_relaxed);
+            return v >= kPerJobBudget ? 0 : static_cast<size_t>(state->workers);
           },
           w);
       h.Join();
-      *total_done += done.load(std::memory_order_relaxed);
+      *total_done += state->done.load(std::memory_order_relaxed);
     }
     finished.store(true, std::memory_order_release);
   });

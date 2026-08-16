@@ -2738,8 +2738,16 @@
  *          library/ssl_tls13_*.c
  *
  * This module provides debugging functions.
+ *
+ * [libnei] DISABLED (vendored change): MBEDTLS_SSL_DEBUG_MSG inside
+ * mbedtls_ssl_free() dereferences ssl->conf->f_dbg.  The conf lives in
+ * SSLContext, and TLSClientSocket teardown is asynchronous — by the time
+ * mbedtls_ssl_free() runs on the IO thread, the caller's SSLContext may
+ * already be destroyed (TSan heap-use-after-free).  libnei does not use
+ * the Mbed TLS debug callbacks at all, so disabling the module removes
+ * the only conf dereference on the free path.
  */
-#define MBEDTLS_DEBUG_C
+// #define MBEDTLS_DEBUG_C
 
 /**
  * \def MBEDTLS_DES_C

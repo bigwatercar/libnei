@@ -1066,18 +1066,18 @@ TEST_F(TcpSocketTest, ClientOrphanDrainReadEOF) {
     ASSERT_TRUE(orphaned.TimedWait(std::chrono::seconds(5)));
   }
 
-  // Close and destroy the server ON the IO thread, signalling only after the
-  // destructor has run.  The server teardown synchronously fires the accept
-  // callback (ok=false), which touches |client_accepted| — a TestBody-local
-  // WaitableEvent.  Destroying the server from the main thread (or returning
-  // before its teardown completes) lets that callback run after the stack
-  // events are destroyed → UAF/mutex hang.  Waiting here makes the teardown
-  // fully synchronous with respect to the TestBody locals.
+  // Close and destroy the server ON the IO thread.  TCPServerSocket::Close()
+  // POSTS the pending-accept failure callback and the physical teardown as
+  // separate tasks; the fence must therefore be posted FROM the IO-thread
+  // task itself, so it queues behind them.  The accept failure callback
+  // touches |client_accepted|, a TestBody-local WaitableEvent: returning
+  // before it runs would let it signal a destroyed event (UAF/hang,
+  // TSan-confirmed).
   WaitableEvent teardown(WaitableEvent::ResetPolicy::kAutomatic, false);
-  io_runner_->PostTask(FROM_HERE, [&server, &teardown]() {
+  io_runner_->PostTask(FROM_HERE, [this, &server, &teardown]() {
     server->Close();
     server.reset();
-    teardown.Signal();
+    io_runner_->PostTask(FROM_HERE, [&teardown, this]() { teardown.Signal(); });
   });
   ASSERT_TRUE(teardown.TimedWait(std::chrono::seconds(5)));
 }
