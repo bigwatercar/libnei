@@ -22,6 +22,7 @@
 | `AutoLock` | RAII 锁守卫 | `base::AutoLock` |
 | `ConditionVariable` | 绑定 `Lock` 的条件变量 | `base::ConditionVariable` |
 | `WaitableEvent` | 自动/手动重置事件（可超时等待） | `base::WaitableEvent` |
+| `AtomicEvent` | 单字 auto-reset 事件（futex/WaitOnAddress，无锁握手） | `base::internal::FutexWrapper` 思路；详见 [`neixx_atomic_event_technical.md`](./neixx_atomic_event_technical.md) |
 
 **设计哲学：** 公开头文件绝对纯净（架构红线）——所有平台同步类型经 PIMPL 隔离，
 `Lock::GetImpl()` 返回 `void*`，调用点自行 `static_cast` 为平台类型；`ConditionVariable`

@@ -1,8 +1,10 @@
 target_sources(
   nei
-  PRIVATE include/neixx/synchronization/condition_variable.h
+  PRIVATE include/neixx/synchronization/atomic_event.h
+          include/neixx/synchronization/condition_variable.h
           include/neixx/synchronization/lock.h
           include/neixx/synchronization/waitable_event.h
+          src/atomic_event.cpp
           src/condition_variable.cpp
           src/lock.cpp
           src/waitable_event.cpp

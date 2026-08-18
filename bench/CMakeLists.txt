@@ -5,6 +5,9 @@ option(NEI_BENCHMARK_FMT
 )
 add_executable(log_bench log_bench.cpp)
 target_link_libraries(log_bench PRIVATE nei::nei)
+
+add_executable(atomic_event_bench atomic_event_bench.cpp)
+target_link_libraries(atomic_event_bench PRIVATE nei::nei)
 if(NEI_BENCHMARK_FMT)
   FetchContent_Declare(
     fmt URL https://github.com/fmtlib/fmt/archive/refs/tags/11.1.3.zip
