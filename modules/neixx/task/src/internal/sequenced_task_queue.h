@@ -71,6 +71,12 @@ public:
   bool HasDelayedWork() const;
   TimeTicks PeekNextDelayedRunTime() const;
 
+  // Consumer-side work query for single-consumer queues: ALSO considers
+  // work_queue_ (the consumer's private drain buffer).  ONLY callable from
+  // the consumer thread (or after the consumer has stopped) — any other
+  // caller races with the lock-free drain.
+  bool HasImmediateWorkOnConsumerSide() const;
+
   // ---- Lifecycle ----
 
   void Shutdown();
@@ -86,6 +92,12 @@ public:
 
   void SetOnTaskPostedCallback(OnTaskPostedCallback callback);
   void SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback);
+
+  // Fired when a delayed task changes the delayed head (first delayed task
+  // posted, or an earlier deadline).  Used by ThreadPool to refresh the
+  // DelayedTaskManager state WITHOUT paying this cost on the immediate-post
+  // hot path (immediate posts never change delayed state).
+  void SetOnDelayedTaskPostedCallback(OnTaskPostedCallback callback);
 
   // ---- WeakPtr ----
 

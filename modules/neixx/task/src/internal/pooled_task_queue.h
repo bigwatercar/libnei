@@ -34,6 +34,8 @@
 #endif
 
 namespace nei {
+class WaitableEvent;
+
 namespace internal {
 
 using OnTaskPostedCallback = std::function<void()>;
@@ -64,6 +66,18 @@ public:
   bool HasDelayedWork() const;
   TimeTicks PeekNextDelayedRunTime() const;
 
+  // Consumer-side work query (see SequencedTaskQueue).  Only callable from
+  // the dedicated worker thread itself.
+  bool HasImmediateWorkOnConsumerSide() const;
+
+  // Enables the SequencedTaskQueue single-consumer swap optimization.
+  // ONLY safe when exactly one worker can ever take tasks from this queue
+  // (dedicated / shared SingleThreadTaskRunner queues — the dedicated-owner
+  // mechanism already guarantees single-worker access).  The producer keeps
+  // its lock, but the consumer drains a lock-free work_queue_, halving lock
+  // contention on the ping-pong hot path.
+  void set_single_consumer(bool single_consumer);
+
   // ---- Completion accounting (for reliable Flush/wait-for-idle) ----
   //
   // posted_tasks_ is incremented on every successful enqueue (immediate and
@@ -89,6 +103,8 @@ public:
   WeakPtr<PooledTaskQueue> GetWeakPtr();
   void SetOnTaskPostedCallback(OnTaskPostedCallback callback);
   void SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback);
+  // See SequencedTaskQueue::SetOnDelayedTaskPostedCallback.
+  void SetOnDelayedTaskPostedCallback(OnTaskPostedCallback callback);
 
   // When true, multiple pool workers may process this queue in parallel.
   // The PooledTaskSource skips the in_flight guard for parallel queues.
@@ -132,6 +148,16 @@ public:
   /// Enqueue a single-task RegisteredTaskSource via the stored callback.
   /// Only meaningful for parallel queues using the new path.
   void EnqueueTaskSource(RegisteredTaskSource task_source);
+
+  // ---- Dedicated wake channel ----
+  //
+  // Cached pointer to the pool-level per-state WaitableEvent that dedicated
+  // (SingleThreadTaskRunner) posts signal directly — no global condition
+  // variable broadcast, no extra shard-lock handshake.  Set once by
+  // PooledTaskSource at registration; never changes while the pool is
+  // alive, so lock-free reads are safe.
+  WaitableEvent *dedicated_event() const;
+  void set_dedicated_event(WaitableEvent *event);
 
 private:
   /// Maximum workers that may simultaneously hold a slot on a single

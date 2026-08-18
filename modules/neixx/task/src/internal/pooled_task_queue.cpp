@@ -109,6 +109,10 @@ public:
     return seq_queue_.HasImmediateWork();
   }
 
+  bool HasImmediateWorkOnConsumerSide() const {
+    return seq_queue_.HasImmediateWorkOnConsumerSide();
+  }
+
   bool HasDelayedWork() const {
     return seq_queue_.HasDelayedWork();
   }
@@ -151,6 +155,10 @@ public:
     seq_queue_.SetOnTaskEnqueuedCallback(std::move(callback));
   }
 
+  void SetOnDelayedTaskPostedCallback(OnTaskPostedCallback callback) {
+    seq_queue_.SetOnDelayedTaskPostedCallback(std::move(callback));
+  }
+
   void SetEnqueueTaskSourceCallback(EnqueueTaskSourceCb callback) {
     enqueue_task_source_cb_ = std::move(callback);
   }
@@ -177,6 +185,19 @@ public:
 
   void set_dedicated(bool dedicated) {
     dedicated_ = dedicated;
+  }
+
+  void set_single_consumer(bool single_consumer) {
+    seq_queue_.set_single_consumer(single_consumer);
+  }
+
+  WaitableEvent *dedicated_event() const {
+    // Set once at registration; never mutated afterwards — lock-free read.
+    return dedicated_event_;
+  }
+
+  void set_dedicated_event(WaitableEvent *event) {
+    dedicated_event_ = event;
   }
 
   // ---- Chromium-aligned DidProcessTask ----
@@ -239,6 +260,11 @@ private:
   // ---- Parallel / pool-specific state ----
   bool parallel_ = false;
   bool dedicated_ = false;
+
+  // Dedicated wake channel cached from PooledTaskSource (see
+  // PooledTaskQueue::dedicated_event()).  Written once at registration,
+  // read lock-free afterwards.
+  WaitableEvent *dedicated_event_ = nullptr;
 
   // Shutdown flag duplicated from seq_queue_ for lock-free access from
   // WillRunTask (parallel hot path).  Set in Shutdown() alongside
@@ -307,6 +333,10 @@ bool PooledTaskQueue::HasImmediateWork() const {
   return impl_->HasImmediateWork();
 }
 
+bool PooledTaskQueue::HasImmediateWorkOnConsumerSide() const {
+  return impl_->HasImmediateWorkOnConsumerSide();
+}
+
 bool PooledTaskQueue::HasDelayedWork() const {
   return impl_->HasDelayedWork();
 }
@@ -343,6 +373,10 @@ void PooledTaskQueue::SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback)
   impl_->SetOnTaskEnqueuedCallback(std::move(callback));
 }
 
+void PooledTaskQueue::SetOnDelayedTaskPostedCallback(OnTaskPostedCallback callback) {
+  impl_->SetOnDelayedTaskPostedCallback(std::move(callback));
+}
+
 WeakPtr<PooledTaskQueue> PooledTaskQueue::GetWeakPtr() {
   return impl_->GetWeakPtr();
 }
@@ -361,6 +395,18 @@ bool PooledTaskQueue::is_dedicated() const {
 
 void PooledTaskQueue::set_dedicated(bool dedicated) {
   impl_->set_dedicated(dedicated);
+}
+
+void PooledTaskQueue::set_single_consumer(bool single_consumer) {
+  impl_->set_single_consumer(single_consumer);
+}
+
+WaitableEvent *PooledTaskQueue::dedicated_event() const {
+  return impl_->dedicated_event();
+}
+
+void PooledTaskQueue::set_dedicated_event(WaitableEvent *event) {
+  impl_->set_dedicated_event(event);
 }
 
 bool PooledTaskQueue::DidProcessTask() {

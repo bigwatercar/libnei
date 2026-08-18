@@ -12,6 +12,7 @@
 #include <neixx/common/time.h>
 #include <neixx/synchronization/condition_variable.h>
 #include <neixx/synchronization/lock.h>
+#include <neixx/synchronization/waitable_event.h>
 #include <neixx/threading/platform_thread.h>
 #include "pooled_task_queue.h"
 #include "registered_task_source.h"
@@ -83,10 +84,22 @@ public:
 
 private:
   // Per-source state.
+  //
+  // dedicated_event: per-state wake channel for the dedicated
+  // (SingleThreadTaskRunner) owner.  Replaces the old global wait_cv_
+  // Broadcast for dedicated wakes: a dedicated post now signals ONLY its
+  // own owner instead of waking every dedicated worker sleeping on the
+  // shared cv (thundering herd).  It lives HERE (pool-level lifetime)
+  // rather than on the queue so an owner sleeping on it can never outlive
+  // it when the queue is released; the states map is never erased while the
+  // pool is alive.  Its address is cached on the queue at registration and
+  // resolved once by the owner at Wait entry, so dedicated posts Signal and
+  // the owner Waits without any per-iteration shard-lock handshake.
   struct TaskSourceState {
     bool queued = false;
     bool in_flight = false;
     PlatformThread::PlatformThreadId dedicated_owner = 0;
+    WaitableEvent dedicated_event{WaitableEvent::ResetPolicy::kAutomatic, false};
   };
 
   struct TaskSourceHeapEntry {
@@ -103,7 +116,6 @@ private:
   TaskSource *GetTaskSourceForQueue(PooledTaskQueue *queue) const;
 
   void NotifyWorkAvailable();
-  void NotifyDedicatedWorkAvailable();
   std::size_t GetTaskSourceShardIndex(const TaskSource *task_source) const;
 
   static constexpr std::size_t kShardCount = 4;

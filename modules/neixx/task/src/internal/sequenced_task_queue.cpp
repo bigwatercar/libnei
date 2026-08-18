@@ -181,6 +181,7 @@ public:
 
     const TimeTicks delayed_run_time = task.delayed_run_time;
     OnTaskPostedCallback posted_callback_to_call;
+    OnTaskPostedCallback delayed_callback_to_call;
     OnTaskEnqueuedCallback enqueued_callback_to_call;
     TaskShutdownBehavior task_shutdown_behavior = TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN;
     {
@@ -199,8 +200,13 @@ public:
       delayed_incoming_queue_.push(std::move(task));
 
       const bool should_notify = !had_delayed_tasks || delayed_run_time < previous_head;
-      if (should_notify && on_task_posted_callback_) {
-        posted_callback_to_call = on_task_posted_callback_;
+      if (should_notify) {
+        if (on_task_posted_callback_) {
+          posted_callback_to_call = on_task_posted_callback_;
+        }
+        if (on_delayed_task_posted_callback_) {
+          delayed_callback_to_call = on_delayed_task_posted_callback_;
+        }
       }
       if (on_task_enqueued_callback_) {
         task_shutdown_behavior = task.traits.shutdown_behavior();
@@ -213,6 +219,9 @@ public:
     }
     if (posted_callback_to_call) {
       posted_callback_to_call();
+    }
+    if (delayed_callback_to_call) {
+      delayed_callback_to_call();
     }
 
     return true;
@@ -245,6 +254,25 @@ public:
     // drain buffer, modified lock-free by Take* on the consumer thread; reading
     // it here would race (TSan-confirmed).  If only work_queue_ holds tasks the
     // consumer is already draining them, so no external work signal is needed.
+    return !incoming_queue_.empty();
+  }
+
+  bool HasImmediateWorkOnConsumerSide() const {
+    if (!single_consumer_) {
+      return HasImmediateWork();
+    }
+    // Consumer-only query: work_queue_ is written exclusively by the
+    // consumer thread (ReloadWorkQueueIfEmpty + Take*), so reading it
+    // here is safe when called from that thread.  A dedicated worker must
+    // use this before parking: tasks already swapped into work_queue_ are
+    // invisible to the producer-side HasImmediateWork(), and parking while
+    // work_queue_ is non-empty strands them until the reclaim timeout
+    // releases the queue.  incoming_queue_ is only examined under lock
+    // (producers write it concurrently).
+    if (!work_queue_.empty()) {
+      return true;
+    }
+    AutoLock lock(lock_);
     return !incoming_queue_.empty();
   }
 
@@ -315,6 +343,11 @@ public:
   void SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback) {
     AutoLock lock(lock_);
     on_task_enqueued_callback_ = std::move(callback);
+  }
+
+  void SetOnDelayedTaskPostedCallback(OnTaskPostedCallback callback) {
+    AutoLock lock(lock_);
+    on_delayed_task_posted_callback_ = std::move(callback);
   }
 
 private:
@@ -403,6 +436,7 @@ private:
   TaskMinHeap delayed_incoming_queue_;
   OnTaskPostedCallback on_task_posted_callback_;
   OnTaskEnqueuedCallback on_task_enqueued_callback_;
+  OnTaskPostedCallback on_delayed_task_posted_callback_;
   // MUST be last — destroyed first so outstanding WeakPtrs are invalidated
   // before other members are torn down.
   WeakPtrFactory<SequencedTaskQueue> weak_factory_;
@@ -450,6 +484,10 @@ bool SequencedTaskQueue::HasImmediateWork() const {
   return impl_->HasImmediateWork();
 }
 
+bool SequencedTaskQueue::HasImmediateWorkOnConsumerSide() const {
+  return impl_->HasImmediateWorkOnConsumerSide();
+}
+
 bool SequencedTaskQueue::HasDelayedWork() const {
   return impl_->HasDelayedWork();
 }
@@ -480,6 +518,10 @@ const TaskTraits &SequencedTaskQueue::traits() const {
 
 void SequencedTaskQueue::SetOnTaskPostedCallback(OnTaskPostedCallback callback) {
   impl_->SetOnTaskPostedCallback(std::move(callback));
+}
+
+void SequencedTaskQueue::SetOnDelayedTaskPostedCallback(OnTaskPostedCallback callback) {
+  impl_->SetOnDelayedTaskPostedCallback(std::move(callback));
 }
 
 void SequencedTaskQueue::SetOnTaskEnqueuedCallback(OnTaskEnqueuedCallback callback) {

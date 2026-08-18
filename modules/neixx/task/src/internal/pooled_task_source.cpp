@@ -54,7 +54,10 @@ void PooledTaskSource::RegisterTaskQueue(PooledTaskQueue *queue) {
   }
 
   queue_to_source_[queue] = raw;
-  (void)shard.states.emplace(raw, TaskSourceState{});
+  auto result = shard.states.emplace(std::piecewise_construct, std::forward_as_tuple(raw), std::forward_as_tuple());
+  // Cache the dedicated wake channel on the queue so dedicated posts can
+  // Signal without re-locating the state (see ReEnqueueTaskQueue).
+  queue->set_dedicated_event(&result.first->second.dedicated_event);
   orphan_sources_.push_back(std::move(ts));
 }
 
@@ -76,7 +79,7 @@ bool PooledTaskSource::EnqueueTaskSourceLocked(RegisteredTaskSource task_source,
 
   auto it = shard.states.find(raw);
   if (it == shard.states.end()) {
-    auto result = shard.states.emplace(raw, TaskSourceState{});
+    auto result = shard.states.emplace(std::piecewise_construct, std::forward_as_tuple(raw), std::forward_as_tuple());
     it = result.first;
   }
 
@@ -319,13 +322,23 @@ bool PooledTaskSource::ReEnqueueTaskQueue(PooledTaskQueue *queue) {
   }
 
   // Dedicated (SingleThreadTaskRunner) queues: the owning worker polls the
-  // queue directly and never reads the global heap.  Just wake the owner.
+  // queue directly and never reads the global heap.  Wake the owner through
+  // its per-state event (WakeDedicatedWorker) — no global cv Broadcast.
+  // The owner check happens under the shard lock, but the Signal itself is
+  // issued OUTSIDE it: WaitableEvent::Signal takes the event's internal lock
+  // (POSIX auto-reset), and nesting it inside shard.lock widens the critical
+  // section on multi-producer posts.  Signalling after the owner released is
+  // harmless — the parked token is consumed by the next Wait (token memory).
   if (queue->is_dedicated()) {
-    std::size_t shard_index = GetTaskSourceShardIndex(raw);
-    Shard &shard = shards_[shard_index];
-    AutoLock lock(shard.lock);
-    auto it = shard.states.find(raw);
-    if (it != shard.states.end() && it->second.dedicated_owner != 0) {
+    bool has_owner = false;
+    {
+      std::size_t shard_index = GetTaskSourceShardIndex(raw);
+      Shard &shard = shards_[shard_index];
+      AutoLock lock(shard.lock);
+      auto it = shard.states.find(raw);
+      has_owner = (it != shard.states.end() && it->second.dedicated_owner != 0);
+    }
+    if (has_owner) {
       WakeDedicatedWorker(queue);
       return true;
     }
@@ -354,13 +367,18 @@ bool PooledTaskSource::PromoteAndReEnqueueTaskQueue(PooledTaskQueue *queue, cons
     // If we don't wake the owner here, promoted delayed tasks sit in the
     // immediate queue until the next post (or the 30s reclaim timeout), which
     // makes SingleThread delayed tasks execute ~1000x too slowly.  Mirror the
-    // dedicated handling in ReEnqueueTaskQueue.
+    // dedicated handling in ReEnqueueTaskQueue (owner check in-lock, Signal
+    // out-of-lock).
     if (queue->is_dedicated()) {
-      std::size_t shard_index = GetTaskSourceShardIndex(raw);
-      Shard &shard = shards_[shard_index];
-      AutoLock lock(shard.lock);
-      auto it = shard.states.find(raw);
-      if (it != shard.states.end() && it->second.dedicated_owner != 0) {
+      bool has_owner = false;
+      {
+        std::size_t shard_index = GetTaskSourceShardIndex(raw);
+        Shard &shard = shards_[shard_index];
+        AutoLock lock(shard.lock);
+        auto it = shard.states.find(raw);
+        has_owner = (it != shard.states.end() && it->second.dedicated_owner != 0);
+      }
+      if (has_owner) {
         WakeDedicatedWorker(queue);
         return true;
       }
@@ -451,13 +469,25 @@ void PooledTaskSource::ReleaseDedicatedQueue(PooledTaskQueue *queue) {
     state.in_flight = false;
   }
 
-  if (!is_shutdown_.load(std::memory_order_acquire) && !queue->is_shutdown() && queue->HasImmediateWork()) {
+  // Consumer-side query (this worker still owns the queue's work_queue_):
+  // with the single-consumer swap optimization, pending work may already be
+  // swapped into work_queue_ and would be invisible to HasImmediateWork().
+  if (!is_shutdown_.load(std::memory_order_acquire) && !queue->is_shutdown()
+      && queue->HasImmediateWorkOnConsumerSide()) {
     EnqueueTaskSource(RegisteredTaskSource{scoped_refptr<TaskSource>(raw)});
   }
 }
 
-void PooledTaskSource::WakeDedicatedWorker(PooledTaskQueue * /*queue*/) {
-  NotifyDedicatedWorkAvailable();
+void PooledTaskSource::WakeDedicatedWorker(PooledTaskQueue *queue) {
+  // Signal the owner's per-state event.  A dedicated post now wakes ONLY
+  // its own owner (auto-reset token with memory), instead of broadcasting
+  // the global wait_cv_ and herding every dedicated worker.
+  if (queue == nullptr) {
+    return;
+  }
+  if (WaitableEvent *park_event = queue->dedicated_event()) {
+    park_event->Signal();
+  }
 }
 
 void PooledTaskSource::WaitForDedicatedWork(PooledTaskQueue *queue, TimeDelta timeout, bool &timed_out) {
@@ -465,48 +495,35 @@ void PooledTaskSource::WaitForDedicatedWork(PooledTaskQueue *queue, TimeDelta ti
   const bool has_timeout = timeout.is_positive();
   const TimeTicks deadline = has_timeout ? TimeTicks::Now() + timeout : TimeTicks();
 
+  // Resolve the park target ONCE under the shard lock.  The state (and its
+  // event) lives at pool level and is never erased while the pool is alive,
+  // and dedicated_owner is only ever modified by this worker itself (Assign /
+  // Release), so the pointer stays valid for the entire wait loop — no
+  // per-iteration shard-lock handshake.
+  WaitableEvent *park_event = nullptr;
+  {
+    TaskSource *raw = GetTaskSourceForQueue(queue);
+    if (raw == nullptr) {
+      return;
+    }
+    std::size_t shard_index = GetTaskSourceShardIndex(raw);
+    Shard &shard = shards_[shard_index];
+    AutoLock lock(shard.lock);
+    auto it = shard.states.find(raw);
+    if (it == shard.states.end() || it->second.dedicated_owner != PlatformThread::CurrentId()) {
+      return;
+    }
+    park_event = &it->second.dedicated_event;
+  }
+
   for (;;) {
-    // Snapshot the wake generation up front.  If any wake (task post,
-    // re-enqueue) lands after this snapshot, we must re-check the queue
-    // instead of sleeping — this closes the lost-wakeup window between the
-    // HasImmediateWork() check and wait_cv_.Wait()/TimedWait() where a
-    // producer's Broadcast can be dropped, leaving the dedicated worker
-    // asleep until the 30s reclaim timeout.
-    const std::uint64_t observed_generation = wake_generation_.load(std::memory_order_acquire);
-
     if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
       return;
     }
-    if (queue->HasImmediateWork()) {
+    // Consumer-side query: this worker owns the queue, so tasks already
+    // swapped into the single-consumer work_queue_ are visible here.
+    if (queue->HasImmediateWorkOnConsumerSide()) {
       return;
-    }
-
-    {
-      TaskSource *raw = GetTaskSourceForQueue(queue);
-      if (raw == nullptr) {
-        return;
-      }
-      std::size_t shard_index = GetTaskSourceShardIndex(raw);
-      Shard &shard = shards_[shard_index];
-      AutoLock lock(shard.lock);
-      auto it = shard.states.find(raw);
-      if (it == shard.states.end() || it->second.dedicated_owner != PlatformThread::CurrentId()) {
-        return;
-      }
-    }
-
-    AutoLock wait_lock(wait_lock_);
-    if (is_shutdown_.load(std::memory_order_acquire) || queue->is_shutdown()) {
-      return;
-    }
-    if (queue->HasImmediateWork()) {
-      return;
-    }
-
-    // A wake arrived after our snapshot — loop back and re-check the queue
-    // rather than sleeping (the Broadcast may have been dropped).
-    if (wake_generation_.load(std::memory_order_acquire) != observed_generation) {
-      continue;
     }
 
     if (has_timeout) {
@@ -516,10 +533,14 @@ void PooledTaskSource::WaitForDedicatedWork(PooledTaskQueue *queue, TimeDelta ti
         return;
       }
       const auto wait_ms = std::max<std::int64_t>(1, remaining.InMilliseconds());
-      wait_cv_.TimedWait(std::chrono::milliseconds(wait_ms));
+      (void)park_event->TimedWait(std::chrono::milliseconds(wait_ms));
     } else {
-      wait_cv_.Wait();
+      park_event->Wait();
     }
+    // Woken (or timeout): loop back — HasImmediateWork() / shutdown are
+    // re-checked at the top.  The auto-reset event token has memory, so a
+    // Signal parked between the check and the Wait is consumed immediately
+    // by Wait itself — no lost wakeup.
   }
 }
 
@@ -528,6 +549,12 @@ void PooledTaskSource::WaitForDedicatedWork(PooledTaskQueue *queue, TimeDelta ti
 // =============================================================================
 
 void PooledTaskSource::Shutdown() {
+  // Idempotent guard first: the wakes below must run at most once.
+  if (is_shutdown_.exchange(true, std::memory_order_acq_rel)) {
+    return;
+  }
+  shutdown_fast_path_.store(true, std::memory_order_release);
+
   // Set the shutdown flag and wake every blocked worker UNDER wait_lock_.
   // Workers evaluate the shutdown flag / wake_generation while holding
   // wait_lock_ right before entering wait_cv_.Wait(), so broadcasting
@@ -541,10 +568,18 @@ void PooledTaskSource::Shutdown() {
   // SIGTERM.
   {
     AutoLock lock(wait_lock_);
-    shutdown_fast_path_.store(true, std::memory_order_release);
-    is_shutdown_.store(true, std::memory_order_release);
     wake_generation_.fetch_add(1, std::memory_order_acq_rel);
     wait_cv_.Broadcast();
+  }
+
+  // Wake every dedicated owner parked on its per-state event.
+  for (Shard &shard : shards_) {
+    AutoLock lock(shard.lock);
+    for (auto &kv : shard.states) {
+      if (kv.second.dedicated_owner != 0) {
+        kv.second.dedicated_event.Signal();
+      }
+    }
   }
 }
 
@@ -558,12 +593,6 @@ void PooledTaskSource::NotifyWorkAvailable() {
   // Shutdown() below.
   AutoLock wait_lock(wait_lock_);
   wait_cv_.Signal();
-}
-
-void PooledTaskSource::NotifyDedicatedWorkAvailable() {
-  wake_generation_.fetch_add(1, std::memory_order_acq_rel);
-  AutoLock wait_lock(wait_lock_);
-  wait_cv_.Broadcast();
 }
 
 void PooledTaskSource::NotifyTaskPosted() {

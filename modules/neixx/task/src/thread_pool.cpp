@@ -286,8 +286,11 @@ private:
         internal::SetCurrentPooledTaskQueue(dedicated_queue_);
         ProcessTaskBatch(dedicated_queue_);
 
-        // Check if more work is available
-        if (dedicated_queue_->HasImmediateWork()) {
+        // Check if more work is available.  Consumer-side query: with the
+        // single-consumer swap optimization, tasks already swapped into
+        // work_queue_ are invisible to the producer-side HasImmediateWork()
+        // — parking then would strand them until the reclaim timeout.
+        if (dedicated_queue_->HasImmediateWorkOnConsumerSide()) {
           internal::SetCurrentPooledTaskQueue(nullptr);
           if (delayed_task_manager_ != nullptr) {
             delayed_task_manager_->OnQueueUpdated(dedicated_queue_);
@@ -743,7 +746,8 @@ private:
             continue;
           }
 
-          if (!queue->HasImmediateWork()) {
+          // Consumer-side query: this thread is each queue's only consumer.
+          if (!queue->HasImmediateWorkOnConsumerSide()) {
             continue;
           }
 
@@ -954,6 +958,17 @@ public:
         return;
       }
       task_source_.ReEnqueueTaskQueue(queue);
+    });
+
+    // Delayed-state refresh rides a separate callback: immediate posts never
+    // change delayed state, so keeping OnQueueUpdated out of the immediate
+    // hot path saves a DelayedTaskManager lock + PeekNextDelayedRunTime lock
+    // per post (measurable on WSL2).
+    raw_queue->SetOnDelayedTaskPostedCallback([this, weak_queue]() {
+      internal::PooledTaskQueue *queue = weak_queue.get();
+      if (queue == nullptr) {
+        return;
+      }
       delayed_task_manager_.OnQueueUpdated(queue);
     });
 
@@ -974,6 +989,10 @@ public:
     // Mark as dedicated so PooledTaskSource assigns a single worker
     // exclusively to this queue, guaranteeing same-thread execution.
     raw_queue->set_dedicated(true);
+
+    // Exactly one worker (the dedicated owner) ever takes from this queue,
+    // so the lock-free work_queue_ swap optimization is safe here.
+    raw_queue->set_single_consumer(true);
 
     task_source_.RegisterTaskQueue(raw_queue);
     delayed_task_manager_.AddQueue(raw_queue);
@@ -997,6 +1016,15 @@ public:
         return;
       }
       task_source_.ReEnqueueTaskQueue(queue);
+    });
+
+    // See CreateSequencedTaskRunner: delayed-state refresh stays off the
+    // immediate-post hot path.
+    raw_queue->SetOnDelayedTaskPostedCallback([this, weak_queue]() {
+      internal::PooledTaskQueue *queue = weak_queue.get();
+      if (queue == nullptr) {
+        return;
+      }
       delayed_task_manager_.OnQueueUpdated(queue);
     });
 
@@ -1036,6 +1064,10 @@ public:
     // worker at a time, and the shared worker becomes its owner.
     raw_queue->set_dedicated(true);
 
+    // Only the shared worker thread ever takes from this queue, so the
+    // lock-free work_queue_ swap optimization is safe here too.
+    raw_queue->set_single_consumer(true);
+
     task_source_.RegisterTaskQueue(raw_queue);
     delayed_task_manager_.AddQueue(raw_queue);
 
@@ -1046,6 +1078,10 @@ public:
 
     // When a task is posted to this queue, wake the shared worker.
     raw_queue->SetOnTaskPostedCallback([sw]() { sw->wake_event.Signal(); });
+
+    // See CreateSequencedTaskRunner: delayed-state refresh stays off the
+    // immediate-post hot path.
+    raw_queue->SetOnDelayedTaskPostedCallback([this, raw_queue]() { delayed_task_manager_.OnQueueUpdated(raw_queue); });
 
     raw_queue->SetOnTaskEnqueuedCallback(
         [this](TaskShutdownBehavior /*shutdown_behavior*/) { task_source_.NotifyTaskPosted(); });
@@ -1106,6 +1142,15 @@ public:
         return;
       }
       task_source_.ReEnqueueTaskQueue(queue);
+    });
+
+    // See CreateSequencedTaskRunner: delayed-state refresh stays off the
+    // immediate-post hot path.
+    raw_queue->SetOnDelayedTaskPostedCallback([this, weak_queue]() {
+      internal::PooledTaskQueue *queue = weak_queue.get();
+      if (queue == nullptr) {
+        return;
+      }
       delayed_task_manager_.OnQueueUpdated(queue);
     });
 
