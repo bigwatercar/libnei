@@ -207,10 +207,7 @@ public:
       }
     });
 
-    queues_.push_back(std::move(queue));
-    selector_.AddQueue(raw_queue, priority);
-    RebuildQueueViewLocked();
-    return raw_queue;
+    return RegisterQueueLocked(std::move(queue), priority);
   }
 
   scoped_refptr<SequencedTaskRunner> CreateTaskRunnerLocked(const TaskTraits &traits) {
@@ -492,6 +489,20 @@ private:
       GetSequenceManagerThreadStateSlot().Set(nullptr);
       delete state;
     }
+  }
+
+  // Registers a queue with the manager: transfers ownership into queues_,
+  // registers it with the selector, and rebuilds the lock-free queue view.
+  // These three operations are an indivisible invariant -- never split them.
+  // Returns the raw queue pointer (owned by queues_).  Must be called under
+  // lock_.
+  internal::SequencedTaskQueue *RegisterQueueLocked(
+      std::unique_ptr<internal::SequencedTaskQueue> queue, TaskPriority priority) {
+    internal::SequencedTaskQueue *raw = queue.get();
+    queues_.push_back(std::move(queue));
+    selector_.AddQueue(raw, priority);
+    RebuildQueueViewLocked();
+    return raw;
   }
 
   void RebuildQueueViewLocked() {
