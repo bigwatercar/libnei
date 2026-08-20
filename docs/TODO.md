@@ -1,6 +1,6 @@
 ﻿# libnei — TODO & Roadmap
 
-**Updated**: 2026-08-16
+**Updated**: 2026-08-20
 
 ---
 
@@ -86,7 +86,7 @@
 
 ### P2
 
-- **唤醒路径性能回退（2026-08-15 bench 分析，待优化）** 📐:
+- **唤醒路径性能回退（2026-08-15 bench 分析）** ✅ 已关闭 2026-08-18（`970e7b6`）:
   丢失唤醒修复（`9c6e54a`，Signal/Broadcast 持 `wait_lock_`）在唤醒握手密集场景有可测回退（同机 A/B）：
   - **WSL dedicated SingleThread 投递 -38~41%**（4.08M→2.5M/s）：pthread ERRORCHECK mutex 每次握手成本 ~150ns；
   - **Windows Parallel 单线程投递 -18.6%**（4.68M→3.81M/s）：每任务两次 notify 的 SRW 锁成本；
@@ -112,6 +112,19 @@
   每帖必睡的场景无解。已回退，保留 9c6e54a 简单正确修复。实验数据：`wsl_task_{spin,nospin,nofix2}`。
   相关 bench 数据：`bench/results/{bench_task_20260815_092618, wsl_task_20260815_084819}`（修复版）、
   `{bench_task_nofix_win, wsl_task_nofix}`（无锁 A/B）、`wsl_task_{fix2,counter,event,align,wakeflag}`（优化实验）。
+  **✅ 关闭记录（2026-08-18，路线与预期不同）**：分析结论「先决条件是廉价的等待原语」已由
+  `e79b702` AtomicEvent 落地（单字 futex/WaitOnAddress，握手 314-319ns vs condvar 727-1019ns）。
+  但 AtomicEvent 全接入 task（分支 `atomic_event_optimize`，`5a86447`）经 A/B 评估**暂搁置**：
+  dedicated +57% 但三个多投递者场景回退（Parallel -12.5%、ST Delayed -12%、ST MT -17.5%），
+  且优化过程引入过真卡死（single_consumer 与 HasImmediateWork 失真）。最终路线 = cv 方案 +
+  四项与事件解耦的改进回移植（`970e7b6`）：
+  - single_consumer swap + `HasImmediateWorkOnConsumerSide`（dedicated 大头，防任务滞留）
+  - per-state dedicated WaitableEvent 替代全局 cv Broadcast（消除 dedicated 惊群，池级生命周期防悬垂）
+  - `OnQueueUpdated` 拆出 delayed 专用回调（脱离 immediate 投递热路径，每帖省 2 次锁）
+  - `Shutdown` 幂等守卫
+  **验收达成**：WSL dedicated **2.26M→4.26M（+88%，≥3.8M 目标 ✅）**，08-18 全量基线 dedicated
+  3.98M/s；ST Delayed +13%、Parallel/Worker Repost +11%、其余噪声带内，ST MT -9%（噪声带边缘，接受）。
+  双平台全量 927/903 零失败、TSan/ASAN 57/57。详细评估：`docs/task_wakeup_backport_evaluation_20260818.md`。
 
 - **HttpClientPool keep-alive 空闲连接 CLOSE_WAIT 堆积（2026-08-14 分析，待实施）** 📐:
   **风险**：keep-alive 连接 kIdle 时 socket 保留且无 pending read；对端（server）主动关闭空闲连接 →
@@ -187,6 +200,9 @@
   **方向**：需要对 `SequenceManager::Impl` 做整体 cache-line-aware 布局（热字段分
   group、冷字段单独隔离），而非单点修补。低优先级（当前 fast-path 默认 ON，
   selector 在 99% 场景不参与）。
+  **状态更新 2026-08-18**：`thread_pool_false_sharing_analysis.md` §8 的两个「下一步候选」
+  均已过期——single_consumer swap 消费路径已随唤醒路径回移植落地（`970e7b6`），廉价
+  per-wake 原语已由 AtomicEvent（`e79b702`）实现。本节方向（整体布局重构）不变。
 
 - **PipeStream direct dispatch continuation**: batch-quota-exhausted 路径可直连
   而非经 `PostTask`。低优先级 — 当前设计正确。
@@ -282,6 +298,17 @@
 
 ## 最近完成（记录，2026-07 ~ 08）
 
+- **Task 唤醒路径回移植（2026-08-18，`970e7b6`）** — AtomicEvent 接入经验反哺 cv 方案：四项与事件
+  解耦的改进（single_consumer swap、per-state dedicated 事件、delayed 回调拆分、Shutdown 幂等）
+  使 WSL dedicated 投递 **+88%**（2.26M→4.26M），P2 唤醒路径条目正式关闭。
+  评估：`docs/task_wakeup_backport_evaluation_20260818.md`。
+- **AtomicEvent 单字事件（2026-08-18，`e79b702`）** — 单字 auto-reset 事件：futex / WaitOnAddress
+  无锁握手（Win7 CRITICAL_SECTION+CONDITION_VARIABLE 兜底、动态解析 kernel32/kernelbase/apiset），
+  握手 314-319ns vs condvar 727-1019ns / WaitableEvent 1090-1144ns；Signal 精确唤醒单等待者
+  （惊群收敛）、futex_wake 计数钳制、park 前有界自旋。全接入 task 经评估暂搁置（见 P2 关闭记录）。
+  技术文档：`docs/neixx_atomic_event_technical.md`。
+- **2026-08-18 双平台全量 bench 新基线（`f0355b9`）** — `bench/results/baseline_(Ultra9-185H)_20260818_{windows,wsl}.md`；
+  report 工具化 + unified runner companion，HTTP/H2 吞吐纳入统一跑分（H2 并发 8 流对照 H1 1.85-3.16×）。
 - **HttpServerRequestHandle 服务端句柄（2026-08-16，`fc68a72`）** — 服务端流式路由可拿到可拷贝值类型句柄：`is_valid()` / `Cancel()`（h2 `RST_STREAM(CANCEL)` 仅该流失败、h1 关连接）/ `SetPriority()`（h2 RFC 7540 `PRIORITY` 帧 weight=1+(7-p)*32、h1 仅记录）。取消后 handler 的 respond/write/write_io/close 回调变 no-op（测试重放验证）。新增 `AddStreamingRouteWithHandle` / `AddStreamingRequestRouteWithHandle`；句柄经 WeakPtr + 共享 `atomic<bool>` active 标志定位，不持有连接。10 用例双平台过。
 - **句柄功能消毒器复查（2026-08-16）** — 旧 ASAN/valgrind 扫描早于句柄代码落地，已重跑：Windows ASAN 全量 912/912、WSL TSan 全量 891/891（排除已知环境失败）、valgrind 定向 6/6 0 errors。
 - **TSan 全量清零（2026-08-16，`42b3a75`/`8b122e2`/`30dac78`）** — 全量重扫（排除环境 DNS 与已知慢速挂起项）0 竞态报告：HttpClient 任意线程探针指针竞态（`conn_mutex_` 边界锁范式）、日志配置表初始化自锁 + slot 不可变发布、mbedtls vendored 关闭 `MBEDTLS_DEBUG_C`（异步 TLS teardown 经 `ssl->conf` 的 UAF）、测试侧 fence 排序与 `shared_ptr<State>` 捕获。
