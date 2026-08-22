@@ -1,6 +1,6 @@
 ﻿# libnei — TODO & Roadmap
 
-**Updated**: 2026-08-22
+**Updated**: 2026-08-23
 
 ---
 
@@ -297,6 +297,18 @@
 ---
 
 ## 最近完成（记录，2026-07 ~ 08）
+
+- **HTTP gzip/deflate 压缩（2026-08-23）** — 引入 vendored zlib v1.3.1（3rdparty/zlib，静态、PRIVATE 链接），
+  新增增量压缩原语 `neixx/net/http/gzip_stream.{h,cpp}`（GzipCompressor/GzipDecompressor，RFC 1952/1950/raw
+  deflate，PIMPL）。自动路径：
+  - 客户端：请求未指定时自动加 `Accept-Encoding: gzip`（h1 序列化 + h2 提交均注入）；响应
+    `Content-Encoding: gzip/deflate` 自动增量解压（h1 delegate + h2 回调，buffered 与 streaming 均支持），
+    原始 Content-Encoding 头保留可见。
+  - 服务端（h1 简单响应）：请求 `Accept-Encoding` 含 gzip 且 body ≥ 256B、无既有 Content-Encoding 时自动
+    gzip（尊重 `gzip;q=0` 拒绝；压缩不更小则跳过）。流式响应由 handler 自行选择编码。
+  - 测试：gzip 原语 8 例（增量/一次性/raw deflate/zlib/损坏/截断/level 0）+ 端到端 6 例（自动压缩+解压、
+    小 body 不压缩、q=0 拒绝、默认广告 gzip、显式覆盖、流式解压）。
+  - 验证：Win D943/R937、WSL D925/R919、WSL TSan 903（0 races）、Win ASAN 943 全绿。
 
 - **HTTP/2 优先级接收语义验证 + RFC 9218 修复（2026-08-22）** — 端到端验证发现真实缺陷：3rdparty nghttp2
   中 `nghttp2_submit_priority` 已按 RFC 9113 弃用为 no-op（RFC 7540 PRIORITY 帧被移除），此前

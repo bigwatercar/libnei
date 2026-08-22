@@ -16,6 +16,7 @@
 #include <neixx/io/io_buffer.h>
 #include <neixx/memory/weak_ptr.h>
 #include <neixx/net/http/http_parser.h>
+#include <neixx/net/http/gzip_stream.h>
 #include <neixx/net/http/http_response_writer.h>
 #include <neixx/net/ip_end_point.h>
 #include <neixx/net/ssl_context.h>
@@ -37,6 +38,55 @@ namespace net::http {
 namespace {
 
 constexpr std::size_t kReadBufferSize = 4096;
+
+// Minimum body size before gzip is worth applying (small bodies expand).
+constexpr std::size_t kMinCompressBytes = 256;
+
+// True when |accept_encoding| contains a "gzip" token that is not explicitly
+// disabled by a q=0 parameter (e.g. "gzip;q=0").
+bool WantsGzip(std::string_view accept_encoding) {
+  const std::string low = ToLowerASCII(accept_encoding);
+  std::size_t pos = 0;
+  while (pos < low.size()) {
+    while (pos < low.size() && (low[pos] == ',' || low[pos] == ' '))
+      ++pos;
+    const std::size_t start = pos;
+    while (pos < low.size() && low[pos] != ',')
+      ++pos;
+    const std::string_view token(low.data() + start, pos - start);
+    const std::size_t semi = token.find(';');
+    const std::string_view name = semi == std::string_view::npos ? token : token.substr(0, semi);
+    if (name == "gzip") {
+      if (semi != std::string_view::npos) {
+        const std::string_view params = token.substr(semi);
+        const std::size_t qpos = params.find("q=");
+        if (qpos != std::string_view::npos && qpos + 2 < params.size() && params[qpos + 2] == '0')
+          return false;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+// Compresses a simple (non-streaming) response body with gzip when the client
+// advertised Accept-Encoding: gzip and the body is large enough to benefit.
+// Streaming responses are the handler's responsibility (they choose their own
+// Content-Encoding).
+void MaybeCompressResponse(const HttpRequest &req, HttpResponse *resp) {
+  if (!resp || resp->body.size() < kMinCompressBytes)
+    return;
+  // Never re-encode a response the handler already encoded.
+  if (!resp->GetHeaderValue("Content-Encoding").empty())
+    return;
+  if (!WantsGzip(req.GetHeaderValue("Accept-Encoding")))
+    return;
+  std::string compressed = GzipCompress(resp->body);
+  if (compressed.size() >= resp->body.size())
+    return; // Not worth the CPU / the larger payload.
+  resp->body = std::move(compressed);
+  resp->headers.push_back({"Content-Encoding", "gzip"});
+}
 
 // Streaming-request backpressure thresholds.  The server buffers request-body
 // chunks that arrive while the handler has no pull pending; once the buffered
@@ -514,6 +564,8 @@ struct Http1Connection : public RefCountedThreadSafe<Http1Connection> {
         if (!keep_alive) {
           resp.headers.push_back({"Connection", "close"});
         }
+
+        MaybeCompressResponse(req, &resp);
 
         WriteResponse(HttpResponseWriter::Serialize(resp));
 

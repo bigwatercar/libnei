@@ -92,9 +92,11 @@ set(NEIXX_NET_HTTP_SOURCES
     src/http/http_client_pool.cpp
     src/http/http_request_handle.cpp
     src/http/http_file_transfer.cpp
+    src/http/gzip_stream.cpp
+    include/neixx/net/http/gzip_stream.h
 )
 target_sources(nei PRIVATE ${NEIXX_NET_HTTP_SOURCES})
-target_link_libraries(nei PRIVATE llhttp)
+target_link_libraries(nei PRIVATE llhttp zlibstatic)
 
 # HTTP/2 module (3rdparty/nghttp2)
 set(NEIXX_NET_HTTP2_SOURCES

@@ -950,6 +950,10 @@ TEST_F(HttpClientIntegrationTest, StreamingResponseDeliversChunks) {
     req.url = Url("/stream-big");
     req.http_version = HttpVersion::kHttp11;
     req.headers.push_back({"Host", "127.0.0.1"});
+    // Ask for an identity encoding so the fixture's 64 KB body is streamed
+    // uncompressed in many chunks (the automatic gzip path is covered by the
+    // dedicated compression tests).
+    req.headers.push_back({"Accept-Encoding", "identity"});
 
     client->SendStreaming(
         req,

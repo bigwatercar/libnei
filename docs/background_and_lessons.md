@@ -243,7 +243,7 @@
 
 **未完成/候选**（详见 docs/TODO.md）：
 - P3：TaskQueueSelector cache-line 布局、PipeStream direct dispatch、CMake 检测审查。
-- HTTP 功能补全：gzip、Cookie、重定向、multipart、中间件。
+- HTTP 功能补全：Cookie、重定向、multipart、中间件。
 - Future：Storage Device Monitoring（自研）。
 
 ---

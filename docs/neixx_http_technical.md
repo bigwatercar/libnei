@@ -299,6 +299,20 @@ HTTP/1.1 特有头（`Connection`/`Keep-Alive`/`Transfer-Encoding`/`Upgrade`）
 
 ## 11. 已知限制与后续
 
+- **gzip/deflate 内容编码已落地**（2026-08-23）：引入 vendored zlib v1.3.1
+  （`3rdparty/zlib`，静态、PRIVATE 链接，不泄漏 ABI）。增量压缩原语
+  `gzip_stream.{h,cpp}`（`GzipCompressor`/`GzipDecompressor`，RFC 1952 gzip /
+  RFC 1950 zlib / raw deflate，PIMPL 保持 ABI 稳定）。自动路径：
+  - 客户端：请求未显式指定时自动加 `Accept-Encoding: gzip`（h1 序列化 +
+    h2 提交均注入）；响应 `Content-Encoding: gzip`（或 `deflate`）自动增量
+    解压——buffered（`Send`）与 streaming（`SendStreaming`）都支持，原始
+    `Content-Encoding` 头对调用方保留可见。
+  - 服务端（h1 简单响应）：请求 `Accept-Encoding` 含 gzip 且 body ≥ 256B、
+    响应无既有 `Content-Encoding` 时自动 gzip 压缩；尊重 `gzip;q=0` 显式
+    拒绝；压缩结果不更小则跳过。流式路由（`AddStreamingRoute`）不自动
+    压缩——由 handler 自行选择编码（示例见 `http_compression_test.cpp`）。
+  - 已知边界：`deflate` 解码按 RFC 9110 视为 zlib 封装（历史 raw-deflate
+    服务器未做回退）；`br` 等其他编码不解码（透传原样）。
 - 无 h2c（明文升级）——首期仅 ALPN。
 - WebSocket over HTTP/2（RFC 8441 extended CONNECT）未做。h2 上不存在 h1 的
   `Upgrade` + 101 机制（RFC 9113 §8.1.1 禁止 101、hop-by-hop 头必须剥离），

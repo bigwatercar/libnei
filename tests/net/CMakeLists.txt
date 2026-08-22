@@ -1,6 +1,12 @@
 # HTTP client integration tests
 target_sources(nei_tests PRIVATE http_client_integration_test.cpp)
 
+# gzip/deflate compression primitives
+target_sources(nei_tests PRIVATE gzip_stream_test.cpp)
+
+# End-to-end HTTP content-encoding (gzip) tests
+target_sources(nei_tests PRIVATE http_compression_test.cpp)
+
 # HTTP parser unit tests
 target_sources(nei_tests PRIVATE http_parser_test.cpp)
 

@@ -22,6 +22,7 @@
 #include <neixx/io/io_buffer.h>
 #include <neixx/net/http/http2_client_session.h>
 #include <neixx/net/http/http_common.h>
+#include <neixx/net/http/gzip_stream.h>
 #include <neixx/net/http/http_parser.h>
 #include <neixx/net/ip_end_point.h>
 #include <neixx/net/ssl_context.h>
@@ -35,6 +36,23 @@ namespace net::http {
 namespace {
 
 constexpr std::size_t kReadBufferSize = 4096;
+
+// Builds a decompressor for a response whose Content-Encoding asks for gzip
+// / deflate.  Returns null when the body is not compressed (or uses an
+// encoding we do not support, e.g. br).
+std::unique_ptr<GzipDecompressor> CreateDecompressorForHeaders(const HttpHeaders &headers) {
+  for (const auto &h : headers) {
+    if (EqualsCaseInsensitiveASCII(h.name, "Content-Encoding")) {
+      const std::string value = ToLowerASCII(h.value);
+      if (value.find("gzip") != std::string::npos)
+        return std::make_unique<GzipDecompressor>(GzipEncoding::kGzip);
+      if (value.find("deflate") != std::string::npos)
+        return std::make_unique<GzipDecompressor>(GzipEncoding::kZlib);
+      break;
+    }
+  }
+  return nullptr;
+}
 
 // ---------------------------------------------------------------------------
 // ResponseDelegate — accumulates parsed HttpResponse from Http1Parser
@@ -81,12 +99,25 @@ struct ResponseDelegate : public Http1Parser::Delegate {
   int OnHeadersComplete() override {
     if (status_provider)
       parsed_status_code = status_provider();
+    // Wire body may be Content-Encoding: gzip — set up an incremental decoder
+    // so OnBody delivers the decompressed bytes.
+    decompressor = CreateDecompressorForHeaders(response.headers);
     if (on_headers_cb)
       on_headers_cb(HttpStatus::FromRaw(parsed_status_code), response.headers);
     return 0;
   }
 
   void OnBody(const char *data, size_t len) override {
+    if (decompressor) {
+      std::string decoded;
+      if (decompressor->Decompress(data, len, &decoded)) {
+        if (on_body_cb)
+          on_body_cb(decoded.data(), decoded.size(), false);
+        else
+          response.body.append(decoded);
+      }
+      return;
+    }
     if (on_body_cb)
       on_body_cb(data, len, false);
     else
@@ -95,9 +126,21 @@ struct ResponseDelegate : public Http1Parser::Delegate {
 
   void OnMessageComplete() override {
     complete = true;
+    if (decompressor) {
+      std::string tail;
+      decompressor->Finish(&tail);
+      if (!tail.empty()) {
+        if (on_body_cb)
+          on_body_cb(tail.data(), tail.size(), false);
+        else
+          response.body.append(tail);
+      }
+    }
     if (on_body_cb)
       on_body_cb(nullptr, 0, true);
   }
+
+  std::unique_ptr<GzipDecompressor> decompressor;
 };
 
 // Serialize an HttpRequest to wire format.  When |include_body| is false only
@@ -122,12 +165,19 @@ std::string SerializeRequest(const HttpRequest &request, bool include_body) {
   wire += HttpVersionToString(request.http_version);
   wire += "\r\n";
 
+  bool has_accept_encoding = false;
   for (const auto &h : request.headers) {
     wire += h.name;
     wire += ": ";
     wire += h.value;
     wire += "\r\n";
+    if (EqualsCaseInsensitiveASCII(h.name, "Accept-Encoding"))
+      has_accept_encoding = true;
   }
+  // Advertise gzip so servers may compress the response; the body is decoded
+  // transparently on receipt.  Users can override by setting the header.
+  if (!has_accept_encoding)
+    wire += "Accept-Encoding: gzip\r\n";
   wire += "\r\n";
   if (include_body) {
     wire += request.body;
@@ -162,6 +212,7 @@ struct HttpClient::Impl {
     HttpClient::ResponseHeadersCallback on_headers; // streaming mode
     HttpClient::BodyChunkCallback on_body;          // streaming mode
     std::unique_ptr<HttpResponse> response;         // buffered-mode aggregation
+    std::unique_ptr<GzipDecompressor> decompressor; // Content-Encoding decoder
     bool body_done = false;                         // streaming done delivered
     int64_t generation = 0;                         // handle tracking
     std::shared_ptr<std::atomic<bool>> active;      // handle liveness flag
@@ -663,64 +714,73 @@ struct HttpClient::Impl {
       pending->response = std::make_unique<HttpResponse>();
     }
 
+    // Response hooks shared by both submit paths: on_headers sets up the
+    // Content-Encoding decoder (before the user sees the headers), on_body
+    // delivers decompressed bytes when a decoder is active.
+    auto on_headers_fn = [this](int32_t stream_id, HttpStatus status, const HttpHeaders &headers) {
+      auto it = h2_pending.find(stream_id);
+      if (it == h2_pending.end())
+        return;
+      it->second->decompressor = CreateDecompressorForHeaders(headers);
+      if (it->second->on_headers) {
+        it->second->on_headers(status, headers);
+        return;
+      }
+      it->second->response->headers = headers;
+      it->second->response->SetStatus(status.code());
+    };
+    auto on_body_fn = [this](int32_t stream_id, const char *data, std::size_t len, bool done) {
+      auto it = h2_pending.find(stream_id);
+      if (it == h2_pending.end())
+        return;
+      if (it->second->on_body) {
+        if (it->second->decompressor) {
+          if (len > 0) {
+            std::string decoded;
+            if (it->second->decompressor->Decompress(data, len, &decoded) && !decoded.empty())
+              it->second->on_body(decoded.data(), decoded.size(), false);
+          }
+          if (done) {
+            std::string tail;
+            it->second->decompressor->Finish(&tail);
+            if (!tail.empty())
+              it->second->on_body(tail.data(), tail.size(), false);
+            it->second->body_done = true;
+            it->second->on_body(nullptr, 0, true);
+          }
+          return;
+        }
+        if (done)
+          it->second->body_done = true;
+        it->second->on_body(data, len, done);
+        return;
+      }
+      if (len > 0) {
+        if (it->second->decompressor) {
+          std::string decoded;
+          if (it->second->decompressor->Decompress(data, len, &decoded))
+            it->second->response->body.append(decoded);
+        } else {
+          it->second->response->body.append(data, len);
+        }
+      }
+    };
+    // Advertise gzip on the wire request; users can override by setting the
+    // Accept-Encoding header explicitly.
+    HttpRequest wire_request = request;
+    if (!wire_request.FindHeader("Accept-Encoding"))
+      wire_request.headers.push_back({"Accept-Encoding", "gzip"});
+
     int32_t id = -1;
     if (upload_streaming) {
       id = h2_session->SubmitRequestWithBody(
-          request,
-          std::move(body_provider),
-          [this](int32_t stream_id, HttpStatus status, const HttpHeaders &headers) {
-            auto it = h2_pending.find(stream_id);
-            if (it == h2_pending.end())
-              return;
-            if (it->second->on_headers) {
-              it->second->on_headers(status, headers);
-              return;
-            }
-            it->second->response->headers = headers;
-            it->second->response->SetStatus(status.code());
-          },
-          [this](int32_t stream_id, const char *data, std::size_t len, bool done) {
-            auto it = h2_pending.find(stream_id);
-            if (it == h2_pending.end())
-              return;
-            if (it->second->on_body) {
-              if (done)
-                it->second->body_done = true;
-              it->second->on_body(data, len, done);
-              return;
-            }
-            if (len > 0)
-              it->second->response->body.append(data, len);
-          },
-          [this](int32_t stream_id, bool clean) { FinishH2Stream(stream_id, clean); });
+          wire_request, std::move(body_provider), on_headers_fn, on_body_fn, [this](int32_t stream_id, bool clean) {
+            FinishH2Stream(stream_id, clean);
+          });
     } else {
-      id = h2_session->SubmitRequest(
-          request,
-          [this](int32_t stream_id, HttpStatus status, const HttpHeaders &headers) {
-            auto it = h2_pending.find(stream_id);
-            if (it == h2_pending.end())
-              return;
-            if (it->second->on_headers) {
-              it->second->on_headers(status, headers);
-              return;
-            }
-            it->second->response->headers = headers;
-            it->second->response->SetStatus(status.code());
-          },
-          [this](int32_t stream_id, const char *data, std::size_t len, bool done) {
-            auto it = h2_pending.find(stream_id);
-            if (it == h2_pending.end())
-              return;
-            if (it->second->on_body) {
-              if (done)
-                it->second->body_done = true;
-              it->second->on_body(data, len, done);
-              return;
-            }
-            if (len > 0)
-              it->second->response->body.append(data, len);
-          },
-          [this](int32_t stream_id, bool clean) { FinishH2Stream(stream_id, clean); });
+      id = h2_session->SubmitRequest(wire_request, on_headers_fn, on_body_fn, [this](int32_t stream_id, bool clean) {
+        FinishH2Stream(stream_id, clean);
+      });
     }
 
     if (id < 0) {
@@ -751,10 +811,18 @@ struct HttpClient::Impl {
     if (pending->active)
       pending->active->store(false, std::memory_order_relaxed);
     if (pending->callback) {
-      if (clean && pending->response)
+      // Buffered mode: flush any decoder tail before delivering the response
+      // (streaming mode already finished the decoder in on_body(done)).
+      if (clean && pending->response) {
+        if (pending->decompressor) {
+          std::string tail;
+          pending->decompressor->Finish(&tail);
+          pending->response->body.append(tail);
+        }
         pending->callback(std::move(pending->response));
-      else
+      } else {
         pending->callback(nullptr);
+      }
       return;
     }
     // Streaming: synthesize the done signal if the stream died uncleanly.
