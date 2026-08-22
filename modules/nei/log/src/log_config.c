@@ -1,5 +1,21 @@
 #include "log_internal.h"
 
+/* Intentional-never-free allocations (the immutable config copies published
+ * by nei_log_add_config) are excluded from LeakSanitizer so ASAN builds stay
+ * green.  LSan only exists on POSIX sanitizer builds; the weak symbol keeps
+ * this usable even when the sanitizer runtime is not linked. */
+#if !defined(_WIN32) && defined(__SANITIZE_ADDRESS__)
+extern void __lsan_ignore_object(const void *p) __attribute__((weak));
+#define _NEI_LOG_LSAN_IGNORE(p)                                                                                        \
+  do {                                                                                                                 \
+    if (__lsan_ignore_object != NULL) {                                                                                \
+      __lsan_ignore_object(p);                                                                                         \
+    }                                                                                                                  \
+  } while (0)
+#else
+#define _NEI_LOG_LSAN_IGNORE(p) ((void)0)
+#endif
+
 #pragma region config table
 
 /* Global configuration table.
@@ -257,6 +273,7 @@ int nei_log_add_config(const nei_log_config_st *config, nei_log_config_handle_t 
     return -1;
   }
   memcpy(copy, config, sizeof(*copy));
+  _NEI_LOG_LSAN_IGNORE(copy);
 
   s_config_used[free_slot] = 1U;
   s_config_ptrs[free_slot] = copy;
