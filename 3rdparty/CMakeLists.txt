@@ -98,3 +98,24 @@ add_subdirectory(llhttp)
 # Build as a static library.  See 3rdparty/nghttp2/README.md for the
 # vendoring scope.  No generated config.h is required.
 add_subdirectory(nghttp2)
+
+# ---------------------------------------------------------------------------
+# zlib (zlib license) — gzip/deflate compression (v1.3.1)
+# ---------------------------------------------------------------------------
+# Build as a static library with examples/tests/install disabled.  Linked
+# PRIVATEly into nei so it never leaks into the public ABI.
+set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SKIP_INSTALL_LIBRARIES ON CACHE BOOL "" FORCE)
+set(SKIP_INSTALL_HEADERS ON CACHE BOOL "" FORCE)
+set(SKIP_INSTALL_FILES ON CACHE BOOL "" FORCE)
+add_subdirectory(zlib)
+
+# Shared-library consumption needs PIC on POSIX.
+if(NOT WIN32)
+  set_target_properties(zlibstatic PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+
+# Suppress MSVC warnings from vendored C code (zlib predates /W4).
+if(COMPILER_IS_MSVC)
+  target_compile_options(zlibstatic PRIVATE /W3 /wd4267 /wd4244 /wd4131 /wd4101)
+endif()
