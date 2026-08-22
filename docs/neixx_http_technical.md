@@ -314,8 +314,12 @@ HTTP/1.1 特有头（`Connection`/`Keep-Alive`/`Transfer-Encoding`/`Upgrade`）
   （值类型、可拷贝、协议无关）：`is_valid()` 请求在途查询；`Cancel()` 任意线程——
   h2 发送 `RST_STREAM(CANCEL)`（仅该流失败，会话可复用），h1 关闭所属连接
   （HTTP/1.1 单请求模型，客户端随之终止，同 `Close()`）；`SetPriority()`
-  [0,7]——h2 发送 RFC 7540 `PRIORITY` 帧（weight=1+(7-p)×32），h1 仅记录无调度
-  效果。句柄不持有客户端（线程安全 `WeakPtr` + 每请求 generation + 共享
-  `atomic<bool>` 活跃标志），请求完成后操作自动 no-op。底层
+  [0,7]——h2 发送 RFC 9218 `PRIORITY_UPDATE`（`u=<urgency>`，仅对端宣告
+  `SETTINGS_NO_RFC7540_PRIORITIES=1` 时发送；RFC 7540 `PRIORITY` 帧已被 RFC 9113
+  移除，nghttp2 的 `nghttp2_submit_priority` 为 no-op），h1 仅记录无调度效果。
+  服务端句柄 `SetPriority()` 经 `nghttp2_session_change_extpri_stream_priority`
+  改本地流 urgency（RFC 9218 无 server→client `PRIORITY_UPDATE` 通道）。句柄
+  不持有客户端（线程安全 `WeakPtr` + 每请求 generation + 共享 `atomic<bool>`
+  活跃标志），请求完成后操作自动 no-op。底层
   `Http2ClientSession::CancelStream/SetStreamPriority` 对直接使用会话的用户
   同样开放。

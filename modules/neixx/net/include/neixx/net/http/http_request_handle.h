@@ -34,9 +34,11 @@ class HttpClient;
 //         flight on that connection fails too, and the client becomes
 //         terminal (see HttpClient::Close).  The response callback is invoked
 //         with nullptr.
-//   - SetPriority(): advisory priority in [0, 7] (0 = highest, RFC 7540
-//       urgency).  HTTP/2 sends a PRIORITY frame for the stream; HTTP/1.1
-//       records the value but has no scheduling effect (no request queue).
+//   - SetPriority(): advisory priority in [0, 7] (0 = highest, RFC 9218
+//       urgency).  HTTP/2 sends a PRIORITY_UPDATE frame for the stream when
+//       the peer advertises RFC 9218 support (RFC 7540 PRIORITY frames were
+//       removed by RFC 9113); HTTP/1.1 records the value but has no
+//       scheduling effect (no request queue).
 //
 // All three methods are safe to call from any thread: when invoked off the
 // request's I/O thread they post to it, serializing with the in-flight

@@ -133,10 +133,12 @@ public:
   // to the I/O thread when called off-thread).
   void CancelStream(int32_t stream_id);
 
-  // Sends an RFC 7540 PRIORITY frame for |stream_id| (urgency [0,7], 0 =
-  // highest).  Advisory: it does not guarantee server-side scheduling.  No-op
-  // if the stream is unknown or the session is not connected.  Safe from any
-  // thread.
+  // Sends an RFC 9218 PRIORITY_UPDATE frame for |stream_id| (urgency [0,7],
+  // 0 = highest) — the modern replacement for RFC 7540 PRIORITY frames
+  // (removed by RFC 9113).  Only sent when the peer advertises
+  // SETTINGS_NO_RFC7540_PRIORITIES=1; otherwise it is a no-op.  Advisory: it
+  // does not guarantee server-side scheduling.  No-op if the stream is
+  // unknown or the session is not connected.  Safe from any thread.
   void SetStreamPriority(int32_t stream_id, int32_t priority);
 
   // Begin graceful shutdown: sends GOAWAY, lets in-flight streams finish,

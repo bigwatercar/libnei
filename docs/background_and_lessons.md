@@ -242,10 +242,9 @@
 - C 层：日志（MPSC 无锁环）、encoding、路径、系统信息、flake_id、crypto。
 
 **未完成/候选**（详见 docs/TODO.md）：
-- P2 唤醒路径性能（5b：AtomicEvent 替换唤醒通道，验收 WSL dedicated ≥3.8M/s）。
 - P3：TaskQueueSelector cache-line 布局、PipeStream direct dispatch、CMake 检测审查。
 - HTTP 功能补全：gzip、Cookie、重定向、multipart、中间件。
-- Future：Storage Device Monitoring（自研）、h2 优先级接收语义验证。
+- Future：Storage Device Monitoring（自研）。
 
 ---
 

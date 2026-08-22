@@ -32,9 +32,11 @@ namespace net::http {
 //       * HTTP/1.1: the single-request connection model cannot abort just
 //         one request, so the owning connection is closed.
 //   - SetPriority(): advisory priority (0 = highest … 7 = lowest, out-of-
-//     range clamped).  HTTP/2 sends an RFC 7540 PRIORITY frame (weight
-//     1 + (7-p)*32) telling the peer how to prioritize this stream;
-//     HTTP/1.1 records the value (no wire effect).
+//     range clamped).  HTTP/2 changes the server-side stream urgency so the
+//     response scheduler (RFC 9218 extensible prioritization) favors this
+//     stream — nghttp2 only supports this server-side change locally, there
+//     is no server→client PRIORITY_UPDATE channel; HTTP/1.1 records the
+//     value (no wire effect).
 //
 // After cancellation, the handler's write/close callbacks become no-ops —
 // the handler should stop producing and return promptly.

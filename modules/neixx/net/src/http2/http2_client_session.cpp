@@ -9,6 +9,7 @@
 #include <neixx/net/http/http2_client_session.h>
 
 #include <atomic>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -238,10 +239,12 @@ struct Http2ClientSession::Impl {
     nghttp2_session_client_new(&session, callbacks, this);
 
     // Advertise a large per-stream receive window for downloads; disable
-    // server push (RFC 9113 deprecates it).
+    // server push (RFC 9113 deprecates it); enable RFC 9218 extensible
+    // prioritization so PRIORITY_UPDATE frames can be sent.
     nghttp2_settings_entry iv[] = {
         {NGHTTP2_SETTINGS_ENABLE_PUSH, 0},
         {NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE, 16 * 1024 * 1024},
+        {NGHTTP2_SETTINGS_NO_RFC7540_PRIORITIES, 1},
     };
     nghttp2_submit_settings(session, NGHTTP2_FLAG_NONE, iv, sizeof(iv) / sizeof(iv[0]));
 
@@ -731,12 +734,18 @@ struct Http2ClientSession::Impl {
       priority = 0;
     else if (priority > 7)
       priority = 7;
-    // RFC 7540 weight is 1..256 (1 = least preferred); map urgency 0..7
-    // (0 = highest) to descending weights anchored at the root.
-    const int32_t weight = 1 + (7 - priority) * 32;
-    nghttp2_priority_spec spec;
-    nghttp2_priority_spec_init(&spec, stream_id, weight, 0);
-    nghttp2_submit_priority(session, NGHTTP2_FLAG_NONE, stream_id, &spec);
+    // RFC 9218 extensible prioritization: urgency 0..7 (0 = highest) maps
+    // directly onto libnei's SetPriority range, carried in a PRIORITY_UPDATE
+    // frame.  nghttp2 only sends it when the peer advertises
+    // SETTINGS_NO_RFC7540_PRIORITIES=1; otherwise submit_priority_update()
+    // is a no-op (RFC 7540 PRIORITY frames were removed in RFC 9113).
+    char field_value[8];
+    const int len = snprintf(field_value, sizeof(field_value), "u=%d", priority);
+    nghttp2_submit_priority_update(session,
+                                   NGHTTP2_FLAG_NONE,
+                                   stream_id,
+                                   reinterpret_cast<const uint8_t *>(field_value),
+                                   static_cast<size_t>(len));
     PumpSession();
   }
 

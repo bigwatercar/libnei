@@ -107,16 +107,23 @@ public:
     nghttp2_session_callbacks_set_on_stream_close_callback(callbacks_, &Http2ServerConnection::OnStreamCloseCallback);
 
     // Manual receive-window management so streaming-request routes can
-    // apply flow-control backpressure above the high-water mark.
+    // apply flow-control backpressure above the high-water mark.  Also parse
+    // RFC 9218 PRIORITY_UPDATE frames so client SetPriority signals update
+    // the server-side stream urgency (RFC 7540 PRIORITY frames were removed
+    // in RFC 9113, so without this the frames are dropped as unknown).
     nghttp2_option *option = nullptr;
     nghttp2_option_new(&option);
     nghttp2_option_set_no_auto_window_update(option, 1);
+    nghttp2_option_set_builtin_recv_extension_type(option, NGHTTP2_PRIORITY_UPDATE);
     nghttp2_session_server_new2(&session_, callbacks_, this, option);
     nghttp2_option_del(option);
 
-    // The first frame the client expects must be our own SETTINGS.
+    // The first frame the client expects must be our own SETTINGS.  Enabling
+    // SETTINGS_NO_RFC7540_PRIORITIES lets nghttp2 apply client
+    // PRIORITY_UPDATE frames to the dependency tree.
     nghttp2_settings_entry iv[] = {
         {NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE, 16 * 1024 * 1024},
+        {NGHTTP2_SETTINGS_NO_RFC7540_PRIORITIES, 1},
     };
     nghttp2_submit_settings(session_, NGHTTP2_FLAG_NONE, iv, sizeof(iv) / sizeof(iv[0]));
 
@@ -558,9 +565,11 @@ private:
   }
 
   // Applies an advisory priority to one in-flight stream (I/O thread):
-  // sends an RFC 7540 PRIORITY frame telling the peer how to prioritize
-  // this stream.  Out-of-range values are clamped to 0..7.  Mirrors
-  // Http2ClientSession::SetStreamPriorityImpl (same weight formula).
+  // changes the server-side stream urgency so the response scheduler (RFC
+  // 9218 extensible prioritization) favors the caller's urgency.  Out-of-
+  // range values are clamped to 0..7.  nghttp2 only lets the server change
+  // its own stream priority locally (there is no server→client
+  // PRIORITY_UPDATE channel), so the peer is not notified.
   void SetStreamPriority(int32_t stream_id, int32_t priority) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     if (closed_ || closing_)
@@ -571,12 +580,12 @@ private:
       priority = 0;
     else if (priority > 7)
       priority = 7;
-    // RFC 7540 weight is 1..256 (1 = least preferred); map urgency 0..7
-    // (0 = highest) to descending weights anchored at the root.
-    const int32_t weight = 1 + (7 - priority) * 32;
-    nghttp2_priority_spec spec;
-    nghttp2_priority_spec_init(&spec, stream_id, weight, 0);
-    nghttp2_submit_priority(session_, NGHTTP2_FLAG_NONE, stream_id, &spec);
+    nghttp2_extpri extpri;
+    extpri.urgency = static_cast<uint32_t>(priority);
+    extpri.inc = 0;
+    // ignore_client_signal=1: the application explicitly overrides any
+    // client-provided priority for this stream.
+    nghttp2_session_change_extpri_stream_priority(session_, stream_id, &extpri, 1);
     Pump();
   }
 

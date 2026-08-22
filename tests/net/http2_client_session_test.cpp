@@ -28,6 +28,7 @@ typedef ptrdiff_t ssize_t;
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <neixx/common/location.h>
@@ -85,6 +86,21 @@ public:
 
   // Called when a connection finishes its h2 handshake (test hook).
   using OnConnected = std::function<void()>;
+
+  // Called when a PRIORITY frame is received (inside nghttp2 callback).
+  using OnPriority = std::function<void(int32_t stream_id, int32_t weight)>;
+
+  // Called when an RFC 9218 PRIORITY_UPDATE frame is received (inside nghttp2
+  // callback).  |field| is the Priority field value (e.g. "u=3").
+  using OnPriorityUpdate = std::function<void(int32_t stream_id, std::string field)>;
+
+  // Synchronized-response mode: the responder's responses are queued instead
+  // of sent immediately, and released together by ReleaseSynchronizedResponses
+  // once |expected| requests have arrived.  Lets tests put several streams
+  // "ready at once" so nghttp2's priority scheduler decides the wire order.
+  // (SetSynchronizedResponder / ReleaseSynchronizedResponses / data_start_order
+  // / synchronized_pending_count are defined at the bottom of the class, after
+  // the members they touch.)
 
   struct Conn {
     TestH2Server *owner = nullptr;
@@ -178,11 +194,20 @@ public:
       nghttp2_session_callbacks_set_on_frame_recv_callback(cbs, &Conn::OnFrameRecvCallback);
       nghttp2_session_callbacks_set_on_data_chunk_recv_callback(cbs, &Conn::OnDataChunkRecvCallback);
       nghttp2_session_callbacks_set_on_stream_close_callback(cbs, &Conn::OnStreamCloseCallback);
-      nghttp2_session_server_new(&session, cbs, this);
+      nghttp2_option *option = nullptr;
+      nghttp2_option_new(&option);
+      // Parse RFC 9218 PRIORITY_UPDATE frames (client SetPriority).
+      nghttp2_option_set_builtin_recv_extension_type(option, NGHTTP2_PRIORITY_UPDATE);
+      nghttp2_session_server_new2(&session, cbs, this, option);
+      nghttp2_option_del(option);
       nghttp2_session_callbacks_del(cbs);
       // The client (per nghttp2) expects the FIRST frame it receives to be
-      // the server's own SETTINGS (non-ACK) — submit ours now.
-      nghttp2_submit_settings(session, NGHTTP2_FLAG_NONE, nullptr, 0);
+      // the server's own SETTINGS (non-ACK) — submit ours now.  Advertising
+      // SETTINGS_NO_RFC7540_PRIORITIES enables RFC 9218 PRIORITY_UPDATE.
+      nghttp2_settings_entry iv[] = {
+          {NGHTTP2_SETTINGS_NO_RFC7540_PRIORITIES, 1},
+      };
+      nghttp2_submit_settings(session, NGHTTP2_FLAG_NONE, iv, sizeof(iv) / sizeof(iv[0]));
       if (owner->on_connected_)
         owner->on_connected_();
       Pump();
@@ -249,6 +274,17 @@ public:
 
     static int OnFrameRecvCallback(nghttp2_session *session, const nghttp2_frame *frame, void *user_data) {
       Conn *conn = static_cast<Conn *>(user_data);
+      if (frame->hd.type == NGHTTP2_PRIORITY_UPDATE) {
+        // Received an RFC 9218 PRIORITY_UPDATE frame — record stream id +
+        // priority field value so tests can verify the peer's priority
+        // signalling end to end.
+        if (conn->owner->on_priority_update_) {
+          const auto *pu = static_cast<const nghttp2_ext_priority_update *>(frame->ext.payload);
+          std::string field(reinterpret_cast<const char *>(pu->field_value), pu->field_value_len);
+          conn->owner->on_priority_update_(pu->stream_id, std::move(field));
+        }
+        return 0;
+      }
       if (frame->hd.type == NGHTTP2_HEADERS && frame->headers.cat == NGHTTP2_HCAT_REQUEST
           && (frame->hd.flags & NGHTTP2_FLAG_END_STREAM)) {
         auto *st = static_cast<StreamState *>(nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
@@ -281,8 +317,9 @@ public:
                                     void *user_data) {
       Conn *conn = static_cast<Conn *>(user_data);
       auto *st = static_cast<StreamState *>(source->ptr);
-      (void)stream_id;
-      (void)conn;
+      // First DATA frame of this stream hitting the wire records the send
+      // order, so tests can observe the priority scheduler's sequence.
+      conn->owner->RecordDataStart(stream_id);
       if (st->resp_offset == st->resp_body.size()) {
         *data_flags |= NGHTTP2_DATA_FLAG_EOF;
         return 0;
@@ -332,7 +369,9 @@ public:
       }
 
       Response resp;
-      if (owner->responder_)
+      if (owner->synchronized_expected_ > 0 && owner->synchronized_responder_)
+        resp = owner->synchronized_responder_(req);
+      else if (owner->responder_)
         resp = owner->responder_(req);
       else
         resp = DefaultResponse(req);
@@ -340,6 +379,11 @@ public:
         // Scripted abrupt disconnect — MUST NOT destroy the nghttp2 session
         // from inside a callback; defer to the read-loop driver.
         abort_requested = true;
+        return;
+      }
+      if (owner->synchronized_expected_ > 0) {
+        // Synchronized mode: queue the response for ReleaseSynchronizedResponses.
+        owner->CollectSynchronized(id, std::move(resp));
         return;
       }
       if (resp.delay_ms > 0) {
@@ -355,6 +399,14 @@ public:
     }
 
     void SubmitResponse(int32_t stream_id, const Response &resp) {
+      SubmitResponseDeferred(stream_id, resp);
+      Pump();
+    }
+
+    // Submits the response to nghttp2's outbound queue WITHOUT pumping, so
+    // callers can queue several streams' responses first and let the priority
+    // scheduler see them all "ready at once" in a single send.
+    void SubmitResponseDeferred(int32_t stream_id, const Response &resp) {
       if (closed || !session)
         return;
       auto it = streams.find(stream_id);
@@ -377,7 +429,6 @@ public:
 
       int rv = nghttp2_submit_response(session, st->id, nva.data(), nva.size(), &data_prd);
       (void)rv;
-      Pump();
     }
 
     static Response DefaultResponse(const Request &req) {
@@ -473,6 +524,14 @@ public:
 
   void SetOnConnected(OnConnected on_connected) {
     on_connected_ = std::move(on_connected);
+  }
+
+  void SetOnPriority(OnPriority on_priority) {
+    on_priority_ = std::move(on_priority);
+  }
+
+  void SetOnPriorityUpdate(OnPriorityUpdate on_priority_update) {
+    on_priority_update_ = std::move(on_priority_update);
   }
 
   // RSTs the given stream on every accepted connection.
@@ -576,6 +635,70 @@ private:
   Responder responder_;
   OnRequest on_request_;
   OnConnected on_connected_;
+  OnPriority on_priority_;
+  OnPriorityUpdate on_priority_update_;
+
+  // Synchronized-response state.
+  Responder synchronized_responder_;
+  int synchronized_expected_ = 0;
+  std::vector<std::pair<int32_t, Response>> synchronized_pending_;
+  std::vector<int32_t> data_start_order_;
+  std::unordered_set<int32_t> data_started_;
+  mutable std::mutex sync_mu_;
+
+  void CollectSynchronized(int32_t stream_id, Response resp) {
+    std::lock_guard<std::mutex> lock(sync_mu_);
+    synchronized_pending_.emplace_back(stream_id, std::move(resp));
+  }
+
+  // Records the first time each stream's response data is read by nghttp2
+  // (i.e. the order its first DATA frame is produced for the wire).  Returns
+  // true on first occurrence.
+  bool RecordDataStart(int32_t stream_id) {
+    std::lock_guard<std::mutex> lock(sync_mu_);
+    if (data_started_.insert(stream_id).second) {
+      data_start_order_.push_back(stream_id);
+      return true;
+    }
+    return false;
+  }
+
+public:
+  // Out-of-line definitions kept after the members so MSVC resolves
+  // synchronize_* / sync_mu_ / conns_ in complete-class context.
+  void SetSynchronizedResponder(Responder responder, int expected) {
+    synchronized_responder_ = std::move(responder);
+    synchronized_expected_ = expected;
+  }
+
+  void ReleaseSynchronizedResponses() {
+    std::vector<std::pair<int32_t, Response>> pending;
+    {
+      std::lock_guard<std::mutex> lock(sync_mu_);
+      pending = std::move(synchronized_pending_);
+      synchronized_pending_.clear();
+    }
+    // Queue every stream's response first, then pump once, so nghttp2's
+    // priority scheduler sees all of them ready at the same time.  The wire
+    // order is inspected afterwards via data_start_order() once the client
+    // has received everything (flow control may interleave sends).
+    for (auto &pr : pending) {
+      for (auto &c : conns_)
+        c->SubmitResponseDeferred(pr.first, pr.second);
+    }
+    for (auto &c : conns_)
+      c->Pump();
+  }
+
+  std::vector<int32_t> data_start_order() const {
+    std::lock_guard<std::mutex> lock(sync_mu_);
+    return data_start_order_;
+  }
+
+  int synchronized_pending_count() const {
+    std::lock_guard<std::mutex> lock(sync_mu_);
+    return static_cast<int>(synchronized_pending_.size());
+  }
 };
 
 // =============================================================================
@@ -1162,6 +1285,150 @@ TEST_F(Http2ClientSessionTest, CloseBeforeConnect) {
   EXPECT_FALSE(ok);
   EXPECT_EQ(error, "connect aborted");
   EXPECT_FALSE(session_->is_connected());
+}
+
+// 优先级接收语义（wire 级）：客户端 SetStreamPriority → RFC 9218
+// PRIORITY_UPDATE 帧 → 服务端解析。 断言服务端收到的 Priority field
+// value（"u=<urgency>"）与 SetPriority 映射一致，越界值被钳制。
+TEST_F(Http2ClientSessionTest, ClientSetStreamPriorityIsParsedByServer) {
+  std::mutex mu;
+  std::vector<std::pair<int32_t, std::string>> prio_updates; // (stream_id, field)
+  server_.SetOnPriorityUpdate([&](int32_t stream_id, std::string field) {
+    std::lock_guard<std::mutex> lock(mu);
+    prio_updates.emplace_back(stream_id, std::move(field));
+  });
+  server_.SetResponder([](const TestH2Server::Request &req) {
+    TestH2Server::Response resp;
+    resp.status = 200;
+    resp.headers.push_back({"content-type", "text/plain"});
+    resp.body = "ok";
+    return resp;
+  });
+  StartServerAndConnect();
+
+  WaitableEvent body_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  int32_t stream_id = -1;
+  io_runner_->PostTask(FROM_HERE, [this, &stream_id, &body_done]() {
+    stream_id = session_->SubmitRequest(
+        MakeGet("/prio"),
+        [](int32_t, HttpStatus, const HttpHeaders &) {},
+        [&body_done](int32_t, const char *, std::size_t, bool done_flag) {
+          if (done_flag)
+            body_done.Signal();
+        },
+        [](int32_t, bool) {});
+    ASSERT_GT(stream_id, 0);
+    session_->SetStreamPriority(stream_id, 2);   // urgency 2 -> "u=2"
+    session_->SetStreamPriority(stream_id, 100); // clamp 7 -> "u=7"
+    session_->SetStreamPriority(stream_id, -3);  // clamp 0 -> "u=0"
+  });
+
+  // 等服务端收到响应（请求已完成）；随后 PRIORITY_UPDATE 帧可能仍在途，
+  // 轮询等待服务端捕获全部 3 帧。
+  ASSERT_TRUE(body_done.TimedWait(std::chrono::seconds(15)));
+  bool got_all = false;
+  for (int i = 0; i < 200 && !got_all; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    std::lock_guard<std::mutex> lock(mu);
+    got_all = prio_updates.size() >= 3u;
+  }
+  std::lock_guard<std::mutex> lock(mu);
+  ASSERT_GE(prio_updates.size(), 3u);
+  // 每次 SetStreamPriority 都映射到独立 PRIORITY_UPDATE 帧，顺序一致。
+  EXPECT_EQ(prio_updates[0].first, stream_id);
+  EXPECT_EQ(prio_updates[0].second, "u=2");
+  EXPECT_EQ(prio_updates[1].second, "u=7"); // clamped
+  EXPECT_EQ(prio_updates[2].second, "u=0"); // clamped
+}
+
+// 优先级接收语义（调度）：多个并发流 urgency 不同，服务端在全部请求与
+// PRIORITY_UPDATE 帧到齐后统一就绪响应；nghttp2 按 RFC 9218 urgency 决定
+// wire 上的首个 DATA 帧顺序——最高 urgency（0）流应先被发送。
+TEST_F(Http2ClientSessionTest, PriorityTreeSchedulesResponseSendOrder) {
+  constexpr int kStreams = 3;
+  constexpr std::size_t kBodySize = 512 * 1024; // 每流半兆，放大调度差异
+  std::mutex mu;
+  std::vector<std::pair<int32_t, int32_t>> updates; // (sid, urgency) 到达顺序
+  std::atomic<int> prio_count{0};
+  WaitableEvent all_prio(WaitableEvent::ResetPolicy::kAutomatic, false);
+  server_.SetOnPriorityUpdate([&](int32_t sid, std::string field) {
+    int urgency = -1;
+    if (field.rfind("u=", 0) == 0)
+      urgency = atoi(field.c_str() + 2);
+    {
+      std::lock_guard<std::mutex> lock(mu);
+      updates.emplace_back(sid, urgency);
+    }
+    if (++prio_count == kStreams)
+      all_prio.Signal();
+  });
+  // urgency = i * 3 → 0 / 3 / 6（0 最高）。
+  server_.SetSynchronizedResponder(
+      [](const TestH2Server::Request &req) {
+        TestH2Server::Response resp;
+        resp.status = 200;
+        resp.body.assign(kBodySize, req.path.empty() ? 'x' : req.path.back());
+        return resp;
+      },
+      kStreams);
+  StartServerAndConnect();
+
+  std::vector<int32_t> stream_ids(kStreams, -1);
+  std::atomic<int> remaining{kStreams};
+  WaitableEvent all_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  io_runner_->PostTask(FROM_HERE, [&]() {
+    for (int i = 0; i < kStreams; ++i) {
+      HttpRequest req = MakeGet("/prio" + std::to_string(i));
+      int32_t sid = session_->SubmitRequest(
+          req,
+          [](int32_t, HttpStatus, const HttpHeaders &) {},
+          [](int32_t, const char *, std::size_t, bool) {},
+          [&](int32_t, bool) {
+            if (--remaining == 0)
+              all_done.Signal();
+          });
+      ASSERT_GT(sid, 0);
+      stream_ids[i] = sid;
+      session_->SetStreamPriority(sid, i * 3);
+    }
+  });
+
+  // 等服务端捕获全部 PRIORITY_UPDATE 帧（流 urgency 已更新）且请求到齐。
+  ASSERT_TRUE(all_prio.TimedWait(std::chrono::seconds(15)));
+  bool all_queued = false;
+  for (int i = 0; i < 200 && !all_queued; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    all_queued = server_.synchronized_pending_count() >= kStreams;
+  }
+  ASSERT_TRUE(all_queued);
+
+  // 统一释放全部响应：所有流同时 ready，由 nghttp2 按 urgency 调度发送。
+  WaitableEvent released(WaitableEvent::ResetPolicy::kAutomatic, false);
+  srv_runner_->PostTask(FROM_HERE, [&]() {
+    server_.ReleaseSynchronizedResponses();
+    released.Signal();
+  });
+  released.Wait();
+
+  ASSERT_TRUE(all_done.TimedWait(std::chrono::seconds(30)));
+  // 客户端已收齐全部响应（flow control 已驱动剩余发送），此刻读取 wire
+  // 上各流首个 DATA 帧的发送顺序。
+  std::vector<int32_t> send_order = server_.data_start_order();
+
+  // 服务端捕获的 urgency 应反映客户端 SetPriority（顺序 = 帧到达顺序）。
+  {
+    std::lock_guard<std::mutex> lock(mu);
+    ASSERT_EQ(updates.size(), kStreams);
+    for (int i = 0; i < kStreams; ++i) {
+      EXPECT_EQ(updates[i].first, stream_ids[i]) << "stream " << i;
+      EXPECT_EQ(updates[i].second, i * 3) << "stream " << i;
+    }
+  }
+  ASSERT_EQ(send_order.size(), kStreams);
+  // 最高 urgency（0）流的首个 DATA 帧必须先于低 urgency 流出现。
+  EXPECT_EQ(send_order[0], stream_ids[0]);
+  // urgency 升序 0 / 3 / 6 应整体反映在发送顺序上。
+  EXPECT_EQ(send_order, std::vector<int32_t>({stream_ids[0], stream_ids[1], stream_ids[2]}));
 }
 
 } // namespace
