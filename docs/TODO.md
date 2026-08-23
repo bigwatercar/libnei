@@ -298,6 +298,15 @@
 
 ## 最近完成（记录，2026-07 ~ 08）
 
+- **HTTP Cookie（RFC 6265）+ 重定向决策（2026-08-23）** — 新增 `cookie.{h,cpp}`（Set-Cookie 解析：
+  domain/path 默认、Max-Age 优先于 Expires、Secure/HttpOnly、host-only 与子域匹配、RFC 1123 日期解析；
+  `CookieJar` 按 name+domain+path 替换、过期丢弃）+ `HttpClient::SetCookieJar` 自动注入 Cookie 头
+  （用户显式设置则跳过）与收集 Set-Cookie（h1+h2）。新增 `redirect_handler.{h,cpp}`（RFC 9110 决策逻辑：
+  301/302/303 改 GET、307/308 保留方法；Location 相对解析；http(s) 白名单）。
+  附带修复既有缺陷：`HttpResponseWriter` 空 body 响应不发 Content-Length（keep-alive 下客户端
+  read-until-close 挂起）→ 现发 `Content-Length: 0`（1xx/204/304 例外）。测试 15+3+11 例。
+  客户端自动跟随重定向（跨 host 需 DNS）留待后续。
+
 - **HTTP gzip/deflate 压缩（2026-08-23）** — 引入 vendored zlib v1.3.1（3rdparty/zlib，静态、PRIVATE 链接），
   新增增量压缩原语 `neixx/net/http/gzip_stream.{h,cpp}`（GzipCompressor/GzipDecompressor，RFC 1952/1950/raw
   deflate，PIMPL）。自动路径：

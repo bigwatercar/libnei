@@ -313,6 +313,19 @@ HTTP/1.1 特有头（`Connection`/`Keep-Alive`/`Transfer-Encoding`/`Upgrade`）
     压缩——由 handler 自行选择编码（示例见 `http_compression_test.cpp`）。
   - 已知边界：`deflate` 解码按 RFC 9110 视为 zlib 封装（历史 raw-deflate
     服务器未做回退）；`br` 等其他编码不解码（透传原样）。
+- **Cookie 与重定向已落地**（2026-08-23）：
+  - `cookie.{h,cpp}`：RFC 6265 Set-Cookie 解析（domain/path 默认、Max-Age
+    优先于 Expires、Secure/HttpOnly、host-only vs 子域匹配、RFC 1123 日期）
+    + `CookieJar`（按 name+domain+path 替换、过期丢弃、`GetCookieHeader`
+    生成请求头）。`HttpClient::SetCookieJar` 接入：请求前注入匹配 Cookie
+    （用户显式设置则不覆盖），响应后收集 Set-Cookie（h1 与 h2 均支持）。
+  - `redirect_handler.{h,cpp}`：RFC 9110 重定向决策（301/302/303 改 GET 并
+    弃 body，307/308 保留方法；Location 按 RFC 3986 相对解析；目标必须
+    http(s)）。`ComputeRedirect` 供调用方决定是否/如何跟随；HttpClient
+    自动跟随（跨 host 需 DNS 解析）为后续项。
+  - 附带修复：`HttpResponseWriter` 对空 body 响应补发 `Content-Length: 0`
+    （否则 keep-alive 客户端按 read-until-close 等待挂起）；1xx/204/304
+    依规范不携带 Content-Length。
 - 无 h2c（明文升级）——首期仅 ALPN。
 - WebSocket over HTTP/2（RFC 8441 extended CONNECT）未做。h2 上不存在 h1 的
   `Upgrade` + 101 机制（RFC 9113 §8.1.1 禁止 101、hop-by-hop 头必须剥离），
