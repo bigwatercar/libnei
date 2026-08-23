@@ -36,7 +36,11 @@ if(INSTALL_MBEDTLS_HEADERS)
 
 endif(INSTALL_MBEDTLS_HEADERS)
 
-install(TARGETS ${everest_target}
-  EXPORT MbedTLSTargets
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+# Vendored guard: internal PRIVATE dependency — never installed (see
+# 3rdparty/CMakeLists.txt).
+if(NOT SKIP_INSTALL_ALL)
+  install(TARGETS ${everest_target}
+    EXPORT MbedTLSTargets
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+endif()

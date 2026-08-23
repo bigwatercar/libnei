@@ -342,13 +342,17 @@ foreach(target IN LISTS target_libraries)
         target_compile_definitions(${target}
             PUBLIC MBEDTLS_USER_CONFIG_FILE="${MBEDTLS_USER_CONFIG_FILE}")
     endif()
-    install(
-        TARGETS ${target}
-        EXPORT MbedTLSTargets
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+    # Vendored guard: libnei treats mbedtls as an internal PRIVATE dependency
+    # and must not install it (3rdparty/CMakeLists.txt sets SKIP_INSTALL_ALL).
+    if(NOT SKIP_INSTALL_ALL)
+        install(
+            TARGETS ${target}
+            EXPORT MbedTLSTargets
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+    endif()
 endforeach(target)
 
 set(lib_target "${MBEDTLS_TARGET_PREFIX}lib")

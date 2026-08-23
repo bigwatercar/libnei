@@ -1,6 +1,20 @@
 # =============================================================================
 # Third-party dependencies for libnei
 # =============================================================================
+#
+# All vendored third-party libraries are INTERNAL-ONLY: they are built and
+# linked PRIVATEly into libnei but are never installed into the public install
+# tree (which must only carry libnei itself and its own headers).  Each
+# library's install rules are gated by the switches below, plus a vendored
+# guard on mbedtls' library install.
+
+# Generic skip for libraries that honour SKIP_INSTALL_ALL (zlib, ...).
+set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
+# c-ares: install target switch.
+set(CARES_INSTALL OFF CACHE BOOL "" FORCE)
+# mbedtls: headers + package config/target export switches.
+set(INSTALL_MBEDTLS_HEADERS OFF CACHE BOOL "" FORCE)
+set(DISABLE_PACKAGE_CONFIG_AND_INSTALL ON CACHE BOOL "" FORCE)
 
 # ---------------------------------------------------------------------------
 # c-ares (MIT) — asynchronous DNS resolver
