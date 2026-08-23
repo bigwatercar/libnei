@@ -94,6 +94,8 @@ set(NEIXX_NET_HTTP_SOURCES
     src/http/http_file_transfer.cpp
     src/http/gzip_stream.cpp
     include/neixx/net/http/gzip_stream.h
+    src/http/cookie.cpp
+    include/neixx/net/http/cookie.h
 )
 target_sources(nei PRIVATE ${NEIXX_NET_HTTP_SOURCES})
 target_link_libraries(nei PRIVATE llhttp zlibstatic)

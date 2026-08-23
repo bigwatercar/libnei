@@ -4,6 +4,12 @@ target_sources(nei_tests PRIVATE http_client_integration_test.cpp)
 # gzip/deflate compression primitives
 target_sources(nei_tests PRIVATE gzip_stream_test.cpp)
 
+# RFC 6265 cookie parsing / matching / jar
+target_sources(nei_tests PRIVATE cookie_test.cpp)
+
+# HttpClient automatic cookie handling (end-to-end)
+target_sources(nei_tests PRIVATE http_cookie_integration_test.cpp)
+
 # End-to-end HTTP content-encoding (gzip) tests
 target_sources(nei_tests PRIVATE http_compression_test.cpp)
 

@@ -22,6 +22,7 @@
 #include <neixx/io/io_buffer.h>
 #include <neixx/net/http/http2_client_session.h>
 #include <neixx/net/http/http_common.h>
+#include <neixx/net/http/cookie.h>
 #include <neixx/net/http/gzip_stream.h>
 #include <neixx/net/http/http_parser.h>
 #include <neixx/net/ip_end_point.h>
@@ -202,6 +203,10 @@ struct HttpClient::Impl {
   // may share it — see HttpClientPool).  Concurrent Send requests are routed
   // through |h2_pending| keyed by stream id.
   scoped_refptr<Http2ClientSession> h2_session;
+  // Optional cookie jar for automatic cookie handling (SetCookieJar).
+  std::shared_ptr<CookieJar> cookie_jar;
+  // URL of the most recent request, used to parse Set-Cookie defaults.
+  Url last_request_url_;
   // First request staged while the h2 session is being established (the
   // ALPN result is unknown until the handshake completes).
   HttpRequest pending_h2_request;
@@ -341,14 +346,17 @@ struct HttpClient::Impl {
     // (busy) Send must not clobber the request staged for the in-progress
     // handshake (it would be submitted by OnH2Ready instead of the real
     // one).
-    this->pending_h2_request = request;
+    last_request_url_ = request.url;
+    HttpRequest request_with_cookies;
+    ApplyCookiesToRequest(request, &request_with_cookies);
+    this->pending_h2_request = request_with_cookies;
 
     this->callback = std::move(callback);
     in_flight_generation_.store(generation, std::memory_order_relaxed);
     in_flight_active_ = active;
     last_h1_priority_ = -1;
 
-    wire_request = SerializeRequest(request, /*include_body=*/!upload_streaming);
+    wire_request = SerializeRequest(request_with_cookies, /*include_body=*/!upload_streaming);
 
     response_delegate->complete = false;
     response_delegate->response = HttpResponse();
@@ -662,6 +670,32 @@ struct HttpClient::Impl {
     callback = nullptr;
   }
 
+  // Copies |req| and adds a "Cookie" header from the attached jar when the
+  // caller did not set one and matching cookies exist.
+  void ApplyCookiesToRequest(const HttpRequest &req, HttpRequest *out) {
+    *out = req;
+    if (!cookie_jar)
+      return;
+    if (out->FindHeader("Cookie"))
+      return; // caller controls the header explicitly.
+    const std::string header = cookie_jar->GetCookieHeader(req.url);
+    if (!header.empty())
+      out->headers.push_back({"Cookie", header});
+  }
+
+  // Parses every Set-Cookie header in |headers| into the attached jar (using
+  // the most recent request URL for domain/path defaults).
+  void CollectResponseCookies(const HttpHeaders &headers) {
+    if (!cookie_jar)
+      return;
+    for (const auto &h : headers) {
+      if (EqualsCaseInsensitiveASCII(h.name, "Set-Cookie")) {
+        if (const auto cookie = Cookie::Parse(h.value, last_request_url_))
+          cookie_jar->SetCookie(*cookie);
+      }
+    }
+  }
+
   // Hops to the I/O thread when needed (SubmitRequest* must run there).
   void PostH2Submit(HttpClient *client,
                     const HttpRequest &request,
@@ -722,6 +756,8 @@ struct HttpClient::Impl {
       if (it == h2_pending.end())
         return;
       it->second->decompressor = CreateDecompressorForHeaders(headers);
+      // Store any Set-Cookie headers from this response.
+      CollectResponseCookies(headers);
       if (it->second->on_headers) {
         it->second->on_headers(status, headers);
         return;
@@ -765,9 +801,10 @@ struct HttpClient::Impl {
         }
       }
     };
-    // Advertise gzip on the wire request; users can override by setting the
-    // Accept-Encoding header explicitly.
-    HttpRequest wire_request = request;
+    // Advertise gzip and attach matching cookies on the wire request; users
+    // can override by setting the Accept-Encoding / Cookie headers explicitly.
+    HttpRequest wire_request;
+    ApplyCookiesToRequest(request, &wire_request);
     if (!wire_request.FindHeader("Accept-Encoding"))
       wire_request.headers.push_back({"Accept-Encoding", "gzip"});
 
@@ -958,6 +995,9 @@ struct HttpClient::Impl {
     }
 
     if (callback) {
+      // Store any Set-Cookie headers before the caller consumes the response.
+      if (response)
+        CollectResponseCookies(response->headers);
       // Move the callback out and clear the member BEFORE invoking it: the
       // callback typically signals the caller, which may immediately reuse
       // this client (e.g. release it back into a pool, then another thread
@@ -991,6 +1031,10 @@ void HttpClient::CancelRequestInternal(int64_t generation) {
 
 void HttpClient::SetRequestPriorityInternal(int64_t generation, int32_t priority) {
   impl_->SetGenerationPriority(this, generation, priority);
+}
+
+void HttpClient::SetCookieJar(std::shared_ptr<CookieJar> jar) {
+  impl_->cookie_jar = std::move(jar);
 }
 
 HttpRequestHandle HttpClient::Send(const HttpRequest &request,

@@ -11,6 +11,7 @@
 #include <nei/build/nei_export.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/memory/weak_ptr.h>
+#include <neixx/net/http/cookie.h>
 #include <neixx/net/http/http_request.h>
 #include <neixx/net/http/http_request_handle.h>
 #include <neixx/net/http/http_response.h>
@@ -113,6 +114,13 @@ public:
   // Close the underlying connection and put the client in a terminal state.
   // Safe to call multiple times.
   void Close();
+
+  // Attaches a cookie jar used for automatic cookie handling: before each
+  // request, matching cookies are added as a "Cookie" header (unless the
+  // caller already set one); after each response, Set-Cookie headers are
+  // parsed and stored.  Must be set before Send* (not synchronized with
+  // in-flight requests).  Passing null detaches the jar.
+  void SetCookieJar(std::shared_ptr<CookieJar> jar);
 
   // Returns true if the client has a live keep-alive connection to the
   // server and is ready to send another request (Idle state with socket).
