@@ -326,6 +326,11 @@ HTTP/1.1 特有头（`Connection`/`Keep-Alive`/`Transfer-Encoding`/`Upgrade`）
   - 附带修复：`HttpResponseWriter` 对空 body 响应补发 `Content-Length: 0`
     （否则 keep-alive 客户端按 read-until-close 等待挂起）；1xx/204/304
     依规范不携带 Content-Length。
+- **multipart/form-data 已落地**（2026-08-23）：`multipart.{h,cpp}` ——
+  `MultipartFormData`（生成 boundary + 字段/文件 body，调用方设
+  `Content-Type: multipart/form-data; boundary=...`）与 `ParseMultipartBody`
+  （按 boundary 拆分 parts：name/filename/content-type/data；容忍 CRLF 与
+  二进制 payload）。端到端验证（HttpClient 上传 → HttpServer 解析回显）。
 - 无 h2c（明文升级）——首期仅 ALPN。
 - WebSocket over HTTP/2（RFC 8441 extended CONNECT）未做。h2 上不存在 h1 的
   `Upgrade` + 101 机制（RFC 9113 §8.1.1 禁止 101、hop-by-hop 头必须剥离），

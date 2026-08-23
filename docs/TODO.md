@@ -298,6 +298,11 @@
 
 ## 最近完成（记录，2026-07 ~ 08）
 
+- **multipart/form-data（RFC 7578）（2026-08-23）** — 新增 `multipart.{h,cpp}`：`MultipartFormData`
+  （生成 boundary + 字段/文件 body）、`ParseMultipartBody`（按 boundary 拆 parts，含 CRLF/二进制 payload、
+  闭合 boundary、Content-Disposition 的 name/filename 解析）。端到端验证：HttpClient 上传 → HttpServer
+  解析回显。测试 5 单测 + 1 端到端。HTTP 补全剩余：中间件、HttpClient 自动跟随重定向。
+
 - **HTTP Cookie（RFC 6265）+ 重定向决策（2026-08-23）** — 新增 `cookie.{h,cpp}`（Set-Cookie 解析：
   domain/path 默认、Max-Age 优先于 Expires、Secure/HttpOnly、host-only 与子域匹配、RFC 1123 日期解析；
   `CookieJar` 按 name+domain+path 替换、过期丢弃）+ `HttpClient::SetCookieJar` 自动注入 Cookie 头
