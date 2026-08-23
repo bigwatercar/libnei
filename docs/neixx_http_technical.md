@@ -323,6 +323,21 @@ HTTP/1.1 特有头（`Connection`/`Keep-Alive`/`Transfer-Encoding`/`Upgrade`）
     弃 body，307/308 保留方法；Location 按 RFC 3986 相对解析；目标必须
     http(s)）。`ComputeRedirect` 供调用方决定是否/如何跟随；HttpClient
     自动跟随（跨 host 需 DNS 解析）为后续项。
+  - **自动跟随重定向已落地**（2026-08-23）：`HttpClient::SendRedirecting`
+    按 `ComputeRedirect` 决策自动跟随 3xx 链，`RedirectOptions` 提供
+    `max_redirects`（默认 10）、跨 host 的 `HostResolver*`（裸指针，调用方
+    保证链期间存活；为空则跨 host 跳不跟随、直接交付 3xx）与
+    `ssl_context_provider`（跨 host 按目标 URL 提供 SSL 上下文）。
+    语义：同 origin（scheme+host+port 全同）复用 endpoint 与连接；跨
+    origin 先剥离调用方手动 `Authorization`/`Cookie` 头，再经 resolver
+    解析新 endpoint（`Url::port()==0` 时按 scheme 默认 80/443），并按需
+    更换 SSL 上下文；301/302/303 改 GET 且丢弃 body 与 body 头（307/308
+    保留）；seen 集合（origin+path+query）防环；跳数耗尽后交付最后响应。
+    递归 driver 用 `shared_ptr<std::function>` 承载，保证跨线程异步回调
+    安全。附带修复真实缺陷：`StartRequest` 的 keep-alive 复用不校验
+    endpoint——同一 HttpClient 先后连不同端口会把第二个请求发到旧连接
+    （跨 host 重定向被发回原服务器）→ 现记录 `peer_endpoint_`，不一致时
+    关闭旧连接重建。端到端测试 9 例（`http_redirect_integration_test.cpp`）。
   - 附带修复：`HttpResponseWriter` 对空 body 响应补发 `Content-Length: 0`
     （否则 keep-alive 客户端按 read-until-close 等待挂起）；1xx/204/304
     依规范不携带 Content-Length。

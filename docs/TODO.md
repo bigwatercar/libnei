@@ -298,10 +298,22 @@
 
 ## 最近完成（记录，2026-07 ~ 08）
 
+- **HttpClient 自动跟随重定向（2026-08-23）** — 新增 `HttpClient::SendRedirecting`：基于
+  `redirect_handler` 决策自动跟随 3xx 链，`RedirectOptions` 可配置 `max_redirects`、跨 host 的
+  `HostResolver*` 与 `ssl_context_provider`。同 origin 复用 endpoint/SSL 连接；跨 origin 去掉
+  手动 `Authorization`/`Cookie` 头、经 resolver 解析新 endpoint（默认端口 80/443）、可按需换
+  SSL 上下文；301/302/303 改 GET 并丢弃 body（307/308 保留）；seen URL（origin+path+query）
+  防环；跳数超限/无 resolver 跨 host 时交付最后响应。附带修复真实缺陷：`StartRequest` 的
+  keep-alive 复用不校验 endpoint（同一 HttpClient 连不同端口会复用旧连接把请求发到错误服务器）
+  → 现 endpoint 不一致时重建连接。测试 9 例端到端（同 origin 链、303/307 方法语义、max_redirects=0、
+  跳数超限、防环、跨端口解析跟随、跨 origin 凭据剥离、无 resolver 交付 3xx）。验证：Win D995、
+  WSL R967 全绿。HTTP 补全剩余：中间件。
+
 - **multipart/form-data（RFC 7578）（2026-08-23）** — 新增 `multipart.{h,cpp}`：`MultipartFormData`
   （生成 boundary + 字段/文件 body）、`ParseMultipartBody`（按 boundary 拆 parts，含 CRLF/二进制 payload、
   闭合 boundary、Content-Disposition 的 name/filename 解析）。端到端验证：HttpClient 上传 → HttpServer
-  解析回显。测试 5 单测 + 1 端到端。HTTP 补全剩余：中间件、HttpClient 自动跟随重定向。
+  解析回显。测试 5 单测 + 1 端到端。HTTP 补全剩余：中间件、HttpClient 自动跟随重定向（已随
+  `SendRedirecting` 落地，见上）。
 
 - **HTTP Cookie（RFC 6265）+ 重定向决策（2026-08-23）** — 新增 `cookie.{h,cpp}`（Set-Cookie 解析：
   domain/path 默认、Max-Age 优先于 Expires、Secure/HttpOnly、host-only 与子域匹配、RFC 1123 日期解析；
@@ -310,7 +322,7 @@
   301/302/303 改 GET、307/308 保留方法；Location 相对解析；http(s) 白名单）。
   附带修复既有缺陷：`HttpResponseWriter` 空 body 响应不发 Content-Length（keep-alive 下客户端
   read-until-close 挂起）→ 现发 `Content-Length: 0`（1xx/204/304 例外）。测试 15+3+11 例。
-  客户端自动跟随重定向（跨 host 需 DNS）留待后续。
+  客户端自动跟随重定向（跨 host 需 DNS）已随 `SendRedirecting` 落地（见上）。
 
 - **HTTP gzip/deflate 压缩（2026-08-23）** — 引入 vendored zlib v1.3.1（3rdparty/zlib，静态、PRIVATE 链接），
   新增增量压缩原语 `neixx/net/http/gzip_stream.{h,cpp}`（GzipCompressor/GzipDecompressor，RFC 1952/1950/raw

@@ -13,6 +13,9 @@ target_sources(nei_tests PRIVATE http_cookie_integration_test.cpp)
 # HTTP 3xx redirect decision logic
 target_sources(nei_tests PRIVATE redirect_handler_test.cpp)
 
+# HttpClient automatic redirect following (end-to-end)
+target_sources(nei_tests PRIVATE http_redirect_integration_test.cpp)
+
 # multipart/form-data encoding / parsing
 target_sources(nei_tests PRIVATE multipart_test.cpp)
 

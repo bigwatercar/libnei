@@ -25,6 +25,7 @@
 #include <neixx/net/http/cookie.h>
 #include <neixx/net/http/gzip_stream.h>
 #include <neixx/net/http/http_parser.h>
+#include <neixx/net/http/redirect_handler.h>
 #include <neixx/net/ip_end_point.h>
 #include <neixx/net/ssl_context.h>
 #include <neixx/net/tcp_client_socket.h>
@@ -262,6 +263,10 @@ struct HttpClient::Impl {
   std::unique_ptr<net::TCPClientSocket> tcp_socket;
   std::unique_ptr<net::TLSClientSocket> tls_socket;
   net::SSLContext *ssl_ctx = nullptr;
+  // Endpoint of the live connection; keep-alive reuse is only valid when a
+  // subsequent Send targets the same peer.  A different endpoint (e.g. a
+  // cross-host redirect hop) forces a reconnect.
+  net::IPEndPoint peer_endpoint_;
   HttpClient::ResponseCallback callback;
   scoped_refptr<SingleThreadTaskRunner> io_runner;
   // Streaming response delivery (SendStreaming): when true, headers/body are
@@ -373,11 +378,24 @@ struct HttpClient::Impl {
 
     // If we already have a live socket (keep-alive reuse), skip connect.
     // Probe under the lock: an any-thread is_connected()/Peek() may run
-    // concurrently with this Send.
+    // concurrently with this Send.  Reuse is only valid when the peer
+    // endpoint matches — a different endpoint (e.g. a cross-host redirect
+    // hop) must tear down the old connection and reconnect.
     bool have_socket = false;
     {
       std::lock_guard<std::mutex> lock(conn_mutex_);
       have_socket = (tcp_socket || tls_socket);
+      if (have_socket && peer_endpoint_ != endpoint) {
+        if (tcp_socket) {
+          tcp_socket->Close();
+          tcp_socket.reset();
+        }
+        if (tls_socket) {
+          tls_socket->Close();
+          tls_socket.reset();
+        }
+        have_socket = false;
+      }
     }
     if (have_socket) {
       state = State::kWriting;
@@ -396,6 +414,7 @@ struct HttpClient::Impl {
       } else {
         tcp_socket = std::make_unique<net::TCPClientSocket>();
       }
+      peer_endpoint_ = endpoint;
     }
     if (ssl_ctx) {
       tls_socket->Connect(
@@ -982,6 +1001,7 @@ struct HttpClient::Impl {
           tls_socket->Close();
           tls_socket.reset();
         }
+        peer_endpoint_ = net::IPEndPoint();
       }
     } else {
       // Keep-alive reuse only runs on the I/O thread (response path).
@@ -1035,6 +1055,124 @@ void HttpClient::SetRequestPriorityInternal(int64_t generation, int32_t priority
 
 void HttpClient::SetCookieJar(std::shared_ptr<CookieJar> jar) {
   impl_->cookie_jar = std::move(jar);
+}
+
+namespace {
+// Removes every header whose (case-insensitive) name is in |drop|.
+void EraseHeaders(HttpHeaders *headers, const std::vector<std::string> &drop) {
+  headers->erase(std::remove_if(headers->begin(),
+                                headers->end(),
+                                [&drop](const HttpHeader &h) {
+                                  for (const auto &name : drop) {
+                                    if (EqualsCaseInsensitiveASCII(h.name, name))
+                                      return true;
+                                  }
+                                  return false;
+                                }),
+                 headers->end());
+}
+} // namespace
+
+HttpRequestHandle HttpClient::SendRedirecting(const HttpRequest &request,
+                                              const net::IPEndPoint &endpoint,
+                                              net::SSLContext *ssl_ctx,
+                                              scoped_refptr<SingleThreadTaskRunner> io_runner,
+                                              const RedirectOptions &options,
+                                              ResponseCallback callback) {
+  // Buffered mode only: clear any streaming hooks like Send() does.
+  impl_->streaming = false;
+  impl_->upload_streaming = false;
+  impl_->body_provider = nullptr;
+  impl_->response_delegate->on_headers_cb = nullptr;
+  impl_->response_delegate->on_body_cb = nullptr;
+
+  struct FollowState {
+    RedirectOptions options;
+    int hops_left = 0;
+    std::unordered_set<std::string> seen;
+    ResponseCallback final_cb;
+  };
+
+  auto state = std::make_shared<FollowState>();
+  state->options = options;
+  state->hops_left = options.max_redirects;
+  state->final_cb = std::move(callback);
+
+  // Recursive hop driver.  Kept in a shared_ptr because each hop's Send
+  // callback may fire after this method returns; recursion goes through the
+  // shared function object.  Returns the in-flight hop's handle.
+  auto run = std::make_shared<
+      std::function<HttpRequestHandle(const HttpRequest &, const net::IPEndPoint &, net::SSLContext *)>>();
+  *run = [this, run, state, io_runner](const HttpRequest &req, const net::IPEndPoint &ep, net::SSLContext *ctx) {
+    return Send(
+        req, ep, ctx, io_runner, [this, run, state, req, ep, ctx, io_runner](std::unique_ptr<HttpResponse> resp) {
+          const Url &url = req.url;
+          const HttpMethod method = req.method;
+          if (!resp) {
+            state->final_cb(nullptr);
+            return;
+          }
+          // Loop guard: never revisit the same origin+path+query.
+          const std::string key = std::string(url.origin()) + std::string(url.path()) + std::string(url.query());
+          if (state->seen.count(key) != 0) {
+            state->final_cb(std::move(resp));
+            return;
+          }
+          state->seen.insert(key);
+
+          const auto decision = ComputeRedirect(*resp, url, method, state->hops_left);
+          if (!decision || !decision->follow) {
+            state->final_cb(std::move(resp));
+            return;
+          }
+          --state->hops_left;
+
+          // Build the next request.
+          HttpRequest next = req;
+          next.url = decision->target;
+          next.method = decision->method;
+          const bool same_origin = EqualsCaseInsensitiveASCII(url.host(), decision->target.host())
+                                   && EqualsCaseInsensitiveASCII(url.scheme(), decision->target.scheme())
+                                   && url.port() == decision->target.port();
+          if (decision->method_changed) {
+            // 301/302/303: switch to GET and drop the body + body headers.
+            next.body.clear();
+            EraseHeaders(&next.headers, {"Content-Length", "Content-Type", "Transfer-Encoding"});
+          }
+          if (same_origin) {
+            (*run)(next, ep, ctx);
+            return;
+          }
+
+          // Cross-origin: drop caller-provided credentials, then resolve DNS
+          // (with a per-target SSL context when the caller supplied one).
+          EraseHeaders(&next.headers, {"Authorization", "Cookie"});
+          if (!state->options.resolver) {
+            state->final_cb(std::move(resp)); // cannot follow cross-host.
+            return;
+          }
+          const uint16_t port = decision->target.port() != 0
+                                    ? decision->target.port()
+                                    : (EqualsCaseInsensitiveASCII(decision->target.scheme(), "https") ? 443 : 80);
+          state->options.resolver->Resolve(
+              std::string(decision->target.host()),
+              [run, state, next, port, ctx, decision](const AddressList &addrs) {
+                if (addrs.empty()) {
+                  state->final_cb(nullptr);
+                  return;
+                }
+                net::SSLContext *next_ctx = ctx;
+                if (state->options.ssl_context_provider) {
+                  if (net::SSLContext *provided = state->options.ssl_context_provider(decision->target))
+                    next_ctx = provided;
+                }
+                const net::IPEndPoint new_ep(addrs[0].address(), port);
+                (*run)(next, new_ep, next_ctx);
+              },
+              io_runner);
+        });
+  };
+  return (*run)(request, endpoint, ssl_ctx);
 }
 
 HttpRequestHandle HttpClient::Send(const HttpRequest &request,

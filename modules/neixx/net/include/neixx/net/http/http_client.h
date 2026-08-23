@@ -11,6 +11,7 @@
 #include <nei/build/nei_export.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/memory/weak_ptr.h>
+#include <neixx/net/host_resolver.h>
 #include <neixx/net/http/cookie.h>
 #include <neixx/net/http/http_request.h>
 #include <neixx/net/http/http_request_handle.h>
@@ -48,6 +49,27 @@ namespace net::http {
 //     connection and leaves the client terminal (like Close).
 
 NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
+
+// Options controlling HttpClient::SendRedirecting's automatic redirect
+// following (RFC 9110 §15.4 via RedirectHandler).
+struct NEI_API RedirectOptions {
+  // Max redirect hops to follow before the final response is delivered.
+  // 0 disables following entirely.
+  int max_redirects = 10;
+
+  // DNS resolver used to resolve cross-host redirect targets (raw pointer:
+  // the caller must keep it alive for the duration of the redirect chain).
+  // Null → only same-host redirects are followed automatically (cross-host
+  // hops are delivered as the final response).
+  HostResolver *resolver = nullptr;
+
+  // Optional per-target SSLContext provider for cross-host https redirects
+  // (SNI + certificate verification must follow the target's hostname).
+  // Called on the I/O thread with the resolved target URL; returning nullptr
+  // reuses the original ssl_ctx (only appropriate for non-verifying contexts
+  // or same-host hops).
+  std::function<net::SSLContext *(const Url &)> ssl_context_provider;
+};
 
 class NEI_API HttpClient : public RefCountedThreadSafe<HttpClient> {
 public:
@@ -110,6 +132,21 @@ public:
                              scoped_refptr<SingleThreadTaskRunner> io_runner,
                              RequestBodyProvider body_provider,
                              ResponseCallback callback);
+
+  // Like Send, but follows redirect responses (3xx + Location) automatically
+  // up to |options.max_redirects| hops.  301/302/303 rewrite the method to
+  // GET and drop the body; 307/308 preserve method/body (see RedirectHandler).
+  // Same-host hops reuse the original endpoint/ssl_ctx; cross-host hops use
+  // |options.resolver| for DNS and |options.ssl_context_provider| (when set)
+  // for a per-target TLS context.  When following is disabled or a hop cannot
+  // be followed (no resolver/provider, hop limit, loop), the final response is
+  // delivered as-is.  The returned handle controls only the in-flight hop.
+  HttpRequestHandle SendRedirecting(const HttpRequest &request,
+                                    const net::IPEndPoint &endpoint,
+                                    net::SSLContext *ssl_ctx,
+                                    scoped_refptr<SingleThreadTaskRunner> io_runner,
+                                    const RedirectOptions &options,
+                                    ResponseCallback callback);
 
   // Close the underlying connection and put the client in a terminal state.
   // Safe to call multiple times.
