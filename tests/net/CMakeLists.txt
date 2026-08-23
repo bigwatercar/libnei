@@ -10,6 +10,9 @@ target_sources(nei_tests PRIVATE cookie_test.cpp)
 # HttpClient automatic cookie handling (end-to-end)
 target_sources(nei_tests PRIVATE http_cookie_integration_test.cpp)
 
+# HTTP 3xx redirect decision logic
+target_sources(nei_tests PRIVATE redirect_handler_test.cpp)
+
 # End-to-end HTTP content-encoding (gzip) tests
 target_sources(nei_tests PRIVATE http_compression_test.cpp)
 
