@@ -98,6 +98,8 @@ set(NEIXX_NET_HTTP_SOURCES
     include/neixx/net/http/cookie.h
     src/http/redirect_handler.cpp
     include/neixx/net/http/redirect_handler.h
+    src/http/multipart.cpp
+    include/neixx/net/http/multipart.h
 )
 target_sources(nei PRIVATE ${NEIXX_NET_HTTP_SOURCES})
 target_link_libraries(nei PRIVATE llhttp zlibstatic)
