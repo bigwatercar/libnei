@@ -49,6 +49,19 @@ struct HttpRequestHandle::Impl {
       return;
     client->SetRequestPriorityInternal(generation, priority);
   }
+
+  void ResumeOnIO() {
+    if (!active || !active->load(std::memory_order_relaxed))
+      return;
+    HttpClient *client = weak_client.get();
+    if (!client)
+      return;
+    // Unlike Cancel/SetPriority (which run while in-flight I/O holds a
+    // self-reference), a paused download has no in-flight I/O — hold a strong
+    // reference so the client cannot be destroyed mid-resume.
+    scoped_refptr<HttpClient> keep_alive(client);
+    client->ResumeDownloadInternal(generation);
+  }
 };
 
 HttpRequestHandle::HttpRequestHandle() = default;
@@ -98,6 +111,17 @@ void HttpRequestHandle::SetPriority(int32_t priority) {
     return;
   }
   impl_->SetPriorityOnIO(priority);
+}
+
+void HttpRequestHandle::Resume() {
+  if (!impl_)
+    return;
+  if (impl_->io_runner && !impl_->io_runner->BelongsToCurrentThread()) {
+    std::shared_ptr<Impl> impl = impl_;
+    impl->io_runner->PostTask(FROM_HERE, [impl]() { impl->ResumeOnIO(); });
+    return;
+  }
+  impl_->ResumeOnIO();
 }
 
 } // namespace net::http

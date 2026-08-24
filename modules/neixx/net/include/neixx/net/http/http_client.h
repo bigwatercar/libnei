@@ -16,6 +16,7 @@
 #include <neixx/net/http/http_request.h>
 #include <neixx/net/http/http_request_handle.h>
 #include <neixx/net/http/http_response.h>
+#include <neixx/net/ip_end_point.h>
 #include <neixx/task/task_runner.h>
 
 namespace nei {
@@ -71,16 +72,46 @@ struct NEI_API RedirectOptions {
   std::function<net::SSLContext *(const Url &)> ssl_context_provider;
 };
 
+// Client-side HTTP proxy configuration (see HttpClient::SetProxy).
+//
+// With kHttp proxying enabled:
+//   - Plain-HTTP targets are sent to the proxy using the absolute-form
+//     request-target (RFC 9112 §3.2.2) — the proxy fetches on our behalf.
+//   - HTTPS targets first establish a CONNECT tunnel through the proxy, then
+//     perform the TLS handshake to the target inside the tunnel (RFC 9110
+//     §9.3.6), so TLS is end-to-end with the origin.
+struct NEI_API ProxyInfo {
+  enum class Type { kNone, kHttp };
+  Type type = Type::kNone;
+  // Proxy server address (the caller resolves the hostname).
+  net::IPEndPoint endpoint;
+  // Optional display name of the proxy host (used for the CONNECT authority
+  // fallback and logging).
+  std::string host;
+};
+
 class NEI_API HttpClient : public RefCountedThreadSafe<HttpClient> {
 public:
   using ResponseCallback = std::function<void(std::unique_ptr<HttpResponse>)>;
 
   // Streaming response delivery.  |on_body| is invoked once per parsed body
   // chunk and finishes with (nullptr, 0, true) when the body is complete.
-  using BodyChunkCallback = std::function<void(const char *data, std::size_t len, bool done)>;
+  //
+  // Backpressure: |on_body| returns true to keep reading (default); returning
+  // false PAUSES the download — the client stops reading the socket and no
+  // further chunks are delivered until HttpRequestHandle::Resume() is called
+  // (safe from any thread).  This gives callers natural backpressure for
+  // large bodies: memory stays bounded by the data already parsed into the
+  // chunk being delivered.
+  using BodyChunkCallback = std::function<bool(const char *data, std::size_t len, bool done)>;
   // Invoked once with the response status and headers, before the first body
   // chunk.  Headers are only valid for the duration of the call.
   using ResponseHeadersCallback = std::function<void(HttpStatus status, const HttpHeaders &headers)>;
+
+  // Upload-direction chunk callback (void): the client invokes it to deliver
+  // each pulled request-body chunk.  Kept distinct from BodyChunkCallback
+  // (download, bool return for backpressure).
+  using UploadBodyChunkCallback = std::function<void(const char *data, std::size_t len, bool done)>;
 
   // Streaming request-body upload.  |body_provider| is invoked once PER BODY
   // CHUNK to pull the next one: each call must deliver exactly one chunk via
@@ -90,7 +121,7 @@ public:
   // flight at a time), keeping memory bounded for large bodies.  If the
   // request carries a Content-Length header the body is sent as-is; otherwise
   // it is sent with Transfer-Encoding: chunked.
-  using RequestBodyProvider = std::function<void(BodyChunkCallback on_chunk)>;
+  using RequestBodyProvider = std::function<void(UploadBodyChunkCallback on_chunk)>;
 
   HttpClient();
   ~HttpClient();
@@ -116,6 +147,9 @@ public:
   // All callbacks run on |io_runner|.  Memory stays bounded regardless of body
   // size.  The connection is only reusable (keep-alive) if the body is drained
   // to the done signal.
+  //
+  // Backpressure: |on_body| may return false to pause (see BodyChunkCallback),
+  // then resume the download later via the returned handle's Resume().
   HttpRequestHandle SendStreaming(const HttpRequest &request,
                                   const net::IPEndPoint &endpoint,
                                   net::SSLContext *ssl_ctx,
@@ -159,6 +193,15 @@ public:
   // in-flight requests).  Passing null detaches the jar.
   void SetCookieJar(std::shared_ptr<CookieJar> jar);
 
+  // Routes requests through an HTTP proxy (see ProxyInfo).  Plain-HTTP
+  // targets use the absolute-form request-target; HTTPS targets establish a
+  // CONNECT tunnel first (TLS stays end-to-end with the origin).  Must be
+  // set before Send* (not synchronized with in-flight requests).
+  void SetProxy(const ProxyInfo &proxy);
+
+  // Disables proxying (equivalent to SetProxy with type == kNone).
+  void ClearProxy();
+
   // Returns true if the client has a live keep-alive connection to the
   // server and is ready to send another request (Idle state with socket).
   bool is_connected() const;
@@ -181,6 +224,8 @@ private:
   // http_request_handle.cpp for the liveness protocol).
   void CancelRequestInternal(int64_t generation);
   void SetRequestPriorityInternal(int64_t generation, int32_t priority);
+  // Resumes a paused streaming download (see BodyChunkCallback / SendStreaming).
+  void ResumeDownloadInternal(int64_t generation);
 
   struct Impl;
   std::unique_ptr<Impl> impl_;

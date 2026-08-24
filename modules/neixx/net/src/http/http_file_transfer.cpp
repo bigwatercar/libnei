@@ -107,18 +107,18 @@ void DownloadToFile(scoped_refptr<HttpClient> client,
                                },
                                // on_body: copy each chunk into a pool buffer and write to the
                                // file at the running offset (offset-based writes are independent).
-                               [state](const char *data, std::size_t len, bool done) {
+                               [state](const char *data, std::size_t len, bool done) -> bool {
                                  if (done) {
                                    state->body_done = true;
                                    FinishIfDone(state);
-                                   return;
+                                   return true;
                                  }
                                  if (len == 0)
-                                   return;
+                                   return true;
                                  state->total_bytes += len;
                                  if (!state->success) {
                                    // Non-2xx: discard the (error) body bytes.
-                                   return;
+                                   return true;
                                  }
                                  auto buf = IOBufferPool::GetInstance().AcquireBuffer(len);
                                  std::memcpy(buf->data(), data, len);
@@ -132,6 +132,7 @@ void DownloadToFile(scoped_refptr<HttpClient> client,
                                          state->success = false;
                                        FinishIfDone(state);
                                      });
+                                 return true;
                                });
                          });
 }
@@ -175,7 +176,7 @@ void UploadFromFile(scoped_refptr<HttpClient> client,
         AsyncFile *file = state->file.get();
         // Pull-based provider: each client pull reads the next file chunk and
         // delivers it via on_chunk (one chunk in flight → bounded memory).
-        HttpClient::RequestBodyProvider provider = [state, file](HttpClient::BodyChunkCallback on_chunk) {
+        HttpClient::RequestBodyProvider provider = [state, file](HttpClient::UploadBodyChunkCallback on_chunk) {
           auto buf = IOBufferPool::GetInstance().AcquireBuffer(UploadState::kChunkSize);
           file->ReadAsync(buf,
                           UploadState::kChunkSize,

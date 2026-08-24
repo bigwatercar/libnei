@@ -506,7 +506,7 @@ TEST_F(HttpStressFixture, UploadCloseMidStream) {
     // Provider hands out one chunk per pull; pulls are backpressured by the
     // client (one write in flight), so Close() races with the in-flight
     // write on every round.
-    HttpClient::RequestBodyProvider provider = [&pulls](HttpClient::BodyChunkCallback cb) {
+    HttpClient::RequestBodyProvider provider = [&pulls](HttpClient::UploadBodyChunkCallback cb) {
       int n = pulls.fetch_add(1);
       if (n >= 8) {
         cb(nullptr, 0, true);

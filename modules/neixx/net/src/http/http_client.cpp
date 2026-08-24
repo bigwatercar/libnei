@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <memory>
@@ -69,6 +70,17 @@ struct ResponseDelegate : public Http1Parser::Delegate {
   // once before the first body byte.
   HttpClient::ResponseHeadersCallback on_headers_cb;
   HttpClient::BodyChunkCallback on_body_cb;
+  // Set by OnBody when the user's on_body_cb returned false (backpressure):
+  // the caller must stop issuing reads until HttpRequestHandle::Resume().
+  bool paused_requested = false;
+  // Bytes parsed while paused are buffered (decoded) here and dispatched by
+  // Resume() — llhttp consumes the whole batch in one Execute() call, so a
+  // pause mid-batch cannot stop parsing, only delivery.
+  std::string paused_buffer;
+  // The done signal arrived while paused (full response parsed but delivery
+  // withheld).  Resume() drains paused_buffer, then delivers done and
+  // finishes the request.
+  bool paused_done = false;
   // Reads the numeric status code from the parser (valid at OnHeadersComplete).
   std::function<uint16_t()> status_provider;
   uint16_t parsed_status_code = 0;
@@ -110,20 +122,36 @@ struct ResponseDelegate : public Http1Parser::Delegate {
   }
 
   void OnBody(const char *data, size_t len) override {
-    if (decompressor) {
-      std::string decoded;
-      if (decompressor->Decompress(data, len, &decoded)) {
-        if (on_body_cb)
-          on_body_cb(decoded.data(), decoded.size(), false);
-        else
-          response.body.append(decoded);
+    if (paused_requested) {
+      // Backpressure window: buffer (decoded) bytes; Resume() drains them.
+      if (decompressor) {
+        std::string decoded;
+        if (decompressor->Decompress(data, len, &decoded))
+          paused_buffer.append(decoded);
+      } else {
+        paused_buffer.append(data, len);
       }
       return;
     }
-    if (on_body_cb)
-      on_body_cb(data, len, false);
-    else
+    if (decompressor) {
+      std::string decoded;
+      if (decompressor->Decompress(data, len, &decoded)) {
+        if (on_body_cb) {
+          // false return pauses the download (see BodyChunkCallback).
+          if (!on_body_cb(decoded.data(), decoded.size(), false))
+            paused_requested = true;
+        } else {
+          response.body.append(decoded);
+        }
+      }
+      return;
+    }
+    if (on_body_cb) {
+      if (!on_body_cb(data, len, false))
+        paused_requested = true;
+    } else {
       response.body.append(data, len);
+    }
   }
 
   void OnMessageComplete() override {
@@ -132,14 +160,22 @@ struct ResponseDelegate : public Http1Parser::Delegate {
       std::string tail;
       decompressor->Finish(&tail);
       if (!tail.empty()) {
-        if (on_body_cb)
-          on_body_cb(tail.data(), tail.size(), false);
-        else
+        if (on_body_cb) {
+          if (paused_requested)
+            paused_buffer.append(tail);
+          else
+            on_body_cb(tail.data(), tail.size(), false);
+        } else {
           response.body.append(tail);
+        }
       }
     }
-    if (on_body_cb)
-      on_body_cb(nullptr, 0, true);
+    if (on_body_cb) {
+      if (paused_requested)
+        paused_done = true; // deliver done after Resume() drains the buffer.
+      else
+        on_body_cb(nullptr, 0, true);
+    }
   }
 
   std::unique_ptr<GzipDecompressor> decompressor;
@@ -147,25 +183,63 @@ struct ResponseDelegate : public Http1Parser::Delegate {
 
 // Serialize an HttpRequest to wire format.  When |include_body| is false only
 // the request line + headers are produced (streaming upload writes the body
-// separately).
-std::string SerializeRequest(const HttpRequest &request, bool include_body) {
+// separately).  When |absolute_form| is true the request-target is the
+// absolute-form URI (RFC 9112 §3.2.2), used for plain-HTTP requests sent
+// through an HTTP proxy.
+std::string SerializeRequest(const HttpRequest &request, bool include_body, bool absolute_form = false) {
   std::string wire;
   wire += HttpMethodToString(request.method);
   wire += " ";
-  // A URL without an explicit path ("https://host") yields an empty path;
-  // HTTP/1.1 requires a non-empty request-target, so default to "/".
-  if (request.url.path().empty()) {
-    wire += "/";
+  if (absolute_form) {
+    // scheme://host[:port]/path?query
+    wire += request.url.scheme();
+    wire += "://";
+    wire += request.url.host();
+    const uint16_t port = request.url.port();
+    if (port != 0)
+      wire += ":" + std::to_string(port);
+    if (request.url.path().empty())
+      wire += "/";
+    else
+      wire += request.url.path();
+    if (!request.url.query().empty()) {
+      wire += "?";
+      wire += request.url.query();
+    }
   } else {
-    wire += request.url.path();
-  }
-  if (!request.url.query().empty()) {
-    wire += "?";
-    wire += request.url.query();
+    // A URL without an explicit path ("https://host") yields an empty path;
+    // HTTP/1.1 requires a non-empty request-target, so default to "/".
+    if (request.url.path().empty()) {
+      wire += "/";
+    } else {
+      wire += request.url.path();
+    }
+    if (!request.url.query().empty()) {
+      wire += "?";
+      wire += request.url.query();
+    }
   }
   wire += " ";
   wire += HttpVersionToString(request.http_version);
   wire += "\r\n";
+
+  // Absolute-form (proxy) requests must carry a Host header even if the
+  // caller omitted it — derive it from the URL when absent.
+  if (absolute_form) {
+    bool has_host = false;
+    for (const auto &h : request.headers) {
+      if (EqualsCaseInsensitiveASCII(h.name, "Host")) {
+        has_host = true;
+        break;
+      }
+    }
+    if (!has_host) {
+      std::string host = std::string(request.url.host());
+      if (request.url.port() != 0)
+        host += ":" + std::to_string(request.url.port());
+      wire += "Host: " + host + "\r\n";
+    }
+  }
 
   bool has_accept_encoding = false;
   for (const auto &h : request.headers) {
@@ -193,7 +267,7 @@ std::string SerializeRequest(const HttpRequest &request, bool include_body) {
 // HttpClient::Impl
 // ===========================================================================
 struct HttpClient::Impl {
-  enum class State { kIdle, kConnecting, kWriting, kUploading, kReading, kClosed };
+  enum class State { kIdle, kConnecting, kProxying, kWriting, kUploading, kReading, kClosed };
 
   // Protocol dispatch (h1/h2 fusion).  Decided once per connection by the
   // ALPN result after the TLS handshake; kHttp1 is also the pre-handshake
@@ -206,6 +280,12 @@ struct HttpClient::Impl {
   scoped_refptr<Http2ClientSession> h2_session;
   // Optional cookie jar for automatic cookie handling (SetCookieJar).
   std::shared_ptr<CookieJar> cookie_jar;
+  // Client-side HTTP proxy (SetProxy).  Read on the Send thread at StartRequest.
+  ProxyInfo proxy_;
+  // CONNECT target authority ("host:port") for HTTPS-through-proxy, and the
+  // raw CONNECT response bytes while in State::kProxying.  I/O thread only.
+  std::string proxy_connect_authority_;
+  std::string proxy_response_;
   // URL of the most recent request, used to parse Set-Cookie defaults.
   Url last_request_url_;
   // First request staged while the h2 session is being established (the
@@ -222,12 +302,24 @@ struct HttpClient::Impl {
     bool body_done = false;                         // streaming done delivered
     int64_t generation = 0;                         // handle tracking
     std::shared_ptr<std::atomic<bool>> active;      // handle liveness flag
+    // Streaming backpressure: on_body returned false → pause delivery.  Bytes
+    // arriving while paused are buffered (decoded) and dispatched on Resume().
+    bool paused = false;
+    std::string paused_buffer;
+    bool paused_done = false; // done arrived while paused
+    // The stream ended (session on_close) while paused: teardown is deferred
+    // until Resume() so buffered bytes and the done signal are not dropped.
+    bool paused_pending_finish = false;
+    bool paused_clean = true;
   };
 
   std::unordered_map<int32_t, std::unique_ptr<H2Pending>> h2_pending;
   // In-flight h2 stream count (atomic so Peek() can read it from any thread;
   // the pool requires "no request in flight" before reusing a client).
   std::atomic<int> h2_inflight{0};
+  // Number of h2 streams currently paused for backpressure (I/O thread only).
+  // > 0 ⇒ the shared h2 session's read loop is paused (PauseRead).
+  int h2_paused_streams = 0;
 
   // ---- HttpRequestHandle tracking (h2) ----
   // Request generation → h2 stream id (populated on submit, erased on
@@ -267,11 +359,24 @@ struct HttpClient::Impl {
   // subsequent Send targets the same peer.  A different endpoint (e.g. a
   // cross-host redirect hop) forces a reconnect.
   net::IPEndPoint peer_endpoint_;
+  // For HTTPS-through-proxy connections, the CONNECT authority the tunnel was
+  // established for.  A tunnel is bound to one authority; reusing it for a
+  // different target requires a fresh CONNECT (new tunnel).
+  std::string peer_connect_authority_;
   HttpClient::ResponseCallback callback;
   scoped_refptr<SingleThreadTaskRunner> io_runner;
   // Streaming response delivery (SendStreaming): when true, headers/body are
   // delivered via the delegate's streaming hooks instead of being buffered.
   bool streaming = false;
+  // h1 streaming backpressure: set when on_body returned false; the read loop
+  // stops until HttpRequestHandle::Resume() clears it (I/O thread only).
+  bool read_paused = false;
+  // While a streaming download is paused there is NO in-flight I/O callback
+  // holding a self-reference, so the client could be destroyed on the calling
+  // thread while a Resume() task is queued on the I/O thread.  Holding a self
+  // reference from the moment the download pauses until Resume() finishes
+  // keeps the client alive across that window (I/O thread only).
+  scoped_refptr<HttpClient> pause_self_holder_;
   // Streaming upload state (SendBody).
   HttpClient::RequestBodyProvider body_provider;
   bool upload_streaming = false;
@@ -361,7 +466,23 @@ struct HttpClient::Impl {
     in_flight_active_ = active;
     last_h1_priority_ = -1;
 
-    wire_request = SerializeRequest(request_with_cookies, /*include_body=*/!upload_streaming);
+    // Proxy routing: connect to the proxy instead of the origin; HTTPS
+    // targets establish a CONNECT tunnel first (TLS stays end-to-end).
+    const bool use_proxy = proxy_.type == ProxyInfo::Type::kHttp;
+    const bool target_is_https = ssl_ctx != nullptr;
+    const net::IPEndPoint connect_target = use_proxy ? proxy_.endpoint : endpoint;
+    if (use_proxy && target_is_https) {
+      std::string host = std::string(request.url.host());
+      if (host.empty())
+        host = endpoint.address().ToString();
+      const uint16_t port = endpoint.port() != 0 ? endpoint.port() : 443;
+      proxy_connect_authority_ = host + ":" + std::to_string(port);
+    } else {
+      proxy_connect_authority_.clear();
+    }
+    const bool absolute_form = use_proxy && !target_is_https;
+
+    wire_request = SerializeRequest(request_with_cookies, /*include_body=*/!upload_streaming, absolute_form);
 
     response_delegate->complete = false;
     response_delegate->response = HttpResponse();
@@ -380,12 +501,16 @@ struct HttpClient::Impl {
     // Probe under the lock: an any-thread is_connected()/Peek() may run
     // concurrently with this Send.  Reuse is only valid when the peer
     // endpoint matches — a different endpoint (e.g. a cross-host redirect
-    // hop) must tear down the old connection and reconnect.
+    // hop) must tear down the old connection and reconnect.  A CONNECT
+    // tunnel is additionally bound to one authority and must be rebuilt for
+    // a different target.
     bool have_socket = false;
     {
       std::lock_guard<std::mutex> lock(conn_mutex_);
       have_socket = (tcp_socket || tls_socket);
-      if (have_socket && peer_endpoint_ != endpoint) {
+      if (have_socket
+          && (peer_endpoint_ != connect_target
+              || (!proxy_connect_authority_.empty() && peer_connect_authority_ != proxy_connect_authority_))) {
         if (tcp_socket) {
           tcp_socket->Close();
           tcp_socket.reset();
@@ -406,22 +531,28 @@ struct HttpClient::Impl {
     state = State::kConnecting;
 
     // Create the socket under the lock (pointer write); connect outside it.
+    // When routing through a proxy, always connect to the proxy over plain
+    // TCP first — TLS (for HTTPS targets) starts only after the CONNECT
+    // tunnel is established.
     {
       std::lock_guard<std::mutex> lock(conn_mutex_);
-      if (ssl_ctx) {
+      if (ssl_ctx && !use_proxy) {
         auto tcp = std::make_unique<net::TCPClientSocket>();
         tls_socket = std::make_unique<net::TLSClientSocket>(std::move(tcp), ssl_ctx);
       } else {
         tcp_socket = std::make_unique<net::TCPClientSocket>();
       }
-      peer_endpoint_ = endpoint;
+      peer_endpoint_ = connect_target;
+      peer_connect_authority_ = proxy_connect_authority_;
     }
-    if (ssl_ctx) {
+    if (ssl_ctx && !use_proxy) {
       tls_socket->Connect(
-          endpoint, [self](bool ok) { self->impl_->OnConnectComplete(self.get(), ok); }, this->io_runner);
+          connect_target, [self](bool ok) { self->impl_->OnConnectComplete(self.get(), ok); }, this->io_runner);
     } else {
       bool ok = tcp_socket->Connect(
-          endpoint, [self](bool success) { self->impl_->OnConnectComplete(self.get(), success); }, this->io_runner);
+          connect_target,
+          [self](bool success) { self->impl_->OnConnectComplete(self.get(), success); },
+          this->io_runner);
       if (!ok)
         Finish(client, nullptr);
     }
@@ -438,6 +569,93 @@ struct HttpClient::Impl {
       return;
     }
 
+    // HTTPS through a proxy: first establish the CONNECT tunnel, then TLS.
+    if (proxy_.type == ProxyInfo::Type::kHttp && !proxy_connect_authority_.empty()) {
+      state = State::kProxying;
+      SendConnectRequest(client);
+      return;
+    }
+
+    OnTunnelOrDirectReady(client);
+  }
+
+  // Writes the CONNECT request that opens the tunnel for HTTPS targets.
+  void SendConnectRequest(HttpClient *client) {
+    std::string request =
+        "CONNECT " + proxy_connect_authority_ + " HTTP/1.1\r\nHost: " + proxy_connect_authority_ + "\r\n\r\n";
+    auto buf = scoped_refptr<IOBuffer>(new IOBufferWithSize(request.size()));
+    std::memcpy(buf->data(), request.data(), request.size());
+    auto self = scoped_refptr<HttpClient>(client);
+    tcp_socket->WriteAsync(buf, request.size(), [self](bool ok, std::size_t) {
+      if (!ok) {
+        self->impl_->Finish(self.get(), nullptr);
+        return;
+      }
+      self->impl_->OnConnectWriteComplete(self.get());
+    });
+  }
+
+  void OnConnectWriteComplete(HttpClient *client) {
+    if (state != State::kProxying)
+      return;
+    proxy_response_.clear();
+    StartRead(client);
+  }
+
+  // Reads the proxy's CONNECT response head; a 2xx opens the tunnel, after
+  // which the TLS handshake to the origin runs inside it.
+  void HandleConnectResponse(HttpClient *client, bool success, std::size_t bytes_read) {
+    if (state != State::kProxying)
+      return;
+    if (!success || bytes_read == 0) {
+      Finish(client, nullptr);
+      return;
+    }
+    proxy_response_.append(reinterpret_cast<const char *>(read_buf->data()), bytes_read);
+    const size_t header_end = proxy_response_.find("\r\n\r\n");
+    if (header_end == std::string::npos) {
+      StartRead(client); // keep reading the response head.
+      return;
+    }
+    // Status line: "HTTP/1.1 200 ..."
+    int code = 0;
+    const size_t sp1 = proxy_response_.find(' ');
+    const size_t sp2 = sp1 == std::string::npos ? std::string::npos : proxy_response_.find(' ', sp1 + 1);
+    if (sp2 != std::string::npos)
+      code = std::atoi(proxy_response_.c_str() + sp1 + 1);
+    proxy_response_.clear();
+    if (code < 200 || code >= 300) {
+      // Tunnel rejected (e.g. 407 Proxy Authentication Required).
+      Finish(client, nullptr);
+      return;
+    }
+    // Tunnel established: perform the TLS handshake to the origin inside it.
+    UpgradeToTls(client);
+  }
+
+  // Wraps the (tunneled) TCP connection in TLS and starts the handshake.
+  void UpgradeToTls(HttpClient *client) {
+    auto self = scoped_refptr<HttpClient>(client);
+    {
+      std::lock_guard<std::mutex> lock(conn_mutex_);
+      auto tcp = std::move(tcp_socket);
+      tls_socket = std::make_unique<net::TLSClientSocket>(std::move(tcp), ssl_ctx);
+    }
+    tls_socket->StartHandshake(
+        [self](bool ok) {
+          if (!ok) {
+            self->impl_->Finish(self.get(), nullptr);
+            return;
+          }
+          self->impl_->OnTunnelOrDirectReady(self.get());
+        },
+        this->io_runner);
+  }
+
+  // Common dispatch after the transport to the origin is ready (direct TCP /
+  // direct TLS / tunneled TLS): ALPN decides h1 vs h2, then writes the
+  // request.
+  void OnTunnelOrDirectReady(HttpClient *client) {
     // h1/h2 fusion dispatch: read the ALPN result exactly once.  Only a
     // literal "h2" routes to the HTTP/2 engine.  A negotiated "http/1.1"
     // continues on the HTTP/1.1 state machine; an EMPTY result (server sent
@@ -624,25 +842,13 @@ struct HttpClient::Impl {
         read_buf, kReadBufferSize, [self](bool ok, std::size_t n) { self->impl_->OnReadComplete(self.get(), ok, n); });
   }
 
-  void OnReadComplete(HttpClient *client, bool success, std::size_t bytes_read) {
-    if (state != State::kReading)
-      return;
-    if (!success || bytes_read == 0) {
-      // EOF.  For a read-until-close body in streaming mode, no Content-Length
-      // or chunked terminator was seen — synthesize the done signal.
-      if (streaming && !response_delegate->complete && response_delegate->on_body_cb) {
-        response_delegate->on_body_cb(nullptr, 0, true);
-        response_delegate->complete = true;
-      }
-      Finish(client, nullptr);
-      return;
-    }
-
-    const char *data = reinterpret_cast<const char *>(read_buf->data());
-    pending_data.append(data, bytes_read);
-
+  // Parses everything buffered in pending_data (feeding the parser / streaming
+  // hooks), then either keeps reading, pauses (on_body returned false), or
+  // finishes.  Shared by OnReadComplete and ResumeGeneration so buffered bytes
+  // left over from a pause are parsed once the download is resumed.
+  void ProcessPendingData(HttpClient *client) {
     size_t offset = 0;
-    while (offset < pending_data.size()) {
+    while (offset < pending_data.size() && !response_delegate->paused_requested) {
       int64_t consumed = response_parser->Execute(pending_data.data() + offset, pending_data.size() - offset);
       if (consumed < 0) {
         Finish(client, nullptr);
@@ -651,6 +857,14 @@ struct HttpClient::Impl {
       offset += static_cast<size_t>(consumed);
 
       if (response_delegate->complete) {
+        // Backpressure: the full response was parsed while paused — defer
+        // teardown until Resume() drains paused_buffer and delivers done.
+        if (response_delegate->paused_requested) {
+          response_delegate->paused_requested = false;
+          read_paused = true;
+          pause_self_holder_ = scoped_refptr<HttpClient>(client);
+          return;
+        }
         if (streaming) {
           // Headers and body chunks were already delivered via the delegate
           // hooks; build a body-less response purely for the connection
@@ -671,7 +885,43 @@ struct HttpClient::Impl {
 
     if (offset > 0)
       pending_data.erase(0, offset);
-    StartRead(client);
+
+    // Backpressure: the user's on_body returned false — stop reading until
+    // HttpRequestHandle::Resume().  Unconsumed bytes stay in pending_data
+    // (bounded by one read buffer); Resume() restarts the loop.  Hold a
+    // self-reference so the client outlives the pause (see
+    // pause_self_holder_).
+    if (response_delegate->paused_requested) {
+      response_delegate->paused_requested = false;
+      read_paused = true;
+      pause_self_holder_ = scoped_refptr<HttpClient>(client);
+      return;
+    }
+    if (!read_paused)
+      StartRead(client);
+  }
+
+  void OnReadComplete(HttpClient *client, bool success, std::size_t bytes_read) {
+    if (state == State::kProxying) {
+      HandleConnectResponse(client, success, bytes_read);
+      return;
+    }
+    if (state != State::kReading)
+      return;
+    if (!success || bytes_read == 0) {
+      // EOF.  For a read-until-close body in streaming mode, no Content-Length
+      // or chunked terminator was seen — synthesize the done signal.
+      if (streaming && !response_delegate->complete && response_delegate->on_body_cb) {
+        response_delegate->on_body_cb(nullptr, 0, true);
+        response_delegate->complete = true;
+      }
+      Finish(client, nullptr);
+      return;
+    }
+
+    const char *data = reinterpret_cast<const char *>(read_buf->data());
+    pending_data.append(data, bytes_read);
+    ProcessPendingData(client);
   }
 
   // ---- h2 path -------------------------------------------------------
@@ -784,40 +1034,81 @@ struct HttpClient::Impl {
       it->second->response->headers = headers;
       it->second->response->SetStatus(status.code());
     };
-    auto on_body_fn = [this](int32_t stream_id, const char *data, std::size_t len, bool done) {
+    auto on_body_fn = [this, client](int32_t stream_id, const char *data, std::size_t len, bool done) {
       auto it = h2_pending.find(stream_id);
       if (it == h2_pending.end())
         return;
-      if (it->second->on_body) {
-        if (it->second->decompressor) {
-          if (len > 0) {
+      H2Pending &pending = *it->second;
+      if (!pending.on_body) {
+        // Buffered mode: accumulate into response->body.
+        if (len > 0) {
+          if (pending.decompressor) {
             std::string decoded;
-            if (it->second->decompressor->Decompress(data, len, &decoded) && !decoded.empty())
-              it->second->on_body(decoded.data(), decoded.size(), false);
+            if (pending.decompressor->Decompress(data, len, &decoded))
+              pending.response->body.append(decoded);
+          } else {
+            pending.response->body.append(data, len);
           }
-          if (done) {
-            std::string tail;
-            it->second->decompressor->Finish(&tail);
-            if (!tail.empty())
-              it->second->on_body(tail.data(), tail.size(), false);
-            it->second->body_done = true;
-            it->second->on_body(nullptr, 0, true);
-          }
-          return;
         }
-        if (done)
-          it->second->body_done = true;
-        it->second->on_body(data, len, done);
         return;
       }
-      if (len > 0) {
-        if (it->second->decompressor) {
-          std::string decoded;
-          if (it->second->decompressor->Decompress(data, len, &decoded))
-            it->second->response->body.append(decoded);
-        } else {
-          it->second->response->body.append(data, len);
+      // Backpressure: while paused, buffer (decoded) bytes instead of
+      // delivering; Resume() drains the buffer.  A done signal arriving while
+      // paused is deferred (paused_done).
+      if (pending.paused) {
+        if (pending.decompressor) {
+          if (len > 0) {
+            std::string decoded;
+            if (pending.decompressor->Decompress(data, len, &decoded))
+              pending.paused_buffer.append(decoded);
+          }
+        } else if (len > 0) {
+          pending.paused_buffer.append(data, len);
         }
+        if (done)
+          pending.paused_done = true;
+        return;
+      }
+      if (pending.decompressor) {
+        if (len > 0) {
+          std::string decoded;
+          if (pending.decompressor->Decompress(data, len, &decoded) && !decoded.empty()) {
+            if (!pending.on_body(decoded.data(), decoded.size(), false)) {
+              // User paused mid-stream: stop the session read loop and defer
+              // any subsequent frames (including done) until Resume().
+              pending.paused = true;
+              ++h2_paused_streams;
+              pause_self_holder_ = scoped_refptr<HttpClient>(client);
+              if (h2_paused_streams == 1 && h2_session)
+                h2_session->PauseRead();
+            }
+          }
+        }
+        if (done && !pending.paused) {
+          std::string tail;
+          pending.decompressor->Finish(&tail);
+          if (!tail.empty())
+            pending.on_body(tail.data(), tail.size(), false);
+          pending.body_done = true;
+          pending.on_body(nullptr, 0, true);
+        } else if (done && pending.paused) {
+          // The done signal belongs to data already buffered while paused.
+          pending.paused_done = true;
+        }
+        return;
+      }
+      if (done && pending.paused) {
+        pending.paused_done = true;
+        return;
+      }
+      if (done)
+        pending.body_done = true;
+      if (!pending.on_body(data, len, done) && !done) {
+        pending.paused = true;
+        ++h2_paused_streams;
+        pause_self_holder_ = scoped_refptr<HttpClient>(client);
+        if (h2_paused_streams == 1 && h2_session)
+          h2_session->PauseRead();
       }
     };
     // Advertise gzip and attach matching cookies on the wire request; users
@@ -860,6 +1151,14 @@ struct HttpClient::Impl {
     auto it = h2_pending.find(stream_id);
     if (it == h2_pending.end())
       return;
+    // Backpressure: the stream ended while the user had paused the download.
+    // Defer teardown so buffered bytes + the done signal survive until
+    // Resume() (which re-runs this once the pause is lifted).
+    if (it->second->paused) {
+      it->second->paused_pending_finish = true;
+      it->second->paused_clean = clean;
+      return;
+    }
     std::unique_ptr<H2Pending> pending = std::move(it->second);
     h2_pending.erase(it);
     gen_to_stream_.erase(pending->generation);
@@ -930,6 +1229,105 @@ struct HttpClient::Impl {
     last_h1_priority_ = priority;
   }
 
+  // Resumes a streaming download paused by a BodyChunkCallback returning
+  // false (backpressure).  Runs on the request's I/O thread.
+  void ResumeGeneration(HttpClient *client, int64_t generation) {
+    // The pause held a self-reference (see pause_self_holder_) to keep the
+    // client alive across the pause; release it once this resume finishes so
+    // a caller dropping its last reference actually destroys the client.  A
+    // re-pause during the drain re-takes the holder, so only release when the
+    // pause is truly over.
+    struct PauseHolderRelease {
+      Impl *impl;
+
+      ~PauseHolderRelease() {
+        if (!impl->read_paused && impl->h2_paused_streams == 0)
+          impl->pause_self_holder_ = nullptr;
+      }
+    } release{this};
+
+    if (state == State::kClosed)
+      return;
+    if (proto == Proto::kHttp2) {
+      auto it = gen_to_stream_.find(generation);
+      if (it == gen_to_stream_.end())
+        return;
+      auto sit = h2_pending.find(it->second);
+      if (sit == h2_pending.end())
+        return;
+      H2Pending &p = *sit->second;
+      if (!p.paused)
+        return;
+      p.paused = false;
+      --h2_paused_streams;
+      // Drain bytes buffered while paused (backpressure window).  If the
+      // user pauses again mid-drain, stay paused; the whole chunk was
+      // already delivered, so the next Resume() simply continues.
+      if (!p.paused_buffer.empty()) {
+        std::string buffered = std::move(p.paused_buffer);
+        p.paused_buffer.clear();
+        if (!p.on_body(buffered.data(), buffered.size(), false)) {
+          p.paused = true;
+          ++h2_paused_streams;
+          pause_self_holder_ = scoped_refptr<HttpClient>(client);
+          return;
+        }
+      }
+      if (p.paused_done) {
+        p.paused_done = false;
+        if (p.decompressor) {
+          std::string tail;
+          p.decompressor->Finish(&tail);
+          if (!tail.empty())
+            p.on_body(tail.data(), tail.size(), false);
+        }
+        p.body_done = true;
+        p.on_body(nullptr, 0, true);
+      }
+      if (h2_paused_streams == 0 && h2_session)
+        h2_session->ResumeRead();
+      // The stream may have ended while paused (session on_close deferred it
+      // in FinishH2Stream); complete the teardown now that the pause is off.
+      if (p.paused_pending_finish) {
+        const bool clean = p.paused_clean;
+        FinishH2Stream(it->second, clean);
+      }
+      return;
+    }
+    // h1: drain bytes buffered while paused (the parser consumed them in the
+    // same Execute() batch), then either finish — the full response arrived
+    // during the pause — or restart the read loop.
+    if (state != State::kReading || !read_paused)
+      return;
+    read_paused = false;
+    if (!response_delegate->paused_buffer.empty()) {
+      std::string buffered = std::move(response_delegate->paused_buffer);
+      response_delegate->paused_buffer.clear();
+      if (response_delegate->on_body_cb && !response_delegate->on_body_cb(buffered.data(), buffered.size(), false)) {
+        // Paused again during drain; the chunk was already delivered in full,
+        // so the next Resume() simply continues.  Re-take the self-holder.
+        read_paused = true;
+        pause_self_holder_ = scoped_refptr<HttpClient>(client);
+        return;
+      }
+    }
+    if (response_delegate->paused_done) {
+      response_delegate->paused_done = false;
+      response_delegate->complete = false;
+      if (response_delegate->on_body_cb)
+        response_delegate->on_body_cb(nullptr, 0, true);
+      // Finish with a body-less response for connection-lifecycle handling
+      // (keep-alive reuse vs close), like the streaming complete path.
+      auto resp = std::make_unique<HttpResponse>();
+      resp->http_version = response_delegate->response.http_version;
+      resp->headers = response_delegate->response.headers;
+      resp->SetRawStatus(response_delegate->parsed_status_code);
+      Finish(client, std::move(resp));
+      return;
+    }
+    ProcessPendingData(client);
+  }
+
   void Finish(HttpClient *client, std::unique_ptr<HttpResponse> response) {
     // Snapshot proto under the lock: Finish() may run on the Send thread
     // (synchronous connect failure / destruction) while OnConnectComplete()
@@ -946,6 +1344,8 @@ struct HttpClient::Impl {
       State prev = state.exchange(State::kClosed);
       if (prev == State::kClosed)
         return;
+      // Terminal: release any pause self-holder (see pause_self_holder_).
+      pause_self_holder_ = nullptr;
       {
         std::lock_guard<std::mutex> lock(conn_mutex_);
         if (h2_session) {
@@ -1002,7 +1402,11 @@ struct HttpClient::Impl {
           tls_socket.reset();
         }
         peer_endpoint_ = net::IPEndPoint();
+        peer_connect_authority_.clear();
       }
+      // Terminal: release any pause self-holder so a paused client that is
+      // closed is not pinned forever.
+      pause_self_holder_ = nullptr;
     } else {
       // Keep-alive reuse only runs on the I/O thread (response path).
       if (state == State::kClosed)
@@ -1053,8 +1457,20 @@ void HttpClient::SetRequestPriorityInternal(int64_t generation, int32_t priority
   impl_->SetGenerationPriority(this, generation, priority);
 }
 
+void HttpClient::ResumeDownloadInternal(int64_t generation) {
+  impl_->ResumeGeneration(this, generation);
+}
+
 void HttpClient::SetCookieJar(std::shared_ptr<CookieJar> jar) {
   impl_->cookie_jar = std::move(jar);
+}
+
+void HttpClient::SetProxy(const ProxyInfo &proxy) {
+  impl_->proxy_ = proxy;
+}
+
+void HttpClient::ClearProxy() {
+  impl_->proxy_ = ProxyInfo{};
 }
 
 namespace {

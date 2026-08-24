@@ -537,13 +537,14 @@ TEST_F(HttpClientMuxTest, SendStreamingViaH2) {
         &client_auto_ctx_,
         client_runner_,
         [status](HttpStatus s, const HttpHeaders &) { *status = s; },
-        [body, seen_done, &done](const char *data, size_t len, bool done_flag) {
+        [body, seen_done, &done](const char *data, size_t len, bool done_flag) -> bool {
           if (len > 0)
             body->append(data, len);
           if (done_flag) {
             seen_done->store(true);
             done.Signal();
           }
+          return true;
         });
   });
 
@@ -573,7 +574,7 @@ TEST_F(HttpClientMuxTest, SendBodyViaH2) {
         addr,
         &client_auto_ctx_,
         client_runner_,
-        [&payload, offset](HttpClient::BodyChunkCallback on_chunk) {
+        [&payload, offset](HttpClient::UploadBodyChunkCallback on_chunk) {
           size_t n = std::min<size_t>(16 * 1024, payload.size() - *offset);
           if (n == 0) {
             on_chunk(nullptr, 0, true);
@@ -591,6 +592,69 @@ TEST_F(HttpClientMuxTest, SendBodyViaH2) {
 
   ASSERT_TRUE(done.TimedWait(std::chrono::seconds(30))) << "upload never completed";
   EXPECT_EQ(*echoed, payload);
+  client->Close();
+}
+
+// h2 下流式下载背压：on_body 返回 false → 会话读暂停（不再派发 chunk 与
+// done），HttpRequestHandle::Resume() 后继续收完。
+TEST_F(HttpClientMuxTest, StreamingDownloadPauseResumeViaH2) {
+  uint16_t port = StartServer();
+  auto client = scoped_refptr<HttpClient>(new HttpClient());
+  IPEndPoint addr(IPAddress::FromIPv4(127, 0, 0, 1), port);
+
+  auto body = std::make_shared<std::string>();
+  auto paused_once = std::make_shared<std::atomic<bool>>(false);
+  auto paused = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto done_count = std::make_shared<std::atomic<int>>(0);
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto handle = std::make_shared<HttpRequestHandle>();
+  // Keep the client alive across the pause (see the h1 pause test for the
+  // rationale: no in-flight I/O callback holds a self-reference while paused).
+  auto client_holder = std::make_shared<scoped_refptr<HttpClient>>();
+
+  client_runner_->PostTask(
+      FROM_HERE, [this, client_holder, addr, body, paused_once, paused, done_count, &done, handle]() {
+        *client_holder = scoped_refptr<HttpClient>(new HttpClient());
+        HttpClient *client = client_holder->get();
+        auto h = client->SendStreaming(
+            MakeGet("/stream"),
+            addr,
+            &client_auto_ctx_,
+            client_runner_,
+            [](HttpStatus, const HttpHeaders &) {},
+            [body, paused_once, paused, done_count, &done](const char *data, size_t len, bool done_flag) -> bool {
+              if (done_flag) {
+                done_count->fetch_add(1);
+                done.Signal();
+                return true;
+              }
+              if (len > 0)
+                body->append(data, len);
+              if (!paused_once->load()) {
+                paused_once->store(true);
+                paused->Signal();
+                return false; // 暂停下载。
+              }
+              return true;
+            });
+        *handle = h;
+      });
+
+  ASSERT_TRUE(paused->TimedWait(std::chrono::seconds(10))) << "on_body never paused";
+  std::size_t paused_len = 0;
+  auto settled = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
+  client_runner_->PostTask(FROM_HERE, [settled, body, &paused_len]() {
+    paused_len = body->size();
+    settled->Signal();
+  });
+  ASSERT_TRUE(settled->TimedWait(std::chrono::seconds(5)));
+  EXPECT_GT(paused_len, 0u);        // some bytes delivered before pause
+  EXPECT_EQ(done_count->load(), 0); // completion withheld while paused
+
+  client_runner_->PostTask(FROM_HERE, [handle]() { handle->Resume(); });
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(15))) << "download never resumed";
+  EXPECT_EQ(1, done_count->load());
+  EXPECT_EQ(*body, "part-one|part-two");
   client->Close();
 }
 

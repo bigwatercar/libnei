@@ -16,6 +16,9 @@ target_sources(nei_tests PRIVATE redirect_handler_test.cpp)
 # HttpClient automatic redirect following (end-to-end)
 target_sources(nei_tests PRIVATE http_redirect_integration_test.cpp)
 
+# HttpClient HTTP proxy + CONNECT tunnel (end-to-end)
+target_sources(nei_tests PRIVATE http_proxy_integration_test.cpp)
+
 # multipart/form-data encoding / parsing
 target_sources(nei_tests PRIVATE multipart_test.cpp)
 

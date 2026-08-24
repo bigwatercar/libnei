@@ -299,6 +299,38 @@ HTTP/1.1 特有头（`Connection`/`Keep-Alive`/`Transfer-Encoding`/`Upgrade`）
 
 ## 11. 已知限制与后续
 
+- **客户端流式下载背压已落地**（2026-08-24）：`SendStreaming` 的
+  `BodyChunkCallback` 改为返回 `bool`（true=继续，false=暂停下载）。
+  暂停语义：
+  - h1：停止 `StartRead`（`read_paused`）；同批已解析字节缓冲到
+    `ResponseDelegate::paused_buffer`（llhttp 一次 `Execute` 消费整批，
+    暂停只能停派发不能停解析），完整响应在暂停窗口到达时延迟收尾
+    （`paused_done`），`Resume()` 派发缓冲、补 done、恢复读。
+  - h2：`Http2ClientSession::PauseRead` 停连接级读；该流后续帧（含 done）
+    缓冲到 `H2Pending::paused_buffer`，流在暂停期间结束则延迟
+    `FinishH2Stream`（`paused_pending_finish`），`Resume()` 排空后补收尾。
+  - `HttpRequestHandle::Resume()` 恢复（任意线程，post 到 I/O 线程）。
+  - **线程安全关键**：暂停时无 in-flight I/O 回调持有 client 的 self 引用，
+    调用方线程可析构 client 而与 I/O 线程排队的 Resume 竞态（TSan 实测
+    data race / UAF）。修复：暂停瞬间起 client 持 `pause_self_holder_`
+    （h1 暂停点 / h2 on_body 返回 false 处），Resume 完成或 Close/析构
+    才释放；`ResumeOnIO` 亦持强引用。
+  - 上传方向拆出 `UploadBodyChunkCallback`（void），`RequestBodyProvider`
+    参数类型同步调整（破坏性变更；6 处调用点已适配）。
+  - 测试：h1/h2 各 1 例（`StreamingDownloadPauseAndResume`、
+    `StreamingDownloadPauseResumeViaH2`）。
+- **HTTP 代理已落地**（2026-08-24）：`HttpClient::SetProxy/ClearProxy` +
+  `ProxyInfo`（`kHttp` 类型 + 代理 `IPEndPoint`）：
+  - 明文 http 目标：请求行绝对形式（RFC 9112 §3.2.2，`SerializeRequest`
+    支持 absolute_form 并自动补 Host），发往代理服务器。
+  - https 目标：先连代理发 `CONNECT host:port`（新状态 `kProxying`，
+    读响应头判 2xx），隧道建立后把 TCP 包成 `TLSClientSocket` 经
+    `StartHandshake` 握手到源站（TLS 端到端），再走既有 h1/h2 ALPN 分流。
+  - keep-alive 复用校验升级：连接目标为代理 endpoint，且 CONNECT 隧道
+    绑定 authority（`peer_connect_authority_`），换目标 host 时重建隧道。
+  - 测试 3 例（`http_proxy_integration_test.cpp`：绝对 URL 经代理转发、
+    CONNECT 隧道 + TLS、无代理对照）。
+
 - **gzip/deflate 内容编码已落地**（2026-08-23）：引入 vendored zlib v1.3.1
   （`3rdparty/zlib`，静态、PRIVATE 链接，不泄漏 ABI）。增量压缩原语
   `gzip_stream.{h,cpp}`（`GzipCompressor`/`GzipDecompressor`，RFC 1952 gzip /

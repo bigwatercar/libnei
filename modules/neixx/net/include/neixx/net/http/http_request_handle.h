@@ -39,6 +39,9 @@ class HttpClient;
 //       the peer advertises RFC 9218 support (RFC 7540 PRIORITY frames were
 //       removed by RFC 9113); HTTP/1.1 records the value but has no
 //       scheduling effect (no request queue).
+//   - Resume(): resumes a streaming download paused by a BodyChunkCallback
+//       that returned false (see HttpClient::SendStreaming).  No-op when the
+//       download is not paused or the request has completed.
 //
 // All three methods are safe to call from any thread: when invoked off the
 // request's I/O thread they post to it, serializing with the in-flight
@@ -74,6 +77,11 @@ public:
   // |priority| is clamped to [0, 7]; 0 is the highest priority.  No-op when
   // the handle is invalid.  Any thread.
   void SetPriority(int32_t priority);
+
+  // Resumes a streaming download paused by a BodyChunkCallback returning
+  // false (see HttpClient::SendStreaming).  No-op when the handle is invalid
+  // or the download is not paused.  Any thread.
+  void Resume();
 
 private:
   friend class HttpClient;

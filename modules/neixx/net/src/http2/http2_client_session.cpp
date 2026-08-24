@@ -113,6 +113,9 @@ struct Http2ClientSession::Impl {
   std::string send_buffer;      // frames staged by send_callback
   bool write_in_flight = false; // single-in-flight socket write
   scoped_refptr<IOBuffer> read_buf;
+  // Connection-level read backpressure (PauseRead/ResumeRead).  When true,
+  // OnReadComplete does not issue the next read; ResumeRead() restarts it.
+  bool read_paused_ = false;
 
   bool closing = false;         // local Close() started (GOAWAY sent)
   bool goaway_received = false; // peer GOAWAY seen
@@ -479,8 +482,15 @@ struct Http2ClientSession::Impl {
         FailSession("nghttp2 session terminated");
       return;
     }
-    if (state.load() == State::kConnected)
+    if (state.load() == State::kConnected) {
+      if (read_paused_) {
+        // Backpressure: stop issuing reads until ResumeRead().  Data already
+        // consumed by this read was dispatched through the nghttp2 callbacks
+        // above; the peer will buffer the rest (TCP + its send window).
+        return;
+      }
       StartRead(client);
+    }
   }
 
   void FlushPendingWrites() {
@@ -946,6 +956,22 @@ void Http2ClientSession::SetStreamPriority(int32_t stream_id, int32_t priority) 
     return;
   }
   impl_->SetStreamPriorityImpl(stream_id, priority);
+}
+
+void Http2ClientSession::PauseRead() {
+  // I/O-thread only (documented).  When a read is already in flight it
+  // completes; OnReadComplete then sees read_paused_ and stops the loop.
+  impl_->read_paused_ = true;
+}
+
+void Http2ClientSession::ResumeRead() {
+  if (!impl_->read_paused_)
+    return;
+  impl_->read_paused_ = false;
+  if (impl_->state.load() != Impl::State::kConnected || impl_->closing)
+    return;
+  auto self = scoped_refptr<Http2ClientSession>(this);
+  impl_->StartRead(self.get());
 }
 
 void Http2ClientSession::Close() {

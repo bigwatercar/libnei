@@ -268,7 +268,7 @@ TEST_F(HttpCompressionTest, StreamingResponseAutoDecoded) {
         nullptr,
         io_runner_,
         [](HttpStatus, const HttpHeaders &) {},
-        [=](const char *data, size_t len, bool body_done) {
+        [=](const char *data, size_t len, bool body_done) -> bool {
           if (len > 0)
             total->fetch_add(len);
           if (body_done) {
@@ -276,6 +276,7 @@ TEST_F(HttpCompressionTest, StreamingResponseAutoDecoded) {
               result->store(true);
             done->Signal();
           }
+          return true;
         });
   });
   ASSERT_TRUE(done->TimedWait(std::chrono::seconds(15)));

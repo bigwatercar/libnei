@@ -298,6 +298,26 @@
 
 ## 最近完成（记录，2026-07 ~ 08）
 
+- **HttpClient 流式下载背压（2026-08-24）** — `SendStreaming` 的 `BodyChunkCallback` 改为
+  返回 `bool`（true=继续，false=暂停）；暂停后客户端停止读 socket（h1 停 `StartRead`、h2
+  经 `Http2ClientSession::PauseRead` 停连接读），已解析的同批数据缓冲到 paused_buffer（llhttp
+  一次 Execute 消费整批，暂停只能停派发不能停解析），完整响应在暂停窗口到达时延迟收尾
+  （h1 `paused_done` / h2 `paused_pending_finish`），`HttpRequestHandle::Resume()` 派发缓冲、
+  补 done、恢复读。暂停期间 client 持 self 引用（`pause_self_holder_`）——暂停时无 in-flight
+  I/O 回调持 self 引用，调用方线程可析构 client 而与 I/O 线程排队的 Resume 竞态（TSan 实锤
+  data race，UAF）；Resume 完成/Close/析构才释放。上传方向拆出 `UploadBodyChunkCallback`
+  （void），`RequestBodyProvider` 参数类型同步调整（破坏性 API 变更，6 处调用点已适配）。
+  测试：h1 + h2 各 1 例端到端（暂停后无更多 chunk/无 done，Resume 后收完）。
+- **HttpClient HTTP 代理（2026-08-24）** — `HttpClient::SetProxy/ClearProxy` + `ProxyInfo`
+  （`kHttp` 类型 + 代理 endpoint）。明文 http 目标：请求行改用绝对形式（RFC 9112 §3.2.2，
+  `SerializeRequest` 支持 absolute_form + 自动补 Host 头）发往代理；https 目标：先连接代理
+  发 `CONNECT host:port`（新状态 `kProxying`，读响应头判 2xx），隧道建立后把 TCP 包成
+  `TLSClientSocket` 经 `StartHandshake` 握手到源站（TLS 端到端），再走既有 h1/h2 ALPN 分流。
+  keep-alive 复用校验升级：实际连接目标为代理 endpoint，且 CONNECT 隧道绑定 authority
+  （`peer_connect_authority_`），换目标 host 时重建隧道。测试 3 例端到端（绝对 URL 经代理、
+  CONNECT 隧道 + TLS、无代理对照）。sanitizer 全绿：WSL TSan 978 0 races、Win ASAN 991、
+  WSL ASAN 978。HTTP 补全剩余：中间件。
+
 - **HttpClient 自动跟随重定向（2026-08-23）** — 新增 `HttpClient::SendRedirecting`：基于
   `redirect_handler` 决策自动跟随 3xx 链，`RedirectOptions` 可配置 `max_redirects`、跨 host 的
   `HostResolver*` 与 `ssl_context_provider`。同 origin 复用 endpoint/SSL 连接；跨 origin 去掉

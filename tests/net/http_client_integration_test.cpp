@@ -967,7 +967,7 @@ TEST_F(HttpClientIntegrationTest, StreamingResponseDeliversChunks) {
           if (total->load() != 0)
             headers_first->store(false);
         },
-        [done, total, chunk_count, done_count, result](const char *data, size_t len, bool body_done) {
+        [done, total, chunk_count, done_count, result](const char *data, size_t len, bool body_done) -> bool {
           if (body_done) {
             done_count->fetch_add(1);
             if (total->load() == 64 * 1024 && done_count->load() == 1)
@@ -977,6 +977,7 @@ TEST_F(HttpClientIntegrationTest, StreamingResponseDeliversChunks) {
             chunk_count->fetch_add(1);
             total->fetch_add(len);
           }
+          return true;
         });
   });
 
@@ -1009,7 +1010,7 @@ TEST_F(HttpClientIntegrationTest, StreamingResponseChunkedTermination) {
         nullptr,
         io_runner(),
         [](HttpStatus, const HttpHeaders &) {},
-        [done, total, done_count, result](const char *data, size_t len, bool body_done) {
+        [done, total, done_count, result](const char *data, size_t len, bool body_done) -> bool {
           if (body_done) {
             done_count->fetch_add(1);
             if (total->load() == 18 && done_count->load() == 1)
@@ -1018,6 +1019,7 @@ TEST_F(HttpClientIntegrationTest, StreamingResponseChunkedTermination) {
           } else {
             total->fetch_add(len);
           }
+          return true;
         });
   });
 
@@ -1046,9 +1048,10 @@ TEST_F(HttpClientIntegrationTest, StreamingResponseKeepAliveReuse) {
             nullptr,
             io_runner(),
             [](HttpStatus, const HttpHeaders &) {},
-            [done](const char *, size_t, bool body_done) {
+            [done](const char *, size_t, bool body_done) -> bool {
               if (body_done)
                 done->Signal();
+              return true;
             });
   });
 
@@ -1080,9 +1083,10 @@ TEST_F(HttpClientIntegrationTest, StreamingResponseCloseAfterComplete) {
             nullptr,
             io_runner(),
             [](HttpStatus, const HttpHeaders &) {},
-            [done](const char *, size_t, bool body_done) {
+            [done](const char *, size_t, bool body_done) -> bool {
               if (body_done)
                 done->Signal();
+              return true;
             });
   });
 
@@ -1115,7 +1119,7 @@ TEST_F(HttpClientIntegrationTest, StreamingResponseWriteIoBuffer) {
         nullptr,
         io_runner(),
         [](HttpStatus, const HttpHeaders &) {},
-        [done, result, body](const char *data, size_t len, bool body_done) {
+        [done, result, body](const char *data, size_t len, bool body_done) -> bool {
           if (body_done) {
             if (body->size() == 64 * 1024 && std::all_of(body->begin(), body->end(), [](char c) { return c == 'z'; }))
               result->store(true);
@@ -1123,12 +1127,82 @@ TEST_F(HttpClientIntegrationTest, StreamingResponseWriteIoBuffer) {
           } else {
             body->append(data, len);
           }
+          return true;
         });
   });
 
   done->Wait();
   EXPECT_EQ(64 * 1024, body->size());
   EXPECT_TRUE(result->load());
+}
+
+// Backpressure: on_body returns false once → the download pauses (no further
+// chunks), then HttpRequestHandle::Resume() drains the rest to completion.
+TEST_F(HttpClientIntegrationTest, StreamingDownloadPauseAndResume) {
+  auto done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto paused = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto total = std::make_shared<std::atomic<std::size_t>>(0);
+  auto done_count = std::make_shared<std::atomic<int>>(0);
+  auto paused_once = std::make_shared<std::atomic<bool>>(false);
+  auto handle = std::make_shared<HttpRequestHandle>();
+  // The client must outlive the I/O lambda: while paused there is no in-flight
+  // I/O callback holding a self-reference, so a lambda-local client would be
+  // destroyed (and the handle invalidated) before Resume() runs.
+  auto client_holder = std::make_shared<scoped_refptr<HttpClient>>();
+
+  io_runner()->PostTask(FROM_HERE, [this, done, paused, total, done_count, paused_once, handle, client_holder]() {
+    *client_holder = scoped_refptr<HttpClient>(new HttpClient());
+    HttpClient *client = client_holder->get();
+    HttpRequest req;
+    req.method = HttpMethod::kGet;
+    req.url = Url("/stream-big");
+    req.http_version = HttpVersion::kHttp11;
+    req.headers.push_back({"Host", "127.0.0.1"});
+    req.headers.push_back({"Accept-Encoding", "identity"});
+
+    auto h = client->SendStreaming(
+        req,
+        server_addr(),
+        nullptr,
+        io_runner(),
+        [](HttpStatus, const HttpHeaders &) {},
+        [total, done, done_count, paused, paused_once](const char *data, size_t len, bool body_done) -> bool {
+          if (body_done) {
+            done_count->fetch_add(1);
+            done->Signal();
+            return true;
+          }
+          total->fetch_add(len);
+          if (!paused_once->load()) {
+            // First body chunk: pause the download.
+            paused_once->store(true);
+            paused->Signal();
+            return false;
+          }
+          // After Resume() more chunks arrive and are counted normally.
+          return true;
+        });
+    *handle = h;
+  });
+
+  // First chunk delivered → download paused.  A sentinel task on the I/O
+  // thread guarantees the pause took effect (no further chunks in flight).
+  ASSERT_TRUE(paused->TimedWait(std::chrono::seconds(10))) << "on_body never paused";
+  std::size_t paused_total = 0;
+  auto settled = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
+  io_runner()->PostTask(FROM_HERE, [settled, total, &paused_total]() {
+    paused_total = total->load();
+    settled->Signal();
+  });
+  ASSERT_TRUE(settled->TimedWait(std::chrono::seconds(5)));
+  EXPECT_GT(paused_total, 0u);         // some bytes delivered before pause
+  EXPECT_LT(paused_total, 64u * 1024); // but not the whole body
+  EXPECT_EQ(done_count->load(), 0);    // completion withheld while paused
+
+  io_runner()->PostTask(FROM_HERE, [handle]() { handle->Resume(); });
+  ASSERT_TRUE(done->TimedWait(std::chrono::seconds(15))) << "download never resumed";
+  EXPECT_EQ(1, done_count->load());
+  EXPECT_EQ(64u * 1024, total->load());
 }
 
 // ===========================================================================
@@ -1152,7 +1226,7 @@ TEST_F(HttpClientIntegrationTest, UploadBodyStreamsToServer) {
     // Pull-based provider: each invocation delivers one chunk, tracking the
     // offset across pulls via shared state.
     auto state = std::make_shared<std::size_t>(0);
-    auto provider = [body, state](HttpClient::BodyChunkCallback on_chunk) {
+    auto provider = [body, state](HttpClient::UploadBodyChunkCallback on_chunk) {
       size_t &offset = *state;
       if (offset >= body.size()) {
         on_chunk(nullptr, 0, true);
@@ -1191,7 +1265,7 @@ TEST_F(HttpClientIntegrationTest, UploadBodyChunkedEncoding) {
     req.headers.push_back({"Transfer-Encoding", "chunked"});
 
     auto state = std::make_shared<std::size_t>(0);
-    auto provider = [body, state](HttpClient::BodyChunkCallback on_chunk) {
+    auto provider = [body, state](HttpClient::UploadBodyChunkCallback on_chunk) {
       size_t &offset = *state;
       if (offset >= body.size()) {
         on_chunk(nullptr, 0, true);
@@ -1235,7 +1309,7 @@ TEST_F(HttpClientIntegrationTest, StreamingRequestBackpressureLargeUpload) {
 
     auto state = std::make_shared<std::size_t>(0);
     const std::string payload(kChunk, 'q');
-    auto provider = [payload, state](HttpClient::BodyChunkCallback on_chunk) {
+    auto provider = [payload, state](HttpClient::UploadBodyChunkCallback on_chunk) {
       size_t &sent = *state;
       if (sent >= kTotal) {
         on_chunk(nullptr, 0, true);

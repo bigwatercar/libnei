@@ -141,6 +141,14 @@ public:
   // unknown or the session is not connected.  Safe from any thread.
   void SetStreamPriority(int32_t stream_id, int32_t priority);
 
+  // Connection-level read backpressure (used by HttpClient's streaming
+  // download pause): PauseRead() stops the read loop (an in-flight read
+  // finishes, then no new reads are issued); ResumeRead() restarts it.
+  // While paused, DATA for all streams stops arriving, so memory stays
+  // bounded by one read buffer.  Must be called on the I/O thread.
+  void PauseRead();
+  void ResumeRead();
+
   // Begin graceful shutdown: sends GOAWAY, lets in-flight streams finish,
   // then closes the TLS transport.  Safe from any thread.
   void Close();
