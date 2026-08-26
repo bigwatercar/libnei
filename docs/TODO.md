@@ -305,6 +305,19 @@
 
 ## 最近完成（记录，2026-07 ~ 08）
 
+- **TaskRunner::PostTaskAndReply / PostTaskAndReplyWithResult（2026-08-26）** —
+  对标 Chromium `base::TaskRunner`：`task` 投递到本 runner，执行完成后 `reply`
+  投递回**调用方线程**（经 `ThreadTaskRunnerHandle::Get()` 捕获）；`WithResult`
+  把 `OnceCallback<T()>` 的返回值转发给 `OnceCallback<void(T)>`。调用方线程
+  无 SequenceManager（无 handle）→ 返回 false；调用方线程已退出 → reply 被丢弃
+  （安全）。实现要点：非模板 `PostTaskAndReply` 复用 `BindPostTask`（reply 获得
+  destroy-on-target-sequence 保护）；`WithResult` 模板类外定义（需 `SequencedTaskRunner`
+  完整）并经私有 `GetCallingThreadRunner()` 取调用方 runner（避免 task_runner.h
+  include thread_task_runner_handle.h 的循环依赖）；`thread_task_runner_handle.h`
+  改为前向声明 `SingleThreadTaskRunner` 解耦。测试 4 例（跨线程 reply 回调用线程、
+  同线程先后序、WithResult 传值、无 handle 返回 false）。验证：Win D997、WSL R977、
+  WSL TSan 982 0 races、Win ASAN 997 全绿。
+
 - **HttpFileTransfer 接入下载背压（2026-08-26）** — `DownloadToFile` 使用内部写盘背压：
   在途文件写队列达到高水位（8，每项持一个 IOBuffer）时暂停流式下载
   （`BodyChunkCallback` 返回 false），队列排空到低水位（2）时经保存的

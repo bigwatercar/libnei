@@ -10,6 +10,7 @@
 #include <nei/build/nei_export.h>
 #include <neixx/common/location.h>
 #include <neixx/common/time.h>
+#include <neixx/functional/bind.h>
 #include <neixx/functional/callback.h>
 #include <neixx/memory/ref_counted.h>
 #include <neixx/task/task_traits.h>
@@ -18,6 +19,8 @@ namespace nei {
 
 // using OnceClosure = OnceCallback<void()>;
 // using RepeatingClosure = RepeatingCallback<void()>;
+
+class SequencedTaskRunner;
 
 namespace internal {
 class PooledTaskQueue;
@@ -43,6 +46,25 @@ public:
   // delay <= 0 is treated as immediate work and is posted without entering
   // the delayed queue. Returns true if successfully enqueued.
   bool PostDelayedTask(const Location &from_here, OnceClosure task, TimeDelta delay);
+
+  // Posts |task| to this runner.  Once |task| has run to completion, |reply|
+  // is posted back to the thread that called PostTaskAndReply (captured at
+  // call time via ThreadTaskRunnerHandle).  Returns false when |task| cannot
+  // be enqueued — including when the calling thread has no
+  // ThreadTaskRunnerHandle bound (reply has nowhere to go).
+  //
+  // Mirrors Chromium's base::TaskRunner::PostTaskAndReply.
+  bool PostTaskAndReply(const Location &from_here, OnceClosure task, OnceClosure reply);
+
+  // Like PostTaskAndReply, but |task| is OnceCallback<T()> and its return
+  // value is forwarded to |reply| (OnceCallback<void(T)>) on the calling
+  // thread.  Returns false under the same conditions as PostTaskAndReply.
+  //
+  // Mirrors Chromium's base::TaskRunner::PostTaskAndReplyWithResult.  The
+  // definition follows the runner classes below (it needs SequencedTaskRunner
+  // to be complete).
+  template <typename T>
+  bool PostTaskAndReplyWithResult(const Location &from_here, OnceCallback<T()> task, OnceCallback<void(T)> reply);
 
   template <typename T>
   bool DeleteSoon(const Location &from_here, T *object) {
@@ -101,6 +123,12 @@ protected:
   }
 
 private:
+  // Returns the runner bound to the calling thread (via ThreadTaskRunnerHandle),
+  // or nullptr when the calling thread has no SequenceManager.  Non-template so
+  // the PostTaskAndReply family can be implemented without pulling in
+  // thread_task_runner_handle.h from this header.
+  scoped_refptr<SequencedTaskRunner> GetCallingThreadRunner();
+
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   TaskTraits traits_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
@@ -236,6 +264,36 @@ protected:
   // For pool-backed runners (CreateForThreadPool): passes nullptr for TLS-based dispatch.
   SingleThreadTaskRunner(std::unique_ptr<SequencedTaskRunner::Impl> impl, const TaskTraits &traits);
 };
+
+// =============================================================================
+// TaskRunner::PostTaskAndReplyWithResult — definition (needs complete types)
+// =============================================================================
+//
+// The task runs on this runner; its return value is posted back to the
+// calling thread (captured at call time via ThreadTaskRunnerHandle) and
+// delivered to |reply| there.  If the calling thread is gone by the time the
+// task completes, PostTask fails and the reply is destroyed on the task
+// thread — safe, since no other thread can run it.
+template <typename T>
+bool TaskRunner::PostTaskAndReplyWithResult(const Location &from_here,
+                                            OnceCallback<T()> task,
+                                            OnceCallback<void(T)> reply) {
+  scoped_refptr<SequencedTaskRunner> reply_runner = GetCallingThreadRunner();
+  if (!reply_runner)
+    return false;
+  OnceClosure wrapped =
+      BindOnce([task = std::move(task), reply = std::move(reply), reply_runner = std::move(reply_runner)]() mutable {
+        T result = std::move(task).Run();
+        if (reply_runner) {
+          auto runner = reply_runner;
+          auto cb = std::move(reply);
+          runner->PostTask(FROM_HERE, [result = std::move(result), cb = std::move(cb)]() mutable {
+            std::move(cb).Run(std::move(result));
+          });
+        }
+      });
+  return PostTask(from_here, std::move(wrapped));
+}
 
 } // namespace nei
 

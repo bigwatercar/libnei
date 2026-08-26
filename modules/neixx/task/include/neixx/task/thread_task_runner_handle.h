@@ -5,9 +5,10 @@
 
 #include <nei/build/nei_export.h>
 #include <neixx/memory/ref_counted.h>
-#include <neixx/task/task_runner.h>
 
 namespace nei {
+
+class SingleThreadTaskRunner;
 
 // ThreadTaskRunnerHandle provides a static interface to post tasks to the
 // default TaskRunner on the current thread via the bound SequenceManager.

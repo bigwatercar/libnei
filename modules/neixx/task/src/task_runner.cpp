@@ -7,7 +7,9 @@
 #include <utility>
 
 #include <neixx/synchronization/lock.h>
+#include <neixx/task/bind_post_task.h>
 #include <neixx/task/task_tracing.h>
+#include <neixx/task/thread_task_runner_handle.h>
 #include "internal/task_tracing_internal.h"
 #include "internal/pooled_task_queue.h"
 #include "internal/pooled_task_runner_utils.h"
@@ -701,6 +703,25 @@ bool TaskRunner::PostTask(const Location &from_here, OnceClosure task) {
 
 bool TaskRunner::PostDelayedTask(const Location &from_here, OnceClosure task, TimeDelta delay) {
   return PostDelayedTaskWithTraits(from_here, traits(), std::move(task), delay);
+}
+
+bool TaskRunner::PostTaskAndReply(const Location &from_here, OnceClosure task, OnceClosure reply) {
+  scoped_refptr<SequencedTaskRunner> reply_runner = GetCallingThreadRunner();
+  if (!reply_runner)
+    return false;
+  // BindPostTask posts |reply| to the calling thread and gives it
+  // destroy-on-target-sequence protection: if the task is dropped (runner
+  // shutdown) the reply is destroyed on its owner thread, not here.
+  OnceClosure safe_reply = BindPostTask(reply_runner, std::move(reply));
+  OnceClosure wrapped = BindOnce([task = std::move(task), safe_reply = std::move(safe_reply)]() mutable {
+    std::move(task).Run();
+    std::move(safe_reply).Run();
+  });
+  return PostTask(from_here, std::move(wrapped));
+}
+
+scoped_refptr<SequencedTaskRunner> TaskRunner::GetCallingThreadRunner() {
+  return ThreadTaskRunnerHandle::Get();
 }
 
 // static

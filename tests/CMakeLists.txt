@@ -75,6 +75,7 @@ add_executable(
   sequence_manager_test.cpp
   shared_memory_test.cpp
   run_loop_test.cpp
+  post_task_and_reply_test.cpp
   task_sequence_token_test.cpp
   task_traits_test.cpp
   task_internal_task_test.cpp
