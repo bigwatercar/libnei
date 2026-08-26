@@ -96,6 +96,13 @@ protected:
         resp.body = std::string(64 * 1024, 'x'); // > 4 KB read buffer.
         return resp;
       });
+      // Large body (many chunks) for the DownloadToFile backpressure test.
+      server_->AddRoute(HttpMethod::kGet, "/stream-huge", [](const HttpRequest &) {
+        HttpResponse resp;
+        resp.SetStatus(HttpStatusCode::kOk);
+        resp.body = std::string(4 * 1024 * 1024, 'y');
+        return resp;
+      });
       server_->AddStreamingRoute(HttpMethod::kGet,
                                  "/stream-chunked",
                                  [](const HttpRequest &,
@@ -1381,6 +1388,61 @@ TEST_F(HttpClientIntegrationTest, DownloadToFileWritesBody) {
   std::ifstream ifs(path, std::ios::binary);
   std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
   EXPECT_EQ(64 * 1024, content.size());
+  RemoveIfExists(path);
+}
+
+// A 4 MB body forces many write batches through DownloadToFile, exercising the
+// internal write-queue backpressure (pause at 8 in-flight writes, resume at 2)
+// many times without losing or corrupting bytes.
+TEST_F(HttpClientIntegrationTest, DownloadToFileBackpressureLargeBody) {
+  constexpr std::size_t kSize = 4 * 1024 * 1024;
+  const std::filesystem::path path = std::filesystem::temp_directory_path() / "nei_download_to_file_bp_test.bin";
+  RemoveIfExists(path);
+
+  auto done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto result = std::make_shared<std::atomic<bool>>(false);
+  auto bytes = std::make_shared<std::atomic<std::size_t>>(0);
+
+  Thread bg("http-transfer-bg");
+  ASSERT_TRUE(bg.Start());
+
+  io_runner()->PostTask(FROM_HERE, [this, done, result, bytes, path, bg_runner = bg.GetTaskRunner()]() {
+    auto client = scoped_refptr<HttpClient>(new HttpClient());
+    HttpRequest req;
+    req.method = HttpMethod::kGet;
+    req.url = Url("/stream-huge"); // 4 MB body served by the fixture.
+    req.http_version = HttpVersion::kHttp11;
+    req.headers.push_back({"Host", "127.0.0.1"});
+    req.headers.push_back({"Accept-Encoding", "identity"});
+
+    DownloadToFile(client,
+                   req,
+                   server_addr(),
+                   nullptr,
+                   io_runner(),
+                   bg_runner,
+                   path,
+                   [client, done, result, bytes](bool ok, std::size_t n) {
+                     bytes->store(n);
+                     result->store(ok);
+                     client->Close();
+                     done->Signal();
+                   });
+  });
+
+  done->Wait();
+  bg.Stop();
+
+  EXPECT_TRUE(result->load());
+  EXPECT_EQ(kSize, bytes->load());
+
+  std::ifstream ifs(path, std::ios::binary);
+  std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+  EXPECT_EQ(kSize, content.size());
+  // Spot-check first/middle/last bytes (the body is all 'y').
+  EXPECT_EQ('y', content.front());
+  EXPECT_EQ('y', content[kSize / 2]);
+  EXPECT_EQ('y', content.back());
   RemoveIfExists(path);
 }
 

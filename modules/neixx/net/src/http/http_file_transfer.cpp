@@ -23,13 +23,25 @@ namespace {
 // DownloadToFile state
 // ---------------------------------------------------------------------------
 struct DownloadState : public RefCountedThreadSafe<DownloadState> {
+  // In-flight write watermark for download backpressure: while more than
+  // kHighWatermark file writes are queued (each holding an IOBuffer), the
+  // download is paused via BodyChunkCallback returning false; it resumes once
+  // the queue drains to kLowWatermark.  Keeps memory bounded when the disk
+  // cannot keep up with the network.
+  static constexpr int kHighWatermark = 8;
+  static constexpr int kLowWatermark = 2;
+
   std::unique_ptr<AsyncFile> file;
   std::uint64_t offset = 0;
   int pending_writes = 0;
   bool body_done = false;
   bool success = true;
   bool finishing = false;
+  bool download_paused = false;
   std::size_t total_bytes = 0;
+  // SendStreaming handle, used to resume the download after the write queue
+  // drains below the low watermark.
+  HttpRequestHandle handle;
   std::function<void(bool, std::size_t)> on_done;
 };
 
@@ -94,7 +106,7 @@ void DownloadToFile(scoped_refptr<HttpClient> client,
                              return;
                            }
 
-                           client->SendStreaming(
+                           auto download_handle = client->SendStreaming(
                                request,
                                endpoint,
                                ssl_ctx,
@@ -107,6 +119,9 @@ void DownloadToFile(scoped_refptr<HttpClient> client,
                                },
                                // on_body: copy each chunk into a pool buffer and write to the
                                // file at the running offset (offset-based writes are independent).
+                               // Backpressure: when the in-flight write queue hits the high
+                               // watermark, pause the download; the write callback resumes it
+                               // once the queue drains to the low watermark.
                                [state](const char *data, std::size_t len, bool done) -> bool {
                                  if (done) {
                                    state->body_done = true;
@@ -130,10 +145,22 @@ void DownloadToFile(scoped_refptr<HttpClient> client,
                                        --state->pending_writes;
                                        if (!ok)
                                          state->success = false;
+                                       if (state->download_paused && state->pending_writes <= state->kLowWatermark) {
+                                         state->download_paused = false;
+                                         state->handle.Resume();
+                                       }
                                        FinishIfDone(state);
                                      });
+                                 if (state->pending_writes >= state->kHighWatermark) {
+                                   // The current chunk is queued; pause delivery until the
+                                   // write queue drains.
+                                   state->download_paused = true;
+                                   return false;
+                                 }
                                  return true;
                                });
+
+                           state->handle = std::move(download_handle);
                          });
 }
 

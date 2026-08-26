@@ -41,30 +41,33 @@ namespace net::http {
 // SendStreaming + AsyncFile.  On HTTP 2xx with all bytes written,
 // |on_done(true, bytes_written)| fires on the I/O thread; otherwise
 // |on_done(false, ...)|.  |client| must outlive the transfer.
-NEI_API void DownloadToFile(
-    scoped_refptr<HttpClient> client,
-    const HttpRequest &request,
-    const net::IPEndPoint &endpoint,
-    net::SSLContext *ssl_ctx,
-    scoped_refptr<SingleThreadTaskRunner> io_runner,
-    scoped_refptr<SequencedTaskRunner> background_runner,
-    const std::filesystem::path &file_path,
-    std::function<void(bool success, std::size_t bytes_written)> on_done);
+//
+// The download is internally backpressured: when more than 8 file writes are
+// in flight (each holding an IOBuffer) the streaming download is paused, and
+// resumes once the queue drains to 2 — memory stays bounded when the disk
+// cannot keep up with the network.
+NEI_API void DownloadToFile(scoped_refptr<HttpClient> client,
+                            const HttpRequest &request,
+                            const net::IPEndPoint &endpoint,
+                            net::SSLContext *ssl_ctx,
+                            scoped_refptr<SingleThreadTaskRunner> io_runner,
+                            scoped_refptr<SequencedTaskRunner> background_runner,
+                            const std::filesystem::path &file_path,
+                            std::function<void(bool success, std::size_t bytes_written)> on_done);
 
 // Streams |file_path| as the request body (SendBody pull provider).  The
 // request must carry Content-Length (or Transfer-Encoding: chunked).  On
 // completion, |on_done(true, response)| fires on the I/O thread when the
 // response is a 2xx, otherwise |on_done(false, response)| (response may be
 // null on transport failure).  |client| must outlive the transfer.
-NEI_API void UploadFromFile(
-    scoped_refptr<HttpClient> client,
-    const HttpRequest &request,
-    const net::IPEndPoint &endpoint,
-    net::SSLContext *ssl_ctx,
-    scoped_refptr<SingleThreadTaskRunner> io_runner,
-    scoped_refptr<SequencedTaskRunner> background_runner,
-    const std::filesystem::path &file_path,
-    std::function<void(bool success, std::unique_ptr<HttpResponse> response)> on_done);
+NEI_API void UploadFromFile(scoped_refptr<HttpClient> client,
+                            const HttpRequest &request,
+                            const net::IPEndPoint &endpoint,
+                            net::SSLContext *ssl_ctx,
+                            scoped_refptr<SingleThreadTaskRunner> io_runner,
+                            scoped_refptr<SequencedTaskRunner> background_runner,
+                            const std::filesystem::path &file_path,
+                            std::function<void(bool success, std::unique_ptr<HttpResponse> response)> on_done);
 
 } // namespace net::http
 } // namespace nei

@@ -292,11 +292,29 @@
 | 1 | HTTP/1.1 + WebSocket | ✅ **已完成 Phase 1**（2026-08-12） | Server/Client (TCP+TLS)、Parser (llhttp)、WebSocket 全栈、连接池、流式请求/响应、路由模式匹配 |
 | 2 | HTTP/2 | ✅ **Phase A+B+C+D 全部落地**（2026-08-15）；**统一 HttpServer 单端口 ALPN 分流落地**（2026-08-15） | nghttp2 v1.70 已集成；Http2ClientSession 多路复用 + **统一 `HttpServer`**（h1+h2 单端口并存，Http2Server/旧 HttpServer 已并入；`HttpServerMuxTest` 5 用例覆盖共存/无 ALPN 兜底/流式双协议/Shutdown 排空）双平台全量过，TSan 10/10、valgrind 零错误；`http2_throughput_bench` 对照 H1（并发 8 流 1.85–3.16×） |
 | 3 | SSL/TLS | ✅ mbedTLS 已集成 | SSLContext + TLS Server/Client Socket + ALPN |
+
+> **h2c（明文 HTTP/2 升级）—— 推迟，触发式任务（2026-08-26）**：现仅支持 TLS + ALPN 的
+> HTTP/2；明文 h2 仅在"无 TLS 但需多路复用"的窄场景（内部明文链路、gRPC 明文模式、curl）有用，
+> 使用率低且 libnei 无 gRPC 层。实现需服务端首字节嗅探（`PRI * HTTP/2.0` 帧序言）+ `Upgrade: h2c`
+> 的 101 升级流程 + 客户端 prior-knowledge/upgrade 双路径，改动融合引擎连接建立逻辑，ROI 低。
+> **触发条件**：① 引入 gRPC 支持（gRPC 强依赖 h2 且明文 h2c 便于无 TLS 开发/回环）；② 出现明确
+> 的内部明文 h2 多路复用需求。在此之前保持"明文走 h1、多路复用走 TLS+ALPN h2"现状。
 | 4 | Storage Device Monitoring | 无 Chromium 参考，需自研 | Win RegisterDeviceNotification / Linux libudev |
 
 ---
 
 ## 最近完成（记录，2026-07 ~ 08）
+
+- **HttpFileTransfer 接入下载背压（2026-08-26）** — `DownloadToFile` 使用内部写盘背压：
+  在途文件写队列达到高水位（8，每项持一个 IOBuffer）时暂停流式下载
+  （`BodyChunkCallback` 返回 false），队列排空到低水位（2）时经保存的
+  `HttpRequestHandle::Resume()` 恢复。磁盘跟不上网络时内存有界。新增
+  4 MB 端到端测试（`/stream-huge` 路由 + identity 编码，触发多次暂停/恢复，
+  校验落盘大小与内容）。附带：`docs/TODO.md` 记录 h2c 明文升级**推迟为
+  触发式任务**（触发条件：引入 gRPC 支持或明确内部明文 h2 多路复用需求；
+  理由：使用率低、libnei 无 gRPC 层、实现成本高 ROI 低）。
+  验证：Win D993、WSL R973、WSL TSan 978（排除已知挂起项）0 races、
+  Win ASAN 993、WSL ASAN 979 全绿（一次偶发 stack-use-after-return 未复现）。
 
 - **HttpClient 流式下载背压（2026-08-24）** — `SendStreaming` 的 `BodyChunkCallback` 改为
   返回 `bool`（true=继续，false=暂停）；暂停后客户端停止读 socket（h1 停 `StartRead`、h2
