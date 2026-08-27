@@ -56,6 +56,7 @@ add_executable(
   log_test.cpp
   nei_global_test.cpp
   functional_test.cpp
+  bind_generic_test.cpp
   small_object_allocator_test.cpp
   memory_pressure_monitor_test.cpp
   # ref_counted_compile_fail.cpp

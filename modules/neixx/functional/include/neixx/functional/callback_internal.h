@@ -19,6 +19,11 @@ class WeakPtr;
 template <typename T>
 class PassedWrapper;
 
+template <typename Signature>
+class OnceCallback;
+template <typename Signature>
+class RepeatingCallback;
+
 namespace detail {
 
 // -----------------------------------------------------------------------------
@@ -234,9 +239,28 @@ bool WeakPtrCheck(const nei::WeakPtr<T> &weak) {
 
 template <typename Tuple>
 bool AllBoundArgsValid(const Tuple &args) {
-  return std::apply([](const auto &...a) { return (WeakPtrCheck(a) && ...); },
-                    args);
+  return std::apply([](const auto &...a) { return (WeakPtrCheck(a) && ...); }, args);
 }
+
+// is_once_callback / is_repeating_callback：判断 functor 是否为回调类型。
+// （定义在 Invoker 之前：Invoker::RunImpl 通过依赖名查找使用它们。）
+template <typename F>
+struct is_once_callback : std::false_type {};
+
+template <typename R, typename... Args>
+struct is_once_callback<OnceCallback<R(Args...)>> : std::true_type {};
+
+template <typename F>
+struct is_repeating_callback : std::false_type {};
+
+template <typename R, typename... Args>
+struct is_repeating_callback<RepeatingCallback<R(Args...)>> : std::true_type {};
+
+template <typename F>
+constexpr bool is_once_callback_v = is_once_callback<F>::value;
+
+template <typename F>
+constexpr bool is_repeating_callback_v = is_repeating_callback<F>::value;
 
 // Invoker<Storage, Sig, IsOnce> — dispatches to the correct unwind policy.
 template <typename Storage, typename Sig, bool IsOnce>
@@ -246,7 +270,14 @@ template <typename Storage, typename R, typename... UA>
 struct Invoker<Storage, R(UA...), true> {
   template <typename Fn, typename Tuple, size_t... I>
   static R RunImpl(Fn &fn, Tuple &args, std::index_sequence<I...>, UA... ua) {
-    if constexpr (std::is_member_function_pointer_v<std::remove_reference_t<Fn>>) {
+    using FnT = std::remove_reference_t<Fn>;
+    if constexpr (is_once_callback_v<FnT>) {
+      // A callback used as the bound functor (BindOnce(cb, args...)) is
+      // dispatched through Run(); the callback consumes itself on Run.
+      return std::move(fn).Run(UnwrapOnce(std::get<I>(args))..., std::forward<UA>(ua)...);
+    } else if constexpr (is_repeating_callback_v<FnT>) {
+      return fn.Run(UnwrapOnce(std::get<I>(args))..., std::forward<UA>(ua)...);
+    } else if constexpr (std::is_member_function_pointer_v<FnT>) {
       return std::invoke(fn, UnwrapOnce(std::get<I>(args))..., std::forward<UA>(ua)...);
     } else {
       return fn(UnwrapOnce(std::get<I>(args))..., std::forward<UA>(ua)...);
@@ -255,16 +286,19 @@ struct Invoker<Storage, R(UA...), true> {
 
   static R Run(BindStateBase *base, UA... ua) {
     auto *s = static_cast<Storage *>(base);
+
     // The OnceCallback holds the only reference to the BindState.  Release it
     // after invoking — even if the functor throws — so the storage is freed.
     struct ScopedRelease {
       BindStateBase *state;
+
       ~ScopedRelease() {
         if (state) {
           state->Release();
         }
       }
     } scoped_release{s};
+
     // If any bound WeakPtr target has died, skip the call entirely rather than
     // dereferencing the invalidated WeakPtr (Chromium semantics).  The state
     // is still released by scoped_release.
@@ -280,7 +314,10 @@ template <typename Storage, typename R, typename... UA>
 struct Invoker<Storage, R(UA...), false> {
   template <typename Fn, typename Tuple, size_t... I>
   static R RunImpl(Fn &fn, Tuple &args, std::index_sequence<I...>, UA... ua) {
-    if constexpr (std::is_member_function_pointer_v<std::remove_reference_t<Fn>>) {
+    using FnT = std::remove_reference_t<Fn>;
+    if constexpr (is_repeating_callback_v<FnT>) {
+      return fn.Run(UnwrapRepeat(std::get<I>(args))..., std::forward<UA>(ua)...);
+    } else if constexpr (std::is_member_function_pointer_v<FnT>) {
       return std::invoke(fn, UnwrapRepeat(std::get<I>(args))..., std::forward<UA>(ua)...);
     } else {
       return fn(UnwrapRepeat(std::get<I>(args))..., std::forward<UA>(ua)...);
@@ -363,6 +400,214 @@ template <typename T>
 bind_arg_storage_t<T> StoreBoundArg(T &&v) {
   return bind_arg_storage<T>::Store(std::forward<T>(v));
 }
+
+// -----------------------------------------------------------------------------
+// FunctorRunType — 提取 functor 的完整调用签名
+// (Chromium base/bind_internal.h FunctorTraits::RunType 的 libnei 等价物)。
+//
+// 输出统一为函数类型 `R(Args...)`。functor 的几种形态：
+//   * 自由函数指针 / 引用                 -> R(Args...)
+//   * 成员函数指针                        -> R(C*, Args...)（receiver 位于参数
+//                                          首位，与 BindOnce 把 receiver 作为
+//                                          第一个绑定参数、Invoker 用 std::invoke
+//                                          调用的语义一致）
+//   * lambda / std::function / 函数对象   -> R(Args...)（经 operator() 提取，
+//                                          不含隐式 receiver）
+//   * OnceCallback / RepeatingCallback    -> R(Args...)，运行时用 .Run() 派发
+// -----------------------------------------------------------------------------
+
+// 从 operator() 提取纯调用签名（用于 lambda / 函数对象）。覆盖 const / ref /
+// noexcept 限定的全部组合。
+template <typename Callable, typename Signature = decltype(&std::decay_t<Callable>::operator())>
+struct CallableRunType;
+
+// MSVC 不接受空实参宏调用（C4003），用 NEIXX_EMPTY 占位并在展开时置空。
+#define NEIXX_EMPTY
+#define NEIXX_DEFINE_CALLABLE_RUN_TYPE(QUALIFIERS)                                                                     \
+  template <typename Callable, typename R, typename C, typename... Args>                                               \
+  struct CallableRunType<Callable, R (C::*)(Args...) QUALIFIERS> {                                                     \
+    using type = R(Args...);                                                                                           \
+  };
+
+NEIXX_DEFINE_CALLABLE_RUN_TYPE(NEIXX_EMPTY)
+NEIXX_DEFINE_CALLABLE_RUN_TYPE(const)
+NEIXX_DEFINE_CALLABLE_RUN_TYPE(&)
+NEIXX_DEFINE_CALLABLE_RUN_TYPE(const &)
+NEIXX_DEFINE_CALLABLE_RUN_TYPE(&&)
+NEIXX_DEFINE_CALLABLE_RUN_TYPE(const &&)
+#if defined(__cpp_noexcept_function_type)
+NEIXX_DEFINE_CALLABLE_RUN_TYPE(noexcept)
+NEIXX_DEFINE_CALLABLE_RUN_TYPE(const noexcept)
+NEIXX_DEFINE_CALLABLE_RUN_TYPE(& noexcept)
+NEIXX_DEFINE_CALLABLE_RUN_TYPE(const & noexcept)
+NEIXX_DEFINE_CALLABLE_RUN_TYPE(&& noexcept)
+NEIXX_DEFINE_CALLABLE_RUN_TYPE(const && noexcept)
+#endif
+
+#undef NEIXX_DEFINE_CALLABLE_RUN_TYPE
+
+// 泛型 functor（lambda / std::function / 函数对象）：经 operator() 提取。
+template <typename F>
+struct FunctorRunType {
+  using type = typename CallableRunType<std::decay_t<F>>::type;
+};
+
+// 自由函数指针 / 引用（含 noexcept 变体）。
+template <typename R, typename... Args>
+struct FunctorRunType<R (*)(Args...)> {
+  using type = R(Args...);
+};
+#if defined(__cpp_noexcept_function_type)
+template <typename R, typename... Args>
+struct FunctorRunType<R (*)(Args...) noexcept> {
+  using type = R(Args...);
+};
+#endif
+template <typename R, typename... Args>
+struct FunctorRunType<R (&)(Args...)> {
+  using type = R(Args...);
+};
+#if defined(__cpp_noexcept_function_type)
+template <typename R, typename... Args>
+struct FunctorRunType<R (&)(Args...) noexcept> {
+  using type = R(Args...);
+};
+#endif
+
+// 成员函数指针：receiver 成为第一个调用参数。覆盖 const / ref / noexcept。
+#define NEIXX_DEFINE_MEMBER_FUNCTOR_RUN_TYPE(CV, REF, NOEX)                                                            \
+  template <typename R, typename C, typename... Args>                                                                  \
+  struct FunctorRunType<R (C::*)(Args...) CV REF NOEX> {                                                               \
+    using type = R(CV C *, Args...);                                                                                   \
+  };
+
+NEIXX_DEFINE_MEMBER_FUNCTOR_RUN_TYPE(NEIXX_EMPTY, NEIXX_EMPTY, NEIXX_EMPTY)
+NEIXX_DEFINE_MEMBER_FUNCTOR_RUN_TYPE(const, NEIXX_EMPTY, NEIXX_EMPTY)
+NEIXX_DEFINE_MEMBER_FUNCTOR_RUN_TYPE(NEIXX_EMPTY, &, NEIXX_EMPTY)
+NEIXX_DEFINE_MEMBER_FUNCTOR_RUN_TYPE(const, &, NEIXX_EMPTY)
+NEIXX_DEFINE_MEMBER_FUNCTOR_RUN_TYPE(NEIXX_EMPTY, &&, NEIXX_EMPTY)
+NEIXX_DEFINE_MEMBER_FUNCTOR_RUN_TYPE(const, &&, NEIXX_EMPTY)
+#if defined(__cpp_noexcept_function_type)
+NEIXX_DEFINE_MEMBER_FUNCTOR_RUN_TYPE(NEIXX_EMPTY, NEIXX_EMPTY, noexcept)
+NEIXX_DEFINE_MEMBER_FUNCTOR_RUN_TYPE(const, NEIXX_EMPTY, noexcept)
+NEIXX_DEFINE_MEMBER_FUNCTOR_RUN_TYPE(NEIXX_EMPTY, &, noexcept)
+NEIXX_DEFINE_MEMBER_FUNCTOR_RUN_TYPE(const, &, noexcept)
+NEIXX_DEFINE_MEMBER_FUNCTOR_RUN_TYPE(NEIXX_EMPTY, &&, noexcept)
+NEIXX_DEFINE_MEMBER_FUNCTOR_RUN_TYPE(const, &&, noexcept)
+#endif
+
+#undef NEIXX_DEFINE_MEMBER_FUNCTOR_RUN_TYPE
+#undef NEIXX_EMPTY
+
+// 回调类型作为 functor。
+template <typename R, typename... Args>
+struct FunctorRunType<OnceCallback<R(Args...)>> {
+  using type = R(Args...);
+};
+
+template <typename R, typename... Args>
+struct FunctorRunType<RepeatingCallback<R(Args...)>> {
+  using type = R(Args...);
+};
+
+// has_functor_run_type：判断能否静态提取完整调用签名（路径 1 可用），从而决定
+// MakeUnboundRunTypeImpl 走“签名裁剪”还是“bound args 推断”。
+//
+// 注意：不能通过探测“typename FunctorRunType<F>::type 是否存在”实现——MSVC 对
+// 类模板实例化内部（默认模板实参中的 decltype(&F::operator())）的 SFINAE 支持
+// 不完整，会在 void_t 探测里把泛型 lambda 的 operator() 提取错误硬报出来。
+// 因此改用：
+//   * has_extractable_operator：直接 decltype(&F::operator())（泛型 lambda /
+//     重载 operator() 在此失败）；
+//   * 对无 operator() 但有 FunctorRunType 特化的类型（函数指针/引用、成员
+//     函数指针、回调）显式判为 true。
+template <typename F, typename = void>
+struct has_extractable_operator : std::false_type {};
+
+template <typename F>
+struct has_extractable_operator<F, std::void_t<decltype(&std::decay_t<F>::operator())>> : std::true_type {};
+
+template <typename F>
+struct has_functor_run_type
+    : std::bool_constant<
+          has_extractable_operator<F>::value || std::is_function_v<std::remove_reference_t<std::remove_pointer_t<F>>>
+          || std::is_member_function_pointer_v<F> || is_once_callback_v<F> || is_repeating_callback_v<F>> {};
+
+template <typename F>
+constexpr bool has_functor_run_type_v = has_functor_run_type<F>::value;
+
+// -----------------------------------------------------------------------------
+// BindTypeHelper / MakeUnboundRunType — 计算未绑定签名。
+//
+// 从完整签名 R(FullArgs...) 丢弃前 sizeof...(BoundArgs) 个参数得到
+// R(UnboundArgs...)。对成员函数指针，receiver 占据 FullArgs 首位，因此自然被
+// 计入“已绑定参数”——与 BindOnce(&C::Method, receiver, args...) 的调用语义
+// 一致。返回类型 R 原样保留。
+//   BindOnce([](int a, int b) { return a + b; }, 10)  -> OnceCallback<int(int)>
+//   BindOnce(&C::Method, &obj)                        -> OnceCallback<R()>
+// -----------------------------------------------------------------------------
+// MakeFunctionType<R, tuple<Args...>> -> R(Args...)
+template <typename R, typename Tuple>
+struct MakeFunctionType;
+
+template <typename R, typename... Args>
+struct MakeFunctionType<R, std::tuple<Args...>> {
+  using type = R(Args...);
+};
+
+template <typename Signature, typename... BoundArgs>
+struct BindTypeHelper;
+
+template <typename R, typename... FullArgs, typename... BoundArgs>
+struct BindTypeHelper<R(FullArgs...), BoundArgs...> {
+  static constexpr size_t kBoundCount = sizeof...(BoundArgs);
+  static_assert(sizeof...(FullArgs) >= sizeof...(BoundArgs),
+                "BindOnce/BindRepeating: 绑定的参数多于 functor 接受的参数");
+
+  // 丢弃 tuple 前 k 个元素，保留尾部（未绑定参数）。
+  template <size_t k, typename Tuple>
+  struct Tail;
+
+  template <size_t k, typename... Ts>
+  struct Tail<k, std::tuple<Ts...>> {
+    static_assert(k <= sizeof...(Ts), "Tail: k out of range");
+    template <size_t... I>
+    static auto Take(std::index_sequence<I...>) -> std::tuple<std::tuple_element_t<k + I, std::tuple<Ts...>>...>;
+    using type = decltype(Take(std::make_index_sequence<sizeof...(Ts) - k>{}));
+  };
+
+  using UnboundRunType = typename MakeFunctionType<R, typename Tail<kBoundCount, std::tuple<FullArgs...>>::type>::type;
+};
+
+// 泛型 lambda / 重载 operator() 的 fallback：用 bound args 实例化调用推断返回
+// 类型，未绑定签名为 R()（丢弃全部 bound args）。仅当 bound args 能实例化
+// functor 的调用时可用（无绑定参数、或完全绑定）。
+template <typename F, typename... BA>
+struct BoundArgsInferredRunType {
+  using ReturnType = decltype(std::declval<F>()(std::declval<BA>()...));
+  using UnboundRunType = typename MakeFunctionType<ReturnType, std::tuple<>>::type;
+};
+
+// 按 has_functor_run_type_v 分派：路径 1（operator() 可提取）用完整签名裁剪出
+// 未绑定参数；路径 2（泛型 lambda / 重载 operator()）退回 bound args 推断。
+// 用类模板部分特化而非函数重载：UnboundRunType 是函数类型，不能作为函数返回
+// 类型，只能放在 using 别名里。分派 bool 置于参数列表最前（模板参数包不能
+// 后跟非包参数，MSVC 严格要求）。
+template <bool Extractable, typename F, typename... BA>
+struct MakeUnboundRunTypeImpl;
+
+template <typename F, typename... BA>
+struct MakeUnboundRunTypeImpl<true, F, BA...> {
+  using type = typename BindTypeHelper<typename FunctorRunType<F>::type, std::decay_t<BA>...>::UnboundRunType;
+};
+
+template <typename F, typename... BA>
+struct MakeUnboundRunTypeImpl<false, F, BA...> {
+  using type = typename BoundArgsInferredRunType<F, std::decay_t<BA>...>::UnboundRunType;
+};
+
+template <typename F, typename... BA>
+using MakeUnboundRunType = typename MakeUnboundRunTypeImpl<has_functor_run_type_v<F>, F, BA...>::type;
 } // namespace detail
 
 template <typename T>
