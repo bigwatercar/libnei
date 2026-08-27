@@ -75,8 +75,7 @@ void TCPServerSocket::Impl::Close() {
       auto cb = std::move(accept_callback_);
       auto runner = io_runner_;
       lock.unlock();
-      runner->PostTask(FROM_HERE,
-                       BindOnce([](TCPServerSocket::AcceptCallback c) { c(false, nullptr); }, std::move(cb)));
+      runner->PostTask(FROM_HERE, BindOnce(std::move(cb), false, nullptr));
       lock.lock();
     }
   }
@@ -266,8 +265,7 @@ void TCPServerSocket::Impl::OnFileCanReadWithoutBlocking(NativeIOHandle /*handle
           auto cb = std::move(accept_callback_);
           lock.unlock();
           if (io_runner_) {
-            io_runner_->PostTask(FROM_HERE,
-                                 BindOnce([](TCPServerSocket::AcceptCallback c) { c(false, nullptr); }, std::move(cb)));
+            io_runner_->PostTask(FROM_HERE, BindOnce(std::move(cb), false, nullptr));
           }
         }
       }

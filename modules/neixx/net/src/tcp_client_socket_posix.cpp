@@ -285,7 +285,7 @@ bool TCPClientSocket::Impl::DoConnect(const IPEndPoint &addr, TCPClientSocket::C
     if (cb) {
       DCHECK_MSG(io_runner_, "Connect error without io_runner_");
       if (io_runner_) {
-        io_runner_->PostTask(FROM_HERE, BindOnce([](TCPClientSocket::ConnectCallback c) { c(false); }, std::move(cb)));
+        io_runner_->PostTask(FROM_HERE, BindOnce(std::move(cb), false));
       }
     }
     return false;
@@ -354,8 +354,7 @@ void TCPClientSocket::Impl::ReadAsync(scoped_refptr<IOBuffer> buf,
     if (callback) {
       DCHECK_MSG(io_runner_, "ReadAsync on closed socket without io_runner_");
       if (io_runner_) {
-        io_runner_->PostTask(FROM_HERE,
-                             BindOnce([](AsyncInputStream::IOReadCallback c) { c(false, 0); }, std::move(callback)));
+        io_runner_->PostTask(FROM_HERE, BindOnce(std::move(callback), false, 0));
       }
     }
     return;
@@ -399,8 +398,7 @@ void TCPClientSocket::Impl::WriteAsync(scoped_refptr<IOBuffer> buf,
     if (callback) {
       DCHECK_MSG(io_runner_, "WriteAsync on closed socket without io_runner_");
       if (io_runner_) {
-        io_runner_->PostTask(FROM_HERE,
-                             BindOnce([](AsyncOutputStream::IOWriteCallback c) { c(false, 0); }, std::move(callback)));
+        io_runner_->PostTask(FROM_HERE, BindOnce(std::move(callback), false, 0));
       }
     }
     return;

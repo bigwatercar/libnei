@@ -28,7 +28,7 @@ void PostError(const scoped_refptr<SequencedTaskRunner> &runner, Callback &&cb) 
   if (!cb)
     return;
   if (runner) {
-    BindPostTask(runner, BindOnce([](Callback c) { c(false, 0u); }, std::forward<Callback>(cb))).Run();
+    BindPostTask(runner, BindOnce(std::move(cb), false, 0u)).Run();
   } else {
     cb(false, 0u);
   }
@@ -39,10 +39,7 @@ void PostResult(const scoped_refptr<SequencedTaskRunner> &runner, Callback &&cb,
   if (!cb)
     return;
   if (runner) {
-    BindPostTask(
-        runner,
-        BindOnce([](Callback c, bool s, std::size_t n) { c(s, n); }, std::forward<Callback>(cb), success, bytes))
-        .Run();
+    BindPostTask(runner, BindOnce(std::move(cb), success, bytes)).Run();
   } else {
     cb(success, bytes);
   }

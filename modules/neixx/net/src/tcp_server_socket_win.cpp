@@ -129,8 +129,7 @@ void TCPServerSocket::Impl::Close() {
       auto cb = std::move(accept_callback_);
       auto runner = io_runner_;
       lock.unlock();
-      runner->PostTask(FROM_HERE,
-                       BindOnce([](TCPServerSocket::AcceptCallback c) { c(false, nullptr); }, std::move(cb)));
+      runner->PostTask(FROM_HERE, BindOnce(std::move(cb), false, nullptr));
       lock.lock();
     }
   }
@@ -344,7 +343,7 @@ void TCPServerSocket::Impl::OnIOCompleted(NativeIOHandle /*handle*/,
       DCHECK_MSG(io_runner_, "OnIOCompleted: io_runner_ is null");
       if (io_runner_) {
         // Lock-free dispatch: callback copied under lock, fired outside.
-        io_runner_->PostTask(FROM_HERE, BindOnce([](AcceptCallback c) { c(false, nullptr); }, std::move(cb)));
+        io_runner_->PostTask(FROM_HERE, BindOnce(std::move(cb), false, nullptr));
       }
     }
     // If orphaned and this was the last pending accept (e.g. the ABORTED
@@ -424,11 +423,7 @@ void TCPServerSocket::Impl::OnIOCompleted(NativeIOHandle /*handle*/,
       DCHECK_MSG(io_runner_, "OnIOCompleted: io_runner_ is null");
       if (io_runner_) {
         // Lock-free dispatch: callback copied under lock, fired outside.
-        io_runner_->PostTask(
-            FROM_HERE,
-            BindOnce([](AcceptCallback c, std::unique_ptr<TCPClientSocket> s) { c(true, std::move(s)); },
-                     std::move(cb),
-                     std::move(client_sock)));
+        io_runner_->PostTask(FROM_HERE, BindOnce(std::move(cb), true, std::move(client_sock)));
       }
     }
   }
