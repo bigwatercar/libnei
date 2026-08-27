@@ -281,15 +281,14 @@ bool TaskRunner::PostTaskAndReplyWithResult(const Location &from_here,
   scoped_refptr<SequencedTaskRunner> reply_runner = GetCallingThreadRunner();
   if (!reply_runner)
     return false;
+  // The reply hop uses generic BindOnce's callback-as-functor support:
+  // BindOnce(OnceCallback<void(T)>, T) derives OnceCallback<void()>, so the
+  // return value is forwarded to |reply| without a hand-written trampoline.
   OnceClosure wrapped =
       BindOnce([task = std::move(task), reply = std::move(reply), reply_runner = std::move(reply_runner)]() mutable {
         T result = std::move(task).Run();
         if (reply_runner) {
-          auto runner = reply_runner;
-          auto cb = std::move(reply);
-          runner->PostTask(FROM_HERE, [result = std::move(result), cb = std::move(cb)]() mutable {
-            std::move(cb).Run(std::move(result));
-          });
+          reply_runner->PostTask(FROM_HERE, BindOnce(std::move(reply), std::move(result)));
         }
       });
   return PostTask(from_here, std::move(wrapped));
