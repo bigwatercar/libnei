@@ -18,6 +18,7 @@
 #include <memory>
 #include <thread>
 
+#include <neixx/functional/bind.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/message_loop/message_pump_default.h>
 #include <neixx/task/sequence_manager.h>
@@ -122,13 +123,44 @@ TEST(PostTaskAndReplyTest, WithResultForwardsValueToReply) {
   auto ok = std::make_shared<std::atomic<bool>>(false);
   auto got = std::make_shared<std::atomic<int>>(-1);
 
+  // Generic BindOnce derives OnceCallback<int()> / OnceCallback<void(int)>,
+  // so no explicit callback types are needed at the call site.
   runner_a->PostTask(FROM_HERE, [=]() {
-    OnceCallback<int()> task = []() { return 42; };
-    OnceCallback<void(int)> reply = [=](int result) {
-      got->store(result);
-      done->Signal();
-    };
-    ok->store(runner_b->PostTaskAndReplyWithResult(FROM_HERE, std::move(task), std::move(reply)));
+    ok->store(runner_b->PostTaskAndReplyWithResult(FROM_HERE, BindOnce([]() { return 42; }), BindOnce([=](int result) {
+                                                     got->store(result);
+                                                     done->Signal();
+                                                   })));
+  });
+
+  ASSERT_TRUE(done->TimedWait(seconds(10))) << "reply never fired";
+  runner_a->PostTask(FROM_HERE, [&mgr_a]() { mgr_a.Quit(); });
+  runner_b->PostTask(FROM_HERE, [&mgr_b]() { mgr_b.Quit(); });
+  thread_a.join();
+  thread_b.join();
+
+  EXPECT_TRUE(ok->load());
+  EXPECT_EQ(got->load(), 42);
+}
+
+TEST(PostTaskAndReplyTest, WithResultForwardsMoveOnlyValue) {
+  SequenceManager mgr_a(std::make_unique<MessagePumpDefault>());
+  SequenceManager mgr_b(std::make_unique<MessagePumpDefault>());
+  std::thread thread_a([&mgr_a]() { mgr_a.Run(); });
+  std::thread thread_b([&mgr_b]() { mgr_b.Run(); });
+  auto runner_a = mgr_a.CreateTaskRunner();
+  auto runner_b = mgr_b.CreateTaskRunner();
+
+  auto done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
+  auto ok = std::make_shared<std::atomic<bool>>(false);
+  auto got = std::make_shared<std::atomic<int>>(-1);
+
+  // T is deduced as std::unique_ptr<int> from the generic BindOnce result.
+  runner_a->PostTask(FROM_HERE, [=]() {
+    ok->store(runner_b->PostTaskAndReplyWithResult(
+        FROM_HERE, BindOnce([]() { return std::make_unique<int>(42); }), BindOnce([=](std::unique_ptr<int> result) {
+          got->store(*result);
+          done->Signal();
+        })));
   });
 
   ASSERT_TRUE(done->TimedWait(seconds(10))) << "reply never fired";
