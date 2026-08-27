@@ -252,6 +252,43 @@ inline RepeatingCallback<void()> BindPostTask(scoped_refptr<SequencedTaskRunner>
   return BindRepeating([trampoline](auto &&...args) { trampoline->Run(std::forward<decltype(args)>(args)...); });
 }
 
+// ---------------------------------------------------------------------------
+// TaskRunner::PostTaskAndReplyWithResult — definition
+// ---------------------------------------------------------------------------
+// Defined here (not in task_runner.h) because it wraps |reply| with
+// BindPostTask, and this header already includes task_runner.h — the natural
+// dependency direction, so there is no include cycle.
+//
+// The task runs on this runner; its return value is posted back to the
+// calling thread (captured at call time via ThreadTaskRunnerHandle) and
+// delivered to |reply| there.  |reply| is wrapped with BindPostTask so it has
+// the same destroy-on-target-sequence protection as PostTaskAndReply: if the
+// reply hop cannot be posted (calling thread gone / runner shutdown), the
+// reply's bound resources are destroyed on the calling thread, not here.
+template <typename T>
+bool TaskRunner::PostTaskAndReplyWithResult(const Location &from_here,
+                                            OnceCallback<T()> task,
+                                            OnceCallback<void(T)> reply) {
+  scoped_refptr<SequencedTaskRunner> reply_runner = GetCallingThreadRunner();
+  if (!reply_runner)
+    return false;
+  // Pin |reply| to the calling thread: BindPostTask gives it
+  // destroy-on-target-sequence protection (a dropped task re-posts the
+  // reply's destruction to its owner thread).
+  OnceCallback<void(T)> safe_reply = BindPostTask(reply_runner, std::move(reply));
+  // The result is forwarded by binding it to the protected reply callback
+  // (generic BindOnce callback-as-functor): BindOnce(OnceCallback<void(T)>, T)
+  // derives OnceCallback<void()>.
+  OnceClosure wrapped = BindOnce(
+      [task = std::move(task), safe_reply = std::move(safe_reply), reply_runner = std::move(reply_runner)]() mutable {
+        T result = std::move(task).Run();
+        if (reply_runner) {
+          reply_runner->PostTask(FROM_HERE, BindOnce(std::move(safe_reply), std::move(result)));
+        }
+      });
+  return PostTask(from_here, std::move(wrapped));
+}
+
 } // namespace nei
 
 #endif // NEIXX_TASK_BIND_POST_TASK_H_

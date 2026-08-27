@@ -20,6 +20,7 @@
 
 #include <neixx/functional/bind.h>
 #include <neixx/synchronization/waitable_event.h>
+#include <neixx/task/bind_post_task.h> // PostTaskAndReplyWithResult definition
 #include <neixx/task/message_loop/message_pump_default.h>
 #include <neixx/task/sequence_manager.h>
 #include <neixx/task/task_runner.h>
