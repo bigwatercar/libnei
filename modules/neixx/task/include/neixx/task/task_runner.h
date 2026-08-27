@@ -271,9 +271,18 @@ protected:
 //
 // The task runs on this runner; its return value is posted back to the
 // calling thread (captured at call time via ThreadTaskRunnerHandle) and
-// delivered to |reply| there.  If the calling thread is gone by the time the
-// task completes, PostTask fails and the reply is destroyed on the task
-// thread — safe, since no other thread can run it.
+// delivered to |reply| there.  |reply| is wrapped with BindPostTask so it has
+// the same destroy-on-target-sequence protection as PostTaskAndReply: if the
+// reply hop cannot be posted (calling thread gone / runner shutdown), the
+// reply's bound resources are destroyed on the calling thread, not here.
+} // namespace nei
+
+// BindPostTask is required by the definition below.  It is included here
+// (after closing the namespace) because bind_post_task.h needs
+// SequencedTaskRunner to be complete and re-opens namespace nei itself.
+#include <neixx/task/bind_post_task.h>
+
+namespace nei {
 template <typename T>
 bool TaskRunner::PostTaskAndReplyWithResult(const Location &from_here,
                                             OnceCallback<T()> task,
@@ -281,19 +290,22 @@ bool TaskRunner::PostTaskAndReplyWithResult(const Location &from_here,
   scoped_refptr<SequencedTaskRunner> reply_runner = GetCallingThreadRunner();
   if (!reply_runner)
     return false;
-  // The reply hop uses generic BindOnce's callback-as-functor support:
-  // BindOnce(OnceCallback<void(T)>, T) derives OnceCallback<void()>, so the
-  // return value is forwarded to |reply| without a hand-written trampoline.
-  OnceClosure wrapped =
-      BindOnce([task = std::move(task), reply = std::move(reply), reply_runner = std::move(reply_runner)]() mutable {
+  // Pin |reply| to the calling thread: BindPostTask gives it
+  // destroy-on-target-sequence protection (a dropped task re-posts the
+  // reply's destruction to its owner thread).
+  OnceCallback<void(T)> safe_reply = BindPostTask(reply_runner, std::move(reply));
+  // The result is forwarded by binding it to the protected reply callback
+  // (generic BindOnce callback-as-functor): BindOnce(OnceCallback<void(T)>, T)
+  // derives OnceCallback<void()>.
+  OnceClosure wrapped = BindOnce(
+      [task = std::move(task), safe_reply = std::move(safe_reply), reply_runner = std::move(reply_runner)]() mutable {
         T result = std::move(task).Run();
         if (reply_runner) {
-          reply_runner->PostTask(FROM_HERE, BindOnce(std::move(reply), std::move(result)));
+          reply_runner->PostTask(FROM_HERE, BindOnce(std::move(safe_reply), std::move(result)));
         }
       });
   return PostTask(from_here, std::move(wrapped));
 }
-
 } // namespace nei
 
 #endif // NEIXX_TASK_TASK_RUNNER_H_
