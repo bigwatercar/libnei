@@ -19,6 +19,7 @@
 #include "internal/sequenced_task_queue.h"
 #include "internal/task_queue_selector.h"
 #include "internal/task_tracing_internal.h"
+#include "internal/pooled_task_runner_utils.h"
 
 namespace nei {
 namespace {
@@ -360,7 +361,10 @@ public:
             internal::RecordTaskExecutionStarted(task, batch_now);
           }
           TRACE_EVENT0("nei.scheduling", "SequenceManager::RunTask");
-          std::move(task.task).Run();
+          {
+            internal::ScopedTaskTraits current_traits(&task.traits);
+            std::move(task.task).Run();
+          }
           if (tracing_enabled) {
             internal::RecordTaskExecutionCompleted();
           }
@@ -397,7 +401,10 @@ public:
         internal::RecordTaskExecutionStarted(task);
       }
       TRACE_EVENT0("nei.scheduling", "SequenceManager::RunTask");
-      std::move(task.task).Run();
+      {
+        internal::ScopedTaskTraits current_traits(&task.traits);
+        std::move(task.task).Run();
+      }
       if (tracing_enabled) {
         internal::RecordTaskExecutionCompleted();
       }

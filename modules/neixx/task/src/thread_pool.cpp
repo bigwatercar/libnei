@@ -434,7 +434,10 @@ private:
               observer->OnTaskStarted(observed, queue_delay);
             }
             const TimeTicks run_start = TimeTicks::Now();
-            std::move(task.task).Run();
+            {
+              internal::ScopedTaskTraits current_traits(&task.traits);
+              std::move(task.task).Run();
+            }
             const TimeDelta run_duration = TimeTicks::Now() - run_start;
             internal::RecordTaskExecutionCompleted();
             if (observer) {
@@ -572,7 +575,10 @@ private:
         }
 
         const TimeTicks run_start = TimeTicks::Now();
-        std::move(task.task).Run();
+        {
+          internal::ScopedTaskTraits current_traits(&task.traits);
+          std::move(task.task).Run();
+        }
         const TimeDelta run_duration = TimeTicks::Now() - run_start;
 
         // Mark the task as fully executed (body finished, not merely dequeued)
@@ -700,7 +706,10 @@ private:
           observer->OnTaskStarted(observed, queue_delay);
         }
         const TimeTicks run_start = TimeTicks::Now();
-        std::move(task.task).Run();
+        {
+          internal::ScopedTaskTraits current_traits(&task.traits);
+          std::move(task.task).Run();
+        }
         const TimeDelta run_duration = TimeTicks::Now() - run_start;
         internal::RecordTaskExecutionCompleted();
         if (observer) {

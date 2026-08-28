@@ -645,6 +645,42 @@ TEST(ThreadPoolTest, RunsTasksInCurrentSequenceFalseForDifferentRunner) {
   pool.Shutdown();
 }
 
+// Regression (2026-08-28): a pool worker that posts to a DIFFERENT sequenced
+// queue and then blocks waiting for it must not deadlock.  ReEnqueueTaskQueue's
+// Phase 2.2 local-queue injection must only capture the queue the worker is
+// CURRENTLY processing; injecting a foreign queue strands it on the blocked
+// worker because local queues are consumed exclusively by their owner.
+//
+// Uses timed waits so that a regression FAILS this test instead of hanging the
+// whole suite (a genuine deadlock would otherwise stall ctest indefinitely).
+TEST(ThreadPoolTest, WorkerPostToDifferentQueueThenWaitCompletes) {
+  ThreadPool pool({2});
+  scoped_refptr<SequencedTaskRunner> runner_a = pool.CreateSequencedTaskRunner();
+  scoped_refptr<SequencedTaskRunner> runner_b = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner_a);
+  ASSERT_TRUE(runner_b);
+
+  WaitableEvent inner_done(WaitableEvent::ResetPolicy::kManual, false);
+  WaitableEvent outer_done(WaitableEvent::ResetPolicy::kManual, false);
+  std::atomic<bool> inner_ran{false};
+
+  runner_a->PostTask(FROM_HERE, [&]() {
+    runner_b->PostTask(FROM_HERE, [&]() {
+      inner_ran.store(true, std::memory_order_relaxed);
+      inner_done.Signal();
+    });
+    // Blocking wait for the cross-queue task.  If runner_b's queue was wrongly
+    // injected into this worker's local queue, no other worker can run it and
+    // this wait times out.
+    inner_done.TimedWait(std::chrono::seconds(5));
+    outer_done.Signal();
+  });
+
+  ASSERT_TRUE(outer_done.TimedWait(std::chrono::seconds(10)));
+  EXPECT_TRUE(inner_ran.load());
+  pool.Shutdown();
+}
+
 // =============================================================================
 // CreateParallelTaskRunner
 // =============================================================================

@@ -308,7 +308,17 @@ bool PooledTaskSource::ReEnqueueTaskQueue(PooledTaskQueue *queue) {
     return false;
   }
 
-  if (!queue->is_parallel()) {
+  // Phase 2.2 fast path: worker-repost to the queue the worker is CURRENTLY
+  // processing goes into that worker's local work queue (the worker keeps
+  // draining it, so the reposted task needs no global-heap round trip).
+  //
+  // CRITICAL: only the current queue may be injected.  A worker that posts
+  // to a DIFFERENT sequenced queue and then blocks waiting for it (nested
+  // task pattern) deadlocks if that queue lands in the local queue: local
+  // queues are consumed exclusively by their owner worker, which is parked
+  // on the wait.  Cross-queue posts must go through the global heap so any
+  // idle worker can pick them up (NotifyWorkAvailable wakes the pool).
+  if (!queue->is_parallel() && queue == GetCurrentPooledTaskQueue()) {
     LocalWorkQueue *local_queue = GetLocalWorkQueue();
     if (local_queue != nullptr) {
       local_queue->push_back(queue);

@@ -4,6 +4,7 @@
 #include <neixx/threading/thread_local.h>
 
 #include "pooled_task_queue.h"
+#include <neixx/task/task_traits.h>
 
 namespace nei {
 namespace internal {
@@ -16,6 +17,11 @@ ThreadLocalPointer<PooledTaskQueue> &GetCurrentQueueSlot() {
 
 ThreadLocalPointer<LocalWorkQueue> &GetLocalWorkQueueSlot() {
   static ThreadLocalPointer<LocalWorkQueue> slot;
+  return slot;
+}
+
+ThreadLocalPointer<TaskTraits> &GetCurrentTaskTraitsSlot() {
+  static ThreadLocalPointer<TaskTraits> slot;
   return slot;
 }
 
@@ -35,6 +41,14 @@ LocalWorkQueue *GetLocalWorkQueue() {
 
 void SetLocalWorkQueue(LocalWorkQueue *queue) {
   GetLocalWorkQueueSlot().Set(queue);
+}
+
+TaskTraits *GetCurrentTaskTraits() {
+  return GetCurrentTaskTraitsSlot().Get();
+}
+
+void SetCurrentTaskTraits(TaskTraits *traits) {
+  GetCurrentTaskTraitsSlot().Set(traits);
 }
 
 } // namespace internal

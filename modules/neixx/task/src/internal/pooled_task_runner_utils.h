@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <deque>
 
+#include <neixx/task/task_traits.h>
+
 namespace nei {
 namespace internal {
 
@@ -18,6 +20,40 @@ PooledTaskQueue *GetCurrentPooledTaskQueue();
 
 // Called by pool worker threads when beginning/ending work on a queue.
 void SetCurrentPooledTaskQueue(PooledTaskQueue *queue);
+
+// ---- Current task traits (Chromium current-task environment) ----------------
+//
+// The traits of the task currently executing on this thread, or nullptr when
+// no task is running.  Set by task execution sites (ThreadPool workers,
+// SequenceManager) around each task body; drives GetTaskPriorityForCurrentThread().
+
+// Returns the traits of the task currently running on this thread, or
+// nullptr if no task is running.
+TaskTraits *GetCurrentTaskTraits();
+
+// Internal setter; use ScopedTaskTraits rather than calling this directly.
+void SetCurrentTaskTraits(TaskTraits *traits);
+
+// RAII guard: installs |traits| as the current task traits for this thread
+// and restores the previous value on destruction.  Supports nested task
+// execution (the inner task overwrites, the outer value is restored after).
+class ScopedTaskTraits {
+public:
+  explicit ScopedTaskTraits(TaskTraits *traits)
+      : previous_(GetCurrentTaskTraits()) {
+    SetCurrentTaskTraits(traits);
+  }
+
+  ~ScopedTaskTraits() {
+    SetCurrentTaskTraits(previous_);
+  }
+
+  ScopedTaskTraits(const ScopedTaskTraits &) = delete;
+  ScopedTaskTraits &operator=(const ScopedTaskTraits &) = delete;
+
+private:
+  TaskTraits *previous_;
+};
 
 // Phase 2.2: Per-worker local WorkQueue TLS accessors.
 //

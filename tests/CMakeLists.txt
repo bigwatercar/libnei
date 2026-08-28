@@ -49,6 +49,7 @@ add_executable(
   cjk_width_test.cpp
   condition_variable_test.cpp
   command_line_test.cpp
+  current_support_test.cpp
   atomic_event_test.cpp
   core_test.cpp
   flake_id_test.cpp

@@ -14,6 +14,7 @@ set(NEIXX_TASK_SOURCES
     include/neixx/task/task_runner.h
     include/neixx/task/task_traits.h
     include/neixx/task/thread_checker.h
+    include/neixx/task/current_support.h
     include/neixx/task/job_delegate.h
     include/neixx/task/post_job.h
     include/neixx/task/thread_pool_instance.h
@@ -45,6 +46,7 @@ set(NEIXX_TASK_SOURCES
     src/internal/task_tracing_internal.h
     src/message_loop/message_pump_default.cpp
     src/message_loop/message_pump_default.h
+    src/current_support.cpp
     src/post_job.cpp
     src/run_loop.cpp
     src/scoped_blocking_call.cpp
