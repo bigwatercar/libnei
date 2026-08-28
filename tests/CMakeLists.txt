@@ -59,6 +59,7 @@ add_executable(
   bind_generic_test.cpp
   small_object_allocator_test.cpp
   memory_pressure_monitor_test.cpp
+  native_library_test.cpp
   # ref_counted_compile_fail.cpp
   platform_thread_test.cpp
   pipe_stream_test.cpp
@@ -125,6 +126,35 @@ include(GoogleTest)
 # (DLLs may not be staged yet). Discover tests at test time instead.
 #
 gtest_discover_tests(nei_tests DISCOVERY_MODE PRE_TEST)
+
+# Test-only plugin modules loaded at runtime by native_library_test. MODULE
+# libraries are not linked against anything; they exist only to be
+# dlopen/LoadLibrary'd. Their output directory is pinned to the nei_tests
+# output directory so the test can locate them next to its own executable.
+add_library(nei_test_plugin MODULE test_plugin/nei_test_plugin.cpp)
+target_compile_features(nei_test_plugin PRIVATE cxx_std_17)
+target_include_directories(nei_test_plugin PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test_plugin)
+set_target_properties(
+  nei_test_plugin
+  PROPERTIES LIBRARY_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:nei_tests>
+             RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:nei_tests>
+)
+add_dependencies(nei_tests nei_test_plugin)
+
+# POSIX-only companion plugin for the RTLD_GLOBAL visibility test. It
+# references a symbol from nei_test_plugin, which shared-library linking
+# allows on Linux but not on Windows.
+if(NOT WIN32)
+  add_library(nei_test_plugin_deps MODULE test_plugin/nei_test_plugin_deps.cpp)
+  target_compile_features(nei_test_plugin_deps PRIVATE cxx_std_17)
+  target_include_directories(nei_test_plugin_deps PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test_plugin)
+  set_target_properties(
+    nei_test_plugin_deps
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:nei_tests>
+               RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:nei_tests>
+  )
+  add_dependencies(nei_tests nei_test_plugin_deps)
+endif()
 
 # Optional compile-fail check for scoped_refptr constraints. This target is
 # excluded from default builds and is intended to be invoked manually to inspect
