@@ -825,10 +825,6 @@ void internal::ThreadGroup::JoinAll() {
   }
 }
 
-void internal::ThreadGroup::JoinForTesting() {
-  JoinAll();
-}
-
 std::size_t internal::ThreadGroup::worker_count() const {
   AutoLock guard(group_lock_);
   return handles_.size();

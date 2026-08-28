@@ -72,12 +72,9 @@ public:
   //   3. 4:2:1 ratio enforced across priorities
   internal::SequencedTaskQueue *SelectNextQueue();
 
-  // Called after a task from |queue| has been processed.
-  // Advances the round-robin pointer within the priority level.
-  void DidProcessTask(internal::SequencedTaskQueue *queue);
-
   // ---- Query ----
 
+  // True if any registered queue currently has work.
   bool HasWork() const {
     return active_priority_mask_.load(std::memory_order_acquire) != 0;
   }

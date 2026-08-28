@@ -103,8 +103,8 @@ JobHandle JobHandle::PostJob(const Location &from_here,
   DCHECK(max_concurrency_cb);
   // Chromium-aligned: retain the posting site (crash reports / tracing) and
   // propagate the traits so worker threads run at the requested priority.
-  scoped_refptr<internal::JobTaskSource> source(new internal::JobTaskSource(
-      from_here, std::move(traits), std::move(task), std::move(max_concurrency_cb), initial_workers));
+  scoped_refptr<internal::JobTaskSource> source(
+      new internal::JobTaskSource(from_here, std::move(traits), std::move(task), std::move(max_concurrency_cb)));
   source->SetRunner(GetJobRunner());
   source->PostInitialWorkers(initial_workers);
   JobHandle handle;

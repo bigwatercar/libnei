@@ -484,7 +484,7 @@ public:
       : traits_(priority, shutdown_behavior) {
   }
 
-  // Post path (any thread): append a task.  Returns false if shutting down.
+  // Post path (any thread): append a task.
   // |out_first| (optional) receives whether this was the first pending task
   // (pending_count_ went 0 -> 1); the poster uses it to decide whether the
   // source must be (re-)enqueued into the scheduler heap.  When the source is
@@ -493,9 +493,6 @@ public:
   // explicit enqueue.
   bool AddTask(internal::Task task, bool *out_first = nullptr) {
     AutoLock lock(lock_);
-    if (shut_down_.load(std::memory_order_acquire)) {
-      return false;
-    }
     const bool first = (pending_count_.load(std::memory_order_relaxed) == 0);
     queue_.push_back(std::move(task));
     pending_count_.fetch_add(1, std::memory_order_release);
@@ -519,25 +516,8 @@ public:
     return true;
   }
 
-  std::size_t TakeTasks(internal::Task *out_tasks, std::size_t max_tasks) override {
-    if (out_tasks == nullptr || max_tasks == 0) {
-      return 0;
-    }
-    AutoLock lock(lock_);
-    std::size_t count = 0;
-    while (count < max_tasks && !queue_.empty()) {
-      out_tasks[count++] = std::move(queue_.front());
-      queue_.pop_front();
-      pending_count_.fetch_sub(1, std::memory_order_release);
-    }
-    return count;
-  }
-
   internal::TaskSource::RunStatus WillRunTask() override {
     constexpr int kMaxParallelWorkers = 256;
-    if (shut_down_.load(std::memory_order_acquire)) {
-      return internal::TaskSource::RunStatus::kDisallowed;
-    }
     // Lock-free emptiness check via the task counter.
     if (pending_count_.load(std::memory_order_acquire) == 0) {
       return internal::TaskSource::RunStatus::kDisallowed;
@@ -568,14 +548,9 @@ public:
   }
 
   bool IsShutdown() const override {
-    return shut_down_.load(std::memory_order_acquire);
-  }
-
-  void Shutdown() override {
-    AutoLock lock(lock_);
-    shut_down_.store(true, std::memory_order_release);
-    queue_.clear();
-    pending_count_.store(0, std::memory_order_relaxed);
+    // The sequence has no shutdown state of its own; it is simply released
+    // when the runner is destroyed.
+    return false;
   }
 
   internal::TaskSourceSortKey GetSortKey() const override {
@@ -594,7 +569,6 @@ private:
   std::deque<internal::Task> queue_;
   TaskTraits traits_;
   std::atomic<int> running_worker_count_{0};
-  std::atomic<bool> shut_down_{false};
   // Lock-free pending-task counter mirroring queue_ size (used by
   // WillRunTask/HasWork so the scheduler hot path avoids lock_).
   std::atomic<std::size_t> pending_count_{0};

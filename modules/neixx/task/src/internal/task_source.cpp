@@ -20,10 +20,6 @@ bool TaskQueueTaskSource::TakeTask(Task *out_task) {
   return queue_->TakeImmediateTask(out_task);
 }
 
-std::size_t TaskQueueTaskSource::TakeTasks(Task *out_tasks, std::size_t max_tasks) {
-  return queue_->TakeImmediateTasks(out_tasks, max_tasks);
-}
-
 TaskSource::RunStatus TaskQueueTaskSource::WillRunTask() {
   ExecutionMode mode = GetExecutionMode();
 
@@ -33,11 +29,6 @@ TaskSource::RunStatus TaskQueueTaskSource::WillRunTask() {
     const int prev = running_worker_count_.fetch_add(1, std::memory_order_acquire);
     const int current = prev + 1;
 
-    if (shut_down_.load(std::memory_order_acquire)) {
-      running_worker_count_.fetch_sub(1, std::memory_order_release);
-      return RunStatus::kDisallowed;
-    }
-
     if (current >= kMaxParallelWorkers) {
       return RunStatus::kAllowedSaturated;
     }
@@ -46,7 +37,7 @@ TaskSource::RunStatus TaskQueueTaskSource::WillRunTask() {
 
   case ExecutionMode::kSequenced:
   case ExecutionMode::kSingleThread:
-    if (has_worker_.load(std::memory_order_acquire) || shut_down_.load(std::memory_order_acquire)) {
+    if (has_worker_.load(std::memory_order_acquire)) {
       return RunStatus::kDisallowed;
     }
     has_worker_.store(true, std::memory_order_release);
@@ -96,12 +87,9 @@ bool TaskQueueTaskSource::HasWork() const {
 }
 
 bool TaskQueueTaskSource::IsShutdown() const {
-  return shut_down_.load(std::memory_order_acquire);
-}
-
-void TaskQueueTaskSource::Shutdown() {
-  shut_down_.store(true, std::memory_order_release);
-  queue_->Shutdown();
+  // The adapter has no shutdown state of its own: the pool closes the
+  // underlying PooledTaskQueue directly (see PooledTaskQueue::Shutdown).
+  return false;
 }
 
 TaskSourceSortKey TaskQueueTaskSource::GetSortKey() const {

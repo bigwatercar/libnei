@@ -47,19 +47,15 @@ public:
 
   RegisteredTaskSource(RegisteredTaskSource &&other) noexcept
       : task_source_(std::move(other.task_source_))
-      , run_status_(other.run_status_)
-      , has_run_(other.has_run_) {
+      , run_status_(other.run_status_) {
     other.run_status_ = TaskSource::RunStatus::kDisallowed;
-    other.has_run_ = false;
   }
 
   RegisteredTaskSource &operator=(RegisteredTaskSource &&other) noexcept {
     if (this != &other) {
       task_source_ = std::move(other.task_source_);
       run_status_ = other.run_status_;
-      has_run_ = other.has_run_;
       other.run_status_ = TaskSource::RunStatus::kDisallowed;
-      other.has_run_ = false;
     }
     return *this;
   }
@@ -100,7 +96,6 @@ public:
   ///   kAllowedSaturated    – can run; this was the last available slot
   TaskSource::RunStatus WillRunTask() {
     run_status_ = task_source_->WillRunTask();
-    has_run_ = (run_status_ != TaskSource::RunStatus::kDisallowed);
     return run_status_;
   }
 
@@ -110,19 +105,12 @@ public:
     return task_source_->TakeTask(out_task);
   }
 
-  /// Batch-dequeue up to |max_tasks|.  Only valid after WillRunTask()
-  /// returned allowed.  Returns the number of tasks dequeued.
-  std::size_t TakeTasks(Task *out_tasks, std::size_t max_tasks) {
-    return task_source_->TakeTasks(out_tasks, max_tasks);
-  }
-
   /// Inform the source that the worker finished processing the task(s).
   /// Returns true if the source should be re-enqueued into the ready heap.
   /// After this call the RegisteredTaskSource resets.
   bool DidProcessTask() {
     const bool reenqueue = task_source_->DidProcessTask();
     run_status_ = TaskSource::RunStatus::kDisallowed;
-    has_run_ = false;
     return reenqueue;
   }
 
@@ -132,7 +120,6 @@ public:
   /// becomes empty after this call.
   scoped_refptr<TaskSource> Unregister() {
     run_status_ = TaskSource::RunStatus::kDisallowed;
-    has_run_ = false;
     return std::move(task_source_);
   }
 
@@ -143,7 +130,6 @@ private:
 
   TaskSourceSortKey sort_key_;
   TaskSource::RunStatus run_status_ = TaskSource::RunStatus::kDisallowed;
-  bool has_run_ = false;
 };
 
 } // namespace internal

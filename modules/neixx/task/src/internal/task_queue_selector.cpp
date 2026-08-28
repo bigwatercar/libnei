@@ -219,9 +219,4 @@ internal::SequencedTaskQueue *TaskQueueSelector::SelectNextQueue() {
   return nullptr;
 }
 
-void TaskQueueSelector::DidProcessTask(internal::SequencedTaskQueue * /*queue*/) {
-  // No additional state to update; round_robin_index is advanced in
-  // SelectNextQueue(), and work_mask is updated via SetQueueHasWork().
-}
-
 } // namespace nei

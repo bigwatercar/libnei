@@ -26,8 +26,7 @@ public:
   JobTaskSource(const Location &from_here,
                 TaskTraits traits,
                 RepeatingCallback<void(JobDelegate *)> task,
-                MaxConcurrencyCallback max_concurrency_cb,
-                int initial_workers);
+                MaxConcurrencyCallback max_concurrency_cb);
   ~JobTaskSource() override = default;
 
   // Chromium-aligned accessors: the posting site (for crash reports /
@@ -72,7 +71,6 @@ private:
   TaskTraits traits_;
   RepeatingCallback<void(JobDelegate *)> task_;
   MaxConcurrencyCallback max_concurrency_cb_;
-  const int initial_workers_;
   scoped_refptr<TaskRunner> runner_;
   std::atomic<int> running_workers_{0};
   std::atomic<int> assigned_workers_{0};

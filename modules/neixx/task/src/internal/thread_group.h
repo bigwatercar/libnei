@@ -59,10 +59,6 @@ public:
   // Joins all live workers.  After this returns, the group is empty.
   void JoinAll();
 
-  // Joins all live workers for testing purposes.  Same as JoinAll
-  // but named conventionally for test fixtures.
-  void JoinForTesting();
-
   // ---- Queries ----
 
   std::size_t worker_count() const;

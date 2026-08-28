@@ -387,7 +387,6 @@ public:
           selector_.SetQueueHasWork(selected_queue, false);
           continue;
         }
-        selector_.DidProcessTask(selected_queue);
       }
 
       if (!task.task) {
@@ -496,8 +495,8 @@ private:
   // These three operations are an indivisible invariant -- never split them.
   // Returns the raw queue pointer (owned by queues_).  Must be called under
   // lock_.
-  internal::SequencedTaskQueue *RegisterQueueLocked(
-      std::unique_ptr<internal::SequencedTaskQueue> queue, TaskPriority priority) {
+  internal::SequencedTaskQueue *RegisterQueueLocked(std::unique_ptr<internal::SequencedTaskQueue> queue,
+                                                    TaskPriority priority) {
     internal::SequencedTaskQueue *raw = queue.get();
     queues_.push_back(std::move(queue));
     selector_.AddQueue(raw, priority);

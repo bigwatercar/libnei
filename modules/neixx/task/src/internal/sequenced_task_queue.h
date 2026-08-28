@@ -63,7 +63,6 @@ public:
 
   bool PushDelayedTask(Task &&task);
   std::size_t PromoteReadyDelayedTasks(const TimeTicks &now);
-  bool TakeReadyDelayedTask(const TimeTicks &now, Task *task);
 
   // ---- Query ----
 
@@ -81,7 +80,6 @@ public:
 
   void Shutdown();
   void CancelNonShutdownBlockingTasksLocked();
-  bool is_shutdown() const;
 
   // ---- Identity ----
 

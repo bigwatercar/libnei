@@ -58,12 +58,9 @@ public:
   // Take a single task. Returns true if a task was available.
   virtual bool TakeTask(Task *out_task) = 0;
 
-  // Batch-take up to |max_tasks|. Returns actual count (0 = empty).
-  virtual std::size_t TakeTasks(Task *out_tasks, std::size_t max_tasks) = 0;
-
   // ---- Concurrency control ----
 
-  // Reserve a worker slot. Must be called before TakeTasks().
+  // Reserve a worker slot. Must be called before TakeTask().
   virtual RunStatus WillRunTask() = 0;
 
   // Release the reserved slot. Returns true if the source should be
@@ -71,7 +68,6 @@ public:
   virtual bool DidProcessTask() = 0;
 
   virtual bool IsShutdown() const = 0;
-  virtual void Shutdown() = 0;
 
   // ---- Query ----
 
@@ -124,7 +120,6 @@ public:
 
   // TaskSource interface.
   bool TakeTask(Task *out_task) override;
-  std::size_t TakeTasks(Task *out_tasks, std::size_t max_tasks) override;
   RunStatus WillRunTask() override;
   bool DidProcessTask() override;
 
@@ -132,17 +127,11 @@ public:
   const TaskTraits &GetTraits() const override;
   bool HasWork() const override;
   bool IsShutdown() const override;
-  void Shutdown() override;
 
   TaskSourceSortKey GetSortKey() const override;
   bool HasReadyTasks(TimeTicks now) const override;
 
   PooledTaskQueue *AsTaskQueue() override {
-    return queue_;
-  }
-
-  // Access the underlying PooledTaskQueue (for delayed work, callbacks, etc.).
-  PooledTaskQueue *task_queue() const {
     return queue_;
   }
 
@@ -160,9 +149,6 @@ private:
   // For parallel sources: number of workers currently holding a slot.
   // Atomic because multiple workers may call WillRunTask concurrently.
   std::atomic<int> running_worker_count_{0};
-
-  // Shutdown flag for lock-free hot-path access.
-  std::atomic<bool> shut_down_{false};
   NEI_SUPPRESS_MSC_WARNING_4251_END
 };
 

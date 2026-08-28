@@ -101,10 +101,6 @@ public:
     return seq_queue_.PromoteReadyDelayedTasks(now);
   }
 
-  bool TakeReadyDelayedTask(const TimeTicks &now, Task *task) {
-    return seq_queue_.TakeReadyDelayedTask(now, task);
-  }
-
   bool HasImmediateWork() const {
     return seq_queue_.HasImmediateWork();
   }
@@ -305,10 +301,6 @@ bool PooledTaskQueue::TakeImmediateTask(Task *task) {
 
 std::size_t PooledTaskQueue::TakeImmediateTasks(Task *tasks, std::size_t max_tasks) {
   return impl_->TakeImmediateTasks(tasks, max_tasks);
-}
-
-bool PooledTaskQueue::TakeReadyDelayedTask(const TimeTicks &now, Task *task) {
-  return impl_->TakeReadyDelayedTask(now, task);
 }
 
 std::size_t PooledTaskQueue::PromoteReadyDelayedTasks(const TimeTicks &now) {

@@ -241,11 +241,6 @@ public:
     return promoted;
   }
 
-  bool TakeReadyDelayedTask(const TimeTicks &now, Task *task) {
-    PromoteReadyDelayedTasks(now);
-    return TakeImmediateTask(task);
-  }
-
   // ---- Query ----------------------------------------------------------
 
   bool HasImmediateWork() const {
@@ -316,11 +311,6 @@ public:
       reject_new_tasks_ = true;
       CancelNonShutdownBlockingTasksLockedImpl(&dropped_tasks);
     }
-  }
-
-  bool is_shutdown() const {
-    AutoLock lock(lock_);
-    return shut_down_;
   }
 
   // ---- Identity -------------------------------------------------------
@@ -476,10 +466,6 @@ std::size_t SequencedTaskQueue::PromoteReadyDelayedTasks(const TimeTicks &now) {
   return impl_->PromoteReadyDelayedTasks(now);
 }
 
-bool SequencedTaskQueue::TakeReadyDelayedTask(const TimeTicks &now, Task *task) {
-  return impl_->TakeReadyDelayedTask(now, task);
-}
-
 bool SequencedTaskQueue::HasImmediateWork() const {
   return impl_->HasImmediateWork();
 }
@@ -502,10 +488,6 @@ void SequencedTaskQueue::Shutdown() {
 
 void SequencedTaskQueue::CancelNonShutdownBlockingTasksLocked() {
   impl_->CancelNonShutdownBlockingTasksLocked();
-}
-
-bool SequencedTaskQueue::is_shutdown() const {
-  return impl_->is_shutdown();
 }
 
 const SequenceToken &SequencedTaskQueue::sequence_token() const {

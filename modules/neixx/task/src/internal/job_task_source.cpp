@@ -16,13 +16,11 @@ static thread_local bool tls_is_joiner = false;
 JobTaskSource::JobTaskSource(const Location &from_here,
                              TaskTraits traits,
                              RepeatingCallback<void(JobDelegate *)> task,
-                             MaxConcurrencyCallback max_concurrency_cb,
-                             int initial_workers)
+                             MaxConcurrencyCallback max_concurrency_cb)
     : posted_from_(from_here)
     , traits_(std::move(traits))
     , task_(std::move(task))
     , max_concurrency_cb_(std::move(max_concurrency_cb))
-    , initial_workers_(initial_workers)
     , completion_event_(WaitableEvent::ResetPolicy::kManual, false)
     , priority_(static_cast<int>(traits_.priority())) {
   DCHECK(task_);
