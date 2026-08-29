@@ -1,7 +1,7 @@
 # neixx Task & Threading 模块类图
 
 > 生成日期：2026-08-07
-> 范围：`modules/neixx/task` 与 `modules/neixx/threading` 的公共 API 及关键内部协作类。
+> 范围：`src/neixx/task` 与 `src/neixx/threading` 的公共 API 及关键内部协作类。
 > 约定：类名统一使用反引号 `` ` `` 包裹（兼容 Mermaid 解析，尤其含 `::`、`<T>` 的类型）。
 
 ---

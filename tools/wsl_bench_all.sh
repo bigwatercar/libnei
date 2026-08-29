@@ -5,7 +5,7 @@ BUILD=$SRC/build/linux-gcc-release-shared
 BIN=$BUILD/bench
 OUT=/tmp/wsl_bench_$(date +%Y%m%d_%H%M%S)
 mkdir -p "$OUT"
-export LD_LIBRARY_PATH=$BUILD/modules/nei:$BUILD/modules/neixx:$BUILD/3rdparty
+export LD_LIBRARY_PATH=$BUILD
 
 echo "=== 0. Build bench targets ==="
 cmake --build "$BUILD" -j$(nproc) --target log_bench log_bench_compare string_append_bench flake_id_bench \

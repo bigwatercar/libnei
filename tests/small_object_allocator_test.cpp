@@ -7,7 +7,7 @@
 #include <vector>
 
 #include <neixx/memory/small_object_allocator.h>
-#include "../modules/neixx/memory/src/internal/small_object_allocator_internal.h"
+#include "../src/neixx/memory/internal/small_object_allocator_internal.h"
 
 using nei::SmallObjectAlloc;
 using nei::SmallObjectFree;

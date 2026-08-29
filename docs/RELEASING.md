@@ -6,8 +6,8 @@
 
 | 派生点 | 机制 |
 |--------|------|
-| 编译期宏 `NEI_VERSION_MAJOR/MINOR/PATCH/STRING/HEX` | `modules/nei/build/version.h.in` 经 `configure_file` 生成 |
-| 运行期 API `nei_get_version_string()` / `nei_get_version_info()` | 消费生成头(`modules/nei/core/version.c`) |
+| 编译期宏 `NEI_VERSION_MAJOR/MINOR/PATCH/STRING/HEX` | `cmake/version.h.in` 经 `configure_file` 生成 |
+| 运行期 API `nei_get_version_string()` / `nei_get_version_info()` | 消费生成头(`src/nei/core/version.c`) |
 | 共享库后缀 | `VERSION`/`SOVERSION` target 属性(`libnei.so.0.9.0` + `libnei.so.0.9` 符号链接) |
 | CMake 包版本 | `neiConfigVersion.cmake`(自动,`find_package(nei 0.9)` 校验) |
 

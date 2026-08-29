@@ -108,18 +108,18 @@ if(MSVC)
 endif()
 target_include_directories(
   nei_tests
-  PRIVATE ${PROJECT_SOURCE_DIR}/modules/neixx/io/src
-          ${PROJECT_SOURCE_DIR}/modules/neixx/process/src
-          ${PROJECT_SOURCE_DIR}/modules/neixx/net/src
-          ${PROJECT_SOURCE_DIR}/modules/neixx/task/src
-          ${PROJECT_SOURCE_DIR}/3rdparty/mbedtls/include
+  PRIVATE ${PROJECT_SOURCE_DIR}/src/neixx/io
+          ${PROJECT_SOURCE_DIR}/src/neixx/process
+          ${PROJECT_SOURCE_DIR}/src/neixx/net
+          ${PROJECT_SOURCE_DIR}/src/neixx/task
+          ${PROJECT_SOURCE_DIR}/external/mbedtls/include
 )
 
 # Internal implementation files that tests need direct access to (not exported
 # from the DLL on Windows because they lack NEI_API).
 target_sources(nei_tests PRIVATE
-  ${PROJECT_SOURCE_DIR}/modules/neixx/net/src/websocket/websocket_frame.cpp
-  ${PROJECT_SOURCE_DIR}/modules/neixx/net/src/websocket/websocket_handshake.cpp
+  ${PROJECT_SOURCE_DIR}/src/neixx/net/websocket/websocket_frame.cpp
+  ${PROJECT_SOURCE_DIR}/src/neixx/net/websocket/websocket_handshake.cpp
 )
 
 include(GoogleTest)

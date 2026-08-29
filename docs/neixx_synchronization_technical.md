@@ -6,12 +6,12 @@
 
 本文档基于：
 
-- `modules/neixx/synchronization/include/neixx/synchronization/lock.h`（公开 API）
-- `modules/neixx/synchronization/include/neixx/synchronization/condition_variable.h`
-- `modules/neixx/synchronization/include/neixx/synchronization/waitable_event.h`
-- `modules/neixx/synchronization/src/lock.cpp`（内部实现）
-- `modules/neixx/synchronization/src/condition_variable.cpp`
-- `modules/neixx/synchronization/src/waitable_event.cpp`
+- `include/neixx/synchronization/lock.h`（公开 API）
+- `include/neixx/synchronization/condition_variable.h`
+- `include/neixx/synchronization/waitable_event.h`
+- `src/neixx/lock.cpp`（内部实现）
+- `src/neixx/condition_variable.cpp`
+- `src/neixx/waitable_event.cpp`
 - `tests/lock_test.cpp`、`tests/condition_variable_test.cpp`（7 个测试用例）
 
 ## 2. 模块定位

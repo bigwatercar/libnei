@@ -3,7 +3,7 @@
 SRC=/mnt/c/Personal/Projects/LibNei/libnei-src
 BUILD=$SRC/build/linux-gcc-release-shared
 BIN=$BUILD/tests/nei_tests
-export LD_LIBRARY_PATH=$BUILD/modules/nei:$BUILD/modules/neixx:$BUILD/3rdparty
+export LD_LIBRARY_PATH=$BUILD
 
 echo "=== 1. Build nei_tests (Release shared) ==="
 cmake --build "$BUILD" -j$(nproc) --target nei_tests 2>&1 | tail -5

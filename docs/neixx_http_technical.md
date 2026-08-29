@@ -2,7 +2,7 @@
 
 **状态**：统一 `HttpServer` 架构落地（2026-08-15）；HTTP/1.1 + HTTP/2 单端口并存
 **范围**：HTTP/1.1（TCP 与 TLS 均支持）、HTTP/2（TLS + ALPN `"h2"`）；暂不做 h2c 明文升级
-**依赖**：llhttp（h1 解析）、nghttp2 v1.70.0（`3rdparty/nghttp2`，lib-only）、mbedTLS 3.6.3（TLS + ALPN）
+**依赖**：llhttp（h1 解析）、nghttp2 v1.70.0（`external/nghttp2`，lib-only）、mbedTLS 3.6.3（TLS + ALPN）
 
 > 本文档由原 `neixx_http2_technical.md` 扩展而来：服务端已从「h1/h2 双服务器」融合为
 > **单一 `HttpServer` + 单端口 ALPN 分流**（商业标准模式）。h2 客户端、nghttp2 集成细节
@@ -49,15 +49,15 @@
 **文件布局**：
 
 ```
-modules/neixx/net/include/neixx/net/http/
+include/neixx/net/http/
   http_server.h                    统一 HttpServer 公开 API
   http_client.h                    h1 客户端（Send / SendStreaming / SendBody）
   http2_client_session.h           h2 客户端（多路复用）
-modules/neixx/net/src/http/
+src/neixx/http/
   http_engine_internal.h           RouteKey/PatternRoute + HttpSharedState（两引擎共享）
   http_server.cpp                  HttpServer::Impl + Http1Connection 引擎 + ALPN 分流
   http_client.cpp                  h1 客户端实现
-modules/neixx/net/src/http2/
+src/neixx/http2/
   http2_engine.cpp                 Http2Connection 引擎（AdoptHttp2Connection / StartCloseAllHttp2）
   http2_client_session.cpp         h2 客户端实现
 tests/net/
@@ -332,7 +332,7 @@ HTTP/1.1 特有头（`Connection`/`Keep-Alive`/`Transfer-Encoding`/`Upgrade`）
     CONNECT 隧道 + TLS、无代理对照）。
 
 - **gzip/deflate 内容编码已落地**（2026-08-23）：引入 vendored zlib v1.3.1
-  （`3rdparty/zlib`，静态、PRIVATE 链接，不泄漏 ABI）。增量压缩原语
+  （`external/zlib`，静态、PRIVATE 链接，不泄漏 ABI）。增量压缩原语
   `gzip_stream.{h,cpp}`（`GzipCompressor`/`GzipDecompressor`，RFC 1952 gzip /
   RFC 1950 zlib / raw deflate，PIMPL 保持 ABI 稳定）。自动路径：
   - 客户端：请求未显式指定时自动加 `Accept-Encoding: gzip`（h1 序列化 +

@@ -6,8 +6,8 @@
 
 本文档基于：
 
-- `modules/nei/sys/include/nei/sys/{host_info,os_info,process_info,process,memory_info,disk_info,cpu_info,fs_util}.h`
-- `modules/nei/sys/src/*.c`（实现）
+- `include/nei/sys/{host_info,os_info,process_info,process,memory_info,disk_info,cpu_info,fs_util}.h`
+- `src/nei/*.c`（实现）
 
 ## 2. 模块总览
 

@@ -5,9 +5,9 @@
 // The single source of truth is the project() VERSION line in the root
 // CMakeLists.txt.
 
-#define NEI_VERSION_MAJOR @PROJECT_VERSION_MAJOR @
-#define NEI_VERSION_MINOR @PROJECT_VERSION_MINOR @
-#define NEI_VERSION_PATCH @PROJECT_VERSION_PATCH @
+#define NEI_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define NEI_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define NEI_VERSION_PATCH @PROJECT_VERSION_PATCH@
 
 // Full version string, e.g. "0.9.0".
 #define NEI_VERSION_STRING "@PROJECT_VERSION@"

@@ -8,7 +8,7 @@ echo "=== 1. Rebuild TSan nei_tests ==="
 cmake --build "$BUILD" -j$(nproc) --target nei_tests 2>&1 | tail -3
 if [ $? -ne 0 ]; then echo "BUILD FAILED"; exit 1; fi
 echo "BUILD OK"
-export LD_LIBRARY_PATH=$BUILD/modules/nei:$BUILD/modules/neixx:$BUILD/3rdparty
+export LD_LIBRARY_PATH=$BUILD
 export TSAN_OPTIONS=halt_on_error=0
 EXCLUDE='-HostResolverTest.*'
 EXCLUDE="$EXCLUDE:SequenceManagerTest.MultiQueueBurstDoesNotStarveAnyQueue"

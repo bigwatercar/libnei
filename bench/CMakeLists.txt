@@ -110,7 +110,7 @@ target_link_libraries(
 # The bench calls Mbed TLS directly (cert generation) and therefore links
 # its own copy — it must be able to register threading callbacks for it.
 target_include_directories(
-  http2_throughput_bench PRIVATE ${PROJECT_SOURCE_DIR}/modules/neixx/net/src
+  http2_throughput_bench PRIVATE ${PROJECT_SOURCE_DIR}/src/neixx/net
 )
 
 if(WIN32)
@@ -125,7 +125,7 @@ target_link_libraries(
 )
 # See http2_throughput_bench above — same reason.
 target_include_directories(
-  tls_throughput_bench PRIVATE ${PROJECT_SOURCE_DIR}/modules/neixx/net/src
+  tls_throughput_bench PRIVATE ${PROJECT_SOURCE_DIR}/src/neixx/net
 )
 if(WIN32)
   target_link_libraries(tls_throughput_bench PRIVATE ws2_32)

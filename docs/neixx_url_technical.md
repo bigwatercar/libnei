@@ -6,10 +6,10 @@
 
 本文档基于：
 
-- `modules/neixx/url/include/neixx/url/url.h`（公开 API）
-- `modules/neixx/url/include/neixx/url/url_encoding.h`
-- `modules/neixx/url/src/url.cpp`（内部实现）
-- `modules/neixx/url/src/url_encoding.cpp`
+- `include/neixx/url/url.h`（公开 API）
+- `include/neixx/url/url_encoding.h`
+- `src/neixx/url.cpp`（内部实现）
+- `src/neixx/url_encoding.cpp`
 
 ## 2. 模块定位
 

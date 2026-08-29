@@ -3,7 +3,7 @@
 SRC=/mnt/c/Personal/Projects/LibNei/libnei-src
 BUILD=$SRC/build/linux-gcc-release-shared
 BIN=$BUILD/bench/post_job_bench
-export LD_LIBRARY_PATH=$BUILD/modules/nei:$BUILD/modules/neixx:$BUILD/3rdparty
+export LD_LIBRARY_PATH=$BUILD
 echo "=== rebuild ==="
 cmake --build "$BUILD" -j$(nproc) --target post_job_bench 2>&1 | tail -1 || exit 1
 ROUNDS=${1:-15}

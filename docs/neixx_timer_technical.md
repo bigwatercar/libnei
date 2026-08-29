@@ -7,12 +7,12 @@
 
 本文档基于：
 
-- `modules/neixx/task/include/neixx/task/timer.h`（公开 API）
-- `modules/neixx/task/src/timer.cpp`（内部实现）
-- `modules/neixx/task/include/neixx/task/task_runner.h`（`PostDelayedTask` 投递接口）
-- `modules/neixx/functional/include/neixx/functional/bind.h`（`BindOnce` WeakPtr 校验）
-- `modules/neixx/memory/include/neixx/memory/weak_ptr.h`（`WeakPtrFactory` / `InvalidateWeakPtrs`）
-- `modules/neixx/task/include/neixx/task/sequence_checker.h`（序列绑定校验）
+- `include/neixx/task/timer.h`（公开 API）
+- `src/neixx/timer.cpp`（内部实现）
+- `include/neixx/task/task_runner.h`（`PostDelayedTask` 投递接口）
+- `include/neixx/functional/bind.h`（`BindOnce` WeakPtr 校验）
+- `include/neixx/memory/weak_ptr.h`（`WeakPtrFactory` / `InvalidateWeakPtrs`）
+- `include/neixx/task/sequence_checker.h`（序列绑定校验）
 
 ## 2. 模块定位
 

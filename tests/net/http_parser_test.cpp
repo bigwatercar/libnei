@@ -1,4 +1,4 @@
-// Tests for modules/neixx/net/http — Http1Parser, HttpRequest, HttpResponse,
+// Tests for src/neixx/net/http — Http1Parser, HttpRequest, HttpResponse,
 // HttpMethod, HttpStatusCode, etc.
 
 #include <gtest/gtest.h>

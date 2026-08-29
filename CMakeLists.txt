@@ -230,14 +230,14 @@ endif()
 # ============================================================================
 # Third-party dependencies (c-ares, ...)
 # ============================================================================
-add_subdirectory(3rdparty)
+add_subdirectory(external)
 
 # ============================================================================
 
-add_subdirectory(modules/nei)
+add_subdirectory(src/nei)
 
 if(NEI_BUILD_NEIXX)
-  add_subdirectory(modules/neixx)
+  add_subdirectory(src/neixx)
 endif()
 
 if(NEI_BUILD_TESTS)
@@ -284,6 +284,10 @@ install(
   NAMESPACE nei::
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/nei
 )
+
+# Pitchfork Layout: single public include root.  All public headers live under
+# include/ mirroring the namespace structure (include/nei/..., include/neixx/...).
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 configure_package_config_file(
   cmake/neiConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/neiConfig.cmake

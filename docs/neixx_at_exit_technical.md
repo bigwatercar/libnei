@@ -8,11 +8,11 @@ API 语义、线程模型、死锁防御机制、Leaky Singleton 集成模式，
 
 本文档基于以下源文件：
 
-- `modules/neixx/common/include/neixx/common/at_exit.h` — 公开 API
-- `modules/neixx/common/include/neixx/common/singleton.h` — 泛型单例容器 + Traits
-- `modules/neixx/common/src/at_exit.cpp` — 实现
-- `modules/neixx/io/include/neixx/io/io_buffer.h` — IOBufferPool 声明（friend Traits）
-- `modules/neixx/io/src/io_buffer.cpp` — GetInstance() + LeakySingletonTraits 特化
+- `include/neixx/common/at_exit.h` — 公开 API
+- `include/neixx/common/singleton.h` — 泛型单例容器 + Traits
+- `src/neixx/at_exit.cpp` — 实现
+- `include/neixx/io/io_buffer.h` — IOBufferPool 声明（friend Traits）
+- `src/neixx/io_buffer.cpp` — GetInstance() + LeakySingletonTraits 特化
 - `examples/at_exit_example.cpp` — 完整集成演示
 - `tests/test_main.cpp` — 带全局 AtExitManager 的 GTest 自定义入口
 
@@ -539,11 +539,11 @@ int main(int argc, char** argv) {
 
 | 文件 | 角色 |
 |------|------|
-| `modules/neixx/common/include/neixx/common/at_exit.h` | AtExitManager 公开 API |
-| `modules/neixx/common/include/neixx/common/singleton.h` | Singleton 容器 + Traits |
-| `modules/neixx/common/src/at_exit.cpp` | AtExitManager 实现 |
-| `modules/neixx/io/include/neixx/io/io_buffer.h` | IOBufferPool 声明（friend Traits） |
-| `modules/neixx/io/src/io_buffer.cpp` | LeakySingletonTraits 特化 + GetInstance |
+| `include/neixx/common/at_exit.h` | AtExitManager 公开 API |
+| `include/neixx/common/singleton.h` | Singleton 容器 + Traits |
+| `src/neixx/at_exit.cpp` | AtExitManager 实现 |
+| `include/neixx/io/io_buffer.h` | IOBufferPool 声明（friend Traits） |
+| `src/neixx/io_buffer.cpp` | LeakySingletonTraits 特化 + GetInstance |
 | `examples/at_exit_example.cpp` | 集成演示（含后台线程竞态测试） |
 | `tests/test_main.cpp` | 带全局 AtExitManager 的 GTest 自定义入口 |
 | `docs/neixx_at_exit_technical.md` | 本文档 |

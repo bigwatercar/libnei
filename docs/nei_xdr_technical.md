@@ -6,8 +6,8 @@
 
 本文档基于：
 
-- `modules/nei/xdr/include/nei/xdr/xdr.h`（公开 API）
-- `modules/nei/xdr/src/xdr.c`（内部实现，纯 C99 + `<string.h>`）
+- `include/nei/xdr/xdr.h`（公开 API）
+- `src/nei/xdr.c`（内部实现，纯 C99 + `<string.h>`）
 
 ## 2. 模块定位
 

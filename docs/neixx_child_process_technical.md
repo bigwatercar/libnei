@@ -18,16 +18,16 @@
 
 本文档基于当前头文件与实现：
 
-- `modules/neixx/process/include/neixx/process/child_process.h`（公开 API）
-- `modules/neixx/process/include/neixx/process/process_service.h`（进程服务）
-- `modules/neixx/process/include/neixx/process/process_util.h`（简化启动接口）
-- `modules/neixx/process/src/child_process.cpp`（PIMPL 桥接）
-- `modules/neixx/process/src/child_process_impl_common.h`（CRTP 基类）
-- `modules/neixx/process/src/child_process_impl_interface.h`（平台实现接口）
-- `modules/neixx/process/src/child_process_win.cpp`（Windows 实现）
-- `modules/neixx/process/src/child_process_posix.cpp`（POSIX 实现）
-- `modules/neixx/process/src/process_util_win.cpp`（Windows ProcessUtil）
-- `modules/neixx/process/src/process_util_posix.cpp`（POSIX ProcessUtil）
+- `include/neixx/process/child_process.h`（公开 API）
+- `include/neixx/process/process_service.h`（进程服务）
+- `include/neixx/process/process_util.h`（简化启动接口）
+- `src/neixx/child_process.cpp`（PIMPL 桥接）
+- `src/neixx/child_process_impl_common.h`（CRTP 基类）
+- `src/neixx/child_process_impl_interface.h`（平台实现接口）
+- `src/neixx/child_process_win.cpp`（Windows 实现）
+- `src/neixx/child_process_posix.cpp`（POSIX 实现）
+- `src/neixx/process_util_win.cpp`（Windows ProcessUtil）
+- `src/neixx/process_util_posix.cpp`（POSIX ProcessUtil）
 
 ## 2. 模块定位
 
@@ -506,9 +506,9 @@ POSIX 平台 `fork()` 后、`execvp()` 前的子进程代码**必须遵循异步
 
 ### 10.2 相关文件
 
-- `modules/neixx/process/include/neixx/process/process_util.h`（API 声明）
-- `modules/neixx/process/src/process_util_win.cpp`（Windows：`CreateProcessW`）
-- `modules/neixx/process/src/process_util_posix.cpp`（POSIX：`fork`/`exec` / double-fork）
+- `include/neixx/process/process_util.h`（API 声明）
+- `src/neixx/process_util_win.cpp`（Windows：`CreateProcessW`）
+- `src/neixx/process_util_posix.cpp`（POSIX：`fork`/`exec` / double-fork）
 
 ### 10.3 ProcessUtil::Launch
 
@@ -669,16 +669,16 @@ ProcessUtil::ShellExecute("C:\\docs\\notes.txt", opts);
 
 | 文件 | 职责 |
 |---|---|
-| `modules/neixx/process/include/neixx/process/child_process.h` | 公开 API：ChildProcess、ChildProcessListener、StdIOConfig 等类型定义 |
-| `modules/neixx/process/include/neixx/process/process_service.h` | ProcessService 公开 API |
-| `modules/neixx/process/include/neixx/process/process_util.h` | ProcessUtil 公开 API：Launch、LaunchProcessElevated、ShellExecute |
-| `modules/neixx/process/src/child_process.cpp` | PIMPL 桥接：公开类方法转发到 Impl |
-| `modules/neixx/process/src/child_process_impl_interface.h` | ChildProcess::Impl 接口定义 |
-| `modules/neixx/process/src/child_process_impl_common.h` | CRTP 基类：IO 线程转发、流代理、监听器管理 |
-| `modules/neixx/process/src/child_process_win.cpp` | Windows 实现：CreateProcessW、IOCP 管道、Job Object |
-| `modules/neixx/process/src/child_process_posix.cpp` | POSIX 实现：fork/exec、pipe2、pidfd、prctl |
-| `modules/neixx/process/src/process_util_win.cpp` | Windows ProcessUtil 实现 |
-| `modules/neixx/process/src/process_util_posix.cpp` | POSIX ProcessUtil 实现 |
-| `modules/neixx/io/include/neixx/io/async_stream.h` | AsyncInputStream / AsyncOutputStream 接口（管道读写） |
-| `modules/neixx/io/include/neixx/io/io_buffer.h` | IOBuffer / IOBufferPool（异步 I/O 缓冲区） |
+| `include/neixx/process/child_process.h` | 公开 API：ChildProcess、ChildProcessListener、StdIOConfig 等类型定义 |
+| `include/neixx/process/process_service.h` | ProcessService 公开 API |
+| `include/neixx/process/process_util.h` | ProcessUtil 公开 API：Launch、LaunchProcessElevated、ShellExecute |
+| `src/neixx/child_process.cpp` | PIMPL 桥接：公开类方法转发到 Impl |
+| `src/neixx/child_process_impl_interface.h` | ChildProcess::Impl 接口定义 |
+| `src/neixx/child_process_impl_common.h` | CRTP 基类：IO 线程转发、流代理、监听器管理 |
+| `src/neixx/child_process_win.cpp` | Windows 实现：CreateProcessW、IOCP 管道、Job Object |
+| `src/neixx/child_process_posix.cpp` | POSIX 实现：fork/exec、pipe2、pidfd、prctl |
+| `src/neixx/process_util_win.cpp` | Windows ProcessUtil 实现 |
+| `src/neixx/process_util_posix.cpp` | POSIX ProcessUtil 实现 |
+| `include/neixx/io/async_stream.h` | AsyncInputStream / AsyncOutputStream 接口（管道读写） |
+| `include/neixx/io/io_buffer.h` | IOBuffer / IOBufferPool（异步 I/O 缓冲区） |
 | `tests/child_process_test.cpp` | 单元测试与集成测试 |

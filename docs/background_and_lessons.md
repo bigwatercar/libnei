@@ -12,8 +12,8 @@
 - **标准**：C++17（禁用 C++20 特性）、C 模块用 C99。
 - **平台**：Windows（MSVC/VS2022）+ POSIX（GCC，Linux/WSL）。
 - **命名空间**：`nei::`；文件后缀 `.h` / `.cpp`。
-- **模块布局**：`modules/nei`（C 库）→ `modules/neixx`（C++ 库，链接 nei）；模块目录规范
-  `modules/neixx/<module>/include/neixx/<module>/<public_api>.h` + `src/<impl>.cpp`。
+- **模块布局**：`src/nei`（C 库）→ `src/neixx`（C++ 库，链接 nei）；模块目录规范
+  `include/neixx/<module>/<public_api>.h` + `src/<impl>.cpp`。
 - **构建**：单一 `nei` target 输出一个 DLL/SO；CMake 的 `target_sources()` 必须显式列出 `.h`
   头文件；公共头经 PUBLIC include 路径暴露。CMake 选项/宏统一 `NEI_` 前缀。
 - **库模式**：同时支持静态与动态库（`NEI_API` 导出宏）。
@@ -45,7 +45,7 @@
 - **Benchmark**：一律 Release 模式收集；任务调度 bench 默认 1M 任务；结果存
   `bench/results/`，基线 `baseline_(Ultra9-185H)_20260816_windows.md`。
 - **clang-format**：每次提交前 `clang-format -i` 全部变更的 C/C++ 文件
-  （`C:\opt\devutils\clang-format.exe`）；**严禁格式化 `3rdparty/`**（`mbedtls_config.h`
+  （`C:\opt\devutils\clang-format.exe`）；**严禁格式化 `external/`**（`mbedtls_config.h`
   是手动修改的例外）；格式化后必须双平台重构建验证再提交；格式化只在代码稳定后
   提交前做一次（中途格式化会让后续文本匹配编辑失效）。
 

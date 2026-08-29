@@ -7,10 +7,10 @@
 
 本文档基于：
 
-- `modules/neixx/task/include/neixx/task/thread_checker.h`
-- `modules/neixx/task/include/neixx/task/sequence_checker.h`
-- `modules/neixx/threading/include/neixx/threading/platform_thread.h`（`PlatformThreadId`）
-- `modules/neixx/task/include/neixx/task/sequence_token.h`（`SequenceToken`）
+- `include/neixx/task/thread_checker.h`
+- `include/neixx/task/sequence_checker.h`
+- `include/neixx/threading/platform_thread.h`（`PlatformThreadId`）
+- `include/neixx/task/sequence_token.h`（`SequenceToken`）
 
 ## 2. 模块定位
 

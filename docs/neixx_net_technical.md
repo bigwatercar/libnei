@@ -6,8 +6,8 @@
 
 本文档基于以下源码：
 
-- `modules/neixx/net/include/neixx/net/*.h`（23 个公开头文件：11 顶层 + 9 http + 3 websocket）
-- `modules/neixx/net/src/*.cpp` / `*.h`（实现文件）
+- `include/neixx/net/*.h`（23 个公开头文件：11 顶层 + 9 http + 3 websocket）
+- `src/neixx/*.cpp` / `*.h`（实现文件）
 - `tests/net/*.cpp`（TCP/TLS/UDP/DNS/HTTP/WebSocket/连接池 测试）
 - `bench/tcp_*.cpp` / `tls_throughput_bench.cpp` / `http_throughput_bench.cpp`（网络性能基准测试）
 
@@ -510,10 +510,10 @@ class TLSServerSocket {
 
 | 文件 | 改动 |
 |---|---|
-| `3rdparty/mbedtls/include/mbedtls/mbedtls_config.h` | 启用 `MBEDTLS_THREADING_C` + `MBEDTLS_THREADING_ALT`；禁用 `MBEDTLS_SELF_TEST` |
-| `3rdparty/mbedtls/include/mbedtls/threading_alt.h`（新） | 定义 `mbedtls_threading_mutex_t { void* mutex; }`——不透明指针指向 C++ `std::mutex`，C 兼容 |
-| `modules/neixx/net/src/mbedtls_threading.h`（新） | 内联 `nei::net::internal::EnsureMbedtlsThreading()`：经 `mbedtls_threading_set_alt` 注册 `std::mutex` 回调（每二进制/DSO 一次，`static` 局部幂等） |
-| `modules/neixx/net/src/ssl_context.cpp` | 静态注册器 `MbedtlsThreadingRegistrar` 库加载时自动注册；`SSLContext` 构造再调一次作双保险 |
+| `external/mbedtls/include/mbedtls/mbedtls_config.h` | 启用 `MBEDTLS_THREADING_C` + `MBEDTLS_THREADING_ALT`；禁用 `MBEDTLS_SELF_TEST` |
+| `external/mbedtls/include/mbedtls/threading_alt.h`（新） | 定义 `mbedtls_threading_mutex_t { void* mutex; }`——不透明指针指向 C++ `std::mutex`，C 兼容 |
+| `src/neixx/mbedtls_threading.h`（新） | 内联 `nei::net::internal::EnsureMbedtlsThreading()`：经 `mbedtls_threading_set_alt` 注册 `std::mutex` 回调（每二进制/DSO 一次，`static` 局部幂等） |
+| `src/neixx/ssl_context.cpp` | 静态注册器 `MbedtlsThreadingRegistrar` 库加载时自动注册；`SSLContext` 构造再调一次作双保险 |
 
 **关键点：同一进程存在两份独立 mbedTLS 副本**。mbedTLS 同时链接进
 `libnei`（POSIX 隐藏可见性、Windows DLL 不导出静态库符号）与测试可执行文件
@@ -564,7 +564,7 @@ class TLSServerSocket {
 
 ### 6.2 公开接口概览
 
-公开头文件见 `modules/neixx/net/include/neixx/net/udp_socket.h`。
+公开头文件见 `include/neixx/net/udp_socket.h`。
 
 ```cpp
 class NEI_API UDPSocket {
@@ -949,6 +949,6 @@ neixx/net
   ├── neixx/functional    (OnceCallback, BindOnce)
   ├── neixx/common        (PlatformHandle, Location)
   ├── nei/macros          (NEI_API, DCHECK)
-  ├── 3rdparty/c-ares     (异步 DNS 解析引擎)
+  ├── external/c-ares     (异步 DNS 解析引擎)
   └── Win: ws2_32         (Winsock)
 ```

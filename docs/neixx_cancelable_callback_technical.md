@@ -7,12 +7,12 @@
 
 本文档基于：
 
-- `modules/neixx/functional/include/neixx/functional/cancelable_callback.h`（公开 API）
-- `modules/neixx/functional/src/cancelable_callback.cpp`（内部实现）
-- `modules/neixx/functional/include/neixx/functional/callback.h`（`OnceCallback` 类型）
-- `modules/neixx/functional/include/neixx/functional/bind.h`（`BindOnce`）
-- `modules/neixx/memory/include/neixx/memory/ref_counted.h`（`RefCountedThreadSafe`）
-- `modules/neixx/synchronization/include/neixx/synchronization/lock.h`（`Lock` / `AutoLock`）
+- `include/neixx/functional/cancelable_callback.h`（公开 API）
+- `src/neixx/cancelable_callback.cpp`（内部实现）
+- `include/neixx/functional/callback.h`（`OnceCallback` 类型）
+- `include/neixx/functional/bind.h`（`BindOnce`）
+- `include/neixx/memory/ref_counted.h`（`RefCountedThreadSafe`）
+- `include/neixx/synchronization/lock.h`（`Lock` / `AutoLock`）
 
 ## 2. 模块定位
 

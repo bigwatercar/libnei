@@ -2,7 +2,7 @@
 
 **日期**：2026-08-14
 **相关提交**：`dfe2ea2`（net: HttpClientPool idle timeout and Peek liveness probe）
-**源码**：`modules/neixx/net/src/http/http_client_pool.cpp`、`modules/neixx/net/src/http/http_client.cpp`、`modules/neixx/net/src/tcp_client_socket_*.cpp`
+**源码**：`src/neixx/http/http_client_pool.cpp`、`src/neixx/http/http_client.cpp`、`src/neixx/tcp_client_socket_*.cpp`
 
 ---
 

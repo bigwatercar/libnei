@@ -7,7 +7,7 @@ echo "=== 1. Rebuild ASAN nei_tests ==="
 cmake --build "$BUILD" -j$(nproc) --target nei_tests 2>&1 | tail -3
 if [ $? -ne 0 ]; then echo "BUILD FAILED"; exit 1; fi
 echo "BUILD OK"
-export LD_LIBRARY_PATH=$BUILD/modules/nei:$BUILD/modules/neixx:$BUILD/3rdparty
+export LD_LIBRARY_PATH=$BUILD
 export ASAN_OPTIONS=detect_leaks=0:halt_on_error=0
 echo "=== 2. Full suite (excl HostResolver env) ==="
 timeout 900 "$BUILD/tests/nei_tests" --gtest_filter="-HostResolverTest.*" > "$LOG" 2>&1

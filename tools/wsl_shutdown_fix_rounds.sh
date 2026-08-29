@@ -5,7 +5,7 @@
 SRC=/mnt/c/Personal/Projects/LibNei/libnei-src
 BUILD=$SRC/build/linux-gcc-release-shared
 BIN=$BUILD/tests/nei_tests
-export LD_LIBRARY_PATH=$BUILD/modules/nei:$BUILD/modules/neixx:$BUILD/3rdparty
+export LD_LIBRARY_PATH=$BUILD
 
 ROUNDS=${1:-8}
 pass=0

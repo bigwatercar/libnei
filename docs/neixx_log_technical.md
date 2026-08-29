@@ -6,8 +6,8 @@
 
 本文档基于：
 
-- `modules/neixx/log/include/neixx/log/log.h`（全部宏定义）
-- `modules/nei/log/include/nei/log/log.h`（C 层：`nei_llog_literal` / `nei_vlog_literal`）
+- `include/neixx/log/log.h`（全部宏定义）
+- `include/nei/log/log.h`（C 层：`nei_llog_literal` / `nei_vlog_literal`）
 - 参考 `nei_log_module_technical.md`（C 层 MPSC 无锁环形缓冲日志系统）
 
 ## 2. 模块定位

@@ -1,4 +1,4 @@
-// Tests for modules/neixx/net/websocket — handshake, framing.
+// Tests for src/neixx/net/websocket — handshake, framing.
 
 #include <gtest/gtest.h>
 

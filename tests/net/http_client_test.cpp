@@ -1,4 +1,4 @@
-// Tests for modules/neixx/net/http/http_client — request serialization,
+// Tests for src/neixx/net/http/http_client — request serialization,
 // response parsing, and state machine.
 
 #include <gtest/gtest.h>

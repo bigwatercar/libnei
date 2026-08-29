@@ -6,9 +6,9 @@
 
 本文档基于：
 
-- `modules/neixx/trace_event/include/neixx/trace_event/trace_event.h`（宏 + RAII 作用域）
-- `modules/neixx/trace_event/include/neixx/trace_event/trace_log.h`（单例 + 每线程 Buffer）
-- `modules/neixx/trace_event/src/trace_log.cpp`（实现）
+- `include/neixx/trace_event/trace_event.h`（宏 + RAII 作用域）
+- `include/neixx/trace_event/trace_log.h`（单例 + 每线程 Buffer）
+- `src/neixx/trace_log.cpp`（实现）
 - 编译开关：`NEI_ENABLE_TRACE_EVENTS`（CMake 选项）
 
 ## 2. 模块定位

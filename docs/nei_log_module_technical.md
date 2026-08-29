@@ -1,4 +1,4 @@
-﻿# Log 模块技术设计说明
+# Log 模块技术设计说明
 
 ## 1. 文档目标与范围
 
@@ -140,7 +140,7 @@ nei_llog / nei_vlog / literal 接口都在序列化前执行过滤：
 
 ### 4.8 Chromium 风格 Check 宏（nei/debug）
 
-当前实现在 `modules/nei/debug/include/nei/debug/check.h` 提供了一组 Chromium 风格断言宏：
+当前实现在 `include/nei/debug/check.h` 提供了一组 Chromium 风格断言宏：
 
 - `CHECK(condition)` / `CHECK_EQ` / `CHECK_NE` / `CHECK_LT` / `CHECK_LE` / `CHECK_GT` / `CHECK_GE`
 - `DCHECK(condition)` / `DCHECK_EQ` / `DCHECK_NE` / `DCHECK_LT` / `DCHECK_LE` / `DCHECK_GT` / `DCHECK_GE`

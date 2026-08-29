@@ -8,11 +8,11 @@ API 语义、线程安全模型、跨线程使用约束、高阶悬空指针诊�
 
 本文档基于以下源文件：
 
-- `modules/neixx/memory/include/neixx/memory/weak_ptr.h` — 公开 API 与完整实现
-- `modules/neixx/memory/include/neixx/memory/internal_flag.h` — 共享有效性标志
-- `modules/neixx/memory/src/internal_flag.cpp` — 原子 flag 实现
-- `modules/neixx/memory/include/neixx/memory/ref_counted.h` — 引用计数基础设施
-- `modules/neixx/common/include/neixx/common/location.h` — 源位置追踪（`FROM_HERE`）
+- `include/neixx/memory/weak_ptr.h` — 公开 API 与完整实现
+- `include/neixx/memory/internal_flag.h` — 共享有效性标志
+- `src/neixx/internal_flag.cpp` — 原子 flag 实现
+- `include/neixx/memory/ref_counted.h` — 引用计数基础设施
+- `include/neixx/common/location.h` — 源位置追踪（`FROM_HERE`）
 - `tests/weak_ptr_test.cpp` — 完整测试覆盖
 
 ---

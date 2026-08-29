@@ -6,8 +6,8 @@
 
 本文档基于：
 
-- `modules/nei/utils/include/nei/utils/{base64,crc32,md5,sha1,sha256,uuid,flake_id}.h`
-- `modules/nei/utils/src/*.c`（实现）
+- `include/nei/utils/{base64,crc32,md5,sha1,sha256,uuid,flake_id}.h`
+- `src/nei/*.c`（实现）
 
 ## 2. 模块总览
 

@@ -7,8 +7,8 @@
 
 本文档基于：
 
-- `modules/neixx/synchronization/include/neixx/synchronization/atomic_event.h`（公开 API）
-- `modules/neixx/synchronization/src/atomic_event.cpp`（内部实现）
+- `include/neixx/synchronization/atomic_event.h`（公开 API）
+- `src/neixx/atomic_event.cpp`（内部实现）
 - `tests/atomic_event_test.cpp`（8 个测试用例）
 - `bench/atomic_event_bench.cpp`（握手延迟基准）
 - 背景分析：`docs/task_sync_review_20260815.md`、`docs/thread_pool_false_sharing_analysis.md`

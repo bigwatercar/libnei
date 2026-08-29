@@ -7,9 +7,9 @@
 
 本文档基于以下源文件：
 
-- `modules/neixx/common/include/neixx/common/no_destructor.h` — 公开 API
-- `modules/neixx/common/include/neixx/common/singleton.h` — 对比参考（Singleton 容器）
-- `modules/neixx/common/include/neixx/common/at_exit.h` — AtExitManager 声明
+- `include/neixx/common/no_destructor.h` — 公开 API
+- `include/neixx/common/singleton.h` — 对比参考（Singleton 容器）
+- `include/neixx/common/at_exit.h` — AtExitManager 声明
 
 ---
 
@@ -414,9 +414,9 @@ AtExitManager::RegisterCallback([] {
 
 | 文件 | 说明 |
 |------|------|
-| `modules/neixx/common/include/neixx/common/no_destructor.h` | 头文件模板，~130 行 |
-| `modules/neixx/common/include/neixx/common/singleton.h` | 对比参考：Singleton 容器 |
-| `modules/neixx/common/include/neixx/common/at_exit.h` | AtExitManager API |
+| `include/neixx/common/no_destructor.h` | 头文件模板，~130 行 |
+| `include/neixx/common/singleton.h` | 对比参考：Singleton 容器 |
+| `include/neixx/common/at_exit.h` | AtExitManager API |
 | 本文档 | 技术设计说明 |
 
 ---

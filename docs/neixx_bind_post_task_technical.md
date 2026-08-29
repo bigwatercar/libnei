@@ -7,11 +7,11 @@
 
 本文档基于：
 
-- `modules/neixx/task/include/neixx/task/bind_post_task.h`
-- `modules/neixx/task/include/neixx/task/task_runner.h`（`PostTask` 投递接口）
-- `modules/neixx/functional/include/neixx/functional/callback.h`（`OnceCallback` / `RepeatingCallback`）
-- `modules/neixx/functional/include/neixx/functional/bind.h`（`BindOnce` / `BindRepeating`）
-- `modules/neixx/task/include/neixx/task/thread_task_runner_handle.h`（目标线程判断）
+- `include/neixx/task/bind_post_task.h`
+- `include/neixx/task/task_runner.h`（`PostTask` 投递接口）
+- `include/neixx/functional/callback.h`（`OnceCallback` / `RepeatingCallback`）
+- `include/neixx/functional/bind.h`（`BindOnce` / `BindRepeating`）
+- `include/neixx/task/thread_task_runner_handle.h`（目标线程判断）
 
 ## 2. 模块定位
 

@@ -6,8 +6,8 @@
 
 本文档基于：
 
-- `modules/nei/core/include/nei/core/{time,random,path_util,file_util,endian,encoding,float_ctrl}.h`
-- `modules/nei/core/src/{time_posix.c,time_win.c?,random.c,path_util.c,file_util.c,endian.c,encoding.c,float_ctrl.c}`
+- `include/nei/core/{time,random,path_util,file_util,endian,encoding,float_ctrl}.h`
+- `src/nei/{time_posix.c,time_win.c?,random.c,path_util.c,file_util.c,endian.c,encoding.c,float_ctrl.c}`
 
 ## 2. time.h — 时间戳
 

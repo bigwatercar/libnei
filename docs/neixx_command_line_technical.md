@@ -60,8 +60,8 @@ cl.GetCommandLineString();  // 完整命令行字符串
 
 本文档基于当前头文件与实现：
 
-- `modules/neixx/command_line/include/neixx/command_line/command_line.h`
-- `modules/neixx/command_line/src/command_line.cpp`
+- `include/neixx/command_line/command_line.h`
+- `src/neixx/command_line.cpp`
 
 ## 2. 模块定位
 
