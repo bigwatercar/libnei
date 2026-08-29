@@ -4,6 +4,7 @@
 #define NEIXX_TASK_THREAD_POOL_H_
 
 #include <cstddef>
+#include <filesystem>
 #include <memory>
 
 #include <nei/build/compiler_specific.h>
@@ -52,6 +53,19 @@ public:
   ThreadPool &operator=(ThreadPool &&) = delete;
 
   scoped_refptr<SequencedTaskRunner> CreateSequencedTaskRunner(const TaskTraits &traits = TaskTraits());
+
+  /// Creates (or returns) a SequencedTaskRunner dedicated to |path|.
+  ///
+  /// Ensures that tasks accessing the same |path| run on the same sequence
+  /// (FIFO order), even when the runners are obtained from different
+  /// contexts.  The first call for a given |path| creates the runner;
+  /// subsequent calls with the same |path| return the same runner.  The
+  /// cached runner lives as long as this pool (it is released at shutdown).
+  ///
+  /// Contract: all calls for the same |path| must provide the same |traits|
+  /// (enforced with a DCHECK).
+  scoped_refptr<SequencedTaskRunner> CreateSequencedTaskRunnerForResource(const TaskTraits &traits,
+                                                                          const std::filesystem::path &path);
 
   /// Creates a SingleThreadTaskRunner on this thread pool.  The pool
   /// dedicates one worker thread to this runner's queue, guaranteeing

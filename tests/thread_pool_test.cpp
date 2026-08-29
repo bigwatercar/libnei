@@ -3,6 +3,7 @@
 #include <atomic>
 #include <array>
 #include <chrono>
+#include <filesystem>
 #include <thread>
 #include <string>
 #include <vector>
@@ -678,6 +679,75 @@ TEST(ThreadPoolTest, WorkerPostToDifferentQueueThenWaitCompletes) {
 
   ASSERT_TRUE(outer_done.TimedWait(std::chrono::seconds(10)));
   EXPECT_TRUE(inner_ran.load());
+  pool.Shutdown();
+}
+
+// =============================================================================
+// CreateSequencedTaskRunnerForResource
+// =============================================================================
+
+// The same resource path must yield the same runner (one sequence per
+// resource), even when requested from different contexts.
+TEST(ThreadPoolTest, ForResourceSamePathReturnsSameRunner) {
+  ThreadPool pool({2});
+  const std::filesystem::path path = std::filesystem::temp_directory_path() / "nei_resource_same";
+
+  scoped_refptr<SequencedTaskRunner> runner1 = pool.CreateSequencedTaskRunnerForResource(TaskTraits(), path);
+  scoped_refptr<SequencedTaskRunner> runner2 = pool.CreateSequencedTaskRunnerForResource(TaskTraits(), path);
+  ASSERT_TRUE(runner1);
+  ASSERT_TRUE(runner2);
+
+  EXPECT_EQ(runner1.get(), runner2.get());
+  pool.Shutdown();
+}
+
+// Different resource paths must map to different runners.
+TEST(ThreadPoolTest, ForResourceDifferentPathsReturnDifferentRunners) {
+  ThreadPool pool({2});
+  const std::filesystem::path path_a = std::filesystem::temp_directory_path() / "nei_resource_a";
+  const std::filesystem::path path_b = std::filesystem::temp_directory_path() / "nei_resource_b";
+
+  scoped_refptr<SequencedTaskRunner> runner_a = pool.CreateSequencedTaskRunnerForResource(TaskTraits(), path_a);
+  scoped_refptr<SequencedTaskRunner> runner_b = pool.CreateSequencedTaskRunnerForResource(TaskTraits(), path_b);
+  ASSERT_TRUE(runner_a);
+  ASSERT_TRUE(runner_b);
+
+  EXPECT_NE(runner_a.get(), runner_b.get());
+  pool.Shutdown();
+}
+
+// Tasks posted to runners obtained from different contexts for the SAME
+// resource must still execute in FIFO order (one shared sequence).
+TEST(ThreadPoolTest, ForResourceTasksAreSequencedAcrossContexts) {
+  ThreadPool pool({2});
+  const std::filesystem::path path = std::filesystem::temp_directory_path() / "nei_resource_seq";
+
+  // Two independent contexts obtain the resource runner.
+  scoped_refptr<SequencedTaskRunner> runner_a = pool.CreateSequencedTaskRunnerForResource(TaskTraits(), path);
+  scoped_refptr<SequencedTaskRunner> runner_b = pool.CreateSequencedTaskRunnerForResource(TaskTraits(), path);
+  ASSERT_TRUE(runner_a);
+  EXPECT_EQ(runner_a.get(), runner_b.get());
+
+  constexpr int kTaskCount = 8;
+  std::atomic<int> next_expected{0};
+  std::atomic<bool> order_ok{true};
+  WaitableEvent done(WaitableEvent::ResetPolicy::kManual, false);
+
+  for (int i = 0; i < kTaskCount; ++i) {
+    // Alternate between the two contexts.
+    scoped_refptr<SequencedTaskRunner> &runner = (i % 2 == 0) ? runner_a : runner_b;
+    runner->PostTask(FROM_HERE, [i, &next_expected, &order_ok, &done]() {
+      if (next_expected.fetch_add(1, std::memory_order_relaxed) != i) {
+        order_ok.store(false, std::memory_order_relaxed);
+      }
+      if (i == kTaskCount - 1) {
+        done.Signal();
+      }
+    });
+  }
+
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  EXPECT_TRUE(order_ok.load());
   pool.Shutdown();
 }
 

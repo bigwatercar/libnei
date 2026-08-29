@@ -59,6 +59,11 @@ public:
   /// Creates a sequenced TaskRunner on the global pool.
   scoped_refptr<SequencedTaskRunner> CreateSequencedTaskRunner(const TaskTraits &traits = TaskTraits());
 
+  /// Creates (or returns) a SequencedTaskRunner dedicated to |path|.
+  /// Same contract as ThreadPool::CreateSequencedTaskRunnerForResource().
+  scoped_refptr<SequencedTaskRunner> CreateSequencedTaskRunnerForResource(const TaskTraits &traits,
+                                                                          const std::filesystem::path &path);
+
   /// Creates a SingleThreadTaskRunner on the global pool.
   scoped_refptr<SingleThreadTaskRunner> CreateSingleThreadTaskRunner(const TaskTraits &traits = TaskTraits());
 

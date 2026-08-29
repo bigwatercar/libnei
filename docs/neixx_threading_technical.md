@@ -395,7 +395,77 @@ Slot A                  Slot B
 - **修复：** 加入 `CHECK_NE` (Windows) / `CHECK(!pthread_equal)` (POSIX)，Release 也生效
 - **Commit:** `389cdef`
 
-## 9. 附录：文件清单
+## 9. CreateSequencedTaskRunnerForResource — 资源级序列（2026-08-29）
+
+### 9.1 作用
+
+`ThreadPool::CreateSequencedTaskRunnerForResource(traits, path)` 为**资源路径**提供
+"一个资源一条序列"的保证：同一 `path` 上投递的所有任务按 FIFO 顺序执行，**即使
+runner 是从不同上下文（不同模块、不同对象、不同线程）分别获取的**。
+
+典型场景：同一份数据库文件、日志文件或索引文件被多个子系统并发访问时，把该文件
+的路径作为 key 获取 runner，所有读写自动串行化，无需调用方自行共享 runner 对象。
+
+对比：
+
+| API | 语义 |
+|------|------|
+| `CreateSequencedTaskRunner(traits)` | 每次调用都新建队列（新序列），调用方必须自己缓存 runner 才能共享序列 |
+| `CreateSequencedTaskRunnerForResource(traits, path)` | 同 `path` 永远返回**同一个** runner（进程内），天然共享序列 |
+
+### 9.2 用法
+
+```cpp
+#include <neixx/task/thread_pool_instance.h>
+
+// 两个互不相识的子系统，只要用同一路径，任务就天然串行：
+const std::filesystem::path db_path = data_dir / "history.db";
+
+scoped_refptr<SequencedTaskRunner> a =
+    ThreadPoolInstance::Get()->CreateSequencedTaskRunnerForResource(
+        TaskTraits(TaskPriority::USER_VISIBLE, TaskShutdownBehavior::BLOCK_SHUTDOWN),
+        db_path);
+
+// 另一处代码，相同 traits + 相同路径：
+scoped_refptr<SequencedTaskRunner> b =
+    ThreadPoolInstance::Get()->CreateSequencedTaskRunnerForResource(
+        TaskTraits(TaskPriority::USER_VISIBLE, TaskShutdownBehavior::BLOCK_SHUTDOWN),
+        db_path);
+// a.get() == b.get() —— 两个 runner 指向同一条序列
+```
+
+### 9.3 语义契约
+
+- **同路径同 runner**：首次调用创建 runner 并缓存；后续同路径调用命中缓存直接返回。
+- **缓存生命周期**：与线程池绑定，`Shutdown()` 时随池释放（进程内稳定，不随调用方
+  runner 引用计数变化）。
+- **同 traits 契约（重要）**：同一 `path` 的所有调用**必须**传入相同的 `traits`
+  （priority / shutdown_behavior / may_block），违反时 Debug 构建 DCHECK 失败。
+  这是 Chromium 上游同款契约——traits 决定调度属性，同一序列不可能同时有两种属性。
+- **路径即 key**：按 `std::filesystem::path` 值比较，调用方应传入规范化路径
+  （如 `absolute().lexically_normal()`），避免 `./a.db` 与 `a.db` 分裂成两条序列。
+- **线程安全**：注册表受池内部 `lock_` 保护，任意线程可并发调用。
+
+### 9.4 实现要点
+
+- 入口位于 `ThreadPool` 与 `ThreadPoolInstance`（全局单例转发）。
+- 注册表：`std::map<path, std::pair<scoped_refptr<SequencedTaskRunner>, TaskTraits>>`
+  复用池的 `lock_`（与队列注册同锁，无新锁）。
+- traits 随缓存并存，用于命中时校验契约——`TaskRunner::traits()` 是 protected，
+  不能作为外部查询通道。
+- 对齐 Chromium `base::ThreadPool::CreateSequencedTaskRunnerForResource`（含
+  `sequences_for_resources_lock_` + runner 强缓存的设计）。
+
+### 9.5 测试
+
+`tests/thread_pool_test.cpp`：
+
+- `ForResourceSamePathReturnsSameRunner` — 同路径返回同一 runner 对象
+- `ForResourceDifferentPathsReturnDifferentRunners` — 不同路径不同 runner
+- `ForResourceTasksAreSequencedAcrossContexts` — 两个 context 交替投递 8 个任务，
+  验证执行顺序严格 FIFO
+
+## 10. 附录：文件清单
 
 ```
 modules/neixx/threading/

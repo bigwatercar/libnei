@@ -88,6 +88,11 @@ scoped_refptr<SequencedTaskRunner> ThreadPoolInstance::CreateSequencedTaskRunner
   return pool_.CreateSequencedTaskRunner(traits);
 }
 
+scoped_refptr<SequencedTaskRunner>
+ThreadPoolInstance::CreateSequencedTaskRunnerForResource(const TaskTraits &traits, const std::filesystem::path &path) {
+  return pool_.CreateSequencedTaskRunnerForResource(traits, path);
+}
+
 scoped_refptr<SingleThreadTaskRunner> ThreadPoolInstance::CreateSingleThreadTaskRunner(const TaskTraits &traits) {
   return pool_.CreateSingleThreadTaskRunner(traits);
 }

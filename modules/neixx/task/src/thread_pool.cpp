@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
@@ -17,6 +18,7 @@
 #include "internal/pooled_task_source.h"
 #include "internal/pooled_task_runner_utils.h"
 #include "internal/thread_group.h"
+#include <nei/debug/check.h>
 #include <nei/log/log.h>
 #include <neixx/synchronization/condition_variable.h>
 #include <neixx/synchronization/waitable_event.h>
@@ -936,7 +938,34 @@ public:
       return nullptr;
     }
     AutoLock lock(lock_);
+    return CreateSequencedTaskRunnerLocked(traits);
+  }
 
+  scoped_refptr<SequencedTaskRunner> CreateSequencedTaskRunnerForResource(const TaskTraits &traits,
+                                                                          const std::filesystem::path &path) {
+    if (!tracker_.WillPostTask(traits.shutdown_behavior())) {
+      return nullptr;
+    }
+    AutoLock lock(lock_);
+
+    auto it = resource_runners_.find(path);
+    if (it != resource_runners_.end()) {
+      // Contract: identical traits for the same resource (Chromium-aligned).
+      const TaskTraits &existing = it->second.second;
+      DCHECK(existing.priority() == traits.priority());
+      DCHECK(existing.shutdown_behavior() == traits.shutdown_behavior());
+      DCHECK(existing.may_block() == traits.may_block());
+      return it->second.first;
+    }
+
+    scoped_refptr<SequencedTaskRunner> runner = CreateSequencedTaskRunnerLocked(traits);
+    if (runner) {
+      resource_runners_.emplace(path, std::make_pair(runner, traits));
+    }
+    return runner;
+  }
+
+  scoped_refptr<SequencedTaskRunner> CreateSequencedTaskRunnerLocked(const TaskTraits &traits) {
     std::unique_ptr<internal::PooledTaskQueue> queue = std::make_unique<internal::PooledTaskQueue>(traits);
     internal::PooledTaskQueue *raw_queue = queue.get();
     WeakPtr<internal::PooledTaskQueue> weak_queue = raw_queue->GetWeakPtr();
@@ -1367,6 +1396,13 @@ private:
   std::atomic<std::size_t> blocking_worker_count_{0};
   std::atomic<bool> backpressure_warning_emitted_{false};
   std::atomic<TaskObserver *> task_observer_{nullptr};
+  // ---- Resource-keyed runner cache (CreateSequencedTaskRunnerForResource) ----
+  // path -> (cached runner, traits).  Runners live as long as the pool
+  // (released at shutdown); the cache guarantees one sequence per resource
+  // path.  Traits are cached alongside to enforce the same-traits contract
+  // without touching TaskRunner's protected traits().
+  std::map<std::filesystem::path, std::pair<scoped_refptr<SequencedTaskRunner>, TaskTraits>> resource_runners_;
+
   std::vector<std::unique_ptr<internal::PooledTaskQueue>> queues_;
 
   // Execution fence (Chromium ThreadPoolInstance::BeginFence/EndFence).
@@ -1391,6 +1427,11 @@ ThreadPool::~ThreadPool() = default;
 
 scoped_refptr<SequencedTaskRunner> ThreadPool::CreateSequencedTaskRunner(const TaskTraits &traits) {
   return impl_->CreateSequencedTaskRunner(traits);
+}
+
+scoped_refptr<SequencedTaskRunner> ThreadPool::CreateSequencedTaskRunnerForResource(const TaskTraits &traits,
+                                                                                    const std::filesystem::path &path) {
+  return impl_->CreateSequencedTaskRunnerForResource(traits, path);
 }
 
 scoped_refptr<SingleThreadTaskRunner> ThreadPool::CreateSingleThreadTaskRunner(const TaskTraits &traits) {
