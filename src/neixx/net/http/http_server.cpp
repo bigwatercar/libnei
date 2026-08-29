@@ -432,6 +432,19 @@ struct Http1Connection : public RefCountedThreadSafe<Http1Connection> {
         auto sr_handler_handle =
             shared->FindStreamingRequestHandlerWithHandle(hdr_req.method, std::string(hdr_req.url.path()));
         if (sr_handler_handle) {
+          // Global pre-request filters (headers-only request — the body has
+          // not arrived yet).  A filter returning false short-circuits the
+          // request; the connection is closed because the request body may
+          // still be in flight.
+          {
+            HttpResponse filter_resp;
+            if (!shared->RunFilters(hdr_req, filter_resp)) {
+              filter_resp.headers.push_back({"Connection", "close"});
+              WriteResponse(HttpResponseWriter::Serialize(filter_resp));
+              Close();
+              return;
+            }
+          }
           // Body chunks parsed in this Execute() call are already buffered
           // in hdr_req.body — hand them to the streaming queue first.
           if (!hdr_req.body.empty()) {
@@ -445,6 +458,16 @@ struct Http1Connection : public RefCountedThreadSafe<Http1Connection> {
         } else {
           auto sr_handler = shared->FindStreamingRequestHandler(hdr_req.method, std::string(hdr_req.url.path()));
           if (sr_handler) {
+            // Global pre-request filters (see handle-aware branch above).
+            {
+              HttpResponse filter_resp;
+              if (!shared->RunFilters(hdr_req, filter_resp)) {
+                filter_resp.headers.push_back({"Connection", "close"});
+                WriteResponse(HttpResponseWriter::Serialize(filter_resp));
+                Close();
+                return;
+              }
+            }
             // Body chunks parsed in this Execute() call are already buffered
             // in hdr_req.body — hand them to the streaming queue first.
             if (!hdr_req.body.empty()) {
@@ -473,6 +496,22 @@ struct Http1Connection : public RefCountedThreadSafe<Http1Connection> {
       if (http_delegate.message_complete()) {
         HttpRequest req = http_delegate.request();
         http_delegate.Reset();
+
+        // Global pre-request filters (auth, request-ID, structured logging).
+        // Run before ANY route dispatch (simple / streaming / WebSocket).
+        // A filter returning false short-circuits: |resp| is sent and the
+        // request is not dispatched.  The connection stays alive unless the
+        // filter's response asked to close.
+        {
+          HttpResponse filter_resp;
+          if (!shared->RunFilters(req, filter_resp)) {
+            WriteResponse(HttpResponseWriter::Serialize(filter_resp));
+            if (offset < pending_data.size()) {
+              pending_data.erase(0, offset);
+            }
+            return;
+          }
+        }
 
         // Check for streaming route match first (handle-aware preferred).
         {
@@ -1149,6 +1188,10 @@ HttpServer::~HttpServer() {
 
 void HttpServer::AddRoute(HttpMethod method, std::string_view path, HttpHandler handler) {
   impl_->shared->AddRoute(method, std::string(path), std::move(handler));
+}
+
+void HttpServer::AddFilter(HttpFilter filter) {
+  impl_->shared->AddFilter(std::move(filter));
 }
 
 void HttpServer::AddStreamingRoute(HttpMethod method, std::string_view path, StreamingHttpHandler handler) {

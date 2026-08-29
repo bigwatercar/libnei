@@ -403,12 +403,28 @@ private:
     HttpRequest probe = BuildRequest(st);
     internal::HttpSharedState::DispatchResult lookup = shared_->Lookup(probe.method, std::string(probe.url.path()));
     if (lookup.has_streaming_request) {
+      // Global pre-request filters (headers-only request).  A filter
+      // returning false short-circuits before the streaming-request
+      // handler runs.
+      HttpResponse filter_resp;
+      if (!shared_->RunFilters(probe, filter_resp)) {
+        st->dispatched = true;
+        SubmitSimpleResponse(st, filter_resp);
+        return;
+      }
       st->mode = Mode::kStreamingRequest;
       st->dispatched = true;
       DispatchStreamingRequest(st, std::move(lookup.streaming_request), std::move(lookup.params), end_stream);
       return;
     }
     if (lookup.has_streaming_request_handle) {
+      // Global pre-request filters (see handle-aware streaming branch above).
+      HttpResponse filter_resp;
+      if (!shared_->RunFilters(probe, filter_resp)) {
+        st->dispatched = true;
+        SubmitSimpleResponse(st, filter_resp);
+        return;
+      }
       st->mode = Mode::kStreamingRequest;
       st->dispatched = true;
       DispatchStreamingRequestWithHandle(
@@ -436,6 +452,17 @@ private:
     st->dispatched = true;
     HttpRequest req = BuildRequest(st);
     req.body = st->body;
+
+    // Global pre-request filters (full request, body included).  A filter
+    // returning false short-circuits before any route dispatch; the
+    // filter's response is submitted and no handler runs.
+    {
+      HttpResponse filter_resp;
+      if (!shared_->RunFilters(req, filter_resp)) {
+        SubmitSimpleResponse(st, filter_resp);
+        return;
+      }
+    }
 
     internal::HttpSharedState::DispatchResult lookup = shared_->Lookup(req.method, std::string(req.url.path()));
     if (lookup.has_streaming) {

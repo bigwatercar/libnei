@@ -78,6 +78,8 @@ namespace nei::net::http {
 class NEI_API HttpServer {
 public:
   using HttpHandler = std::function<HttpResponse(const HttpRequest &)>;
+  // 全局前置过滤器：每个请求在路由派发前按注册顺序执行
+  using HttpFilter = std::function<bool(HttpRequest &, HttpResponse &)>;
   // 5 参流式：respond 头 → write/write_io 块 → close 终止（h1 chunked / h2 DATA）
   using StreamingHttpHandler =
       std::function<void(const HttpRequest &, SendHeadersCallback, StreamingWriteCallback,
@@ -91,6 +93,7 @@ public:
   ~HttpServer();
 
   void AddRoute(HttpMethod method, std::string_view path, HttpHandler handler);
+  void AddFilter(HttpFilter filter);
   void AddStreamingRoute(HttpMethod method, std::string_view path, StreamingHttpHandler handler);
   void AddStreamingRequestRoute(HttpMethod method, std::string_view path, StreamingRequestHandler handler);
   void AddWebSocketRoute(HttpMethod method, std::string_view path, WebSocketHandler handler);
@@ -114,6 +117,14 @@ public:
   不保留向后兼容（本阶段允许破坏性变更）。
 - **路由派发**：h1 按 `message_complete` 派发（流式请求在 headers 阶段提前接管）；
   h2 按 stream HEADERS 派发。同一 `HttpSharedState` 保证两个引擎查同一张表。
+- **全局前置过滤器（`AddFilter`，2026-08-29 决策落地）**：每个请求在**任何路由
+  派发之前**（普通 / streaming / streaming-request / WebSocket 升级，h1 + h2 双协议）
+  按注册顺序执行一次。过滤器可：
+  - 修改 `req`（如注入 `X-Request-Id` 头），修改对后续 handler 可见；
+  - 返回 `false` 短路——此时填写的 `resp` 直接返回，路由 handler 不执行；
+    未填写响应（默认 200 + 空 body）时回退为 `403 Forbidden`。
+  典型用途：认证、请求 ID、结构化访问日志。h1 streaming-request 在 headers 阶段
+  短路时连接关闭（body 可能仍在途）；h1 普通路径短路保持 keep-alive。
 - **流式 handler 语义（两协议统一）**：
   - `respond(resp)`：仅发送状态行 + 头（h1 自动加 `Transfer-Encoding: chunked`；
     h2 提交 HEADERS 帧）。

@@ -21,10 +21,15 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <neixx/common/location.h>
+#include <neixx/common/time.h>
 #include <neixx/net/http/http2_client_session.h>
 #include <neixx/net/http/http_client.h>
 #include <neixx/net/http/http_common.h>
@@ -118,6 +123,15 @@ protected:
       WaitableEvent drained(WaitableEvent::ResetPolicy::kAutomatic, false);
       srv_runner_->PostTask(FROM_HERE, [&drained]() { drained.Signal(); });
       drained.Wait();
+      // h2 连接 teardown 链（读 FIN → FailConnection → posted ProcessClose
+      // → drain read → FinalTeardown）跨多个 I/O 事件，超出单次 fence 之上。
+      // 与 Http2ServerTest 一致：给有界完成窗口再停线程，否则 ASAN/valgrind
+      // 会报告 h2 连接 + 线程 runner 的泄漏。
+      for (int i = 0; i < 4; ++i) {
+        WaitableEvent tick(WaitableEvent::ResetPolicy::kAutomatic, false);
+        srv_runner_->PostDelayedTask(FROM_HERE, [&tick]() { tick.Signal(); }, TimeDelta::FromMilliseconds(250));
+        tick.Wait();
+      }
     }
     srv_thread_.Stop();
     client_thread_.Stop();
@@ -129,6 +143,7 @@ protected:
     srv_runner_->PostTask(FROM_HERE, [this, &port, &started, tls]() {
       server_ = std::make_unique<HttpServer>();
       RegisterRoutes(*server_);
+      RegisterFilters(*server_);
       port = FindFreePort();
       if (tls)
         ASSERT_TRUE(server_->Listen(IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port), &server_ctx_, srv_runner_));
@@ -139,6 +154,15 @@ protected:
     started.Wait();
     return port;
   }
+
+  // Overridden by filter tests to install global pre-request filters.
+  virtual void RegisterFilters(HttpServer &server) {
+    if (filter_installer_)
+      filter_installer_(server);
+  }
+
+  // Set by filter tests before StartServer() to install filters.
+  std::function<void(HttpServer &)> filter_installer_;
 
   void RegisterRoutes(HttpServer &server) {
     server.AddRoute(HttpMethod::kGet, "/hello", [](const HttpRequest &) {
@@ -247,6 +271,28 @@ protected:
     return *body;
   }
 
+  // 通过 h1 客户端发请求并返回 (status, body)。
+  std::pair<int, std::string> RequestViaH1Full(uint16_t port, net::SSLContext *ctx, const char *path) {
+    auto client = scoped_refptr<HttpClient>(new HttpClient());
+    IPEndPoint addr(IPAddress::FromIPv4(127, 0, 0, 1), port);
+    auto body = std::make_shared<std::string>();
+    auto status = std::make_shared<int>(-1);
+    WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+    client_runner_->PostTask(
+        FROM_HERE, [this, client, req = MakeGet("127.0.0.1", path), addr, ctx, body, status, &done]() mutable {
+          client->Send(req, addr, ctx, client_runner_, [body, status, &done](std::unique_ptr<HttpResponse> resp) {
+            if (resp) {
+              *status = resp->status.raw_code();
+              *body = resp->body;
+            }
+            done.Signal();
+          });
+        });
+    EXPECT_TRUE(done.TimedWait(std::chrono::seconds(15))) << "h1 request never completed";
+    client->Close();
+    return {*status, *body};
+  }
+
   net::SSLContext server_ctx_{net::SSLContext::Mode::Server};
   net::SSLContext client2_ctx_{net::SSLContext::Mode::Client};
   net::SSLContext client1_ctx_{net::SSLContext::Mode::Client};
@@ -345,6 +391,211 @@ TEST_F(HttpServerMuxTest, TcpListenServesHttp1) {
   bool ok = false;
   EXPECT_EQ("hello-unified", RequestViaH1(port, nullptr, "/hello", ok));
   EXPECT_TRUE(ok);
+}
+
+// =============================================================================
+// 全局前置过滤器（HttpServer::AddFilter）
+// =============================================================================
+
+// filter 返回 true → 请求正常派发（h1 + h2 双协议）。
+TEST_F(HttpServerMuxTest, FilterPassesThroughWhenTrue) {
+  filter_installer_ = [](HttpServer &s) { s.AddFilter([](HttpRequest &, HttpResponse &) { return true; }); };
+  uint16_t port = StartServer();
+
+  bool ok = false;
+  EXPECT_EQ("hello-unified", RequestViaH1(port, &client1_ctx_, "/hello", ok));
+  EXPECT_TRUE(ok);
+  EXPECT_EQ("hello-unified", RequestViaH2(port, "/hello"));
+}
+
+// filter 返回 false + 填充响应 → 短路派发，路由 handler 不执行（h1 + h2）。
+TEST_F(HttpServerMuxTest, FilterShortCircuitsSimpleRoute) {
+  filter_installer_ = [](HttpServer &s) {
+    s.AddFilter([](HttpRequest &, HttpResponse &resp) {
+      resp.SetStatus(HttpStatusCode::kUnauthorized);
+      resp.body = "filtered-401";
+      resp.headers.push_back({"Content-Type", "text/plain"});
+      return false;
+    });
+  };
+  uint16_t port = StartServer();
+
+  auto [status1, body1] = RequestViaH1Full(port, &client1_ctx_, "/hello");
+  EXPECT_EQ(401, status1);
+  EXPECT_EQ("filtered-401", body1);
+  // h2 端同样收到 filter 的响应（不再命中路由）。
+  EXPECT_EQ("filtered-401", RequestViaH2(port, "/hello"));
+}
+
+// filter 返回 false 但不填响应 → 默认 403 Forbidden。
+TEST_F(HttpServerMuxTest, FilterShortCircuitDefaultsToForbidden) {
+  filter_installer_ = [](HttpServer &s) { s.AddFilter([](HttpRequest &, HttpResponse &) { return false; }); };
+  uint16_t port = StartServer();
+
+  auto [status, body] = RequestViaH1Full(port, &client1_ctx_, "/hello");
+  EXPECT_EQ(403, status);
+  EXPECT_EQ("403 Forbidden\r\n", body);
+}
+
+// 多个 filter 按注册顺序执行。
+TEST_F(HttpServerMuxTest, FiltersRunInRegistrationOrder) {
+  auto order = std::make_shared<std::vector<int>>();
+  std::mutex m;
+  filter_installer_ = [order, &m](HttpServer &s) {
+    s.AddFilter([order, &m](HttpRequest &, HttpResponse &) {
+      std::lock_guard<std::mutex> g(m);
+      order->push_back(1);
+      return true;
+    });
+    s.AddFilter([order, &m](HttpRequest &, HttpResponse &) {
+      std::lock_guard<std::mutex> g(m);
+      order->push_back(2);
+      return true;
+    });
+  };
+  uint16_t port = StartServer();
+
+  bool ok = false;
+  EXPECT_EQ("hello-unified", RequestViaH1(port, &client1_ctx_, "/hello", ok));
+  EXPECT_TRUE(ok);
+  {
+    std::lock_guard<std::mutex> g(m);
+    ASSERT_EQ(2u, order->size());
+    EXPECT_EQ(1, (*order)[0]);
+    EXPECT_EQ(2, (*order)[1]);
+  }
+}
+
+// filter 可修改请求（注入 request-ID 头），路由 handler 可见该修改。
+TEST_F(HttpServerMuxTest, FilterCanMutateRequest) {
+  filter_installer_ = [](HttpServer &s) {
+    s.AddFilter([](HttpRequest &req, HttpResponse &) {
+      req.headers.push_back({"X-Request-Id", "req-123"});
+      return true;
+    });
+  };
+  uint16_t port = StartServer();
+  server_->AddRoute(HttpMethod::kGet, "/echo", [](const HttpRequest &req) {
+    HttpResponse resp;
+    resp.SetStatus(HttpStatusCode::kOk);
+    resp.body = std::string(req.GetHeaderValue("x-request-id"));
+    return resp;
+  });
+
+  bool ok = false;
+  EXPECT_EQ("req-123", RequestViaH1(port, &client1_ctx_, "/echo", ok));
+  EXPECT_TRUE(ok);
+}
+
+// streaming 路由同样受 filter 约束（h1 + h2）。
+TEST_F(HttpServerMuxTest, FilterRejectsStreamingRoute) {
+  filter_installer_ = [](HttpServer &s) {
+    s.AddFilter([](HttpRequest &, HttpResponse &resp) {
+      resp.SetStatus(HttpStatusCode::kForbidden);
+      resp.body = "no-stream";
+      return false;
+    });
+  };
+  uint16_t port = StartServer();
+
+  auto [status, body] = RequestViaH1Full(port, &client1_ctx_, "/stream");
+  EXPECT_EQ(403, status);
+  EXPECT_EQ("no-stream", body);
+  EXPECT_EQ("no-stream", RequestViaH2(port, "/stream"));
+}
+
+// streaming-request 路由在 headers 阶段即被 filter 拒绝。
+TEST_F(HttpServerMuxTest, FilterRejectsStreamingRequestRoute) {
+  filter_installer_ = [](HttpServer &s) {
+    s.AddFilter([](HttpRequest &, HttpResponse &resp) {
+      resp.SetStatus(HttpStatusCode::kForbidden);
+      resp.body = "no-upload";
+      return false;
+    });
+  };
+  uint16_t port = StartServer();
+  server_->AddStreamingRequestRoute(HttpMethod::kPost,
+                                    "/upload",
+                                    [](const HttpRequest &,
+                                       ReadBodyFunction,
+                                       SendHeadersCallback respond,
+                                       StreamingWriteCallback,
+                                       StreamingWriteIoCallback,
+                                       StreamingCloseCallback) {
+                                      HttpResponse resp;
+                                      resp.SetStatus(HttpStatusCode::kOk);
+                                      respond(resp);
+                                    });
+
+  // h1 POST 带 body。
+  auto client = scoped_refptr<HttpClient>(new HttpClient());
+  IPEndPoint addr(IPAddress::FromIPv4(127, 0, 0, 1), port);
+  auto status = std::make_shared<int>(-1);
+  auto body = std::make_shared<std::string>();
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  client_runner_->PostTask(FROM_HERE, [this, client, addr, status, body, &done]() mutable {
+    HttpRequest req;
+    req.method = HttpMethod::kPost;
+    req.url = Url("/upload");
+    req.http_version = HttpVersion::kHttp11;
+    req.headers.push_back({"Host", "127.0.0.1"});
+    req.headers.push_back({"Content-Length", "12"});
+    req.body = "payload-data";
+    client->Send(req, addr, &client1_ctx_, client_runner_, [status, body, &done](std::unique_ptr<HttpResponse> resp) {
+      if (resp) {
+        *status = resp->status.raw_code();
+        *body = resp->body;
+      }
+      done.Signal();
+    });
+  });
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(15)));
+  client->Close();
+  EXPECT_EQ(403, *status);
+  EXPECT_EQ("no-upload", *body);
+}
+
+// WebSocket 升级请求在 upgrade 前被 filter 拒绝。
+TEST_F(HttpServerMuxTest, FilterRejectsWebSocketRoute) {
+  filter_installer_ = [](HttpServer &s) {
+    s.AddFilter([](HttpRequest &, HttpResponse &resp) {
+      resp.SetStatus(HttpStatusCode::kForbidden);
+      resp.body = "no-ws";
+      return false;
+    });
+  };
+  uint16_t port = StartServer();
+  server_->AddWebSocketRoute("/ws",
+                             [](net::websocket::WebSocketConnection &, const net::websocket::WebSocketFrame &) {});
+
+  // 手工构造 WebSocket Upgrade 请求（h1）。
+  auto client = scoped_refptr<HttpClient>(new HttpClient());
+  IPEndPoint addr(IPAddress::FromIPv4(127, 0, 0, 1), port);
+  auto status = std::make_shared<int>(-1);
+  auto body = std::make_shared<std::string>();
+  WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+  client_runner_->PostTask(FROM_HERE, [this, client, addr, status, body, &done]() mutable {
+    HttpRequest req;
+    req.method = HttpMethod::kGet;
+    req.url = Url("/ws");
+    req.http_version = HttpVersion::kHttp11;
+    req.headers.push_back({"Host", "127.0.0.1"});
+    req.headers.push_back({"Upgrade", "websocket"});
+    req.headers.push_back({"Connection", "Upgrade"});
+    req.headers.push_back({"Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ=="});
+    req.headers.push_back({"Sec-WebSocket-Version", "13"});
+    client->Send(req, addr, &client1_ctx_, client_runner_, [status, body, &done](std::unique_ptr<HttpResponse> resp) {
+      if (resp) {
+        *status = resp->status.raw_code();
+        *body = resp->body;
+      }
+      done.Signal();
+    });
+  });
+  ASSERT_TRUE(done.TimedWait(std::chrono::seconds(15)));
+  client->Close();
+  EXPECT_EQ(403, *status);
+  EXPECT_EQ("no-ws", *body);
 }
 
 } // namespace

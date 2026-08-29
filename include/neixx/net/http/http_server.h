@@ -59,13 +59,28 @@ namespace net::http {
 //   - Destruction: any thread, any time — safe while connections are
 //     active; the destructor shuts down the server.  Handlers/frames are
 //     always invoked on the I/O thread the server is bound to.
-//   - AddRoute / AddWebSocketRoute / AddStreamingRoute / AddStreamingRequestRoute:
-//     any thread, any time (internally synchronized).
+//   - AddRoute / AddWebSocketRoute / AddStreamingRoute / AddStreamingRequestRoute
+//     / AddFilter: any thread, any time (internally synchronized).
 //   - Listen / Shutdown: any thread, but not concurrently with each other
 //     on the same instance.  Shutdown is idempotent.
 //   - Dispatch: any thread (used by tests and internal dispatch).
 
 using HttpHandler = std::function<HttpResponse(const HttpRequest &)>;
+
+// Global pre-request filter.  Registered via HttpServer::AddFilter and
+// invoked for EVERY incoming request — HTTP/1.1 and HTTP/2, before any
+// route dispatch (simple, streaming, streaming-request or WebSocket).
+//
+// The filter may:
+//   - mutate |req| (e.g. inject a request-ID header) before dispatch, and
+//   - short-circuit the request by returning false, in which case |resp|
+//     (which the filter fills in) is sent back and no route handler runs.
+//
+// A filter returning false without touching |resp| (default status + empty
+// body) yields a 403 Forbidden.  Filters run in registration order; the
+// first false short-circuits.  Typical uses: authentication, request-ID
+// injection, structured access logging.
+using HttpFilter = std::function<bool(HttpRequest &req, HttpResponse &resp)>;
 
 // WebSocket frame handler.  Called for each received frame after a successful
 // WebSocket upgrade.  |conn| can be used to send frames back to the client.
@@ -171,6 +186,11 @@ public:
   // Register a route.  method + path must match exactly (literal match,
   // no wildcards).  Paths should include the leading "/".
   void AddRoute(HttpMethod method, std::string_view path, HttpHandler handler);
+
+  // Register a global pre-request filter (see HttpFilter above).  Filters
+  // run in registration order before any route dispatch.  May be called
+  // from any thread, any time (internally synchronized).
+  void AddFilter(HttpFilter filter);
 
   // Register a WebSocket route.  The server automatically handles the
   // HTTP upgrade handshake (validates headers, computes Accept key,

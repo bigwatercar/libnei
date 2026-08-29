@@ -161,6 +161,43 @@ public:
     ws_routes_[std::move(path)] = std::move(handler);
   }
 
+  // Registers a global pre-request filter.  Filters run in registration
+  // order for every request, before ANY route dispatch (HTTP/1.1 and
+  // HTTP/2 alike).  Safe to call from any thread, any time.
+  void AddFilter(HttpFilter filter) {
+    std::lock_guard<std::mutex> lock(routes_mutex_);
+    filters_.push_back(std::move(filter));
+  }
+
+  // Runs every registered filter on |req| in registration order.  Returns
+  // true when all filters allowed the request to proceed.  On the first
+  // filter that returns false, fills |resp| with the filter's short-circuit
+  // response (a 403 Forbidden default when the filter left it untouched)
+  // and returns false — the caller must send |resp| and skip dispatch.
+  // Filters may mutate |req| (e.g. inject request-ID headers); mutations are
+  // visible to the dispatched handler.
+  bool RunFilters(HttpRequest &req, HttpResponse &resp) {
+    std::vector<HttpFilter> filters;
+    {
+      std::lock_guard<std::mutex> lock(routes_mutex_);
+      filters = filters_;
+    }
+    for (const auto &filter : filters) {
+      if (!filter(req, resp)) {
+        // A filter that returns false without filling the response falls
+        // back to 403.  (HttpResponse defaults to 200 OK, so an untouched
+        // response is exactly: default status + empty body + no headers.)
+        if (resp.status.raw_code() == 200 && resp.body.empty() && resp.headers.empty()) {
+          resp.SetStatus(HttpStatusCode::kForbidden);
+          resp.body = "403 Forbidden\r\n";
+          resp.headers.push_back({"Content-Type", "text/plain"});
+        }
+        return false;
+      }
+    }
+    return true;
+  }
+
   // ---- Route lookup (handlers copied out under the lock; invoked lock-free) ----
 
   std::optional<WebSocketHandler> FindWebSocketHandler(const std::string &path) {
@@ -365,6 +402,7 @@ private:
   std::unordered_map<RouteKey, StreamingRequestHandler, RouteKeyHash> streaming_request_routes_;
   std::unordered_map<RouteKey, StreamingRequestHandlerWithHandle, RouteKeyHash> streaming_request_routes_handle_;
   std::unordered_map<std::string, WebSocketHandler> ws_routes_;
+  std::vector<HttpFilter> filters_;
 
   std::mutex conn_mutex_;
   // h1: raw-pointer map; an entry's presence denotes the registry's strong

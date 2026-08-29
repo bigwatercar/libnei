@@ -1,6 +1,6 @@
 # libnei — TODO & Roadmap
 
-**Updated**: 2026-08-28
+**Updated**: 2026-08-29
 
 > 已完成的详细实现记录已归档至仓库记忆（`/memories/repo/`）与 `bench/results/`；
 > 本文档只保留**未完成任务**与**里程碑摘要**，避免重复堆积。
@@ -8,15 +8,6 @@
 ---
 
 ## 未完成任务
-
-### HTTP 模块（唯一显式剩余项）
-
-- **中间件（定位已收敛为轻量级,2026-08-29 决策）** — libnei 的 HttpServer 不承担
-  专业 server 角色（TLS 终结/限流/WAF/访问日志等由前置 nginx 等网关负责），因此中间件
-  不做完整框架（无洋葱模型/next 链/后置处理）。若做，仅提供最小形态：全局前置过滤器
-  `AddFilter`（`bool(HttpRequest&, HttpResponse&)`，返回 false 短路路由派发），覆盖
-  认证/请求 ID/结构化日志三类应用级需求；路由回调 + 公共函数已覆盖其余 90% 场景。
-  触发条件：出现无代理直连场景，或多个 HttpServer 共享同一批前置逻辑的复用痛点。
 
 ### 触发式任务（有明确触发条件）
 
@@ -31,9 +22,6 @@
 - **TaskQueueSelector false sharing 整体布局重构** — 方向：`SequenceManager::Impl` 做
   cache-line-aware 布局（单点 `alignas` 已实测反效 -14.6%）；fast-path 默认 ON，优先级低。
 - **PipeStream direct dispatch continuation** — batch-quota-exhausted 路径可直连省一次 PostTask。
-- **统一堆死代码清理** — `PooledTaskQueue::WillRunTask/DidProcessTask`、
-  `GetNextTaskQueue*` legacy wrappers、`TaskSource` 死虚函数等（清单见
-  repo memory `unified-heap-option-b`）。
 - **Crash handler POSIX 非 async-signal-safe** — 已接受限制（如需完整信号安全另行评估）。
 
 ### 推迟
@@ -43,14 +31,18 @@
 
 ### 可选 API 补齐（Chromium 对齐遗留）
 
-- `CreateSequencedTaskRunnerForResource(path)` — 按资源 key 缓存 runner（SHARED 模式遗留）。
-- `GetCurrentTaskImportance()` 继承（PostJob 未做项）。
+- `GetCurrentTaskImportance()` 继承（PostJob 未做项）— 注：Chromium 该 API 现已重构为
+  ThreadType（线程优先级）语义（`base/task/thread_type.h`），libnei 尚无线程优先级基础设施，
+  若实现需先引入 ThreadType 或降级为独立 TaskImportance 枚举。
 - sequence_token 显式跨 runner 保序（当前无需）。
 
 ---
 
 ## 里程碑摘要（已完成）
 
+- **2026-08-29** — HTTP 中间件最小形态落地：`HttpServer::AddFilter` 全局前置过滤器
+  （h1+h2 双协议，路由派发前按序执行，false 短路 + 默认 403，可注入请求头；8 测试，
+  Win/WSL 全过）。TODO 唯一显式剩余项清除。
 - **2026-08-28** — `native_library` 模块：NativeLibrary 裸句柄 + 自由函数 + ScopedNativeLibrary
   RAII（对齐 Chromium）；12 测试，Win 1030 / WSL 1008 全量过，ASAN/TSan 干净（`354a031`）。
 - **2026-08-26** — `PostTaskAndReply/WithResult`；HttpFileTransfer 写盘背压。
