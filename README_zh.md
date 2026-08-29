@@ -24,7 +24,7 @@ Chromium 的 `//base` 目录包含大量精心设计的跨平台基础设施—�
 | 模块 | 说明 |
 |------|------|
 | `log` | 高性能异步日志系统，MPSC 无锁环形缓冲区，支持多 sink、运行时动态配置 |
-| `core` | 字节序转换（`endian.h`）、浮点控制（`float_ctrl.h`）、编码（`encoding.h`）、文件工具（`file_util.h`）、路径工具（`path_util.h`）、加密安全随机数（`random.h`）、时间工具（`time.h`） |
+| `core` | 字节序转换（`endian.h`）、浮点控制（`float_ctrl.h`）、编码（`encoding.h`）、文件工具（`file_util.h`）、路径工具（`path_util.h`）、加密安全随机数（`random.h`）、时间工具（`time.h`）、版本查询（`version.h`：`nei_get_version_string()` / `nei_get_version_info()`） |
 | `build` | 导出宏（`NEI_API`）、平台检测、编译器特定宏、公共类型定义 |
 | `debug` | 断言与检查宏（`CHECK` / `DCHECK` / `NOTREACHED`） |
 | `xdr` | XDR 风格数据序列化 / 反序列化 |
@@ -45,6 +45,7 @@ Chromium 的 `//base` 目录包含大量精心设计的跨平台基础设施—�
 | `strings` | 字符串工具：`SplitString`、`StringPrintf`、UTF 编码转换、CJK 宽度检测、文本规范化 |
 | `common` | `AtExitManager`、`NoDestructor`、`Singleton`、`PathService`、`Location`、`StrongAlias`、`ScopedHandle` / `ScopedFd`、`TimeSource`、线程检查器（`SequenceChecker` / `ThreadChecker`）、`PlatformHandle` |
 | `command_line` | 命令行参数解析 |
+| `native_library` | 跨平台动态库加载与符号解析：`LoadNativeLibrary` / `UnloadNativeLibrary` / `GetFunctionPointerFromNativeLibrary`、`ScopedNativeLibrary` RAII |
 | `net` | 异步套接字：`TCPClientSocket` / `TCPServerSocket`（IOCP / epoll）、`TLSClientSocket` / `TLSServerSocket` / `SSLContext`（mbedTLS）、`UDPSocket`；`HostResolver`（基于 c-ares 的异步 DNS） |
 | `net/http` | 异步 HTTP/1.1：`HttpClient`（流式请求/响应，带背压）、`HttpServer`（路由分发，TCP + TLS）、`HttpParser`（llhttp）、`HttpFileTransfer`（内存有界的大文件下载/上传）、`HttpClientPool` |
 | `net/websocket` | RFC 6455：`WebSocketClient` / `WebSocketConnection` / `WebSocketFrame`（文本 / 二进制 / ping，TCP + TLS） |

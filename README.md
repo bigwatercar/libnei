@@ -24,7 +24,7 @@ This library is developed with the assistance of AI-powered coding assistants. L
 | Module | Description |
 |--------|-------------|
 | `log` | High-performance async logging with MPSC lock-free ring buffer, multiple sinks, and runtime configuration |
-| `core` | Byte-order conversion (`endian.h`), floating-point control (`float_ctrl.h`), encoding (`encoding.h`), file utilities (`file_util.h`), path utilities (`path_util.h`), cryptographically secure random (`random.h`), time utilities (`time.h`) |
+| `core` | Byte-order conversion (`endian.h`), floating-point control (`float_ctrl.h`), encoding (`encoding.h`), file utilities (`file_util.h`), path utilities (`path_util.h`), cryptographically secure random (`random.h`), time utilities (`time.h`), version query (`version.h`: `nei_get_version_string()` / `nei_get_version_info()`) |
 | `build` | Export macros (`NEI_API`), platform detection, compiler-specific macros, common typedefs |
 | `debug` | Assertion and check macros (`CHECK` / `DCHECK` / `NOTREACHED`) |
 | `xdr` | XDR-style data serialization / deserialization |
@@ -45,6 +45,7 @@ This library is developed with the assistance of AI-powered coding assistants. L
 | `strings` | String utilities: `SplitString`, `StringPrintf`, UTF conversions, CJK width detection, text normalization |
 | `common` | `AtExitManager`, `NoDestructor`, `Singleton`, `PathService`, `Location`, `StrongAlias`, `ScopedHandle` / `ScopedFd`, `TimeSource`, thread checkers (`SequenceChecker` / `ThreadChecker`), `PlatformHandle` |
 | `command_line` | Command-line argument parsing |
+| `native_library` | Cross-platform dynamic library loading & symbol resolution: `LoadNativeLibrary` / `UnloadNativeLibrary` / `GetFunctionPointerFromNativeLibrary`, `ScopedNativeLibrary` RAII |
 | `net` | Async sockets: `TCPClientSocket` / `TCPServerSocket` (IOCP / epoll), `TLSClientSocket` / `TLSServerSocket` / `SSLContext` (mbedTLS), `UDPSocket`; `HostResolver` (async DNS via c-ares) |
 | `net/http` | Async HTTP/1.1: `HttpClient` (streaming request/response with backpressure), `HttpServer` (route dispatch, TCP + TLS), `HttpParser` (llhttp), `HttpFileTransfer` (bounded-memory file download/upload), `HttpClientPool` |
 | `net/websocket` | RFC 6455: `WebSocketClient` / `WebSocketConnection` / `WebSocketFrame` (text / binary / ping, TCP + TLS) |
