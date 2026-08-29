@@ -7,12 +7,14 @@ target_sources(
           include/nei/core/path_util.h
           include/nei/core/time.h
           include/nei/core/random.h
+          include/nei/core/version.h
   PRIVATE src/endian.c
           src/file_util.c
           src/float_ctrl.c
           src/encoding.c
           src/path_util.c
           src/random.c
+          src/version.c
 )
 
 if(WIN32)

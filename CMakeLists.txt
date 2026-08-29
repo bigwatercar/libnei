@@ -2,11 +2,21 @@ cmake_minimum_required(VERSION 3.23)
 
 project(
   nei
-  VERSION 0.1.0
+  VERSION 0.9.0
   DESCRIPTION
     "libNei: A modern, cross-platform C/C++ foundation library focusing on performance, safety, and ease of use."
   LANGUAGES C CXX
 )
+
+# Single source of truth for the library version.  All downstream consumers
+# (generated version header, SONAME, package version file, release tags) derive
+# from the project() VERSION above -- bump ONLY that line when releasing.
+#
+# SOVERSION policy: during the 0.x pre-release phase the ABI is explicitly
+# unstable, so SOVERSION tracks major.minor (0.9) and every minor release
+# requires relinking.  At 1.0, switch SOVERSION to ${PROJECT_VERSION_MAJOR}
+# so that only major releases break the ABI.
+set(NEI_VERSION "${PROJECT_VERSION}")
 
 # Export compile_commands.json for clangd / IDE tooling (no code changes
 # required).
@@ -153,6 +163,14 @@ endif()
 # ============================================================================
 add_library(nei)
 add_library(nei::nei ALIAS nei)
+
+# Versioned shared library (Linux: libnei.so.0.9.0 + libnei.so.0.9 soname
+# symlink; Windows DLLs carry no SONAME so these are ELF-only no-ops).
+set_target_properties(
+  nei
+  PROPERTIES VERSION ${PROJECT_VERSION}
+             SOVERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}"
+)
 
 # Platform definitions
 if(WIN32)

@@ -94,6 +94,7 @@ add_executable(
   time_test.cpp
   utf_string_conversions_test.cpp
   utils_crypto_uuid_test.cpp
+  version_test.cpp
   win_utils_test.cpp
   xdr_test.cpp
 )
