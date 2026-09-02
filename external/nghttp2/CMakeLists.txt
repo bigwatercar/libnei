@@ -75,6 +75,6 @@ else()
 endif()
 
 # Vendored C code is not subjected to our project's /W4 + /WX strictness.
-if(COMPILER_IS_MSVC)
+if(NEI_MSVC_FLAVOR)
   target_compile_options(nghttp2 PRIVATE /WX- /W3)
 endif()

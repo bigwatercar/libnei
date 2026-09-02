@@ -8,14 +8,24 @@ project(
   LANGUAGES C CXX
 )
 
+# Set default build type to Debug if no configuration is specified
+# (single-config generators)
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+  message(WARNING "No build type specified, defaulting to Debug")
+  set(CMAKE_BUILD_TYPE
+      Debug
+      CACHE STRING "Build type" FORCE
+  )
+endif()
+
 # Single source of truth for the library version.  All downstream consumers
 # (generated version header, SONAME, package version file, release tags) derive
 # from the project() VERSION above -- bump ONLY that line when releasing.
 #
 # SOVERSION policy: during the 0.x pre-release phase the ABI is explicitly
 # unstable, so SOVERSION tracks major.minor (0.9) and every minor release
-# requires relinking.  At 1.0, switch SOVERSION to ${PROJECT_VERSION_MAJOR}
-# so that only major releases break the ABI.
+# requires relinking.  At 1.0, switch SOVERSION to ${PROJECT_VERSION_MAJOR} so
+# that only major releases break the ABI.
 set(NEI_VERSION "${PROJECT_VERSION}")
 
 # Export compile_commands.json for clangd / IDE tooling (no code changes
@@ -46,64 +56,11 @@ set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN YES)
 
-# cmake-format: off
-string(REGEX MATCH "^Clang" _compiler_is_clang "${CMAKE_C_COMPILER_ID}")
-string(REGEX MATCH "^GNU" _compiler_is_gnu "${CMAKE_C_COMPILER_ID}")
-string(REGEX MATCH "^MSVC" _compiler_is_msvc "${CMAKE_C_COMPILER_ID}")
-string(COMPARE EQUAL "${CMAKE_C_COMPILER_FRONTEND_VARIANT}" "MSVC" _frontend_is_msvc)
-string(COMPARE EQUAL "${CMAKE_C_COMPILER_FRONTEND_VARIANT}" "GNU" _frontend_is_gnu)
-string(COMPARE EQUAL "${CMAKE_C_COMPILER_FRONTEND_VARIANT}" "AppleClang" _frontend_is_apple_clang)
-# cmake-format: on
-
-if(_frontend_is_msvc)
-  set(COMPILER_IS_MSVC TRUE)
-elseif(_frontend_is_gnu)
-  if(_compiler_is_clang)
-    set(COMPILER_IS_CLANG TRUE)
-  else()
-    set(COMPILER_IS_GNU TRUE)
-  endif()
-elseif(_frontend_is_apple_clang)
-  set(COMPILER_IS_APPLE_CLANG TRUE)
-  message(
-    WARNING
-      "AppleClang frontend detected. Treating as Clang for feature detection."
-  )
-  set(COMPILER_IS_CLANG TRUE)
-else()
-  # Unknown compiler frontend. Assume COMPILER_ID is sufficient for feature
-  # detection.
-  if(_compiler_is_msvc)
-    set(COMPILER_IS_MSVC TRUE)
-  elseif(_compiler_is_gnu)
-    set(COMPILER_IS_GNU TRUE)
-  elseif(_compiler_is_clang)
-    set(COMPILER_IS_CLANG TRUE)
-  endif()
-endif()
-unset(_compiler_is_msvc)
-unset(_compiler_is_gnu)
-unset(_compiler_is_clang)
-unset(_frontend_is_msvc)
-unset(_frontend_is_gnu)
-unset(_frontend_is_apple_clang)
-
-message(STATUS "COMPILER_IS_MSVC: ${COMPILER_IS_MSVC}")
-message(STATUS "COMPILER_IS_GNU: ${COMPILER_IS_GNU}")
-message(STATUS "COMPILER_IS_CLANG: ${COMPILER_IS_CLANG}")
-
-# Treat source and execution character sets as UTF-8 on MSVC. Without this flag,
-# MSVC encodes \uXXXX escapes in narrow string literals using the system ANSI
-# code page (e.g. CP936), producing C4819 warnings and incorrect byte sequences
-# at runtime.
-if(COMPILER_IS_MSVC)
-  add_compile_options(/utf-8)
-endif()
-
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+include(neiDetectCompiler)
 
 option(NEI_BUILD_TESTS "Build nei tests" ON)
 option(NEI_BUILD_BENCHMARKS "Build nei benchmarks" ON)
@@ -129,33 +86,38 @@ option(
 )
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 
+# ============================================================================
+# Third-party dependencies (c-ares, ...)
+# ============================================================================
+message(STATUS "Configuring third-party dependencies...")
+add_subdirectory(external)
+message(STATUS "Third-party dependencies configured.")
+
 if(NEI_BUILD_TESTS)
   include(CTest)
 endif()
 
-# Set default build type to Debug if no configuration is specified
-# (single-config generators)
-if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
-  message(WARNING "No build type specified, defaulting to Debug")
-  set(CMAKE_BUILD_TYPE
-      Debug
-      CACHE STRING "Build type" FORCE
-  )
-endif()
-
 if(NEI_ENABLE_WARNINGS)
-  if(COMPILER_IS_MSVC)
+  if(NEI_MSVC_FLAVOR)
     add_compile_options(/W4 /permissive-)
-  else()
+  elseif(NEI_GNU_FLAVOR)
     add_compile_options(-Wall -Wextra -Wpedantic)
   endif()
   if(NEI_TREAT_WARNINGS_AS_ERRORS)
-    if(COMPILER_IS_MSVC)
+    if(NEI_MSVC_FLAVOR)
       add_compile_options(/WX)
-    else()
+    elseif(NEI_GNU_FLAVOR)
       add_compile_options(-Werror)
     endif()
   endif()
+endif()
+
+# Treat source and execution character sets as UTF-8 on MSVC. Without this flag,
+# MSVC encodes \uXXXX escapes in narrow string literals using the system ANSI
+# code page (e.g. CP936), producing C4819 warnings and incorrect byte sequences
+# at runtime.
+if(NEI_MSVC_FLAVOR)
+  add_compile_options(/utf-8)
 endif()
 
 # ============================================================================
@@ -167,15 +129,14 @@ add_library(nei::nei ALIAS nei)
 # Versioned shared library (Linux: libnei.so.0.9.0 + libnei.so.0.9 soname
 # symlink; Windows DLLs carry no SONAME so these are ELF-only no-ops).
 set_target_properties(
-  nei
-  PROPERTIES VERSION ${PROJECT_VERSION}
-             SOVERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}"
+  nei PROPERTIES VERSION ${PROJECT_VERSION}
+                 SOVERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}"
 )
 
 # Platform definitions
 if(WIN32)
   target_compile_definitions(nei PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
-  if(COMPILER_IS_MSVC)
+  if(NEI_MSVC_FLAVOR)
     # /Zc:__cplusplus — MSVC reports 199711L by default even under /std:c++17.
     # This flag makes __cplusplus reflect the actual standard version (e.g.
     # 201703L for C++17).  Applied at the top-level nei target so that C++
@@ -227,13 +188,6 @@ if(NOT WIN32)
   )
 endif()
 
-# ============================================================================
-# Third-party dependencies (c-ares, ...)
-# ============================================================================
-add_subdirectory(external)
-
-# ============================================================================
-
 add_subdirectory(src/nei)
 
 if(NEI_BUILD_NEIXX)
@@ -261,6 +215,7 @@ if(BUILD_SHARED_LIBS)
 else()
   set(_nei_install_targets
       nei
+      # external
       c-ares
       mbedtls
       mbedx509
@@ -286,7 +241,8 @@ install(
 )
 
 # Pitchfork Layout: single public include root.  All public headers live under
-# include/ mirroring the namespace structure (include/nei/..., include/neixx/...).
+# include/ mirroring the namespace structure (include/nei/...,
+# include/neixx/...).
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 configure_package_config_file(
