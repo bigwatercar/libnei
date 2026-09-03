@@ -14,23 +14,25 @@
 #include <utility>
 #include <vector>
 
-#include "internal/delayed_task_manager.h"
-#include "internal/pooled_task_source.h"
-#include "internal/pooled_task_runner_utils.h"
-#include "internal/thread_group.h"
+#include <nei/build/nei_global.h>
 #include <nei/debug/check.h>
 #include <nei/log/log.h>
 #include <neixx/synchronization/condition_variable.h>
 #include <neixx/synchronization/waitable_event.h>
-#include "internal/task.h"
-#include "internal/pooled_task_queue.h"
-#include "internal/task_tracker.h"
-#include "internal/task_tracing_internal.h"
 #include <neixx/task/scoped_blocking_call.h>
 #include <neixx/task/task_observer.h>
 #include <neixx/task/task_traits.h>
 #include <neixx/threading/platform_thread.h>
 #include <neixx/trace_event/trace_event.h>
+
+#include "internal/delayed_task_manager.h"
+#include "internal/pooled_task_queue.h"
+#include "internal/pooled_task_runner_utils.h"
+#include "internal/pooled_task_source.h"
+#include "internal/task.h"
+#include "internal/task_tracing_internal.h"
+#include "internal/task_tracker.h"
+#include "internal/thread_group.h"
 
 namespace nei {
 namespace {
@@ -979,10 +981,12 @@ public:
       const std::int64_t count = task_source_.GetTotalTaskCount();
       if (count >= kBackpressureWarningThreshold
           && !backpressure_warning_emitted_.exchange(true, std::memory_order_relaxed)) {
-        NEI_LOG_WARN("[ThreadPool] Backpressure: %lld pending tasks "
-                     "(threshold=%lld). Producer may be outpacing consumers.",
-                     static_cast<long long>(count),
-                     static_cast<long long>(kBackpressureWarningThreshold));
+        NEI_LOG_C(g_nei_logger,
+                  NEI_L_WARN,
+                  "[ThreadPool] Backpressure: %lld pending tasks "
+                  "(threshold=%lld). Producer may be outpacing consumers.",
+                  static_cast<long long>(count),
+                  static_cast<long long>(kBackpressureWarningThreshold));
       }
     });
 
@@ -1037,10 +1041,12 @@ public:
       const std::int64_t count = task_source_.GetTotalTaskCount();
       if (count >= kBackpressureWarningThreshold
           && !backpressure_warning_emitted_.exchange(true, std::memory_order_relaxed)) {
-        NEI_LOG_WARN("[ThreadPool] Backpressure: %lld pending tasks "
-                     "(threshold=%lld). Producer may be outpacing consumers.",
-                     static_cast<long long>(count),
-                     static_cast<long long>(kBackpressureWarningThreshold));
+        NEI_LOG_C(g_nei_logger,
+                  NEI_L_WARN,
+                  "[ThreadPool] Backpressure: %lld pending tasks "
+                  "(threshold=%lld). Producer may be outpacing consumers.",
+                  static_cast<long long>(count),
+                  static_cast<long long>(kBackpressureWarningThreshold));
       }
     });
 
@@ -1237,8 +1243,9 @@ public:
       }
       if (std::chrono::steady_clock::now() >= deadline) {
         // Do not hang forever on a misbehaving task; surface the stall.
-        NEI_LOG_WARN("[ThreadPool] FlushForTesting timed out waiting for "
-                     "enqueued tasks to finish executing");
+        NEI_LOG_C(g_nei_logger,
+                  NEI_L_WARNING "[ThreadPool] FlushForTesting timed out waiting for "
+                                "enqueued tasks to finish executing");
         return;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
