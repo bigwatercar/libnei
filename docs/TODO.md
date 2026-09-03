@@ -1,6 +1,6 @@
 # libnei — TODO & Roadmap
 
-**Updated**: 2026-08-29
+**Updated**: 2026-09-03
 
 > 已完成的详细实现记录已归档至仓库记忆（`/memories/repo/`）与 `bench/results/`；
 > 本文档只保留**未完成任务**与**里程碑摘要**，避免重复堆积。
@@ -27,7 +27,6 @@
 ### 推迟
 
 - **TCPServerSocket_FDExhaustion**（POSIX, P2）— 场景难以可靠构造、生产影响极低。
-- **CMake `COMPILER_IS_*` 审查遗留** — 手动处理，不纳入自动化任务。
 
 ### 可选 API 补齐（Chromium 对齐遗留）
 
@@ -40,6 +39,12 @@
 
 ## 里程碑摘要（已完成）
 
+- **2026-09-03** — CMake 编译器检测重构：`COMPILER_IS_*` 内联检测逻辑从 top-level
+  CMakeLists 提取为 `cmake/neiDetectCompiler.cmake` 模块（include-once 保护），统一为
+  `NEI_COMPILER_IS_MSVC/GNU/APPLE_CLANG`、`NEI_MSVC_FLAVOR` / `NEI_GNU_FLAVOR` 等变量；
+  top-level 与 external/（c-ares、nghttp2 等）消费者全部改用新变量；mbedtls 增加
+  `CMAKE_C_COMPILER_FRONTEND_VARIANT` 兼容（clang-cl/MSVC）；新增 cmake 格式配置
+  （`e4fe29d`）。
 - **2026-08-29** — HTTP 中间件最小形态落地：`HttpServer::AddFilter` 全局前置过滤器
   （h1+h2 双协议，路由派发前按序执行，false 短路 + 默认 403，可注入请求头；8 测试，
   Win/WSL 全过）。TODO 唯一显式剩余项清除。
