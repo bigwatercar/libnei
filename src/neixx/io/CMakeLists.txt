@@ -53,9 +53,3 @@ target_include_directories(
 if(WIN32)
   target_link_libraries(nei PRIVATE ws2_32)
 endif()
-
-install(
-  DIRECTORY include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-  PATTERN "internal" EXCLUDE
-)

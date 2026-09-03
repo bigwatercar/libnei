@@ -1,5 +1,6 @@
-set(NEIXX_FILES_SOURCES ${PROJECT_SOURCE_DIR}/include/neixx/files/file_path_watcher.h
-                        file_path_watcher.cpp
+set(NEIXX_FILES_SOURCES
+    ${PROJECT_SOURCE_DIR}/include/neixx/files/file_path_watcher.h
+    file_path_watcher.cpp
 )
 
 if(WIN32)
@@ -19,10 +20,4 @@ target_include_directories(
   PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-)
-
-install(
-  DIRECTORY include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-  PATTERN "internal" EXCLUDE
 )

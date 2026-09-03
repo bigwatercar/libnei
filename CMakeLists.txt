@@ -245,6 +245,14 @@ install(
 # include/neixx/...).
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
+# Architecture-independent documentation and license files.  GNUInstallDirs
+# has no DOCDIR, so we place the docs under the data root (share/) at
+# share/doc/nei and install the LICENSE into the distro-license convention
+# directory share/licenses/nei (discoverable by compliance scanners such as
+# licensee / scancode, and namespaced to avoid clashes with other packages).
+install(DIRECTORY docs/ DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/nei)
+install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/nei)
+
 configure_package_config_file(
   cmake/neiConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/neiConfig.cmake
   INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/nei
