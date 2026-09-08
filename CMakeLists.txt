@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.23)
 
 project(
   nei
-  VERSION 0.9.0
+  VERSION 0.9.1
   DESCRIPTION
     "libNei: A modern, cross-platform C/C++ foundation library focusing on performance, safety, and ease of use."
   LANGUAGES C CXX
