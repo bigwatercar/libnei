@@ -1,6 +1,6 @@
 # libnei — TODO & Roadmap
 
-**Updated**: 2026-09-03
+**Updated**: 2026-09-26
 
 > 已完成的详细实现记录已归档至仓库记忆（`/memories/repo/`）与 `bench/results/`；
 > 本文档只保留**未完成任务**与**里程碑摘要**，避免重复堆积。
@@ -14,8 +14,6 @@
 - **h2c 明文 HTTP/2 升级** — 触发条件：① 引入 gRPC 支持；② 明确内部明文 h2 多路复用需求。
   现状仅 TLS+ALPN h2；需服务端 `PRI * HTTP/2.0` 帧序言嗅探 + `Upgrade: h2c` 101 流程 +
   客户端 prior-knowledge/upgrade 双路径，ROI 低。
-- **Storage Device Monitoring** — 无 Chromium 参考需自研（Win `RegisterDeviceNotification` /
-  Linux libudev），未排期。
 
 ### 低优先（P3）
 
@@ -27,6 +25,10 @@
 ### 推迟
 
 - **TCPServerSocket_FDExhaustion**（POSIX, P2）— 场景难以可靠构造、生产影响极低。
+- **Storage Device Monitoring (Windows)** — Linux 部分（原生 `NETLINK_KOCKET_UEVENT` netlink socket，
+  `nl_pid=0`/`nl_groups=1` 内核 uevents；`block` 子系统 + `DEVTYPE disk` 整盘过滤，已用真实 USB
+  硬盘插拔验收）已于 2026-09-26 落地（见里程碑摘要）；Win 需 `RegisterDeviceNotification`
+  / `DMIOCP` 自研、无 Chromium 参考，暂缓。
 
 ### 可选 API 补齐（Chromium 对齐遗留）
 
@@ -39,6 +41,18 @@
 
 ## 里程碑摘要（已完成）
 
+- **2026-09-26** — **Storage Device Monitoring（Linux）** 落地：新增 `neixx/storage` 模块
+  （`StorageDeviceMonitor`，Pimpl + `MessagePumpForIO::Watcher`）。Linux 用原生
+  `NETLINK_KOCKET_UEVENT` netlink socket（`nl_pid=0`/`nl_groups=1`，手动解析内核 udev 扁平
+  `<action>@<devpath>` + `KEY=VALUE` 消息），`block` 子系统 + `DEVTYPE disk` 整盘过滤；
+  `Start()`/`Stop()` 生命周期，回调投递到绑定 `TaskRunner`（同序列同步 / 跨序列 `PostTask`）。
+  回调持久化（`Stop()` 不再清空，由 `watching_` 门控投递）。不依赖 libudev：该工具链下
+  `udev_monitor_new_from_netlink()` 的 socket 以 `nl_groups=0` 绑定、收不到任何事件（此内核
+  udev 事件为扁平字符串而非 NLA 属性，故直接按字符串序列解析）。5 个单测全过
+  （`StartReturnsTrueWhenUvidAvailable`、`SyncDispatchDeliversCallbackOnIoSequence`、
+  `AsyncDispatchPostsToBoundRunner`、`NoCallbacksAfterStop`、`DestructorStopsMonitor`）；
+  真实 USB 硬盘插拔验收：整条 usb→scsi→block 事件链收到，`[EVENT] ADDED`/`REMOVED`
+  正确派发，root / 非 root 均工作。
 - **2026-09-03** — CMake 编译器检测重构：`COMPILER_IS_*` 内联检测逻辑从 top-level
   CMakeLists 提取为 `cmake/neiDetectCompiler.cmake` 模块（include-once 保护），统一为
   `NEI_COMPILER_IS_MSVC/GNU/APPLE_CLANG`、`NEI_MSVC_FLAVOR` / `NEI_GNU_FLAVOR` 等变量；

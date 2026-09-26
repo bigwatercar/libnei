@@ -186,6 +186,13 @@ if(NOT WIN32)
     PUBLIC Threads::Threads
     PRIVATE m
   )
+  # glibc < 2.34 keeps dlopen()/dlclose()/dlsym()/dlerror() in libdl.so and
+  # shm_open()/shm_unlink() in librt.so (they are not in libc.so.6).  The
+  # linker will not pull these in automatically for a shared library, so link
+  # them explicitly; otherwise consumers get "undefined reference".
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(nei PRIVATE dl rt)
+  endif()
 endif()
 
 add_subdirectory(src/nei)

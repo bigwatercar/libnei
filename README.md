@@ -51,6 +51,7 @@ This library is developed with the assistance of AI-powered coding assistants. L
 | `net/websocket` | RFC 6455: `WebSocketClient` / `WebSocketConnection` / `WebSocketFrame` (text / binary / ping, TCP + TLS) |
 | `ipc` | `MessageChannel` / `RpcEndpoint` — inter-process communication abstractions |
 | `process` | Child process management, process utilities, privilege elevation |
+| `storage` | Storage-device event monitoring: whole-disk (DEVTYPE disk) add/remove/change (`StorageDeviceMonitor`). Linux uses a raw NETLINK_KOCKET_UEVENT netlink socket (no libudev dependency), `block` subsystem + `DEVTYPE disk` filter; callbacks are always delivered to the bound `TaskRunner`; Windows backend is reserved |
 | `url` | RFC 3986 / WHATWG-compliant URL parsing (`Url`, zero-copy `string_view` accessors), percent-encoding (`url_encoding.h`) |
 | `trace_event` | Lightweight trace event instrumentation (optional) |
 | `log` | C++ log header wrapper |
