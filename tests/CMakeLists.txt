@@ -65,6 +65,7 @@ add_executable(
   platform_thread_test.cpp
   pipe_stream_test.cpp
   file_path_watcher_test.cpp
+  storage_device_monitor_test.cpp
   ref_counted_test.cpp
   weak_ptr_test.cpp
   thread_test.cpp

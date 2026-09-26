@@ -37,6 +37,9 @@ target_link_libraries(elevated_process_example PRIVATE nei::nei)
 add_executable(memory_monitor_example memory_monitor_example.cpp)
 target_link_libraries(memory_monitor_example PRIVATE nei::nei)
 
+add_executable(storage_device_monitor_example storage_device_monitor_example.cpp)
+target_link_libraries(storage_device_monitor_example PRIVATE nei::nei)
+
 add_executable(resolve_connect_example resolve_connect_example.cpp)
 target_link_libraries(resolve_connect_example PRIVATE nei::nei)
 

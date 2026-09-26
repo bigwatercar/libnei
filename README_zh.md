@@ -51,6 +51,7 @@ Chromium 的 `//base` 目录包含大量精心设计的跨平台基础设施—�
 | `net/websocket` | RFC 6455：`WebSocketClient` / `WebSocketConnection` / `WebSocketFrame`（文本 / 二进制 / ping，TCP + TLS） |
 | `ipc` | `MessageChannel` / `RpcEndpoint` — 进程间通信抽象 |
 | `process` | 子进程管理、进程工具函数、权限提升 |
+| `storage` | 存储设备事件监听：整盘（`DEVTYPE disk`）新增/移除/变更（`StorageDeviceMonitor`）。Linux 原生 `NETLINK_KOCKET_UEVENT` netlink socket（`nl_pid=0`/`nl_groups=1`，直接解析内核 udev 扁平 `KEY=VALUE` 消息，不依赖 libudev），`block` 子系统 + `DEVTYPE disk` 整盘过滤；回调始终投递到绑定 `TaskRunner`（`storage_device_monitor.h`）；Windows 后端预留 |
 | `url` | 符合 RFC 3986 / WHATWG 的 URL 解析（`Url`，零拷贝 `string_view` 访问器）、百分号编码（`url_encoding.h`） |
 | `trace_event` | 轻量级 trace event 埋点（可选编译） |
 | `log` | C++ 层 log 头文件封装 |

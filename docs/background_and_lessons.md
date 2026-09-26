@@ -237,14 +237,14 @@
   HostResolver（c-ares）、Keep-Alive 双层。
 - HTTP：HttpServer（h1+h2 单端口 ALPN、流式双向、背压、模式路由、WebSocket）、
   HttpClient（h1/h2 融合、keep-alive、流式上传/下载、HttpFileTransfer）、
-  HttpClientPool、HttpRequestHandle + HttpServerRequestHandle（Cancel/SetPriority）。
+   HttpClientPool、HttpRequestHandle + HttpServerRequestHandle（Cancel/SetPriority）。
 - IPC：MessageChannel/RpcEndpoint；进程：ChildProcess/ProcessService。
 - C 层：日志（MPSC 无锁环）、encoding、路径、系统信息、flake_id、crypto。
-
+- 存储：StorageDeviceMonitor（netlink 监听整盘 add/remove/change，真实 USB 硬盘插拔验收）。
+ 
 **未完成/候选**（详见 docs/TODO.md）：
 - P3：TaskQueueSelector cache-line 布局、PipeStream direct dispatch、CMake 检测审查。
 - HTTP 功能补全：中间件；HttpClient 自动跟随重定向（组件已就绪）。
-- Future：Storage Device Monitoring（自研）。
 
 ---
 
