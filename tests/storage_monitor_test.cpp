@@ -1,0 +1,409 @@
+// =============================================================================
+// StorageMonitor unit tests - fake mountinfo / sysfs / dev-disk trees
+// =============================================================================
+
+#include <gtest/gtest.h>
+
+#include <chrono>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include <neixx/common/location.h>
+#include <neixx/io/io_thread.h>
+#include <neixx/storage/storage_monitor.h>
+#include <neixx/synchronization/waitable_event.h>
+#include <neixx/task/task_runner.h>
+
+namespace nei {
+namespace {
+
+namespace fs = std::filesystem;
+
+struct RecordingObserver : RemovableStorageObserver {
+  std::vector<StorageInfo> attached;
+  std::vector<StorageInfo> detached;
+  std::vector<std::string> order; // "A:<id>" / "D:<id>"
+
+  void OnRemovableStorageAttached(const StorageInfo &info) override {
+    attached.push_back(info);
+    order.push_back("A:" + info.device_id);
+  }
+
+  void OnRemovableStorageDetached(const StorageInfo &info) override {
+    detached.push_back(info);
+    order.push_back("D:" + info.device_id);
+  }
+};
+
+class StorageMonitorTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    IOThread::Start();
+    io_runner_ = GetGlobalIOTaskRunner();
+    ASSERT_TRUE(io_runner_);
+
+    root_ = fs::temp_directory_path() / ("libnei_storage_test_" + std::to_string(counter_++) + "_" + UniqueSuffix());
+    fs::create_directories(root_);
+#if !defined(_WIN32)
+    BuildFakeSystem();
+#endif
+  }
+
+  void TearDown() override {
+    IOThread::ResetForTesting();
+    std::error_code ec;
+    fs::remove_all(root_, ec);
+  }
+
+  static std::string UniqueSuffix() {
+    return std::to_string(reinterpret_cast<std::uintptr_t>(&counter_));
+  }
+
+  void WriteFile(const fs::path &p, const std::string &content) {
+    fs::create_directories(p.parent_path());
+    std::ofstream(p, std::ios::binary) << content;
+  }
+
+#if !defined(_WIN32)
+  // sda1: fixed disk (8:1), no identifiers -> path fallback.  sdb1: USB stick
+  // partition (8:17) with filesystem UUID and label.  sdc1: removable=1 disk
+  // (8:33) with only a partition UUID.  sdd1: fixed partition with only a disk
+  // wwid.  sde (8:49): whole removable disk with only a device serial.
+  void BuildFakeSystem() {
+    const fs::path sys = root_ / "sys";
+    auto add_disk = [&](const std::string &bus_dir,
+                        const std::string &disk,
+                        const std::string &part,
+                        const std::string &majmin,
+                        const std::string &removable) {
+      const fs::path disk_dir = sys / "devices/pci0" / bus_dir / "block" / disk;
+      WriteFile(disk_dir / "removable", removable + "\n");
+      WriteFile(disk_dir / "device/vendor", "SanDisk \n");
+      WriteFile(disk_dir / "device/model", "Cruzer Blade     \n");
+      WriteFile(disk_dir / part / "partition", "1\n");
+      WriteFile(disk_dir / part / "size", "2048\n");
+      fs::create_directories(sys / "dev/block");
+      fs::create_directory_symlink(fs::path("../../devices/pci0") / bus_dir / "block" / disk / part,
+                                   sys / "dev/block" / majmin);
+    };
+    add_disk("ata1", "sda", "sda1", "8:1", "0");
+    add_disk("usb1", "sdb", "sdb1", "8:17", "0");
+    add_disk("ata2", "sdc", "sdc1", "8:33", "1");
+    add_disk("ata3", "sdd", "sdd1", "8:65", "0");
+    WriteFile(sys / "devices/pci0/ata3/block/sdd/device/wwid", "naa.5001b448b1a3e0c3\n");
+
+    const fs::path sde = sys / "devices/pci0/usb2/block/sde";
+    WriteFile(sde / "removable", "1\n");
+    WriteFile(sde / "size", "4096\n");
+    WriteFile(sde / "device/serial", "USB-SERIAL-9 \n");
+    fs::create_directories(sys / "dev/block");
+    fs::create_directory_symlink("../../devices/pci0/usb2/block/sde", sys / "dev/block/8:49");
+
+    WriteFile(sys / "devices/virtual/block/loop0/size", "1024\n");
+    fs::create_directory_symlink("../../devices/virtual/block/loop0", sys / "dev/block/7:0");
+
+    const fs::path by_uuid = root_ / "dev/disk/by-uuid";
+    const fs::path by_partuuid = root_ / "dev/disk/by-partuuid";
+    const fs::path by_label = root_ / "dev/disk/by-label";
+    fs::create_directories(by_uuid);
+    fs::create_directories(by_partuuid);
+    fs::create_directories(by_label);
+    fs::create_symlink("../../sdb1", by_uuid / "ABCD-1234");
+    fs::create_symlink("../../sdb1", by_label / "MY\\x20USB");
+    // sdb1 has both, so the filesystem UUID must win over the partition UUID.
+    fs::create_symlink("../../sdb1", by_partuuid / "11111111-2222-3333-4444-555555555555");
+    fs::create_symlink("../../sdc1", by_partuuid / "99999999-8888-7777-6666-555555555555");
+
+    options_.mountinfo_path = (root_ / "mountinfo").string();
+    options_.sysfs_root = sys.string();
+    options_.dev_disk_root = (root_ / "dev/disk").string();
+    options_.watch_changes = false;
+  }
+#endif
+
+  void SetMountInfo(const std::vector<std::string> &lines) {
+    std::string content;
+    for (const auto &l : lines)
+      content += l + "\n";
+    WriteFile(root_ / "mountinfo", content);
+  }
+
+  void RunOnIO(std::function<void()> fn) {
+    WaitableEvent done(WaitableEvent::ResetPolicy::kManual);
+    io_runner_->PostTask(FROM_HERE, [&]() {
+      fn();
+      done.Signal();
+    });
+    ASSERT_TRUE(done.TimedWait(std::chrono::milliseconds(5000)));
+  }
+
+  static constexpr const char *kRoot = "30 1 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw";
+  static constexpr const char *kUsb = "36 30 8:17 / /media/usb\\040stick rw - vfat /dev/sdb1 rw";
+
+  scoped_refptr<SingleThreadTaskRunner> io_runner_;
+  fs::path root_;
+  StorageMonitor::Options options_;
+  static inline int counter_ = 0;
+};
+
+#if defined(_WIN32)
+
+TEST_F(StorageMonitorTest, StartReturnsFalseOnWindows) {
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_);
+    EXPECT_FALSE(monitor.Start());
+    EXPECT_FALSE(monitor.is_started());
+    EXPECT_TRUE(monitor.GetAllAvailableStorages().empty());
+  });
+}
+
+#else
+
+TEST_F(StorageMonitorTest, InitialEnumerationReportsFixedAndRemovable) {
+  SetMountInfo({kRoot, kUsb});
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    ASSERT_TRUE(monitor.Start());
+    auto all = monitor.GetAllAvailableStorages();
+    ASSERT_EQ(all.size(), 2u);
+
+    StorageInfo usb, fixed;
+    ASSERT_TRUE(monitor.GetStorageInfoForPath("/media/usb stick/dir/file", &usb));
+    ASSERT_TRUE(monitor.GetStorageInfoForPath("/etc/passwd", &fixed));
+
+    EXPECT_EQ(usb.type, StorageInfo::Type::kRemovableMassStorage);
+    EXPECT_EQ(usb.device_id, "uuid:ABCD-1234");
+    EXPECT_EQ(usb.location, "/media/usb stick");
+    EXPECT_EQ(usb.label, "MY USB");
+    EXPECT_EQ(usb.vendor, "SanDisk");
+    EXPECT_EQ(usb.model, "Cruzer Blade");
+    EXPECT_EQ(usb.total_size_bytes, 2048u * 512u);
+
+    EXPECT_EQ(fixed.type, StorageInfo::Type::kFixedMassStorage);
+    EXPECT_EQ(fixed.device_id, "path:/dev/sda1");
+    EXPECT_EQ(fixed.location, "/");
+  });
+}
+
+TEST_F(StorageMonitorTest, RemovableFlagWithoutUsbPathIsRemovable) {
+  SetMountInfo({"40 30 8:33 / /mnt/card rw - vfat /dev/sdc1 rw"});
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    ASSERT_TRUE(monitor.Start());
+    auto all = monitor.GetAllAvailableStorages();
+    ASSERT_EQ(all.size(), 1u);
+    EXPECT_EQ(all[0].type, StorageInfo::Type::kRemovableMassStorage);
+    EXPECT_TRUE(all[0].label.empty());
+  });
+}
+
+TEST_F(StorageMonitorTest, DeviceIdPrefersTheMostStableIdentifierAvailable) {
+  SetMountInfo({kRoot,
+                kUsb,
+                "40 30 8:33 / /mnt/card rw - vfat /dev/sdc1 rw",
+                "41 30 8:65 / /mnt/wwid rw - ext4 /dev/sdd1 rw",
+                "42 30 8:49 / /mnt/serial rw - vfat /dev/sde rw"});
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    ASSERT_TRUE(monitor.Start());
+    StorageInfo info;
+
+    // Filesystem UUID wins even though this partition also has a partition UUID.
+    ASSERT_TRUE(monitor.GetStorageInfoForPath("/media/usb stick/f", &info));
+    EXPECT_EQ(info.device_id, "uuid:ABCD-1234");
+
+    // No filesystem UUID: the partition UUID is used next.
+    ASSERT_TRUE(monitor.GetStorageInfoForPath("/mnt/card", &info));
+    EXPECT_EQ(info.device_id, "partuuid:99999999-8888-7777-6666-555555555555");
+
+    // No UUIDs at all: the disk wwid plus the partition index.
+    ASSERT_TRUE(monitor.GetStorageInfoForPath("/mnt/wwid", &info));
+    EXPECT_EQ(info.device_id, "wwid:naa.5001b448b1a3e0c3p1");
+
+    // Whole disk with only a serial: no partition suffix.
+    ASSERT_TRUE(monitor.GetStorageInfoForPath("/mnt/serial", &info));
+    EXPECT_EQ(info.device_id, "serial:USB-SERIAL-9");
+
+    // Nothing to identify the device: device-node fallback.
+    ASSERT_TRUE(monitor.GetStorageInfoForPath("/etc/fstab", &info));
+    EXPECT_EQ(info.device_id, "path:/dev/sda1");
+
+    // Every volume still gets its own id.
+    std::set<std::string> ids;
+    for (const auto &s : monitor.GetAllAvailableStorages())
+      EXPECT_TRUE(ids.insert(s.device_id).second) << s.device_id;
+    EXPECT_EQ(ids.size(), 5u);
+  });
+}
+
+TEST_F(StorageMonitorTest, NonDeviceAndUnknownMountsAreIgnored) {
+  SetMountInfo({kRoot,
+                "31 30 0:5 / /proc rw - proc proc rw",
+                "32 30 0:20 / /tmp rw - tmpfs tmpfs rw",
+                "33 30 7:0 / /snap/core rw - squashfs /dev/loop0 ro",
+                "34 30 9:9 / /mnt/ghost rw - ext4 /dev/sdz9 rw"});
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    ASSERT_TRUE(monitor.Start());
+    EXPECT_EQ(monitor.GetAllAvailableStorages().size(), 1u);
+  });
+}
+
+TEST_F(StorageMonitorTest, InitialStoragesDoNotNotify) {
+  SetMountInfo({kRoot, kUsb});
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    RecordingObserver obs;
+    monitor.AddObserver(&obs);
+    ASSERT_TRUE(monitor.Start());
+    EXPECT_TRUE(obs.order.empty());
+    monitor.RemoveObserver(&obs);
+  });
+}
+
+TEST_F(StorageMonitorTest, RescanNotifiesAttachAndDetachOfRemovableOnly) {
+  SetMountInfo({kRoot});
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    RecordingObserver obs;
+    monitor.AddObserver(&obs);
+    ASSERT_TRUE(monitor.Start());
+
+    SetMountInfo({kRoot, kUsb});
+    monitor.Rescan();
+    ASSERT_EQ(obs.attached.size(), 1u);
+    EXPECT_EQ(obs.attached[0].device_id, "uuid:ABCD-1234");
+    EXPECT_EQ(monitor.GetAllAvailableStorages().size(), 2u);
+
+    monitor.Rescan(); // no change
+    EXPECT_EQ(obs.order.size(), 1u);
+
+    SetMountInfo({kRoot});
+    monitor.Rescan();
+    ASSERT_EQ(obs.detached.size(), 1u);
+    EXPECT_EQ(obs.detached[0].location, "/media/usb stick");
+    EXPECT_EQ(monitor.GetAllAvailableStorages().size(), 1u);
+
+    // Fixed disk disappearing is not reported.
+    SetMountInfo({});
+    monitor.Rescan();
+    EXPECT_EQ(obs.order.size(), 2u);
+    monitor.RemoveObserver(&obs);
+  });
+}
+
+TEST_F(StorageMonitorTest, MovedMountPointNotifiesDetachThenAttach) {
+  SetMountInfo({kUsb});
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    RecordingObserver obs;
+    monitor.AddObserver(&obs);
+    ASSERT_TRUE(monitor.Start());
+
+    SetMountInfo({"36 30 8:17 / /mnt/other rw - vfat /dev/sdb1 rw"});
+    monitor.Rescan();
+    ASSERT_EQ(obs.order.size(), 2u);
+    EXPECT_EQ(obs.order[0], "D:uuid:ABCD-1234");
+    EXPECT_EQ(obs.order[1], "A:uuid:ABCD-1234");
+    EXPECT_EQ(obs.attached[0].location, "/mnt/other");
+    monitor.RemoveObserver(&obs);
+  });
+}
+
+TEST_F(StorageMonitorTest, DeviceMountedTwiceIsReportedOnceAtFirstMountPoint) {
+  SetMountInfo({kUsb, "37 30 8:17 /sub /srv/bind rw - vfat /dev/sdb1 rw"});
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    ASSERT_TRUE(monitor.Start());
+    auto all = monitor.GetAllAvailableStorages();
+    ASSERT_EQ(all.size(), 1u);
+    EXPECT_EQ(all[0].location, "/media/usb stick");
+  });
+}
+
+TEST_F(StorageMonitorTest, ObserverMayUnregisterInsideCallback) {
+  struct SelfRemoving : RemovableStorageObserver {
+    StorageMonitor *monitor = nullptr;
+    int calls = 0;
+
+    void OnRemovableStorageAttached(const StorageInfo &) override {
+      ++calls;
+      monitor->RemoveObserver(this);
+    }
+
+    void OnRemovableStorageDetached(const StorageInfo &) override {
+      ++calls;
+    }
+  };
+
+  SetMountInfo({kRoot});
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    SelfRemoving a;
+    RecordingObserver b;
+    a.monitor = &monitor;
+    monitor.AddObserver(&a);
+    monitor.AddObserver(&b);
+    ASSERT_TRUE(monitor.Start());
+
+    SetMountInfo({kRoot, kUsb});
+    monitor.Rescan();
+    EXPECT_EQ(a.calls, 1);
+    EXPECT_EQ(b.attached.size(), 1u);
+
+    SetMountInfo({kRoot});
+    monitor.Rescan();
+    EXPECT_EQ(a.calls, 1); // unregistered
+    EXPECT_EQ(b.detached.size(), 1u);
+    monitor.RemoveObserver(&b);
+  });
+}
+
+TEST_F(StorageMonitorTest, GetStorageInfoForPathUsesLongestMountPointOnComponentBoundary) {
+  SetMountInfo({kRoot, kUsb});
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    ASSERT_TRUE(monitor.Start());
+
+    StorageInfo info;
+    ASSERT_TRUE(monitor.GetStorageInfoForPath("/media/usb stick", &info));
+    EXPECT_EQ(info.device_id, "uuid:ABCD-1234");
+
+    // "/media/usb stickX" is a sibling directory on the root volume.
+    ASSERT_TRUE(monitor.GetStorageInfoForPath("/media/usb stickX/f", &info));
+    EXPECT_EQ(info.location, "/");
+
+    EXPECT_FALSE(monitor.GetStorageInfoForPath("relative/path", &info));
+  });
+}
+
+TEST_F(StorageMonitorTest, RescanBeforeStartIsNoOp) {
+  SetMountInfo({kUsb});
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    monitor.Rescan();
+    EXPECT_TRUE(monitor.GetAllAvailableStorages().empty());
+  });
+}
+
+TEST_F(StorageMonitorTest, StartWatchingRealMountTableAndStop) {
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_); // default Options: real procfs, epoll watch
+    ASSERT_TRUE(monitor.Start());
+    EXPECT_TRUE(monitor.is_started());
+    EXPECT_TRUE(monitor.Start()); // idempotent
+    monitor.Stop();
+    EXPECT_FALSE(monitor.is_started());
+    ASSERT_TRUE(monitor.Start()); // restartable
+  });
+}
+
+#endif // _WIN32
+
+} // namespace
+} // namespace nei

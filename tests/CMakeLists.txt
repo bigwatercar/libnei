@@ -90,6 +90,7 @@ add_executable(
   string_number_conversions_test.cpp
   string_util_test.cpp
   sys_info_test.cpp
+  storage_monitor_test.cpp
   text_normalization_test.cpp
   time_test.cpp
   utf_string_conversions_test.cpp
