@@ -2,7 +2,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <memory>
+#include <new>
 
 #include <neixx/functional/bind.h>
 #include <neixx/functional/cancelable_callback.h>
@@ -72,7 +74,7 @@ TEST(TaskCallbackTest, OnceCallbackRunsAtMostOnce) {
 TEST(TaskCallbackTest, BindRepeatingSupportsOverAlignedFunctorStorage) {
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable: 4324)  // alignas padding
+#pragma warning(disable : 4324) // alignas padding
 #endif
   struct alignas(64) AlignedFunctor {
     bool *aligned = nullptr;
@@ -112,6 +114,17 @@ TEST(TaskCallbackTest, RepeatingCallbackRunsMultipleTimes) {
   cb.Run();
 
   EXPECT_EQ(count, 6);
+}
+
+TEST(TaskCallbackTest, DefaultConstructedRepeatingCallbackIsNullOnDirtyMemory) {
+  // Default-initialization (no parentheses) must not leave the invoke pointer indeterminate.
+  alignas(nei::RepeatingClosure) unsigned char storage[sizeof(nei::RepeatingClosure)];
+  std::memset(storage, 0xAB, sizeof(storage));
+  auto *cb = new (storage) nei::RepeatingClosure;
+
+  EXPECT_FALSE(*cb);
+  EXPECT_TRUE(cb->IsNull());
+  std::destroy_at(cb);
 }
 
 TEST(TaskCallbackTest, RepeatingCallbackIsCopyable) {

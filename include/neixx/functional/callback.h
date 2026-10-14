@@ -216,7 +216,7 @@ private:
   NEI_SUPPRESS_MSC_WARNING_4251_BEGIN
   scoped_refptr<detail::BindStateBase> state_;
   NEI_SUPPRESS_MSC_WARNING_4251_END
-  InvokeFunc fn_;
+  InvokeFunc fn_ = nullptr;
 
   template <typename F>
   void Init(F &&fn) {
@@ -244,7 +244,7 @@ using RepeatingClosure = RepeatingCallback<void()>;
 // Layout contract (both are 16 bytes on x64):
 //   OnceCallback<void()>   = { BindStateBase* state_; InvokeFunc fn_ }
 //   RepeatingCallback<void()> = { scoped_refptr<BindStateBase> state_; InvokeFunc fn_ }
-NEI_SUPPRESS_MSC_WARNING_BEGIN(4910)  // extern template + dllexport
+NEI_SUPPRESS_MSC_WARNING_BEGIN(4910) // extern template + dllexport
 extern template class NEI_API OnceCallback<void()>;
 extern template class NEI_API RepeatingCallback<void()>;
 NEI_SUPPRESS_MSC_WARNING_END()
