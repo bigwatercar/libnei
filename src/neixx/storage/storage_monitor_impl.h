@@ -13,8 +13,18 @@
 
 namespace nei {
 
+// Everything a scan needs, copied so it can run on a worker without touching
+// the Impl.
+struct StorageScanConfig {
+  std::string mountinfo_path;
+  std::string sysfs_root;
+  std::string dev_disk_root;
+};
+
 class StorageMonitor::Impl final : public MessagePumpForIO::Watcher {
 public:
+  using ScanConfig = StorageScanConfig;
+
   Impl(scoped_refptr<SingleThreadTaskRunner> task_runner, Options options);
   ~Impl() override;
 
@@ -31,6 +41,10 @@ public:
   std::vector<StorageInfo> GetAllAvailableStorages() const;
   bool GetStorageInfoForPath(const std::string &path, StorageInfo *info) const;
   void Rescan();
+  void EjectDevice(const std::string &device_id, OnceCallback<void(EjectStatus)> callback);
+
+  // Entry point for change events; runs on the monitor sequence.
+  void OnPlatformEvent();
 
   // MessagePumpForIO::Watcher:
   void OnFileCanReadWithoutBlocking(NativeIOHandle) override {
@@ -39,21 +53,43 @@ public:
   void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) override;
 
 private:
-  // Entry point for platform change events; runs on the monitor sequence.
-  void OnPlatformEvent();
+  // Lets worker-side continuations detect that the Impl is gone; |impl| is
+  // only read and cleared on the monitor sequence.
+  struct Alive {
+    Impl *impl;
+  };
 
   // Platform hooks (storage_monitor_posix.cpp / storage_monitor_win.cpp).
+  // The static ones run on a worker and must not touch Impl state.
   bool PlatformStart();
   void PlatformStop();
-  std::vector<StorageInfo> PlatformScan() const;
+  static std::vector<StorageInfo> PlatformScan(const ScanConfig &config);
+  static EjectStatus PlatformEject(const std::string &location);
+
+  // Resolves where |device_id| is mounted right now, re-reading the mount
+  // table so a stale snapshot cannot redirect the eject to another volume.
+  // Returns kOk and fills |location| when it is mounted and removable.
+  static EjectStatus ResolveEjectTarget(const std::string &device_id, const ScanConfig &config, std::string *location);
 
   // Replaces the known set; when |notify| is true, reports removable volumes
   // whose device_id or mount point changed.
   void ApplySnapshot(std::vector<StorageInfo> next, bool notify);
 
+  void StartAsyncScan();
+  void OnAsyncScanDone(std::vector<StorageInfo> result);
+  void RunEventHook();
+  void DeliverEjectResult(std::shared_ptr<OnceCallback<void(EjectStatus)>> callback, EjectStatus status);
+
   scoped_refptr<SingleThreadTaskRunner> task_runner_;
   const Options options_;
+  const ScanConfig scan_config_;
+  const std::shared_ptr<Alive> alive_;
   bool started_ = false;
+
+  // Null when ThreadPoolInstance is not started; work then runs inline.
+  scoped_refptr<SequencedTaskRunner> blocking_runner_;
+  bool scan_in_flight_ = false;
+  bool scan_dirty_ = false;
 
   // device_id -> info; one entry per device even if mounted several times.
   std::map<std::string, StorageInfo> storages_;

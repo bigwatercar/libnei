@@ -1,9 +1,11 @@
 #if !defined(_WIN32)
 
 #include <fcntl.h>
+#include <sys/mount.h>
 #include <unistd.h>
 
 #include <cctype>
+#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -105,9 +107,9 @@ std::string FindDiskAlias(const fs::path &dir, const std::string &dev_name) {
 std::string MakeDeviceId(const fs::path &disk,
                          const std::string &dev_name,
                          const std::string &partition_index,
-                         const StorageMonitor::Options &opts,
+                         const StorageScanConfig &cfg,
                          const std::string &source) {
-  const fs::path alias_root = fs::path(opts.dev_disk_root);
+  const fs::path alias_root = fs::path(cfg.dev_disk_root);
   if (std::string uuid = FindDiskAlias(alias_root / "by-uuid", dev_name); !uuid.empty())
     return "uuid:" + uuid;
   if (std::string partuuid = FindDiskAlias(alias_root / "by-partuuid", dev_name); !partuuid.empty())
@@ -127,15 +129,15 @@ std::string MakeDeviceId(const fs::path &disk,
   return "path:" + source;
 }
 
-bool BuildStorageInfo(const MountEntry &m, const StorageMonitor::Options &opts, StorageInfo *out) {
+bool BuildStorageInfo(const MountEntry &m, const StorageScanConfig &cfg, StorageInfo *out) {
   if (m.source.compare(0, 5, "/dev/") != 0)
     return false;
 
   std::error_code ec;
-  const fs::path sys_root = fs::canonical(opts.sysfs_root, ec);
+  const fs::path sys_root = fs::canonical(cfg.sysfs_root, ec);
   if (ec)
     return false;
-  const fs::path dev = fs::canonical(fs::path(opts.sysfs_root) / "dev" / "block" / m.major_minor, ec);
+  const fs::path dev = fs::canonical(fs::path(cfg.sysfs_root) / "dev" / "block" / m.major_minor, ec);
   if (ec)
     return false;
 
@@ -152,9 +154,9 @@ bool BuildStorageInfo(const MountEntry &m, const StorageMonitor::Options &opts, 
   const bool removable = ReadTrimmed(disk / "removable") == "1" || on_usb;
 
   out->type = removable ? StorageInfo::Type::kRemovableMassStorage : StorageInfo::Type::kFixedMassStorage;
-  out->device_id = MakeDeviceId(disk, name, partition_index, opts, m.source);
+  out->device_id = MakeDeviceId(disk, name, partition_index, cfg, m.source);
   out->location = m.mount_point;
-  out->label = UnescapeHexName(FindDiskAlias(fs::path(opts.dev_disk_root) / "by-label", name));
+  out->label = UnescapeHexName(FindDiskAlias(fs::path(cfg.dev_disk_root) / "by-label", name));
   out->vendor = ReadTrimmed(disk / "device" / "vendor");
   out->model = ReadTrimmed(disk / "device" / "model");
   // sysfs "size" counts 512-byte sectors regardless of the device block size.
@@ -196,14 +198,27 @@ void StorageMonitor::Impl::PlatformStop() {
   }
 }
 
-std::vector<StorageInfo> StorageMonitor::Impl::PlatformScan() const {
+std::vector<StorageInfo> StorageMonitor::Impl::PlatformScan(const ScanConfig &config) {
   std::vector<StorageInfo> result;
-  for (const MountEntry &m : ParseMountInfo(options_.mountinfo_path)) {
+  for (const MountEntry &m : ParseMountInfo(config.mountinfo_path)) {
     StorageInfo info;
-    if (BuildStorageInfo(m, options_, &info))
+    if (BuildStorageInfo(m, config, &info))
       result.push_back(std::move(info));
   }
   return result;
+}
+
+EjectStatus StorageMonitor::Impl::PlatformEject(const std::string &location) {
+  if (::umount2(location.c_str(), 0) == 0)
+    return EjectStatus::kOk;
+  switch (errno) {
+  case EBUSY:
+    return EjectStatus::kInUse;
+  case ENOENT:
+    return EjectStatus::kNoSuchDevice;
+  default:
+    return EjectStatus::kFailure;
+  }
 }
 
 } // namespace nei

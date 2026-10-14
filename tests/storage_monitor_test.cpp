@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <cctype>
 #include <cstdint>
@@ -26,6 +27,7 @@
 #include <neixx/storage/storage_monitor.h>
 #include <neixx/synchronization/waitable_event.h>
 #include <neixx/task/task_runner.h>
+#include <neixx/task/thread_pool_instance.h>
 
 namespace nei {
 namespace {
@@ -51,6 +53,10 @@ struct RecordingObserver : RemovableStorageObserver {
 class StorageMonitorTest : public ::testing::Test {
 protected:
   void SetUp() override {
+    // Other suites may leave a global pool behind; start from a known state.
+    ThreadPoolInstance::ResetForTesting();
+    if (WantsThreadPool())
+      ThreadPoolInstance::CreateAndStartWithDefaultParams();
     IOThread::Start();
     io_runner_ = GetGlobalIOTaskRunner();
     ASSERT_TRUE(io_runner_);
@@ -64,8 +70,13 @@ protected:
 
   void TearDown() override {
     IOThread::ResetForTesting();
+    ThreadPoolInstance::ResetForTesting();
     std::error_code ec;
     fs::remove_all(root_, ec);
+  }
+
+  virtual bool WantsThreadPool() const {
+    return false;
   }
 
   static std::string UniqueSuffix() {
@@ -157,6 +168,55 @@ protected:
   fs::path root_;
   StorageMonitor::Options options_;
   static inline int counter_ = 0;
+};
+
+// Same as above plus a started ThreadPoolInstance, so event-driven rescans
+// and ejects run on the pool.
+class StorageMonitorAsyncTest : public StorageMonitorTest {
+protected:
+  void SetUp() override {
+    StorageMonitorTest::SetUp();
+    options_.on_event_rescan_for_testing = [this]() { ++hook_count_; };
+  }
+
+  bool WantsThreadPool() const override {
+    return true;
+  }
+
+  bool WaitForHooks(int n) {
+    for (int i = 0; i < 300; ++i) {
+      if (hook_count_.load() >= n)
+        return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+  }
+
+  // Runs EjectDevice on the IO thread and waits for the callback.  Verifies the
+  // callback never runs before EjectDevice returns.
+  EjectStatus EjectAndWait(StorageMonitor *monitor, const std::string &id) {
+    struct State {
+      WaitableEvent done{WaitableEvent::ResetPolicy::kManual};
+      EjectStatus status = EjectStatus::kFailure;
+      bool returned = false;
+      bool ran_inline = false;
+    };
+
+    auto state = std::make_shared<State>();
+    io_runner_->PostTask(FROM_HERE, [=]() {
+      monitor->EjectDevice(id, [state](EjectStatus s) {
+        state->ran_inline = !state->returned;
+        state->status = s;
+        state->done.Signal();
+      });
+      state->returned = true;
+    });
+    EXPECT_TRUE(state->done.TimedWait(std::chrono::milliseconds(5000)));
+    EXPECT_FALSE(state->ran_inline);
+    return state->status;
+  }
+
+  std::atomic<int> hook_count_{0};
 };
 
 #if defined(_WIN32)
@@ -276,6 +336,50 @@ TEST_F(StorageMonitorTest, DestroyedMonitorIgnoresPendingDelayedRescan) {
   // Outlive the 1s settle delay; the stale task must not touch the freed monitor.
   std::this_thread::sleep_for(std::chrono::milliseconds(1300));
   RunOnIO([]() {});
+}
+
+TEST_F(StorageMonitorAsyncTest, SimulatedEventRescansOffThread) {
+  std::unique_ptr<StorageMonitor> monitor;
+  RunOnIO([&]() {
+    options_.watch_changes = false;
+    monitor = std::make_unique<StorageMonitor>(io_runner_, options_);
+    ASSERT_TRUE(monitor->Start());
+    monitor->SimulateChangeEventForTesting();
+  });
+  ASSERT_TRUE(WaitForHooks(1));
+  RunOnIO([&]() {
+    EXPECT_FALSE(monitor->GetAllAvailableStorages().empty());
+    monitor.reset();
+  });
+}
+
+TEST_F(StorageMonitorAsyncTest, EjectUnknownDeviceReportsNoSuchDevice) {
+  std::unique_ptr<StorageMonitor> monitor;
+  RunOnIO([&]() {
+    options_.watch_changes = false;
+    monitor = std::make_unique<StorageMonitor>(io_runner_, options_);
+    ASSERT_TRUE(monitor->Start());
+  });
+  EXPECT_EQ(EjectAndWait(monitor.get(), "volume:{no-such}"), EjectStatus::kNoSuchDevice);
+  RunOnIO([&]() { monitor.reset(); });
+}
+
+TEST_F(StorageMonitorAsyncTest, EjectFixedDriveIsRefused) {
+  std::unique_ptr<StorageMonitor> monitor;
+  std::string id;
+  RunOnIO([&]() {
+    options_.watch_changes = false;
+    monitor = std::make_unique<StorageMonitor>(io_runner_, options_);
+    ASSERT_TRUE(monitor->Start());
+    char drive[8] = {};
+    ASSERT_GT(::GetEnvironmentVariableA("SystemDrive", drive, sizeof(drive)), 0u);
+    StorageInfo info;
+    ASSERT_TRUE(monitor->GetStorageInfoForPath(std::string(drive) + "\\", &info));
+    ASSERT_EQ(info.type, StorageInfo::Type::kFixedMassStorage);
+    id = info.device_id;
+  });
+  EXPECT_EQ(EjectAndWait(monitor.get(), id), EjectStatus::kNotRemovable);
+  RunOnIO([&]() { monitor.reset(); });
 }
 
 #else
@@ -517,6 +621,165 @@ TEST_F(StorageMonitorTest, StartWatchingRealMountTableAndStop) {
     EXPECT_FALSE(monitor.is_started());
     ASSERT_TRUE(monitor.Start()); // restartable
   });
+}
+
+TEST_F(StorageMonitorTest, EventWithoutThreadPoolRescansInline) {
+  SetMountInfo({kRoot});
+  int hooks = 0;
+  options_.on_event_rescan_for_testing = [&hooks]() { ++hooks; };
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    RecordingObserver obs;
+    monitor.AddObserver(&obs);
+    ASSERT_TRUE(monitor.Start());
+
+    SetMountInfo({kRoot, kUsb});
+    monitor.SimulateChangeEventForTesting();
+    EXPECT_EQ(hooks, 1); // synchronous when there is no pool
+    EXPECT_EQ(obs.attached.size(), 1u);
+    monitor.RemoveObserver(&obs);
+  });
+}
+
+TEST_F(StorageMonitorAsyncTest, EventRescanRunsOnPoolAndNotifiesOnMonitorSequence) {
+  SetMountInfo({kRoot});
+  std::unique_ptr<StorageMonitor> monitor;
+  RecordingObserver obs;
+  RunOnIO([&]() {
+    monitor = std::make_unique<StorageMonitor>(io_runner_, options_);
+    monitor->AddObserver(&obs);
+    ASSERT_TRUE(monitor->Start());
+    SetMountInfo({kRoot, kUsb});
+    monitor->SimulateChangeEventForTesting();
+    EXPECT_TRUE(obs.attached.empty()); // not applied inline
+  });
+  ASSERT_TRUE(WaitForHooks(1));
+  RunOnIO([&]() {
+    ASSERT_EQ(obs.attached.size(), 1u);
+    EXPECT_EQ(obs.attached[0].device_id, "uuid:ABCD-1234");
+    monitor->RemoveObserver(&obs);
+    monitor.reset();
+  });
+}
+
+TEST_F(StorageMonitorAsyncTest, BurstOfEventsIsCoalescedAndConverges) {
+  SetMountInfo({kRoot});
+  std::unique_ptr<StorageMonitor> monitor;
+  RecordingObserver obs;
+  RunOnIO([&]() {
+    monitor = std::make_unique<StorageMonitor>(io_runner_, options_);
+    monitor->AddObserver(&obs);
+    ASSERT_TRUE(monitor->Start());
+    SetMountInfo({kRoot, kUsb});
+    for (int i = 0; i < 20; ++i)
+      monitor->SimulateChangeEventForTesting();
+  });
+  ASSERT_TRUE(WaitForHooks(1));
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  RunOnIO([&]() {
+    EXPECT_EQ(obs.attached.size(), 1u); // one notification despite 20 events
+    EXPECT_LE(hook_count_.load(), 2);   // in-flight scan plus at most one follow-up
+    EXPECT_EQ(monitor->GetAllAvailableStorages().size(), 2u);
+    monitor->RemoveObserver(&obs);
+    monitor.reset();
+  });
+}
+
+TEST_F(StorageMonitorAsyncTest, DestroyingMonitorWithScanInFlightIsSafe) {
+  SetMountInfo({kRoot, kUsb});
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    ASSERT_TRUE(monitor.Start());
+    for (int i = 0; i < 5; ++i)
+      monitor.SimulateChangeEventForTesting();
+  }); // destroyed with scans pending
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  RunOnIO([]() {});
+}
+
+TEST_F(StorageMonitorAsyncTest, EjectFixedDeviceIsRefused) {
+  SetMountInfo({kRoot, kUsb});
+  std::unique_ptr<StorageMonitor> monitor;
+  RunOnIO([&]() {
+    monitor = std::make_unique<StorageMonitor>(io_runner_, options_);
+    ASSERT_TRUE(monitor->Start());
+  });
+  EXPECT_EQ(EjectAndWait(monitor.get(), "path:/dev/sda1"), EjectStatus::kNotRemovable);
+  RunOnIO([&]() { monitor.reset(); });
+}
+
+TEST_F(StorageMonitorAsyncTest, EjectUnknownDeviceReportsNoSuchDevice) {
+  SetMountInfo({kRoot});
+  std::unique_ptr<StorageMonitor> monitor;
+  RunOnIO([&]() {
+    monitor = std::make_unique<StorageMonitor>(io_runner_, options_);
+    ASSERT_TRUE(monitor->Start());
+  });
+  EXPECT_EQ(EjectAndWait(monitor.get(), "uuid:nope"), EjectStatus::kNoSuchDevice);
+  RunOnIO([&]() { monitor.reset(); });
+}
+
+TEST_F(StorageMonitorAsyncTest, EjectOfNonexistentMountPointFails) {
+  // The fake mount point does not exist, so the unmount must not report success.
+  SetMountInfo({kRoot, kUsb});
+  std::unique_ptr<StorageMonitor> monitor;
+  RunOnIO([&]() {
+    monitor = std::make_unique<StorageMonitor>(io_runner_, options_);
+    ASSERT_TRUE(monitor->Start());
+  });
+  EXPECT_NE(EjectAndWait(monitor.get(), "uuid:ABCD-1234"), EjectStatus::kOk);
+  RunOnIO([&]() { monitor.reset(); });
+}
+
+TEST_F(StorageMonitorAsyncTest, EjectResolvesDeviceFromLiveStateNotSnapshot) {
+  // A real directory at the stale mount point: unmounting it would fail with
+  // EINVAL, so the test distinguishes "re-resolved" from "used the snapshot".
+  const std::string stale_mount = (root_ / "stale_mnt").string();
+  fs::create_directories(stale_mount);
+  SetMountInfo({kRoot, "36 30 8:17 / " + stale_mount + " rw - vfat /dev/sdb1 rw"});
+  std::unique_ptr<StorageMonitor> monitor;
+  RunOnIO([&]() {
+    monitor = std::make_unique<StorageMonitor>(io_runner_, options_);
+    ASSERT_TRUE(monitor->Start());
+    StorageInfo info;
+    ASSERT_TRUE(monitor->GetStorageInfoForPath(stale_mount, &info));
+    EXPECT_EQ(info.device_id, "uuid:ABCD-1234");
+    // The snapshot still lists the device; the mount table no longer has it.
+    SetMountInfo({kRoot});
+  });
+  // Must not treat the stale snapshot as authority.
+  EXPECT_EQ(EjectAndWait(monitor.get(), "uuid:ABCD-1234"), EjectStatus::kNoSuchDevice);
+  RunOnIO([&]() { monitor.reset(); });
+}
+
+TEST_F(StorageMonitorAsyncTest, EjectTypeComesFromLiveStateNotSnapshot) {
+  constexpr const char *kCard = "40 30 8:33 / /mnt/card rw - vfat /dev/sdc1 rw";
+  SetMountInfo({kRoot, kCard});
+  std::unique_ptr<StorageMonitor> monitor;
+  RunOnIO([&]() {
+    monitor = std::make_unique<StorageMonitor>(io_runner_, options_);
+    ASSERT_TRUE(monitor->Start());
+    StorageInfo info;
+    ASSERT_TRUE(monitor->GetStorageInfoForPath("/mnt/card", &info));
+    ASSERT_EQ(info.type, StorageInfo::Type::kRemovableMassStorage);
+    // The volume stops advertising itself as removable after the snapshot.
+    WriteFile(root_ / "sys/devices/pci0/ata2/block/sdc/removable", "0\n");
+  });
+  EXPECT_EQ(EjectAndWait(monitor.get(), "partuuid:99999999-8888-7777-6666-555555555555"), EjectStatus::kNotRemovable);
+  RunOnIO([&]() { monitor.reset(); });
+}
+
+TEST_F(StorageMonitorTest, EjectCallbackNotRunIfMonitorDestroyedFirst) {
+  SetMountInfo({kRoot});
+  auto ran = std::make_shared<std::atomic<bool>>(false);
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    ASSERT_TRUE(monitor.Start());
+    monitor.EjectDevice("uuid:nope", [ran](EjectStatus) { ran->store(true); });
+  }); // destroyed before the posted callback runs
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  RunOnIO([]() {});
+  EXPECT_FALSE(ran->load());
 }
 
 #endif // _WIN32

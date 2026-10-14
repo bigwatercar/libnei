@@ -7,6 +7,7 @@
 #include <winioctl.h>
 
 #include <cstdint>
+#include <cctype>
 #include <cstdio>
 #include <cwchar>
 #include <future>
@@ -320,7 +321,7 @@ void StorageMonitor::Impl::PlatformStop() {
   win_notifier_.reset();
 }
 
-std::vector<StorageInfo> StorageMonitor::Impl::PlatformScan() const {
+std::vector<StorageInfo> StorageMonitor::Impl::PlatformScan(const ScanConfig &) {
   std::vector<StorageInfo> result;
   ScopedFailCriticalErrors no_dialogs;
   const DWORD drives = ::GetLogicalDrives();
@@ -332,6 +333,37 @@ std::vector<StorageInfo> StorageMonitor::Impl::PlatformScan() const {
       result.push_back(std::move(info));
   }
   return result;
+}
+
+EjectStatus StorageMonitor::Impl::PlatformEject(const std::string &location) {
+  if (location.size() < 2 || location[1] != ':')
+    return EjectStatus::kNoSuchDevice;
+  const wchar_t letter = static_cast<wchar_t>(std::toupper(static_cast<unsigned char>(location[0])));
+  const wchar_t path[] = {L'\\', L'\\', L'.', L'\\', letter, L':', L'\0'};
+
+  HANDLE h = ::CreateFileW(
+      path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+  if (h == INVALID_HANDLE_VALUE) {
+    const DWORD err = ::GetLastError();
+    return (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND) ? EjectStatus::kNoSuchDevice
+                                                                        : EjectStatus::kFailure;
+  }
+
+  DWORD bytes = 0;
+  EjectStatus status = EjectStatus::kOk;
+  if (!::DeviceIoControl(h, FSCTL_LOCK_VOLUME, nullptr, 0, nullptr, 0, &bytes, nullptr)) {
+    // Fails while any handle to the volume is open.
+    status = EjectStatus::kInUse;
+  } else if (!::DeviceIoControl(h, FSCTL_DISMOUNT_VOLUME, nullptr, 0, nullptr, 0, &bytes, nullptr)) {
+    status = EjectStatus::kFailure;
+  } else {
+    PREVENT_MEDIA_REMOVAL allow = {FALSE};
+    ::DeviceIoControl(h, IOCTL_STORAGE_MEDIA_REMOVAL, &allow, sizeof(allow), nullptr, 0, &bytes, nullptr);
+    if (!::DeviceIoControl(h, IOCTL_STORAGE_EJECT_MEDIA, nullptr, 0, nullptr, 0, &bytes, nullptr))
+      status = EjectStatus::kFailure;
+  }
+  ::CloseHandle(h);
+  return status;
 }
 
 } // namespace nei

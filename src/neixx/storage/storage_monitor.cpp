@@ -3,6 +3,9 @@
 #include <algorithm>
 
 #include <nei/debug/check.h>
+#include <neixx/common/location.h>
+#include <neixx/task/task_traits.h>
+#include <neixx/task/thread_pool_instance.h>
 
 #include "storage_monitor_impl.h"
 
@@ -79,18 +82,29 @@ void StorageMonitor::Rescan() {
   impl_->Rescan();
 }
 
+void StorageMonitor::EjectDevice(const std::string &device_id, OnceCallback<void(EjectStatus)> callback) {
+  impl_->EjectDevice(device_id, std::move(callback));
+}
+
+void StorageMonitor::SimulateChangeEventForTesting() {
+  impl_->OnPlatformEvent();
+}
+
 // ===========================================================================
 // Impl (platform independent part)
 // ===========================================================================
 
 StorageMonitor::Impl::Impl(scoped_refptr<SingleThreadTaskRunner> task_runner, Options options)
     : task_runner_(std::move(task_runner))
-    , options_(std::move(options)) {
+    , options_(std::move(options))
+    , scan_config_{options_.mountinfo_path, options_.sysfs_root, options_.dev_disk_root}
+    , alive_(std::make_shared<Alive>(Alive{this})) {
   DCHECK(task_runner_ != nullptr);
 }
 
 StorageMonitor::Impl::~Impl() {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
+  alive_->impl = nullptr;
   Stop();
 }
 
@@ -101,11 +115,13 @@ bool StorageMonitor::Impl::Start() {
 
   // Enumerate before watching so a change in between is caught by the first
   // event rather than lost.
-  ApplySnapshot(PlatformScan(), false);
+  ApplySnapshot(PlatformScan(scan_config_), false);
   if (!PlatformStart()) {
     storages_.clear();
     return false;
   }
+  if (ThreadPoolInstance *pool = ThreadPoolInstance::Get())
+    blocking_runner_ = pool->CreateSequencedTaskRunner(TaskTraits(MayBlock()));
   started_ = true;
   return true;
 }
@@ -116,6 +132,7 @@ void StorageMonitor::Impl::Stop() {
     return;
   PlatformStop();
   started_ = false;
+  scan_dirty_ = false;
 }
 
 void StorageMonitor::Impl::AddObserver(RemovableStorageObserver *observer) {
@@ -163,7 +180,7 @@ void StorageMonitor::Impl::Rescan() {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
   if (!started_)
     return;
-  ApplySnapshot(PlatformScan(), true);
+  ApplySnapshot(PlatformScan(scan_config_), true);
 }
 
 void StorageMonitor::Impl::OnFileCanWriteWithoutBlocking(NativeIOHandle) {
@@ -172,9 +189,101 @@ void StorageMonitor::Impl::OnFileCanWriteWithoutBlocking(NativeIOHandle) {
 
 void StorageMonitor::Impl::OnPlatformEvent() {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
-  Rescan();
+  if (!started_)
+    return;
+  if (blocking_runner_ == nullptr) {
+    Rescan();
+    RunEventHook();
+    return;
+  }
+  // One scan at a time; events arriving meanwhile collapse into one follow-up.
+  if (scan_in_flight_) {
+    scan_dirty_ = true;
+    return;
+  }
+  StartAsyncScan();
+}
+
+void StorageMonitor::Impl::StartAsyncScan() {
+  scan_in_flight_ = true;
+  scan_dirty_ = false;
+  blocking_runner_->PostTask(FROM_HERE, [alive = alive_, config = scan_config_, runner = task_runner_]() {
+    std::vector<StorageInfo> result = PlatformScan(config);
+    runner->PostTask(FROM_HERE, [alive, result = std::move(result)]() {
+      if (alive->impl != nullptr)
+        alive->impl->OnAsyncScanDone(result);
+    });
+  });
+}
+
+void StorageMonitor::Impl::OnAsyncScanDone(std::vector<StorageInfo> result) {
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+  scan_in_flight_ = false;
+  if (started_) {
+    ApplySnapshot(std::move(result), true);
+    RunEventHook();
+    if (scan_dirty_)
+      StartAsyncScan();
+  }
+}
+
+void StorageMonitor::Impl::RunEventHook() {
   if (options_.on_event_rescan_for_testing)
     options_.on_event_rescan_for_testing.Run();
+}
+
+void StorageMonitor::Impl::EjectDevice(const std::string &device_id, OnceCallback<void(EjectStatus)> callback) {
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+  // Shared so the posted closures stay copyable.
+  auto cb = std::make_shared<OnceCallback<void(EjectStatus)>>(std::move(callback));
+  const ScanConfig config = scan_config_;
+
+  if (blocking_runner_ == nullptr) {
+    std::string location;
+    EjectStatus status = ResolveEjectTarget(device_id, config, &location);
+    if (status == EjectStatus::kOk)
+      status = PlatformEject(location);
+    DeliverEjectResult(std::move(cb), status);
+    return;
+  }
+
+  blocking_runner_->PostTask(FROM_HERE, [alive = alive_, cb, device_id, config, runner = task_runner_]() {
+    std::string location;
+    EjectStatus status = ResolveEjectTarget(device_id, config, &location);
+    if (status == EjectStatus::kOk)
+      status = PlatformEject(location);
+    runner->PostTask(FROM_HERE, [alive, cb, status]() {
+      if (alive->impl != nullptr)
+        alive->impl->DeliverEjectResult(cb, status);
+    });
+  });
+}
+
+// The cached snapshot may be stale: the volume could have been unmounted, or
+// replaced at the same mount point by another device.  Ejecting a path from
+// the snapshot could therefore unmount the wrong volume, so resolve from a
+// fresh scan instead.
+EjectStatus StorageMonitor::Impl::ResolveEjectTarget(const std::string &device_id,
+                                                     const ScanConfig &config,
+                                                     std::string *location) {
+  for (const StorageInfo &info : PlatformScan(config)) {
+    if (info.device_id != device_id)
+      continue;
+    if (info.type != StorageInfo::Type::kRemovableMassStorage)
+      return EjectStatus::kNotRemovable;
+    *location = info.location;
+    return EjectStatus::kOk;
+  }
+  return EjectStatus::kNoSuchDevice;
+}
+
+// Always bounces through the runner so the callback is never run inline.
+void StorageMonitor::Impl::DeliverEjectResult(std::shared_ptr<OnceCallback<void(EjectStatus)>> callback,
+                                              EjectStatus status) {
+  task_runner_->PostTask(FROM_HERE, [alive = alive_, callback, status]() {
+    if (alive->impl != nullptr && *callback)
+      std::move(*callback).Run(status);
+  });
 }
 
 void StorageMonitor::Impl::ApplySnapshot(std::vector<StorageInfo> next, bool notify) {

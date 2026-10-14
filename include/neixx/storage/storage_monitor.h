@@ -47,6 +47,14 @@ public:
   virtual void OnRemovableStorageDetached(const StorageInfo &info) = 0;
 };
 
+enum class EjectStatus {
+  kOk,
+  kInUse,        // Files are open on the volume.
+  kNoSuchDevice, // Unknown device_id.
+  kNotRemovable, // Only removable volumes can be ejected.
+  kFailure,      // Anything else, including insufficient privileges.
+};
+
 // StorageMonitor tracks mounted storage volumes and reports removable ones
 // coming and going.  Modeled after Chromium's components/storage_monitor.
 //
@@ -58,7 +66,13 @@ public:
 //              events.  Win8+ uses CM_Register_Notification (no window);
 //              Windows 7 falls back to a hidden top-level window receiving
 //              WM_DEVICECHANGE on a dedicated thread.  Does not need a
-//              MessagePumpForIO.  Volume info is queried synchronously.
+//              MessagePumpForIO.
+//
+// Blocking work: change events trigger a rescan on a MayBlock sequence of
+// the global ThreadPoolInstance (overlapping events are coalesced), so a
+// stalled drive cannot block the monitor's runner.  If ThreadPoolInstance is
+// not started, rescans and ejects run inline on the monitor's runner.  The
+// initial enumeration in Start() is always synchronous.
 //
 // Thread-safety: every method, including the destructor, must be called on
 // the sequence of the TaskRunner passed to the constructor, and that runner
@@ -76,8 +90,9 @@ public:
     bool watch_changes = true;
     // Windows only: skip CM_Register_Notification and use the Win7 window path.
     bool use_legacy_window_notifications = false;
-    // Run after each event-driven rescan (one event may trigger two: an
-    // immediate one and a delayed one on Windows).  Not run by Rescan().
+    // Run after each event-driven rescan has been applied (one event may
+    // trigger two: an immediate one and a delayed one on Windows).  Not run
+    // by Rescan().
     RepeatingClosure on_event_rescan_for_testing;
   };
 
@@ -112,7 +127,22 @@ public:
 
   // Re-reads the mount table and notifies observers of differences.  Called
   // automatically on change events; exposed for Options::watch_changes=false.
+  // Synchronous, on the calling sequence.
   void Rescan();
+
+  // Unmounts / ejects the removable volume |device_id|.  |callback| always
+  // runs asynchronously on the monitor's sequence, and is not run if the
+  // monitor is destroyed first.  Linux unmounts the mount point (needs
+  // privileges); Windows locks, dismounts and ejects the volume.  The volume
+  // disappears from GetAllAvailableStorages() via the usual change event.
+  //
+  // Re-reads the current mount table first, so a device that was unmounted or
+  // replaced since the last scan is reported as kNoSuchDevice instead of
+  // ejecting whatever now occupies its old mount point.
+  void EjectDevice(const std::string &device_id, OnceCallback<void(EjectStatus)> callback);
+
+  // Behaves as if the OS had reported a storage change.  For tests.
+  void SimulateChangeEventForTesting();
 
 private:
   class Impl;
