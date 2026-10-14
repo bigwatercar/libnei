@@ -5,13 +5,21 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
+
+#if defined(_WIN32)
+#include <windows.h>
+
+#include <dbt.h>
+#endif
 
 #include <neixx/common/location.h>
 #include <neixx/io/io_thread.h>
@@ -153,13 +161,121 @@ protected:
 
 #if defined(_WIN32)
 
-TEST_F(StorageMonitorTest, StartReturnsFalseOnWindows) {
+int CountMonitorWindows() {
+  int count = 0;
+  ::EnumWindows(
+      [](HWND hwnd, LPARAM lparam) -> BOOL {
+        wchar_t name[64] = {};
+        ::GetClassNameW(hwnd, name, 64);
+        if (std::wstring(name).rfind(L"NeiStorageMonitor_", 0) == 0)
+          ++*reinterpret_cast<int *>(lparam);
+        return TRUE;
+      },
+      reinterpret_cast<LPARAM>(&count));
+  return count;
+}
+
+// Sends WM_DEVICECHANGE only to the monitor's own windows, not system-wide.
+void SendDeviceChangeToMonitorWindows() {
+  ::EnumWindows(
+      [](HWND hwnd, LPARAM) -> BOOL {
+        wchar_t name[64] = {};
+        ::GetClassNameW(hwnd, name, 64);
+        if (std::wstring(name).rfind(L"NeiStorageMonitor_", 0) == 0)
+          ::SendMessageW(hwnd, WM_DEVICECHANGE, DBT_DEVNODES_CHANGED, 0);
+        return TRUE;
+      },
+      0);
+}
+
+TEST_F(StorageMonitorTest, EnumeratesSystemDrive) {
   RunOnIO([&]() {
-    StorageMonitor monitor(io_runner_);
-    EXPECT_FALSE(monitor.Start());
-    EXPECT_FALSE(monitor.is_started());
-    EXPECT_TRUE(monitor.GetAllAvailableStorages().empty());
+    options_.watch_changes = false;
+    StorageMonitor monitor(io_runner_, options_);
+    ASSERT_TRUE(monitor.Start());
+
+    char drive[8] = {};
+    ASSERT_GT(::GetEnvironmentVariableA("SystemDrive", drive, sizeof(drive)), 0u);
+    const std::string system_drive = drive; // e.g. "C:"
+
+    StorageInfo info;
+    // Case-insensitive and tolerant of forward slashes.
+    ASSERT_TRUE(monitor.GetStorageInfoForPath(system_drive + "\\Windows\\System32", &info));
+    EXPECT_EQ(info.location, system_drive + "\\");
+    EXPECT_FALSE(info.device_id.empty());
+    EXPECT_GT(info.total_size_bytes, 0u);
+
+    std::string lower = system_drive + "/windows";
+    lower[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(lower[0])));
+    EXPECT_TRUE(monitor.GetStorageInfoForPath(lower, &info));
+
+    EXPECT_FALSE(monitor.GetStorageInfoForPath("relative\\path", &info));
   });
+}
+
+TEST_F(StorageMonitorTest, BothNotificationBackendsStartStopRestart) {
+  for (bool legacy : {false, true}) {
+    RunOnIO([&]() {
+      options_.use_legacy_window_notifications = legacy;
+      StorageMonitor monitor(io_runner_, options_);
+      ASSERT_TRUE(monitor.Start()) << "legacy=" << legacy;
+      EXPECT_TRUE(monitor.is_started());
+      monitor.Stop();
+      EXPECT_FALSE(monitor.is_started());
+      EXPECT_EQ(CountMonitorWindows(), 0);
+      ASSERT_TRUE(monitor.Start());
+    });
+    EXPECT_EQ(CountMonitorWindows(), 0) << "window leaked after destruction, legacy=" << legacy;
+  }
+}
+
+TEST_F(StorageMonitorTest, DefaultBackendUsesNoWindowWhenCmAvailable) {
+  HMODULE cfgmgr = ::LoadLibraryExW(L"cfgmgr32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+  if (cfgmgr == nullptr || ::GetProcAddress(cfgmgr, "CM_Register_Notification") == nullptr)
+    GTEST_SKIP() << "CM_Register_Notification not available (pre-Win8)";
+  ::FreeLibrary(cfgmgr);
+
+  RunOnIO([&]() {
+    StorageMonitor monitor(io_runner_, options_);
+    ASSERT_TRUE(monitor.Start());
+    EXPECT_EQ(CountMonitorWindows(), 0);
+  });
+}
+
+TEST_F(StorageMonitorTest, LegacyWindowPathRescansOnDeviceChange) {
+  auto event_fired = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kManual);
+  options_.use_legacy_window_notifications = true;
+  options_.on_event_rescan_for_testing = [event_fired]() { event_fired->Signal(); };
+
+  std::unique_ptr<StorageMonitor> monitor;
+  RunOnIO([&]() {
+    monitor = std::make_unique<StorageMonitor>(io_runner_, options_);
+    ASSERT_TRUE(monitor->Start());
+  });
+  EXPECT_EQ(CountMonitorWindows(), 1);
+
+  SendDeviceChangeToMonitorWindows();
+  EXPECT_TRUE(event_fired->TimedWait(std::chrono::milliseconds(3000)));
+
+  RunOnIO([&]() { monitor.reset(); });
+}
+
+TEST_F(StorageMonitorTest, DestroyedMonitorIgnoresPendingDelayedRescan) {
+  auto event_fired = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kManual);
+  options_.use_legacy_window_notifications = true;
+  options_.on_event_rescan_for_testing = [event_fired]() { event_fired->Signal(); };
+
+  std::unique_ptr<StorageMonitor> monitor;
+  RunOnIO([&]() {
+    monitor = std::make_unique<StorageMonitor>(io_runner_, options_);
+    ASSERT_TRUE(monitor->Start());
+  });
+  SendDeviceChangeToMonitorWindows();
+  RunOnIO([&]() { monitor.reset(); }); // delayed rescan still queued
+
+  // Outlive the 1s settle delay; the stale task must not touch the freed monitor.
+  std::this_thread::sleep_for(std::chrono::milliseconds(1300));
+  RunOnIO([]() {});
 }
 
 #else

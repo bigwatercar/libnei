@@ -7,6 +7,31 @@
 #include "storage_monitor_impl.h"
 
 namespace nei {
+namespace {
+
+#if defined(_WIN32)
+constexpr char kSep = '\\';
+
+// Windows paths are case-insensitive and accept both separators.
+std::string NormalizePathForMatch(const std::string &path) {
+  std::string out = path;
+  for (char &c : out) {
+    if (c == '/')
+      c = '\\';
+    else if (c >= 'A' && c <= 'Z')
+      c = static_cast<char>(c - 'A' + 'a');
+  }
+  return out;
+}
+#else
+constexpr char kSep = '/';
+
+std::string NormalizePathForMatch(const std::string &path) {
+  return path;
+}
+#endif
+
+} // namespace
 
 // ===========================================================================
 // Shell
@@ -116,14 +141,15 @@ std::vector<StorageInfo> StorageMonitor::Impl::GetAllAvailableStorages() const {
 
 bool StorageMonitor::Impl::GetStorageInfoForPath(const std::string &path, StorageInfo *info) const {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
+  const std::string key = NormalizePathForMatch(path);
   const StorageInfo *best = nullptr;
   for (const auto &kv : storages_) {
-    const std::string &loc = kv.second.location;
-    if (loc.empty() || path.compare(0, loc.size(), loc) != 0)
+    const std::string loc = NormalizePathForMatch(kv.second.location);
+    if (loc.empty() || key.compare(0, loc.size(), loc) != 0)
       continue;
     // The match must end on a path component boundary.
-    const bool boundary = loc.back() == '/' || path.size() == loc.size() || path[loc.size()] == '/';
-    if (boundary && (best == nullptr || loc.size() > best->location.size()))
+    const bool boundary = loc.back() == kSep || key.size() == loc.size() || key[loc.size()] == kSep;
+    if (boundary && (best == nullptr || loc.size() > NormalizePathForMatch(best->location).size()))
       best = &kv.second;
   }
   if (best == nullptr)
@@ -141,7 +167,14 @@ void StorageMonitor::Impl::Rescan() {
 }
 
 void StorageMonitor::Impl::OnFileCanWriteWithoutBlocking(NativeIOHandle) {
+  OnPlatformEvent();
+}
+
+void StorageMonitor::Impl::OnPlatformEvent() {
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
   Rescan();
+  if (options_.on_event_rescan_for_testing)
+    options_.on_event_rescan_for_testing.Run();
 }
 
 void StorageMonitor::Impl::ApplySnapshot(std::vector<StorageInfo> next, bool notify) {

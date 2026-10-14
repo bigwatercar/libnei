@@ -4,6 +4,7 @@
 #define NEIXX_STORAGE_STORAGE_MONITOR_IMPL_H_
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -38,6 +39,9 @@ public:
   void OnFileCanWriteWithoutBlocking(NativeIOHandle handle) override;
 
 private:
+  // Entry point for platform change events; runs on the monitor sequence.
+  void OnPlatformEvent();
+
   // Platform hooks (storage_monitor_posix.cpp / storage_monitor_win.cpp).
   bool PlatformStart();
   void PlatformStop();
@@ -56,7 +60,10 @@ private:
   std::vector<RemovableStorageObserver *> observers_;
 
   MessagePumpForIO::FdWatchController controller_;
-#if !defined(_WIN32)
+#if defined(_WIN32)
+  struct WinNotifier;
+  std::shared_ptr<WinNotifier> win_notifier_;
+#else
   int mount_fd_ = -1;
 #endif
 };

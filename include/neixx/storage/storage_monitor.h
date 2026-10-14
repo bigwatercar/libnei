@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <nei/build/nei_export.h>
+#include <neixx/functional/callback.h>
 #include <neixx/task/task_runner.h>
 
 namespace nei {
@@ -28,7 +29,7 @@ struct StorageInfo {
   // last form can change when the device is re-plugged).  Windows:
   // "volume:{GUID}" or "serial:<hex>".
   std::string device_id;
-  // Current mount point.
+  // Current mount point (Windows: drive root such as "E:\").
   std::string location;
   std::string label;
   std::string vendor;
@@ -53,11 +54,15 @@ public:
 //   Linux    - /proc/self/mountinfo change notification via epoll
 //              (requires a MessagePumpForIO); volume metadata from sysfs and
 //              /dev/disk.  No libudev dependency.
-//   Windows  - not implemented yet; Start() returns false.
+//   Windows  - drive letters (A:..Z:) re-enumerated on volume interface
+//              events.  Win8+ uses CM_Register_Notification (no window);
+//              Windows 7 falls back to a hidden top-level window receiving
+//              WM_DEVICECHANGE on a dedicated thread.  Does not need a
+//              MessagePumpForIO.  Volume info is queried synchronously.
 //
 // Thread-safety: every method, including the destructor, must be called on
 // the sequence of the TaskRunner passed to the constructor, and that runner
-// must be backed by a MessagePumpForIO.  Observers are invoked on the same
+// must be backed by a MessagePumpForIO on Linux.  Observers are invoked on the same
 // sequence, so no locking is involved; Add/RemoveObserver may be called from
 // inside an observer callback.
 class NEI_API StorageMonitor final {
@@ -69,6 +74,11 @@ public:
     std::string dev_disk_root = "/dev/disk";
     // false: do not register for change events; drive updates with Rescan().
     bool watch_changes = true;
+    // Windows only: skip CM_Register_Notification and use the Win7 window path.
+    bool use_legacy_window_notifications = false;
+    // Run after each event-driven rescan (one event may trigger two: an
+    // immediate one and a delayed one on Windows).  Not run by Rescan().
+    RepeatingClosure on_event_rescan_for_testing;
   };
 
   explicit StorageMonitor(scoped_refptr<SingleThreadTaskRunner> task_runner);
