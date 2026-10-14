@@ -158,7 +158,9 @@ protected:
 
   /// Pool-configured OS scheduling baseline restored after each task.
   const ThreadType baseline_thread_type_;
-  /// 0 = never reclaim; positive = self-terminate after this idle duration.
+  /// Idle duration after which a worker may give up waiting for work: it
+  /// bounds the dedicated-queue wait, and it is the timeout that lets a
+  /// reclaimable worker observe the end of its shift.  0 = wait indefinitely.
   const TimeDelta reclaim_time_;
   /// Current OS priority of this thread, updated by Apply/Restore.
   /// Only accessed from this thread's ThreadMain() - no synchronisation needed.
@@ -178,6 +180,7 @@ public:
                PoolWorkerBase::BlockingCb on_blocking_end,
                ThreadType baseline_thread_type,
                TimeDelta reclaim_time,
+               bool may_exit_when_idle,
                const std::string &name,
                std::atomic<int> *execution_fence_count,
                WaitableEvent *fence_release_event)
@@ -190,6 +193,7 @@ public:
                        baseline_thread_type,
                        reclaim_time,
                        name)
+      , may_exit_when_idle_(may_exit_when_idle)
       , execution_fence_count_(execution_fence_count)
       , fence_release_event_(fence_release_event) {
   }
@@ -208,6 +212,11 @@ public:
   }
 
 private:
+  // True for compensation workers only: they may return from ThreadMain() when
+  // they idle out.  Initial workers must not, since nothing spawns a
+  // replacement for them.
+  const bool may_exit_when_idle_;
+
   // Adapts the per-queue turn budget based on dequeue saturation:
   // - Full batch => queue is likely still hot, grow budget.
   // - Very sparse batch => queue likely cooling down, shrink budget.
@@ -371,7 +380,9 @@ private:
 
       // ---- Normal path: fetch next ready source from unified heap ----
       bool timed_out = false;
-      internal::RegisteredTaskSource task_source = reclaim_time_.is_positive()
+      // Only compensation workers may idle out; an initial worker blocks until
+      // work arrives or the pool shuts down, because nothing respawns it.
+      internal::RegisteredTaskSource task_source = may_exit_when_idle_
                                                        ? source_->GetNextTaskSourceTimed(reclaim_time_, timed_out)
                                                        : source_->GetNextTaskSource();
 
@@ -1377,6 +1388,9 @@ private:
         [this]() { OnWorkerEndedBlocking(); },
         params_.worker_thread_type,
         params_.suggested_reclaim_time,
+        // Nothing respawns an exited initial worker, so only compensation
+        // workers may idle out; otherwise the pool silently stops running tasks.
+        is_compensation,
         prefix + std::to_string(idx),
         &execution_fence_count_,
         &fence_release_event_);

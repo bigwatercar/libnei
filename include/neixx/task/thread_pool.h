@@ -31,9 +31,13 @@ public:
     /// 0 means derive from std::thread::hardware_concurrency().
     std::size_t max_num_workers = 0;
 
-    /// Maximum idle time a worker thread will wait for new work before
-    /// self-terminating and releasing OS resources.
-    /// TimeDelta() (zero) means workers never self-terminate (run until Shutdown).
+    /// Idle timeout used for worker parking decisions: it bounds how long a
+    /// worker waits on an idle dedicated queue before releasing it, and it is
+    /// how long a compensation worker (spawned when a task calls
+    /// ScopedBlockingCall) may sit idle before self-terminating.  The initial
+    /// workers never self-terminate — they run until Shutdown.  TimeDelta()
+    /// (zero) means "wait indefinitely" (compensation workers are not
+    /// reclaimed either).
     TimeDelta suggested_reclaim_time = TimeDelta::FromSeconds(30);
 
     /// Initial and post-task-restored OS-level scheduling priority for worker

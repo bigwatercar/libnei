@@ -52,6 +52,33 @@ TEST(ThreadPoolTest, SequencedTaskRunnerSerializesExecution) {
   pool.Shutdown();
 }
 
+TEST(ThreadPoolTest, PostingAfterIdleLongerThanReclaimTimeStillRuns) {
+  ThreadPool::InitParams params;
+  params.max_num_workers = 2;
+  params.suggested_reclaim_time = TimeDelta::FromMilliseconds(100);
+  ThreadPool pool(params);
+  scoped_refptr<SequencedTaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  WaitableEvent first(WaitableEvent::ResetPolicy::kManual);
+  runner->PostTask(FROM_HERE, [&first]() { first.Signal(); });
+  ASSERT_TRUE(first.TimedWait(std::chrono::seconds(5)));
+
+  // Several multiples of the reclaim time: every worker that could idle out has.
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(600));
+
+  WaitableEvent second(WaitableEvent::ResetPolicy::kManual);
+  runner->PostTask(FROM_HERE, [&second]() { second.Signal(); });
+  EXPECT_TRUE(second.TimedWait(std::chrono::seconds(3))) << "task stranded: no worker left to run it";
+
+  scoped_refptr<SequencedTaskRunner> other = pool.CreateSequencedTaskRunner();
+  WaitableEvent third(WaitableEvent::ResetPolicy::kManual);
+  other->PostTask(FROM_HERE, [&third]() { third.Signal(); });
+  EXPECT_TRUE(third.TimedWait(std::chrono::seconds(3)));
+
+  pool.Shutdown();
+}
+
 TEST(ThreadPoolTest, PostTaskWakesSleepingWorker) {
   ThreadPool pool({1});
   scoped_refptr<SequencedTaskRunner> runner = pool.CreateSequencedTaskRunner();
@@ -61,6 +88,159 @@ TEST(ThreadPoolTest, PostTaskWakesSleepingWorker) {
   runner->PostTask(FROM_HERE, [&done]() { done.Signal(); });
 
   ASSERT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  pool.Shutdown();
+}
+
+// ============================================================================
+// Idle reclaim: initial workers must survive an idle period past
+// suggested_reclaim_time (nothing respawns them), while compensation workers
+// spawned by ScopedBlockingCall may still idle out.
+// ============================================================================
+
+namespace {
+
+ThreadPool::InitParams IdleTestParams(std::size_t workers, TimeDelta reclaim) {
+  ThreadPool::InitParams params;
+  params.max_num_workers = workers;
+  params.suggested_reclaim_time = reclaim;
+  return params;
+}
+
+// Runs |task| on the runner and returns the id of the thread that ran it.
+PlatformThread::PlatformThreadId RunAndGetThreadId(const scoped_refptr<SequencedTaskRunner> &runner) {
+  PlatformThread::PlatformThreadId id = 0;
+  WaitableEvent done(WaitableEvent::ResetPolicy::kManual);
+  runner->PostTask(FROM_HERE, [&id, &done]() {
+    id = PlatformThread::CurrentId();
+    done.Signal();
+  });
+  EXPECT_TRUE(done.TimedWait(std::chrono::seconds(5)));
+  return id;
+}
+
+} // namespace
+
+TEST(ThreadPoolTest, InitialWorkerThreadSurvivesIdlePastReclaimTime) {
+  ThreadPool pool(IdleTestParams(1, TimeDelta::FromMilliseconds(100)));
+  scoped_refptr<SequencedTaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  const PlatformThread::PlatformThreadId before = RunAndGetThreadId(runner);
+  ASSERT_NE(before, 0u);
+
+  // Several multiples of the reclaim time.
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(500));
+
+  const PlatformThread::PlatformThreadId after = RunAndGetThreadId(runner);
+  EXPECT_NE(after, 0u) << "task stranded: no worker left to run it";
+  // Same thread, not a replacement: nothing respawns an exited initial worker.
+  EXPECT_EQ(after, before);
+
+  pool.Shutdown();
+}
+
+TEST(ThreadPoolTest, MayBlockTaskAfterIdlePastReclaimTimeStillRuns) {
+  ThreadPool pool(IdleTestParams(1, TimeDelta::FromMilliseconds(100)));
+  scoped_refptr<SequencedTaskRunner> runner = pool.CreateSequencedTaskRunner(TaskTraits(MayBlock()));
+  ASSERT_TRUE(runner);
+
+  ASSERT_NE(RunAndGetThreadId(runner), 0u);
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(500));
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kManual);
+  runner->PostTask(FROM_HERE, [&done]() {
+    {
+      ScopedBlockingCall blocking;
+      PlatformThread::Sleep(TimeDelta::FromMilliseconds(10));
+    }
+    done.Signal();
+  });
+  EXPECT_TRUE(done.TimedWait(std::chrono::seconds(5))) << "may_block task stranded after idle";
+
+  pool.Shutdown();
+}
+
+TEST(ThreadPoolTest, DelayedTaskAfterIdlePastReclaimTimeStillRuns) {
+  ThreadPool pool(IdleTestParams(1, TimeDelta::FromMilliseconds(100)));
+  scoped_refptr<SequencedTaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  ASSERT_NE(RunAndGetThreadId(runner), 0u);
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(500));
+
+  WaitableEvent done(WaitableEvent::ResetPolicy::kManual);
+  runner->PostDelayedTask(FROM_HERE, [&done]() { done.Signal(); }, TimeDelta::FromMilliseconds(50));
+  EXPECT_TRUE(done.TimedWait(std::chrono::seconds(5))) << "delayed task stranded after idle";
+
+  pool.Shutdown();
+}
+
+TEST(ThreadPoolTest, ZeroReclaimTimeWaitsIndefinitelyForWork) {
+  // TimeDelta() documents "wait indefinitely" rather than "reclaim at once".
+  ThreadPool pool(IdleTestParams(1, TimeDelta()));
+  scoped_refptr<SequencedTaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  ASSERT_NE(RunAndGetThreadId(runner), 0u);
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(300));
+  EXPECT_NE(RunAndGetThreadId(runner), 0u);
+
+  pool.Shutdown();
+}
+
+TEST(ThreadPoolTest, ShutdownAfterLongIdleStillCompletes) {
+  ThreadPool pool(IdleTestParams(1, TimeDelta::FromMilliseconds(100)));
+  scoped_refptr<SequencedTaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  ASSERT_NE(RunAndGetThreadId(runner), 0u);
+  // Long past the reclaim time: the worker is parked in its dequeue wait and
+  // must still be woken by Shutdown rather than waiting forever.
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(400));
+
+  const auto start = std::chrono::steady_clock::now();
+  pool.Shutdown();
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+  EXPECT_LT(elapsed.count(), 5000) << "Shutdown() did not wake an idle worker";
+}
+
+TEST(ThreadPoolTest, CompensationWorkerIdlesOutWhileInitialWorkerSurvives) {
+  ThreadPool pool(IdleTestParams(1, TimeDelta::FromMilliseconds(100)));
+  const TaskTraits may_block_traits(MayBlock());
+  scoped_refptr<SequencedTaskRunner> blocking_runner = pool.CreateSequencedTaskRunner(may_block_traits);
+  scoped_refptr<SequencedTaskRunner> other_runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(blocking_runner);
+  ASSERT_TRUE(other_runner);
+
+  PlatformThread::PlatformThreadId initial_id = 0;
+  WaitableEvent blocking_started(WaitableEvent::ResetPolicy::kManual);
+  WaitableEvent blocking_done(WaitableEvent::ResetPolicy::kManual);
+  blocking_runner->PostTask(FROM_HERE, [&]() {
+    initial_id = PlatformThread::CurrentId();
+    blocking_started.Signal();
+    {
+      ScopedBlockingCall blocking; // Spawns a compensation worker.
+      PlatformThread::Sleep(TimeDelta::FromMilliseconds(500));
+    }
+    blocking_done.Signal();
+  });
+  ASSERT_TRUE(blocking_started.TimedWait(std::chrono::seconds(5)));
+
+  // The single initial worker is blocked, so only a compensation worker can
+  // pick this up.
+  const PlatformThread::PlatformThreadId compensation_id = RunAndGetThreadId(other_runner);
+  EXPECT_NE(compensation_id, 0u);
+  EXPECT_NE(compensation_id, initial_id) << "no compensation worker took over while the initial one was blocked";
+
+  ASSERT_TRUE(blocking_done.TimedWait(std::chrono::seconds(5)));
+  // Past the reclaim window the compensation worker should have exited, so the
+  // initial worker is the only one left to serve the next task.
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(500));
+
+  const PlatformThread::PlatformThreadId after_idle = RunAndGetThreadId(other_runner);
+  EXPECT_NE(after_idle, 0u);
+  EXPECT_EQ(after_idle, initial_id);
+
   pool.Shutdown();
 }
 
