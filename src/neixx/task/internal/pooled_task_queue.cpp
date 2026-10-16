@@ -196,6 +196,14 @@ public:
     dedicated_event_ = event;
   }
 
+  TaskSource *task_source() const {
+    return task_source_.load(std::memory_order_acquire);
+  }
+
+  void set_task_source(TaskSource *source) {
+    task_source_.store(source, std::memory_order_release);
+  }
+
   // ---- Chromium-aligned DidProcessTask ----
 
   bool DidProcessTask() {
@@ -261,6 +269,11 @@ private:
   // PooledTaskQueue::dedicated_event()).  Written once at registration,
   // read lock-free afterwards.
   WaitableEvent *dedicated_event_ = nullptr;
+
+  // Owning task source, published by PooledTaskSource::RegisterTaskQueue (see
+  // PooledTaskQueue::task_source()).  Release/acquire so a reader that sees the
+  // pointer also sees the state registered alongside it.
+  std::atomic<TaskSource *> task_source_{nullptr};
 
   // Shutdown flag duplicated from seq_queue_ for lock-free access from
   // WillRunTask (parallel hot path).  Set in Shutdown() alongside
@@ -399,6 +412,14 @@ WaitableEvent *PooledTaskQueue::dedicated_event() const {
 
 void PooledTaskQueue::set_dedicated_event(WaitableEvent *event) {
   impl_->set_dedicated_event(event);
+}
+
+TaskSource *PooledTaskQueue::task_source() const {
+  return impl_->task_source();
+}
+
+void PooledTaskQueue::set_task_source(TaskSource *source) {
+  impl_->set_task_source(source);
 }
 
 bool PooledTaskQueue::DidProcessTask() {

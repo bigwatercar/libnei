@@ -244,6 +244,45 @@ TEST(ThreadPoolTest, CompensationWorkerIdlesOutWhileInitialWorkerSurvives) {
   pool.Shutdown();
 }
 
+// Queues are registered when a runner is created, and workers look their queue
+// up whenever they process it.  Both happen concurrently in real use, so
+// registration must not disturb a worker's lookup: a worker that fails to find
+// its queue silently drops the re-enqueue and strands the queue's tasks.
+TEST(ThreadPoolTest, RunnerCreationWhilePoolIsBusyDoesNotLoseTasks) {
+  ThreadPool pool(IdleTestParams(4, TimeDelta::FromMilliseconds(50)));
+  constexpr int kThreads = 4;
+  constexpr int kTasksPerThread = 100;
+  constexpr int kTotal = kThreads * kTasksPerThread;
+
+  std::atomic<int> completed{0};
+  WaitableEvent all_done(WaitableEvent::ResetPolicy::kManual);
+  std::vector<std::thread> threads;
+  std::vector<scoped_refptr<SequencedTaskRunner>> runners(kThreads);
+
+  for (int t = 0; t < kThreads; ++t) {
+    threads.emplace_back([&, t]() {
+      // Creating the runner registers a new queue while the other threads'
+      // queues are already being drained by workers.
+      runners[t] = pool.CreateSequencedTaskRunner();
+      for (int i = 0; i < kTasksPerThread; ++i) {
+        runners[t]->PostTask(FROM_HERE, [&completed, &all_done]() {
+          if (completed.fetch_add(1, std::memory_order_relaxed) + 1 == kTotal) {
+            all_done.Signal();
+          }
+        });
+      }
+    });
+  }
+  for (auto &thread : threads) {
+    thread.join();
+  }
+
+  EXPECT_TRUE(all_done.TimedWait(std::chrono::seconds(10))) << "tasks stranded after concurrent registration";
+  EXPECT_EQ(completed.load(), kTotal);
+
+  pool.Shutdown();
+}
+
 TEST(ThreadPoolTest, PostingFromRunningTaskStillExecutesFollowupTask) {
   ThreadPool pool({1});
   scoped_refptr<SequencedTaskRunner> runner = pool.CreateSequencedTaskRunner();

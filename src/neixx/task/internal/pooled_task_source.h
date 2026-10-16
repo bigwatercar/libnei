@@ -136,7 +136,6 @@ private:
   std::atomic<std::uint64_t> enqueue_order_{0};
   std::atomic<std::int64_t> total_task_count_{0};
 
-  std::unordered_map<PooledTaskQueue *, TaskSource *> queue_to_source_;
   std::vector<scoped_refptr<TaskSource>> orphan_sources_;
 };
 

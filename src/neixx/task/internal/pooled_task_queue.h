@@ -42,6 +42,7 @@ using OnTaskPostedCallback = std::function<void()>;
 using OnTaskEnqueuedCallback = std::function<void(TaskShutdownBehavior)>;
 
 class RegisteredTaskSource;
+class TaskSource;
 
 class NEI_API PooledTaskQueue final {
 public:
@@ -157,6 +158,16 @@ public:
   // alive, so lock-free reads are safe.
   WaitableEvent *dedicated_event() const;
   void set_dedicated_event(WaitableEvent *event);
+
+  // ---- Owning task source ----
+  //
+  // Cached by PooledTaskSource::RegisterTaskQueue BEFORE the queue's runner is
+  // handed out, so post and worker paths reach the source with a single atomic
+  // load instead of a locked lookup.  The source is kept alive by the pool's
+  // orphan container for the pool's lifetime, i.e. for as long as the queue
+  // itself lives.  nullptr means "not registered yet".
+  TaskSource *task_source() const;
+  void set_task_source(TaskSource *source);
 
 private:
   /// Maximum workers that may simultaneously hold a slot on a single

@@ -27,8 +27,9 @@ TaskSource *PooledTaskSource::GetTaskSourceForQueue(PooledTaskQueue *queue) cons
   if (queue == nullptr) {
     return nullptr;
   }
-  auto it = queue_to_source_.find(queue);
-  return (it != queue_to_source_.end()) ? it->second : nullptr;
+  // Cached on the queue at registration: no global map, no lock, and readers
+  // can never observe a half-built insert entry.
+  return queue->task_source();
 }
 
 // =============================================================================
@@ -39,7 +40,10 @@ void PooledTaskSource::RegisterTaskQueue(PooledTaskQueue *queue) {
   if (queue == nullptr) {
     return;
   }
-  if (queue_to_source_.find(queue) != queue_to_source_.end()) {
+  // Called once per queue, under the pool's lock and before the queue's runner
+  // is handed out, so the check-then-publish below cannot race with another
+  // registration.
+  if (queue->task_source() != nullptr) {
     return;
   }
 
@@ -53,12 +57,14 @@ void PooledTaskSource::RegisterTaskQueue(PooledTaskQueue *queue) {
     return;
   }
 
-  queue_to_source_[queue] = raw;
   auto result = shard.states.emplace(std::piecewise_construct, std::forward_as_tuple(raw), std::forward_as_tuple());
   // Cache the dedicated wake channel on the queue so dedicated posts can
   // Signal without re-locating the state (see ReEnqueueTaskQueue).
   queue->set_dedicated_event(&result.first->second.dedicated_event);
   orphan_sources_.push_back(std::move(ts));
+  // Publish last: a reader that observes the pointer also observes the state
+  // and the wake channel registered above (release/acquire).
+  queue->set_task_source(raw);
 }
 
 // =============================================================================
