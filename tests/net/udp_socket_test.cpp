@@ -43,8 +43,22 @@ protected:
   }
 
   void TearDown() override {
+    // Sockets free their native resources from tasks posted to the runner that
+    // owns them; drain it so that teardown runs instead of being dropped with
+    // the queue (LeakSanitizer would report the leftovers as leaks).
+    DrainRunner(io_runner_);
     io_thread_.Stop();
     main_mgr_->Shutdown();
+  }
+
+  // Runs every task already queued on |runner| and returns once they are done.
+  static void DrainRunner(const scoped_refptr<SingleThreadTaskRunner> &runner) {
+    if (!runner) {
+      return;
+    }
+    WaitableEvent drained(WaitableEvent::ResetPolicy::kAutomatic, false);
+    runner->PostTask(FROM_HERE, [&drained]() { drained.Signal(); });
+    (void)drained.TimedWait(std::chrono::seconds(5));
   }
 
   // Bind a socket to 127.0.0.1:0; return assigned endpoint.  IO-thread only.
@@ -232,6 +246,9 @@ TEST_F(UdpSocketTest, HighConcurrencyDrain) {
     std::atomic<int> received{0};
     std::atomic<bool> done{false};
     std::function<void()> start_recv;
+    // Owned here so teardown can close the socket on the IO thread.  Keeping it
+    // in the state is safe because teardown clears both fields on that thread.
+    std::shared_ptr<UDPSocket> sock;
   };
 
   auto state = std::make_shared<DrainState>();
@@ -240,6 +257,7 @@ TEST_F(UdpSocketTest, HighConcurrencyDrain) {
     EXPECT_TRUE(io_runner_->BelongsToCurrentThread());
 
     auto sock = std::make_shared<UDPSocket>();
+    state->sock = sock;
     IPEndPoint bound = BindToLoopback(sock.get(), io_runner_);
 
     // Safety timeout: quit the loop after kTimeoutMs regardless of
@@ -276,7 +294,10 @@ TEST_F(UdpSocketTest, HighConcurrencyDrain) {
                 return;
               }
             }
-            state->start_recv();
+            // |start_recv| is cleared by teardown; stay silent in that case.
+            if (state->start_recv) {
+              state->start_recv();
+            }
           });
     };
 
@@ -300,6 +321,24 @@ TEST_F(UdpSocketTest, HighConcurrencyDrain) {
   });
 
   loop.Run();
+
+  // Teardown must run on the IO thread: the receive driver (
+  // |state->start_recv|) captures the shared state that owns it, and the
+  // socket's pending receive callback captures the socket, so both are
+  // reference cycles.  Close the socket and drop the driver on the IO thread
+  // so the pending callbacks are failed and released instead of leaking the
+  // socket, its queues and the receive buffer.
+  WaitableEvent cleaned_up(WaitableEvent::ResetPolicy::kAutomatic, false);
+  io_runner_->PostTask(FROM_HERE, [state, &cleaned_up]() {
+    state->done.store(true, std::memory_order_release);
+    state->start_recv = nullptr;
+    if (state->sock) {
+      state->sock->Close();
+      state->sock.reset();
+    }
+    cleaned_up.Signal();
+  });
+  (void)cleaned_up.TimedWait(std::chrono::seconds(5));
 
   int recv = state->received.load();
   int sent = state->sent.load();

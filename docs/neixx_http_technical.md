@@ -377,7 +377,13 @@ HTTP/1.1 特有头（`Connection`/`Keep-Alive`/`Transfer-Encoding`/`Upgrade`）
     更换 SSL 上下文；301/302/303 改 GET 且丢弃 body 与 body 头（307/308
     保留）；seen 集合（origin+path+query）防环；跳数耗尽后交付最后响应。
     递归 driver 用 `shared_ptr<std::function>` 承载，保证跨线程异步回调
-    安全。附带修复真实缺陷：`StartRequest` 的 keep-alive 复用不校验
+    安全。**引用环修复（2026-08-25，LeakSanitizer 发现）**：driver 若强
+    持有自身（`*run = [... run, state ...]`），则 `run → lambda → run` 自
+    环且经 lambda 可达 `state`、`HttpClient::Impl` 与最后一个响应，每次
+    重定向请求泄漏一整套对象。现改为：driver 只弱引用自身与 `state`，由
+    在飞跳的回调强持有 `state`（保持链存活），链结束（`FollowState::Finish`）
+    时 `run.reset()` 断开；跨 host 的 resolver 回调强持有 `state`+driver，
+    resolver 释放回调即释放整条链。附带修复真实缺陷：`StartRequest` 的 keep-alive 复用不校验
     endpoint——同一 HttpClient 先后连不同端口会把第二个请求发到旧连接
     （跨 host 重定向被发回原服务器）→ 现记录 `peer_endpoint_`，不一致时
     关闭旧连接重建。端到端测试 9 例（`http_redirect_integration_test.cpp`）。

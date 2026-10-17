@@ -173,7 +173,20 @@ protected:
       server_a_->Shutdown();
     if (server_b_)
       server_b_->Shutdown();
+    // Drain the IO sequence so the sockets' asynchronous teardown runs (it is
+    // posted to that runner) instead of being dropped with the queue.
+    DrainRunner(io_runner_);
     io_thread_.Stop();
+  }
+
+  // Runs every task already queued on |runner| and returns once they are done.
+  static void DrainRunner(const scoped_refptr<SingleThreadTaskRunner> &runner) {
+    if (!runner) {
+      return;
+    }
+    WaitableEvent drained(WaitableEvent::ResetPolicy::kAutomatic, false);
+    runner->PostTask(FROM_HERE, [&drained]() { drained.Signal(); });
+    (void)drained.TimedWait(std::chrono::seconds(5));
   }
 
   // Drives SendRedirecting on the IO thread and captures the final response.

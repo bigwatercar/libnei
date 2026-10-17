@@ -101,6 +101,10 @@ namespace {
 void OnAresCallback(void *arg, int status, int /*timeouts*/, struct ares_addrinfo *result) {
   // Take ownership of the query context.
   std::unique_ptr<QueryContext> query(static_cast<QueryContext *>(arg));
+  // ...and of |result|: c-ares transfers the result to the callback and never
+  // frees it itself, so it must be released on EVERY path -- including the
+  // drop path below, which used to return early and leak the whole result tree.
+  std::unique_ptr<struct ares_addrinfo, void (*)(struct ares_addrinfo *)> result_guard(result, &ares_freeaddrinfo);
 
   // If the HostResolver has been destroyed, silently drop.
   if (!query->weak_self) {
@@ -110,10 +114,6 @@ void OnAresCallback(void *arg, int status, int /*timeouts*/, struct ares_addrinf
   AddressList addresses;
   if (status == ARES_SUCCESS) {
     addresses = ConvertAresAddrInfo(result);
-  }
-
-  if (result) {
-    ares_freeaddrinfo(result);
   }
 
   // Post the user callback to the target runner.

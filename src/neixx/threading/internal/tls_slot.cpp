@@ -71,14 +71,27 @@ int TLSManager::AllocateLongLivedSlot(TLSDestructorFunc destructor) {
 void TLSManager::FreeSlot(int index) {
   if (index < 0 || index >= kMaxSlots)
     return;
-  // Clear this thread's cached value for the freed slot.  Without this, a
-  // recycled slot index would observe stale data left behind by the previous
-  // owner on this thread (e.g. a ThreadLocalPointer allocated later on another
-  // thread only clears ITS OWN thread's storage, leaving this thread's stale
-  // pointer live) — which surfaces as a wild pointer read via Get().
+  // Destroy this thread's value first, with the slot's registered destructor.
+  // Thread exit only runs destructors for slots that are STILL registered, so a
+  // value set on the freeing thread would otherwise be dropped silently: that
+  // leaked every ThreadLocalOwnedPointer<T> value whose wrapper went out of
+  // scope before the thread exited.
+  //
+  // Clearing the slot value is also required for index recycling: a recycled
+  // index must not observe stale data left behind by the previous owner on this
+  // thread (e.g. a slot allocated later on another thread only clears ITS OWN
+  // thread's storage, leaving this thread's stale pointer live — which surfaces
+  // as a wild pointer read via Get()).
   if (PerThreadStorage *s = GetThreadStorageNoCreate()) {
     if (static_cast<size_t>(index) < s->values.size()) {
-      s->values[static_cast<size_t>(index)] = nullptr;
+      if (void *value = s->values[static_cast<size_t>(index)]) {
+        // Clear before running the destructor: it may re-enter TLS (this slot
+        // or others) and must not observe a value that is being destroyed.
+        s->values[static_cast<size_t>(index)] = nullptr;
+        if (TLSDestructorFunc destructor = slot_destructors_[index].load(std::memory_order_acquire)) {
+          destructor(value);
+        }
+      }
     }
   }
   slot_destructors_[index].store(nullptr, std::memory_order_release);

@@ -201,6 +201,13 @@ protected:
   }
 
   void TearDown() override {
+    // Drain the IO sequence first: pipe streams free their buffers from tasks
+    // posted to it, and dropping those tasks leaks them.
+    if (io_runner_) {
+      WaitableEvent drained(WaitableEvent::ResetPolicy::kAutomatic, false);
+      io_runner_->PostTask(FROM_HERE, [&drained]() { drained.Signal(); });
+      (void)drained.TimedWait(std::chrono::seconds(5));
+    }
     IOThread::ResetForTesting();
   }
 

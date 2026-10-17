@@ -16,6 +16,7 @@
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -40,6 +41,34 @@
 namespace nei::net {
 namespace {
 
+// Self-referencing recursion helpers registered by the tests below.  A
+// std::function that captures itself is a reference cycle: it keeps every
+// object it captured (sockets, multi-MB buffers) alive until process exit,
+// which LeakSanitizer reports as a leak.  TearDown() breaks the cycles.
+std::mutex g_recursion_mutex;
+std::vector<std::shared_ptr<std::function<void()>>> g_recursion_helpers;
+
+// Safe to call from any thread (accept/read callbacks run on the IO thread).
+void TrackRecursion(std::shared_ptr<std::function<void()>> fn) {
+  std::lock_guard<std::mutex> lock(g_recursion_mutex);
+  g_recursion_helpers.push_back(std::move(fn));
+}
+
+// Replaces every registered helper with a no-op: that releases the captures
+// (breaking the cycle) while still being safe if a late IO event invokes it.
+void BreakRecursionCycles() {
+  std::vector<std::shared_ptr<std::function<void()>>> helpers;
+  {
+    std::lock_guard<std::mutex> lock(g_recursion_mutex);
+    helpers.swap(g_recursion_helpers);
+  }
+  for (auto &fn : helpers) {
+    if (fn && *fn) {
+      *fn = []() {};
+    }
+  }
+}
+
 // ===========================================================================
 // TcpSocketTest fixture  --  provides a dedicated IO thread with MessagePumpForIO.
 // ===========================================================================
@@ -55,7 +84,22 @@ protected:
   }
 
   void TearDown() override {
+    // Break the recursion cycles first (releasing the sockets/shells they hold),
+    // then drain the IO runner: releasing a socket posts its teardown to that
+    // runner, and dropping those tasks would leak the native resources they own.
+    BreakRecursionCycles();
+    DrainRunner(io_runner_);
     io_thread_.Stop();
+  }
+
+  // Runs every task already queued on |runner| and returns once they are done.
+  static void DrainRunner(const scoped_refptr<SingleThreadTaskRunner> &runner) {
+    if (!runner) {
+      return;
+    }
+    WaitableEvent drained(WaitableEvent::ResetPolicy::kAutomatic, false);
+    runner->PostTask(FROM_HERE, [&drained]() { drained.Signal(); });
+    (void)drained.TimedWait(std::chrono::seconds(5));
   }
 
   // Finds a free TCP port by binding to loopback:0, querying the assigned
@@ -202,6 +246,7 @@ TEST_F(TcpSocketTest, AsyncStreamTransfer) {
           auto sock = std::make_shared<std::unique_ptr<TCPClientSocket>>(std::move(accepted));
 
           auto do_read = std::make_shared<std::function<void()>>();
+          TrackRecursion(do_read);
           *do_read = [do_read, &transfer_done, &data_match, sock, recv_base, recv_offset, ref_base, kTransferSize]() {
             auto *accepted = sock->get();
             std::size_t remaining = kTransferSize - *recv_offset;
@@ -333,6 +378,7 @@ TEST_F(TcpSocketTest, ExplicitShutdownWrite) {
                                // Keep reading until EOF  --  proof that ShutdownWrite sent FIN.
                                auto buf = MakeRefCounted<IOBufferWithSize>(64);
                                auto do_read = std::make_shared<std::function<void()>>();
+                               TrackRecursion(do_read);
                                *do_read = [&, sock, buf, do_read]() {
                                  (*sock)->ReadAsync(buf, 64, [&, do_read](bool s, std::size_t n) {
                                    if (!s || n == 0) {
@@ -450,6 +496,7 @@ TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
           auto sock = std::make_shared<std::unique_ptr<TCPClientSocket>>(std::move(accepted));
 
           auto do_read = std::make_shared<std::function<void()>>();
+          TrackRecursion(do_read);
           *do_read = [&, sock, recv_buf, recv_offset, do_read]() {
             std::size_t remaining = kTransferSize - *recv_offset;
             // Read in chunks.  Once the expected byte count is reached we
@@ -627,6 +674,7 @@ TEST_F(TcpSocketTest, WriteChainNoStackOverflow) {
                                auto sock = std::make_shared<std::unique_ptr<TCPClientSocket>>(std::move(accepted));
 
                                auto do_read = std::make_shared<std::function<void()>>();
+                               TrackRecursion(do_read);
                                *do_read = [&, sock, do_read]() {
                                  auto buf = nei::MakeRefCounted<nei::IOBufferWithSize>(64);
                                  (*sock)->ReadAsync(buf, 64, [&, do_read](bool s, std::size_t n) {
@@ -647,6 +695,7 @@ TEST_F(TcpSocketTest, WriteChainNoStackOverflow) {
     auto depth = std::make_shared<std::atomic<int>>(0);
     auto remaining = std::make_shared<std::atomic<int>>(kChainLength);
     auto do_write = std::make_shared<std::function<void()>>();
+    TrackRecursion(do_write);
 
     *do_write = [&, client, depth, remaining, do_write]() {
       int d = depth->fetch_add(1) + 1;

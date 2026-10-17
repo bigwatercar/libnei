@@ -144,7 +144,7 @@ class HostResolver {
 | 解析引擎 | c-ares（异步 DNS，`ares_addrinfo` 接口） |
 | 线程模型 | 阻塞查询由 `ThreadPoolInstance` 后台 worker 执行，回调通过 `target_runner` 投递 |
 | 回调确定性 | **永不**同步触发回调（100% 异步） |
-| 销毁安全 | 解析中销毁 `HostResolver` → 回调通过 `WeakPtr` 静默丢弃 |
+| 销毁安全 | 解析中销毁 `HostResolver` → 回调通过 `WeakPtr` 静默丢弃；c-ares 交回的 `ares_addrinfo` 仍会在丢弃路径上 `ares_freeaddrinfo`（RAII 守卫，所有权在回调，c-ares 不会自己释放） |
 | DNS 服务器 | 通过 `HostResolverOptions::dns_servers` 自定义（不指定则使用系统默认） |
 
 ### 4.2 HostResolverOptions

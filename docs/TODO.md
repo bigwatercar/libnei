@@ -1,6 +1,6 @@
 # libnei — TODO & Roadmap
 
-**Updated**: 2026-09-03
+**Updated**: 2026-10-17
 
 > 已完成的详细实现记录已归档至仓库记忆（`/memories/repo/`）与 `bench/results/`；
 > 本文档只保留**未完成任务**与**里程碑摘要**，避免重复堆积。
@@ -38,6 +38,16 @@
 ---
 
 ## 里程碑摘要（已完成）
+
+- **2026-10-17** — 全库 ASAN/LSan 泄漏清零（全量 1042 测试，0 泄漏）。其中 3 处是
+  **真实库缺陷**：① `HttpClient::SendRedirecting` 的递归 hop driver 强引用自身，
+  `run → lambda → state → run` 自环使每个重定向请求泄漏 state / `HttpClient::Impl` /
+  最后一个响应（改为弱自引用 + 由在飞跳回调强持有 state）；② `TLSManager::FreeSlot`
+  只清指针不跑析构，包装对象先于线程退出销毁时 `ThreadLocalOwnedPointer<T>` 的值被
+  静默丢弃（改为释放线程先销毁自己的值）；③ c-ares 回调在 WeakPtr 丢弃路径漏掉
+  `ares_freeaddrinfo`（改为 RAII 守卫）。其余为测试端生命周期问题：runner 停止后才
+  销毁 `TCPServerSocket` / `AsyncFile`（`Orphan`/`DeleteSoon` 投递到已停线程）、测试
+  回调自引用、UDP 压测 recv driver 的 state 环。
 
 - **2026-09-03** — CMake 编译器检测重构：`COMPILER_IS_*` 内联检测逻辑从 top-level
   CMakeLists 提取为 `cmake/neiDetectCompiler.cmake` 模块（include-once 保护），统一为

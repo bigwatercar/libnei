@@ -181,8 +181,41 @@ protected:
   }
 
   void TearDown() override {
+    // Sockets free their native/TLS resources from a task posted to the runner
+    // that owns them.  Drain both runners before stopping the threads so that
+    // teardown actually runs instead of being dropped with the queue (which
+    // LeakSanitizer reports as a leaked mbedtls session plus transport state).
+    DrainRunner(io_runner_);
+    DrainRunner(srv_runner_);
     srv_thread_.Stop();
     io_thread_.Stop();
+  }
+
+  // Runs every task already queued on |runner| and returns once they are done.
+  static void DrainRunner(const scoped_refptr<SingleThreadTaskRunner> &runner) {
+    if (!runner) {
+      return;
+    }
+    WaitableEvent drained(WaitableEvent::ResetPolicy::kAutomatic, false);
+    runner->PostTask(FROM_HERE, [&drained]() { drained.Signal(); });
+    (void)drained.TimedWait(std::chrono::seconds(5));
+  }
+
+  // Closes |socket| on |runner| and waits for the close to be dispatched.  A TLS
+  // shell keeps itself alive through the accept/connect callbacks it stores, so
+  // Close() is what breaks that cycle; its mbedtls session is then freed by a
+  // task posted to the same runner.
+  template <typename Socket>
+  static void CloseOnRunner(const scoped_refptr<SingleThreadTaskRunner> &runner, Socket socket) {
+    if (!runner || !socket) {
+      return;
+    }
+    WaitableEvent closed(WaitableEvent::ResetPolicy::kAutomatic, false);
+    runner->PostTask(FROM_HERE, [socket, &closed]() {
+      socket->Close();
+      closed.Signal();
+    });
+    (void)closed.TimedWait(std::chrono::seconds(5));
   }
 
   static uint16_t FindFreePort() {
@@ -406,16 +439,27 @@ TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
   // Listen 经 srv_runner_ 异步投递；客户端 Connect 经 io_runner_ 异步投递。
   // 用事件等 Listen 就绪再发起连接（否则客户端可能先于服务器 bind/listen
   // 完成而收到 ECONNREFUSED，见 SingleLargeWriteNoPartialDataLoss flaky）。
+  // Holds the read/write recursion helpers so the test can break their
+  // self-references once the transfer is done: a std::function that captures
+  // itself is a reference cycle that keeps the sockets and their buffers alive
+  // past the test (LeakSanitizer reports exactly that).
+  std::shared_ptr<std::function<void()>> server_read_fn;
+  std::shared_ptr<std::function<void()>> client_write_fn;
   auto listen_done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
   srv_runner_->PostTask(FROM_HERE, [&, server_done, listen_done]() {
     ASSERT_TRUE(server->Listen(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
         1,
         [&, server_done](bool ok, std::unique_ptr<TLSClientSocket> tls) {
-          ASSERT_TRUE(ok);
+          if (!ok) {
+            // The listener was closed during teardown, which aborts a pending
+            // accept.  Nothing to serve in that case.
+            return;
+          }
           auto tls_shared = std::make_shared<TLSClientSocket>(std::move(*tls));
           auto offset = std::make_shared<size_t>(0);
           auto do_read = std::make_shared<std::function<void()>>();
+          server_read_fn = do_read;
           *do_read = [=]() {
             size_t remain = kPayloadSize - *offset;
             if (remain == 0) {
@@ -454,6 +498,7 @@ TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
           std::memcpy(send_buf->data(), payload->data(), kPayloadSize);
           auto offset = std::make_shared<size_t>(0);
           auto do_write = std::make_shared<std::function<void()>>();
+          client_write_fn = do_write;
           *do_write = [=]() {
             size_t remain = kPayloadSize - *offset;
             if (remain == 0) {
@@ -482,6 +527,19 @@ TEST_F(TlsSocketTest, LargePayloadBioCompaction) {
   // Verify byte-for-byte match.
   ASSERT_EQ(recv_buf->size(), kPayloadSize);
   EXPECT_EQ(*recv_buf, *payload) << "10 MB TLS round-trip: data corruption detected!";
+
+  // Break the recursion cycles so the sockets and their multi-MB buffers are
+  // released with the test instead of leaking until process exit.
+  if (server_read_fn) {
+    *server_read_fn = nullptr;
+  }
+  if (client_write_fn) {
+    *client_write_fn = nullptr;
+  }
+  // Close both shells: each one keeps itself alive through the callbacks it
+  // stores, and closing is what releases the TLS session.
+  CloseOnRunner(io_runner_, client);
+  CloseOnRunner(srv_runner_, server);
 }
 
 // =============================================================================
@@ -523,16 +581,24 @@ TEST_F(TlsSocketTest, SingleLargeWriteNoPartialDataLoss) {
   // Listen 经 srv_runner_ 异步投递；客户端 Connect 经 io_runner_ 异步投递。
   // 两者无同步时客户端可能先于服务器 bind/listen 完成而收到 ECONNREFUSED
   // （间歇性 "TCP connect failed" flaky）——用事件等 Listen 就绪再发起连接。
+  // See LargePayloadBioCompaction: the self-capturing recursion helper is a
+  // reference cycle, so the test clears it once the transfer completed.
+  std::shared_ptr<std::function<void()>> server_read_fn;
   auto listen_done = std::make_shared<WaitableEvent>(WaitableEvent::ResetPolicy::kAutomatic, false);
   srv_runner_->PostTask(FROM_HERE, [&, server_done, listen_done]() {
     ASSERT_TRUE(server->Listen(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
         1,
         [&, server_done](bool ok, std::unique_ptr<TLSClientSocket> tls) {
-          ASSERT_TRUE(ok);
+          if (!ok) {
+            // See LargePayloadBioCompaction: closing the listener aborts a
+            // pending accept, so tolerate ok == false here.
+            return;
+          }
           auto tls_shared = std::make_shared<TLSClientSocket>(std::move(*tls));
           auto offset = std::make_shared<size_t>(0);
           auto do_read = std::make_shared<std::function<void()>>();
+          server_read_fn = do_read;
           *do_read = [=]() {
             size_t remain = kPayloadSize - *offset;
             if (remain == 0) {
@@ -593,6 +659,13 @@ TEST_F(TlsSocketTest, SingleLargeWriteNoPartialDataLoss) {
   EXPECT_TRUE(write_ok->load()) << "WriteAsync must report the full payload length";
   ASSERT_TRUE(server_done->TimedWait(std::chrono::seconds(60))) << "server never received the full payload";
   ASSERT_TRUE(server_ok->load()) << "2 MB single-write TLS transfer: data corruption or loss detected!";
+
+  // See LargePayloadBioCompaction: break the recursion cycle.
+  if (server_read_fn) {
+    *server_read_fn = nullptr;
+  }
+  CloseOnRunner(io_runner_, client);
+  CloseOnRunner(srv_runner_, server);
 }
 
 // =============================================================================

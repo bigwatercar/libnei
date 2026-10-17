@@ -121,10 +121,14 @@ TEST(ThreadLocalPointerTest, PerThreadIsolation) {
   auto t2 = new TrackedObject(2);
   g_obj.Set(t1);
 
+  std::atomic<TrackedObject *> t3{nullptr};
+
   std::thread th1([&] {
     if (g_obj.Get() == nullptr)
       t1_ok = true; // should be null in new thread
-    g_obj.Set(new TrackedObject(3));
+    auto *created = new TrackedObject(3);
+    g_obj.Set(created);
+    t3.store(created); // non-owning slot: the test has to delete it itself
   });
 
   std::thread th2([&] {
@@ -145,6 +149,7 @@ TEST(ThreadLocalPointerTest, PerThreadIsolation) {
   // Cleanup
   delete t1;
   delete t2;
+  delete t3.load();
 }
 
 // ---- ThreadLocalOwnedPointer<T> --------------------------------------------
@@ -174,41 +179,49 @@ TEST(ThreadLocalOwnedPointerTest, GetOrCreate) {
     auto *b = g_obj.GetOrCreate();
     EXPECT_EQ(b, a); // same object
     EXPECT_EQ(b->id, 7);
+    EXPECT_EQ(g_owned_dtor_count.load(), 0);
   }
-  // ThreadLocalOwnedPointer dtor does NOT call DestroyValue on slot destruction;
-  // it's the thread exit that triggers it.  This test verifies GetOrCreate
-  // behavior, not destructor behavior.
+  // Destroying the wrapper releases this thread's owned value right away (the
+  // slot's destructor is invoked for the freeing thread).
+  EXPECT_EQ(g_owned_dtor_count.load(), 1);
 }
 
 TEST(ThreadLocalOwnedPointerTest, SetAndGet) {
-  nei::ThreadLocalOwnedPointer<OwnedObject> g_obj;
-  auto *obj = new OwnedObject(42);
-  g_obj.Set(obj);
-  EXPECT_EQ(g_obj->id, 42);
+  g_owned_dtor_count.store(0);
+  {
+    nei::ThreadLocalOwnedPointer<OwnedObject> g_obj;
+    auto *obj = new OwnedObject(42);
+    g_obj.Set(obj);
+    EXPECT_EQ(g_obj->id, 42);
+  }
+  EXPECT_EQ(g_owned_dtor_count.load(), 1);
 }
 
 TEST(ThreadLocalOwnedPointerTest, GetOrCreateIsPerThread) {
+  g_owned_dtor_count.store(0);
   nei::ThreadLocalOwnedPointer<OwnedObject> g_obj;
   auto *main_obj = g_obj.GetOrCreate();
   main_obj->id = 1;
 
-  std::atomic<OwnedObject *> t_obj{nullptr};
-  std::atomic<int> t_id{-1};
+  std::atomic<int> worker_started_empty{0};
+  std::atomic<int> worker_id{-1};
   std::thread th([&] {
+    if (g_obj.Get() == nullptr)
+      worker_started_empty.fetch_add(1);
     auto *obj = g_obj.GetOrCreate();
     obj->id = 2;
-    t_obj.store(obj);
-    t_id.store(2);
+    worker_id.store(obj->id);
   });
   th.join();
 
   // Main thread still has its own object.
   EXPECT_EQ(main_obj->id, 1);
-  // The worker thread created a different object.  Once `th` exits, its TLS
-  // destructor frees that object, so t_obj must NOT be dereferenced after
-  // join(); capture the id before the thread exits instead.
-  EXPECT_NE(t_obj.load(), main_obj);
-  EXPECT_EQ(t_id.load(), 2);
+  // The worker started empty and used a different value, which its TLS
+  // destructor freed at thread exit (the pointer itself must not be
+  // dereferenced after join()).
+  EXPECT_EQ(worker_started_empty.load(), 1);
+  EXPECT_EQ(worker_id.load(), 2);
+  EXPECT_EQ(g_owned_dtor_count.load(), 1);
 }
 
 // ---- ThreadLocalBoolean ----------------------------------------------------
@@ -258,11 +271,14 @@ TEST(ThreadLocalTest, ManySlotsNoLeak) {
 }
 
 TEST(ThreadLocalTest, ManyOwnedPointersNoLeak) {
+  g_owned_dtor_count.store(0);
   for (int i = 0; i < 300; ++i) {
     nei::ThreadLocalOwnedPointer<OwnedObject> g_p;
     g_p.GetOrCreate();
-    // Destructor frees slot when g_p goes out of scope.
+    // Destructor frees slot when g_p goes out of scope; the owned value is
+    // deleted at the same time (slot destruction destroys this thread's value).
   }
+  EXPECT_EQ(g_owned_dtor_count.load(), 300);
 }
 
 // ---- Mixed types -----------------------------------------------------------

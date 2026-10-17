@@ -54,26 +54,36 @@ namespace nei {
 NEI_API void *ThreadLocal_AllocSlot();
 NEI_API void *ThreadLocal_AllocSlotWithDtor(void(NTAPI *dtor)(void *));
 NEI_API void *ThreadLocal_AllocLongLivedSlotWithDtor(void(NTAPI *dtor)(void *));
-NEI_API void  ThreadLocal_FreeSlot(void *handle);
+NEI_API void ThreadLocal_FreeSlot(void *handle);
 NEI_API void *ThreadLocal_GetSlotValue(void *handle);
-NEI_API void  ThreadLocal_SetSlotValue(void *handle, void *value);
+NEI_API void ThreadLocal_SetSlotValue(void *handle, void *value);
 
 // ---- Slot wrapper (header-defined, delegates to bridge) ---------------------
 
 class ThreadLocalSlot {
 public:
-  ThreadLocalSlot() : handle_(ThreadLocal_AllocSlot()) {}
+  ThreadLocalSlot()
+      : handle_(ThreadLocal_AllocSlot()) {
+  }
 
   explicit ThreadLocalSlot(void (*dtor)(void *))
-      : handle_(ThreadLocal_AllocSlotWithDtor(dtor)) {}
+      : handle_(ThreadLocal_AllocSlotWithDtor(dtor)) {
+  }
 
-  ~ThreadLocalSlot() { ThreadLocal_FreeSlot(handle_); }
+  ~ThreadLocalSlot() {
+    ThreadLocal_FreeSlot(handle_);
+  }
 
   ThreadLocalSlot(const ThreadLocalSlot &) = delete;
   ThreadLocalSlot &operator=(const ThreadLocalSlot &) = delete;
 
-  void *Get() const { return ThreadLocal_GetSlotValue(handle_); }
-  void Set(void *value) { ThreadLocal_SetSlotValue(handle_, value); }
+  void *Get() const {
+    return ThreadLocal_GetSlotValue(handle_);
+  }
+
+  void Set(void *value) {
+    ThreadLocal_SetSlotValue(handle_, value);
+  }
 
 private:
   void *handle_;
@@ -93,22 +103,40 @@ private:
 template <typename T>
 class ThreadLocal {
 public:
-  ThreadLocal() { GetValue() = T{}; }
+  ThreadLocal() {
+    GetValue() = T{};
+  }
 
-  explicit ThreadLocal(T initial) { GetValue() = std::move(initial); }
+  explicit ThreadLocal(T initial) {
+    GetValue() = std::move(initial);
+  }
 
   ThreadLocal(const ThreadLocal &) = delete;
   ThreadLocal &operator=(const ThreadLocal &) = delete;
 
-  T *Get() { return &GetValue(); }
+  T *Get() {
+    return &GetValue();
+  }
 
-  T *operator->() { return &GetValue(); }
-  const T *operator->() const { return &GetValue(); }
+  T *operator->() {
+    return &GetValue();
+  }
 
-  T &operator*() { return GetValue(); }
-  const T &operator*() const { return GetValue(); }
+  const T *operator->() const {
+    return &GetValue();
+  }
 
-  void Set(T value) { GetValue() = std::move(value); }
+  T &operator*() {
+    return GetValue();
+  }
+
+  const T &operator*() const {
+    return GetValue();
+  }
+
+  void Set(T value) {
+    GetValue() = std::move(value);
+  }
 
 private:
   static T &GetValue() {
@@ -131,20 +159,36 @@ private:
 template <typename T>
 class ThreadLocalPointer {
 public:
-  ThreadLocalPointer() : slot_(new ThreadLocalSlot()) {}
-  ~ThreadLocalPointer() { delete slot_; }
+  ThreadLocalPointer()
+      : slot_(new ThreadLocalSlot()) {
+  }
+
+  ~ThreadLocalPointer() {
+    delete slot_;
+  }
 
   ThreadLocalPointer(const ThreadLocalPointer &) = delete;
   ThreadLocalPointer &operator=(const ThreadLocalPointer &) = delete;
 
-  T *Get() const { return static_cast<T *>(slot_->Get()); }
+  T *Get() const {
+    return static_cast<T *>(slot_->Get());
+  }
 
-  void Set(T *value) { slot_->Set(static_cast<void *>(value)); }
+  void Set(T *value) {
+    slot_->Set(static_cast<void *>(value));
+  }
 
-  T *operator->() const { return Get(); }
-  T &operator*() const { return *Get(); }
+  T *operator->() const {
+    return Get();
+  }
 
-  bool HasValue() const { return Get() != nullptr; }
+  T &operator*() const {
+    return *Get();
+  }
+
+  bool HasValue() const {
+    return Get() != nullptr;
+  }
 
 private:
   ThreadLocalSlot *slot_;
@@ -154,8 +198,11 @@ private:
 // ThreadLocalOwnedPointer<T> — ownership-aware per-thread pointer.
 //
 // Like ThreadLocalPointer<T>, but the stored pointer is automatically deleted
-// (via `delete`) when the thread exits.  Typically stored as a function-local
-// static so there is exactly one per thread.
+// (via `delete`) when the thread exits, or right away when this object is
+// destroyed on the thread that owns the value (the slot destructor runs the
+// thread-local destructor for the freeing thread).  Typically stored as a
+// function-local static so there is exactly one per thread; a short-lived
+// instance only cleans up the value it owns on its own thread.
 //
 // Example:
 //   struct PerThreadData { int count; std::string name; };
@@ -165,13 +212,20 @@ private:
 template <typename T>
 class ThreadLocalOwnedPointer {
 public:
-  ThreadLocalOwnedPointer() : slot_(new ThreadLocalSlot(&DestroyValue)) {}
-  ~ThreadLocalOwnedPointer() { delete slot_; }
+  ThreadLocalOwnedPointer()
+      : slot_(new ThreadLocalSlot(&DestroyValue)) {
+  }
+
+  ~ThreadLocalOwnedPointer() {
+    delete slot_;
+  }
 
   ThreadLocalOwnedPointer(const ThreadLocalOwnedPointer &) = delete;
   ThreadLocalOwnedPointer &operator=(const ThreadLocalOwnedPointer &) = delete;
 
-  T *Get() const { return static_cast<T *>(slot_->Get()); }
+  T *Get() const {
+    return static_cast<T *>(slot_->Get());
+  }
 
   T *GetOrCreate() {
     T *val = Get();
@@ -182,13 +236,22 @@ public:
     return val;
   }
 
-  void Set(T *value) { slot_->Set(static_cast<void *>(value)); }
+  void Set(T *value) {
+    slot_->Set(static_cast<void *>(value));
+  }
 
-  T *operator->() const { return Get(); }
-  T &operator*() const { return *Get(); }
+  T *operator->() const {
+    return Get();
+  }
+
+  T &operator*() const {
+    return *Get();
+  }
 
 private:
-  static void NTAPI DestroyValue(void *ptr) { delete static_cast<T *>(ptr); }
+  static void NTAPI DestroyValue(void *ptr) {
+    delete static_cast<T *>(ptr);
+  }
 
   ThreadLocalSlot *slot_;
 };
@@ -206,8 +269,13 @@ private:
 // =============================================================================
 class NEI_API ThreadLocalBoolean {
 public:
-  ThreadLocalBoolean() : slot_(new ThreadLocalSlot()) {}
-  ~ThreadLocalBoolean() { delete slot_; }
+  ThreadLocalBoolean()
+      : slot_(new ThreadLocalSlot()) {
+  }
+
+  ~ThreadLocalBoolean() {
+    delete slot_;
+  }
 
   ThreadLocalBoolean(const ThreadLocalBoolean &) = delete;
   ThreadLocalBoolean &operator=(const ThreadLocalBoolean &) = delete;

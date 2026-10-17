@@ -1507,6 +1507,23 @@ HttpRequestHandle HttpClient::SendRedirecting(const HttpRequest &request,
     int hops_left = 0;
     std::unordered_set<std::string> seen;
     ResponseCallback final_cb;
+
+    // The recursion driver below captures itself (it has to: each hop's callback
+    // may fire after this method returns), which makes a reference cycle.  The
+    // state owns the driver so that finishing can release it, otherwise the
+    // driver, this state, the client Impl and the last response all leak.
+    std::shared_ptr<std::function<HttpRequestHandle(const HttpRequest &, const net::IPEndPoint &, net::SSLContext *)>>
+        run;
+
+    // Delivers the final response and breaks the self-capture cycle.
+    void Finish(std::unique_ptr<HttpResponse> response) {
+      ResponseCallback cb = std::move(final_cb);
+      final_cb = nullptr;
+      run.reset();
+      if (cb) {
+        cb(std::move(response));
+      }
+    }
   };
 
   auto state = std::make_shared<FollowState>();
@@ -1516,29 +1533,46 @@ HttpRequestHandle HttpClient::SendRedirecting(const HttpRequest &request,
 
   // Recursive hop driver.  Kept in a shared_ptr because each hop's Send
   // callback may fire after this method returns; recursion goes through the
-  // shared function object.  Returns the in-flight hop's handle.
-  auto run = std::make_shared<
-      std::function<HttpRequestHandle(const HttpRequest &, const net::IPEndPoint &, net::SSLContext *)>>();
-  *run = [this, run, state, io_runner](const HttpRequest &req, const net::IPEndPoint &ep, net::SSLContext *ctx) {
+  // shared function object.  The driver only holds WEAK references to itself
+  // and to |state|, while each in-flight hop callback holds |state| strongly.
+  // That keeps a running chain alive without a reference cycle (a driver that
+  // captured itself strongly would outlive every request and leak the state,
+  // the client Impl and the last response).  Returns the in-flight handle.
+  using HopDriver = std::function<HttpRequestHandle(const HttpRequest &, const net::IPEndPoint &, net::SSLContext *)>;
+  auto run = std::make_shared<HopDriver>();
+  std::weak_ptr<HopDriver> weak_run = run;
+  std::weak_ptr<FollowState> weak_state = state;
+  *run = [this, weak_run, weak_state, io_runner](
+             const HttpRequest &req, const net::IPEndPoint &ep, net::SSLContext *ctx) {
+    // Strong reference for this hop: the callback below keeps the chain (and
+    // therefore the driver) alive until it fires.
+    std::shared_ptr<FollowState> state = weak_state.lock();
+    if (!state) {
+      return HttpRequestHandle();
+    }
     return Send(
-        req, ep, ctx, io_runner, [this, run, state, req, ep, ctx, io_runner](std::unique_ptr<HttpResponse> resp) {
+        req, ep, ctx, io_runner, [this, weak_run, state, req, ep, ctx, io_runner](std::unique_ptr<HttpResponse> resp) {
+          std::shared_ptr<HopDriver> hop = weak_run.lock();
+          if (!hop) {
+            return; // Chain already finished: nothing to drive any more.
+          }
           const Url &url = req.url;
           const HttpMethod method = req.method;
           if (!resp) {
-            state->final_cb(nullptr);
+            state->Finish(nullptr);
             return;
           }
           // Loop guard: never revisit the same origin+path+query.
           const std::string key = std::string(url.origin()) + std::string(url.path()) + std::string(url.query());
           if (state->seen.count(key) != 0) {
-            state->final_cb(std::move(resp));
+            state->Finish(std::move(resp));
             return;
           }
           state->seen.insert(key);
 
           const auto decision = ComputeRedirect(*resp, url, method, state->hops_left);
           if (!decision || !decision->follow) {
-            state->final_cb(std::move(resp));
+            state->Finish(std::move(resp));
             return;
           }
           --state->hops_left;
@@ -1556,7 +1590,7 @@ HttpRequestHandle HttpClient::SendRedirecting(const HttpRequest &request,
             EraseHeaders(&next.headers, {"Content-Length", "Content-Type", "Transfer-Encoding"});
           }
           if (same_origin) {
-            (*run)(next, ep, ctx);
+            (*hop)(next, ep, ctx);
             return;
           }
 
@@ -1564,7 +1598,7 @@ HttpRequestHandle HttpClient::SendRedirecting(const HttpRequest &request,
           // (with a per-target SSL context when the caller supplied one).
           EraseHeaders(&next.headers, {"Authorization", "Cookie"});
           if (!state->options.resolver) {
-            state->final_cb(std::move(resp)); // cannot follow cross-host.
+            state->Finish(std::move(resp)); // cannot follow cross-host.
             return;
           }
           const uint16_t port = decision->target.port() != 0
@@ -1572,9 +1606,9 @@ HttpRequestHandle HttpClient::SendRedirecting(const HttpRequest &request,
                                     : (EqualsCaseInsensitiveASCII(decision->target.scheme(), "https") ? 443 : 80);
           state->options.resolver->Resolve(
               std::string(decision->target.host()),
-              [run, state, next, port, ctx, decision](const AddressList &addrs) {
+              [hop, state, next, port, ctx, decision](const AddressList &addrs) {
                 if (addrs.empty()) {
-                  state->final_cb(nullptr);
+                  state->Finish(nullptr);
                   return;
                 }
                 net::SSLContext *next_ctx = ctx;
@@ -1583,11 +1617,12 @@ HttpRequestHandle HttpClient::SendRedirecting(const HttpRequest &request,
                     next_ctx = provided;
                 }
                 const net::IPEndPoint new_ep(addrs[0].address(), port);
-                (*run)(next, new_ep, next_ctx);
+                (*hop)(next, new_ep, next_ctx);
               },
               io_runner);
         });
   };
+  state->run = run;
   return (*run)(request, endpoint, ssl_ctx);
 }
 

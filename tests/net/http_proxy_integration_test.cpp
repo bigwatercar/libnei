@@ -121,12 +121,34 @@ protected:
       plain_server_->Shutdown();
     if (tls_server_)
       tls_server_->Shutdown();
-    client_runner_->PostTask(FROM_HERE, [this]() {
-      if (proxy_)
+    // Shut the proxy down on the runner that owns it and wait for that task.
+    // The shell must be destroyed here as well, not by the fixture destructor:
+    // ~TCPServerSocket() -> Orphan() posts the self-hold release to io_runner_,
+    // so destroying it after the thread stopped would leak the Impl (and its
+    // runner chain) forever.
+    WaitableEvent proxy_done(WaitableEvent::ResetPolicy::kAutomatic, false);
+    client_runner_->PostTask(FROM_HERE, [this, &proxy_done]() {
+      if (proxy_) {
         proxy_->Shutdown();
+        proxy_.reset();
+      }
+      proxy_done.Signal();
     });
+    (void)proxy_done.TimedWait(std::chrono::seconds(5));
+    DrainRunner(client_runner_);
+    DrainRunner(srv_runner_);
     srv_thread_.Stop();
     client_thread_.Stop();
+  }
+
+  // Runs every task already queued on |runner| and returns once they are done.
+  static void DrainRunner(const scoped_refptr<SingleThreadTaskRunner> &runner) {
+    if (!runner) {
+      return;
+    }
+    WaitableEvent drained(WaitableEvent::ResetPolicy::kAutomatic, false);
+    runner->PostTask(FROM_HERE, [&drained]() { drained.Signal(); });
+    (void)drained.TimedWait(std::chrono::seconds(5));
   }
 
   // -------------------------------------------------------------------------

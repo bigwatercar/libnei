@@ -135,6 +135,17 @@ TEST(FileInputStreamAdapterTest, BridgesAsyncFileAndAsyncLineReader) {
   io_runner->PostTask(FROM_HERE, [&]() { read_close_barrier.Signal(); });
   ASSERT_TRUE(read_close_barrier.TimedWait(std::chrono::seconds(10)));
 
+  // Release the AsyncFile shells while the IO thread is still running: their
+  // destructors hand the implementation to DeleteSoon() on that runner, so
+  // letting them die after IOThread::ResetForTesting() leaks the file object.
+  writer_file.reset();
+  reader_file.reset();
+  {
+    WaitableEvent released(WaitableEvent::ResetPolicy::kAutomatic, false);
+    io_runner->PostTask(FROM_HERE, [&released]() { released.Signal(); });
+    EXPECT_TRUE(released.TimedWait(std::chrono::seconds(10)));
+  }
+
   background_thread.Stop();
   IOThread::ResetForTesting();
 

@@ -43,6 +43,21 @@ Global TLSManager
 
 新设计：`slot_states_[256]` 原子位图，`AllocateSlot` 扫描 `kSlotFree` → CAS → 标记 `kSlotInUse`。`FreeSlot` 重置为 `kSlotFree`。支持无限次创建/销毁 Slot。
 
+### 1.2.1 Slot 释放时的值析构（重要）
+
+`FreeSlot` 在回收索引前，会先用该 Slot 注册的析构函数销毁**释放线程自身**的值：
+
+```text
+FreeSlot(index):
+  1. 取出本线程 values[index]，先置空（防重入二次析构）
+  2. 调用 slot_destructors_[index]（如有）
+  3. 注销析构函数 + 退回 kSlotFree
+```
+
+原因：`OnThreadExit` 只会给**仍然注册**的 Slot 跑析构。若 `ThreadLocalOwnedPointer<T>` 的包装对象在线程退出前就销毁（例如作为局部变量、循环内临时对象），旧实现只把本线程的值指针清零，值本身被静默丢弃 —— 这是真实内存泄漏（被 `ThreadLocalTest.ManyOwnedPointersNoLeak` / `ThreadLocalOwnedPointerTest.*` 的 LeakSanitizer 抓到）。Chromium 的语义同样是“Slot 销毁即线程局部值销毁”。
+
+注意：其他线程里残留的值无法在此刻安全销毁（跨线程析构不安全），它们的 `OnThreadExit` 也不会再触发；因此约定 Slot 应当是**长生命周期**对象（典型是函数内 `static`），短生命周期 Slot 只应在使用它的同一线程创建并销毁。
+
 ### 1.3 析构顺序（long_lived）
 
 线程退出时 `OnThreadExit` 分两 pass：
@@ -117,6 +132,8 @@ PerThreadRenderer* GetRenderer() {
 ```
 
 **适用**：per-thread 单例，线程退出时自动清理。**推荐作为大多数场景的首选。**
+
+补充：若 `ThreadLocalOwnedPointer<T>` 本身在持有值的线程上被销毁，值会立即 delete（见 1.2.1），不需要等线程退出。
 
 **注意**：`T` 必须有默认构造函数（`GetOrCreate` 调用 `new T()`）。对象在 OnThreadExit 的第一 pass 中 delete。
 
