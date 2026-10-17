@@ -46,9 +46,11 @@ public:
     /// reclaimed either).
     ///
     /// SHARED-mode SingleThreadTaskRunner workers (see
-    /// CreateSingleThreadTaskRunner) also never self-terminate, but they idle
-    /// by polling: this value is their poll interval, and a zero value makes
-    /// them poll continuously (they stay functional, at the cost of CPU).
+    /// CreateSingleThreadTaskRunner) also never self-terminate.  They park on
+    /// their wake event, and a positive value additionally makes them wake up
+    /// periodically to re-check their queues (and gives a bounded shutdown
+    /// latency if a wake-up were ever missed); with zero they park until the
+    /// next task post or shutdown.
     TimeDelta suggested_reclaim_time = TimeDelta::FromSeconds(30);
 
     /// Initial and post-task-restored OS-level scheduling priority for worker
@@ -127,12 +129,20 @@ public:
   /// worker thread (would deadlock).
   void FlushForTesting();
 
-  /// Shuts down the pool and waits for all workers to exit.
+  /// Shuts down the pool and waits for its workers.
   ///
-  /// The timeout parameter is currently ignored: shutdown always blocks until
-  /// every worker has exited and returns true.  Abandoning workers on timeout
-  /// (Chromium's JoiningPolicy) is not implemented yet — see docs/TODO.md.
-  /// Callers must therefore ensure worker tasks have bounded execution time.
+  /// Tasks that must run to completion (shutdown behavior other than
+  /// CONTINUE_ON_SHUTDOWN) are always waited for; that wait is deliberately NOT
+  /// bounded by |timeout|, because abandoning such a task would let it touch
+  /// pool state after destruction.
+  ///
+  /// |timeout| bounds the final phase — waiting for the worker threads to
+  /// return.  A zero or negative timeout waits indefinitely and always returns
+  /// true.  A positive timeout returns false if some worker was still running
+  /// when it expired; the pool stays shut down, those workers keep running, and
+  /// a later Shutdown() call (or destroying the pool, which calls Shutdown()
+  /// without a timeout) waits for them and then releases their resources.
+  /// Callers must not destroy the pool while Shutdown() has returned false.
   bool Shutdown(TimeDelta timeout = TimeDelta());
 
   /// Chromium-aligned execution fence (ThreadPoolInstance::BeginFence/EndFence).
@@ -148,9 +158,10 @@ public:
   void BeginFence();
   void EndFence();
 
-  /// Returns the number of worker threads created so far, NOT the number that
-  /// are currently alive: worker handles are only released at Shutdown, so
-  /// compensation workers that self-terminated on idle are still counted.
+  /// Returns the number of worker threads that are currently alive.  Workers
+  /// that self-terminated (compensation workers that idled out) are reaped and
+  /// no longer counted, so the value does not grow with the number of
+  /// compensation workers the pool has spawned over its lifetime.
   std::size_t worker_count() const;
 
   /// Registers a global observer for task execution events.

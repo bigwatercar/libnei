@@ -116,7 +116,30 @@ public:
     (void)PlatformThread::Join(&handle_);
   }
 
+  /// Waits up to |timeout| for this worker's thread to exit and joins it if it
+  /// did.  A zero or negative timeout only probes and never blocks.  Returns
+  /// true once the thread has exited (and is now joined).
+  bool TryJoin(TimeDelta timeout) {
+    const auto ms = std::chrono::milliseconds(std::max<std::int64_t>(0, timeout.InMilliseconds()));
+    if (!exit_event_.TimedWait(ms)) {
+      return false;
+    }
+    Join();
+    return true;
+  }
+
+  /// Entry point for the platform thread.  Subclasses implement
+  /// ThreadMainBody(); this wrapper publishes the exit signal afterwards so
+  /// TryJoin() only reports an exited thread once the body has fully returned.
+  void ThreadMain() final {
+    ThreadMainBody();
+    exit_event_.Signal();
+  }
+
 protected:
+  /// Worker-specific main function (previous ThreadMain()).
+  virtual void ThreadMainBody() = 0;
+
   void InstallBlockingCallback() {
     internal::SetCurrentBlockingCallback([this](bool began) {
       if (began && on_blocking_begin_) {
@@ -163,11 +186,16 @@ protected:
   /// reclaimable worker observe the end of its shift.  0 = wait indefinitely.
   const TimeDelta reclaim_time_;
   /// Current OS priority of this thread, updated by Apply/Restore.
-  /// Only accessed from this thread's ThreadMain() - no synchronisation needed.
+  /// Only accessed from this thread's ThreadMainBody() - no synchronisation
+  /// needed.
   ThreadType current_thread_type_;
 
   std::string name_;
   PlatformThread::Handle handle_;
+  /// Signaled by ThreadMain() once the worker body has returned.  This is what
+  /// makes a worker's exit observable without blocking on a join, so the pool
+  /// can reap self-terminated compensation workers.
+  WaitableEvent exit_event_{WaitableEvent::ResetPolicy::kManual, false};
 };
 
 class WorkerThread final : public PoolWorkerBase {
@@ -196,19 +224,6 @@ public:
       , may_exit_when_idle_(may_exit_when_idle)
       , execution_fence_count_(execution_fence_count)
       , fence_release_event_(fence_release_event) {
-  }
-
-  bool TryJoin(TimeDelta timeout) {
-    if (!timeout.is_positive()) {
-      Join();
-      return true;
-    }
-    const auto ms = std::chrono::milliseconds(timeout.InMilliseconds());
-    if (!exit_event_.TimedWait(ms)) {
-      return false;
-    }
-    Join();
-    return true;
   }
 
 private:
@@ -266,7 +281,7 @@ private:
     }
   }
 
-  void ThreadMain() override {
+  void ThreadMainBody() override {
     TRACE_EVENT_BEGIN("nei.scheduling", "WorkerThread");
 
     if (!name_.empty()) {
@@ -392,7 +407,7 @@ private:
         internal::SetCurrentBlockingCallback(nullptr);
         internal::SetCurrentPooledTaskQueue(nullptr);
         internal::SetLocalWorkQueue(nullptr);
-        exit_event_.Signal();
+        // The base class signals the exit event once this body returns.
         return;
       }
 
@@ -647,8 +662,6 @@ private:
   mutable Lock local_queue_lock_;
   std::deque<internal::PooledTaskQueue *> local_work_queue_;
 
-  WaitableEvent exit_event_{WaitableEvent::ResetPolicy::kManual, false};
-
   // Execution fence (Chromium ThreadPoolInstance::BeginFence/EndFence).
   std::atomic<int> *execution_fence_count_ = nullptr;
   WaitableEvent *fence_release_event_ = nullptr;
@@ -745,7 +758,7 @@ private:
     (void)queue->DidProcessTask();
   }
 
-  void ThreadMain() override {
+  void ThreadMainBody() override {
     TRACE_EVENT_BEGIN("nei.scheduling", "SharedWorkerThread");
 
     if (!name_.empty()) {
@@ -796,10 +809,19 @@ private:
       if (!did_work) {
         // No queue had work — wait for a wake-up from a new task post.
         // Deliberately wait WITHOUT holding queues_lock_: holding it across
-        // the (up to reclaim_time_) wait starves CreateSingleThreadTaskRunner,
-        // which needs queues_lock_ to register a new SHARED queue, for the
-        // full reclaim cycle on every idle wait.
-        shared_->wake_event.TimedWait(std::chrono::milliseconds(reclaim_time_.InMilliseconds()));
+        // the wait starves CreateSingleThreadTaskRunner, which needs
+        // queues_lock_ to register a new SHARED queue, for the full reclaim
+        // cycle on every idle wait.
+        //
+        // wake_event is auto-reset and is signaled both on every task post and
+        // on shutdown, and it latches while no one waits — so a blocking wait
+        // cannot miss a wake-up.  A zero reclaim time therefore parks this
+        // thread instead of polling (it used to TimedWait(0), i.e. busy-loop).
+        if (reclaim_time_.is_positive()) {
+          shared_->wake_event.TimedWait(std::chrono::milliseconds(reclaim_time_.InMilliseconds()));
+        } else {
+          shared_->wake_event.Wait();
+        }
       }
     }
 
@@ -849,13 +871,72 @@ void internal::ThreadGroup::JoinAll() {
   }
 }
 
-std::size_t internal::ThreadGroup::worker_count() const {
+bool internal::ThreadGroup::JoinAllWithTimeout(TimeDelta timeout) {
+  const TimeTicks deadline = TimeTicks::Now() + timeout;
+  std::vector<ThreadHandle> pending;
+  {
+    AutoLock guard(group_lock_);
+    pending.swap(handles_);
+  }
+
+  bool all_joined = true;
+  std::vector<ThreadHandle> still_running;
+  for (auto &handle : pending) {
+    // Poll when the budget is exhausted so a worker that exited meanwhile is
+    // not reported as running.
+    const TimeDelta left = deadline - TimeTicks::Now();
+    if (handle.try_join && handle.try_join(left.is_positive() ? left : TimeDelta())) {
+      continue;
+    }
+    all_joined = false;
+    still_running.push_back(std::move(handle));
+  }
+
+  // Keep whatever is still running so a later join can complete (a worker that
+  // has not exited must stay joinable: its thread still references the worker
+  // object the handle owns).
+  if (!still_running.empty()) {
+    AutoLock guard(group_lock_);
+    for (auto &handle : still_running) {
+      handles_.push_back(std::move(handle));
+    }
+  }
+  return all_joined;
+}
+
+void internal::ThreadGroup::ReapExitedWorkers() {
+  std::vector<ThreadHandle> reaped;
+  {
+    AutoLock guard(group_lock_);
+    for (auto it = handles_.begin(); it != handles_.end();) {
+      // Zero timeout: probe only.  A worker that has signalled its exit is
+      // joined right away, which returns essentially immediately (its thread is
+      // already past ThreadMainBody()); workers that are still running are left
+      // alone so the caller — which may hold pool locks a worker needs to make
+      // progress — never waits for real work to finish.
+      if (it->try_join && it->try_join(TimeDelta())) {
+        reaped.push_back(std::move(*it));
+        it = handles_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  // |reaped| destroys the handles outside the lock; joining already happened in
+  // try_join(), so this only releases the worker objects.
+}
+
+std::size_t internal::ThreadGroup::worker_count() {
+  ReapExitedWorkers();
   AutoLock guard(group_lock_);
   return handles_.size();
 }
 
 bool internal::ThreadGroup::SpawnCompensationWorker(const WorkerFactory &factory) {
-  // Capacity check under our own lock first.
+  // Self-terminated compensation workers must not keep holding slots: reap
+  // them before the capacity check, otherwise the pool would only ever be able
+  // to spawn max_worker_count_ workers over its whole lifetime.
+  ReapExitedWorkers();
   {
     AutoLock guard(group_lock_);
     if (handles_.size() >= max_worker_count_) {
@@ -1307,7 +1388,14 @@ public:
       queues_to_shutdown.swap(queues_);
     }
 
+    // Move the queues into the retired container and flag them shutdown: a
+    // worker may still be inside one (dedicated assignment or local work
+    // queue), so the memory must stay valid until every worker has stopped.
+    // |retired_queues_| is only released once the workers are all joined.
     for (auto &queue : queues_to_shutdown) {
+      retired_queues_.push_back(std::move(queue));
+    }
+    for (auto &queue : retired_queues_) {
       queue->Shutdown();
     }
 
@@ -1321,21 +1409,52 @@ public:
         kv.second->wake_event.Signal();
       }
     }
-    for (auto &worker : shared_worker_threads_) {
-      worker->Join();
-    }
-    shared_worker_threads_.clear();
-    shared_workers_.clear();
 
-    if (!timeout.is_positive()) {
+    // From here on |timeout| bounds the waits: the deadline is shared by both
+    // worker families so the total wait stays within the caller's budget.
+    const bool bounded = timeout.is_positive();
+    const TimeTicks deadline = bounded ? TimeTicks::Now() + timeout : TimeTicks();
+
+    // A shared worker that has not exited keeps referencing its SharedWorker
+    // (|shared_|), so both containers are only cleared once every thread is
+    // joined; otherwise the next Shutdown() call finishes the job.
+    bool shared_joined = true;
+    for (auto &worker : shared_worker_threads_) {
+      if (!bounded) {
+        worker->Join();
+        continue;
+      }
+      const TimeDelta left = deadline - TimeTicks::Now();
+      if (!worker->TryJoin(left)) {
+        shared_joined = false;
+      }
+    }
+
+    if (!bounded) {
       thread_group_->JoinAll();
+      shared_worker_threads_.clear();
+      shared_workers_.clear();
+      retired_queues_.clear();
       return true;
     }
 
-    // With JoiningPolicy::kBlock, TryJoin semantics are not fully
-    // supported yet; for now delegate to JoinAll.
-    thread_group_->JoinAll();
-    return true;
+    if (shared_joined) {
+      shared_worker_threads_.clear();
+      shared_workers_.clear();
+    }
+
+    const TimeDelta left = deadline - TimeTicks::Now();
+    const bool group_joined = thread_group_->JoinAllWithTimeout(left);
+    if (group_joined && shared_joined) {
+      // No worker can reference the retired queues any more.
+      retired_queues_.clear();
+    } else {
+      NEI_LOG_C(g_nei_logger,
+                NEI_L_WARN,
+                "[ThreadPool] Shutdown timed out with workers still running; call Shutdown() again "
+                "(or destroy the pool) to wait for them");
+    }
+    return group_joined && shared_joined;
   }
 
   void BeginFence() {
@@ -1405,6 +1524,7 @@ private:
     // use shared_ptr instead of unique_ptr for the capture.
     internal::ThreadHandle handle;
     handle.join = [w = worker]() { w->Join(); };
+    handle.try_join = [w = worker](TimeDelta timeout) { return w->TryJoin(timeout); };
     return handle;
   }
 
@@ -1425,6 +1545,12 @@ private:
   std::map<std::filesystem::path, std::pair<scoped_refptr<SequencedTaskRunner>, TaskTraits>> resource_runners_;
 
   std::vector<std::unique_ptr<internal::PooledTaskQueue>> queues_;
+
+  // Queues taken out of |queues_| by a shutdown that has not yet joined every
+  // worker.  Workers may still hold raw pointers to them (dedicated assignment,
+  // local work queue), so they are only destroyed once the join phase of a
+  // Shutdown() call reports every worker gone.
+  std::vector<std::unique_ptr<internal::PooledTaskQueue>> retired_queues_;
 
   // Execution fence (Chromium ThreadPoolInstance::BeginFence/EndFence).
   std::atomic<int> execution_fence_count_{0};

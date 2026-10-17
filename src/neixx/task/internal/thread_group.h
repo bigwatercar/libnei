@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "neixx/common/time.h"
 #include "neixx/synchronization/lock.h"
 
 namespace nei {
@@ -24,8 +25,14 @@ namespace internal {
 // All public methods are thread-safe unless noted.
 
 struct ThreadHandle {
-  // Joins (waits for) the thread.  Must be called at most once.
+  // Joins (waits for) the thread.  Safe to call more than once: an already
+  // joined or already detached thread is a no-op.
   std::function<void()> join;
+
+  // Waits up to |timeout| for the thread to exit and joins it if it did.  A
+  // zero or negative timeout only probes and never blocks.  Returns true when
+  // the thread has exited (and is now joined), false while it still runs.
+  std::function<bool(TimeDelta)> try_join;
 };
 
 class ThreadGroup final {
@@ -59,9 +66,25 @@ public:
   // Joins all live workers.  After this returns, the group is empty.
   void JoinAll();
 
+  // Joins workers until |timeout| elapses.  Returns true if every worker was
+  // joined.  On false, the workers that were still running are kept in the
+  // group (not detached and not forgotten), so a later JoinAll() — or another
+  // JoinAllWithTimeout() — can finish the job.  |timeout| is measured from the
+  // call, and a zero or negative value only probes without waiting.
+  bool JoinAllWithTimeout(TimeDelta timeout);
+
   // ---- Queries ----
 
-  std::size_t worker_count() const;
+  // Number of workers that are still running, i.e. handles whose threads have
+  // not exited yet.  Exited workers are reaped (joined and forgotten) first, so
+  // this does not grow with the number of compensation workers the pool spawned
+  // over its lifetime.
+  std::size_t worker_count();
+
+  // Joins and forgets every handle whose worker has already exited.  Called
+  // before capacity checks so a self-terminated compensation worker does not
+  // keep occupying a slot forever.
+  void ReapExitedWorkers();
 
   // ---- Runtime spawning ----
 

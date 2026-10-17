@@ -118,6 +118,20 @@ PlatformThread::PlatformThreadId RunAndGetThreadId(const scoped_refptr<Sequenced
   return id;
 }
 
+// Polls until the pool reports |expected| workers, or |timeout| elapses.
+bool WaitForWorkerCount(ThreadPool &pool, std::size_t expected, std::chrono::milliseconds timeout) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  for (;;) {
+    if (pool.worker_count() == expected) {
+      return true;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      return false;
+    }
+    PlatformThread::Sleep(TimeDelta::FromMilliseconds(5));
+  }
+}
+
 } // namespace
 
 TEST(ThreadPoolTest, InitialWorkerThreadSurvivesIdlePastReclaimTime) {
@@ -281,6 +295,112 @@ TEST(ThreadPoolTest, RunnerCreationWhilePoolIsBusyDoesNotLoseTasks) {
   EXPECT_EQ(completed.load(), kTotal);
 
   pool.Shutdown();
+}
+
+// A compensation worker that idles out must give its capacity slot back.
+// Without releasing slots, the group kept a handle for every worker it had ever
+// created, so the pool could only spawn max_num_workers compensation workers
+// over its whole lifetime and then silently lost the ability to compensate, no
+// matter how many of them had already exited.  The rounds below therefore only
+// assert the functional consequence (a compensation worker is available again);
+// querying worker_count() mid-test would reap on the test's behalf and hide it.
+TEST(ThreadPoolTest, ExitedCompensationWorkersReleaseTheirCapacitySlots) {
+  constexpr std::size_t kWorkers = 1; // -> compensation cap of 2 handles total
+  constexpr int kRounds = 4;
+  const TaskTraits may_block_traits(MayBlock());
+  ThreadPool pool(IdleTestParams(kWorkers, TimeDelta::FromMilliseconds(50)));
+  scoped_refptr<SequencedTaskRunner> blocking_runner = pool.CreateSequencedTaskRunner(may_block_traits);
+  scoped_refptr<SequencedTaskRunner> other_runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(blocking_runner);
+  ASSERT_TRUE(other_runner);
+
+  for (int round = 0; round < kRounds; ++round) {
+    // Let the previous round's compensation worker idle out first (reclaim time
+    // is 50ms), so the task below is guaranteed to be taken by the initial
+    // worker rather than by a leftover compensation worker.
+    PlatformThread::Sleep(TimeDelta::FromMilliseconds(300));
+
+    WaitableEvent blocking_started(WaitableEvent::ResetPolicy::kManual);
+    WaitableEvent blocking_done(WaitableEvent::ResetPolicy::kManual);
+    PlatformThread::PlatformThreadId initial_id = 0;
+    blocking_runner->PostTask(FROM_HERE, [&]() {
+      initial_id = PlatformThread::CurrentId();
+      blocking_started.Signal();
+      {
+        ScopedBlockingCall blocking; // Asks the pool for a compensation worker.
+        PlatformThread::Sleep(TimeDelta::FromMilliseconds(200));
+      }
+      blocking_done.Signal();
+    });
+    ASSERT_TRUE(blocking_started.TimedWait(std::chrono::seconds(5))) << "round " << round;
+
+    // The only initial worker is blocked, so this task needs a compensation
+    // worker: the initial worker cannot serve it until it returns from its
+    // blocking scope, i.e. a matching id means no replacement was spawned.
+    const PlatformThread::PlatformThreadId compensation_id = RunAndGetThreadId(other_runner);
+    EXPECT_NE(compensation_id, initial_id) << "round " << round << ": no compensation worker was available";
+    ASSERT_TRUE(blocking_done.TimedWait(std::chrono::seconds(5))) << "round " << round;
+  }
+
+  // Exited compensation workers must not accumulate in the group either.
+  EXPECT_TRUE(WaitForWorkerCount(pool, kWorkers, std::chrono::seconds(5)))
+      << "an exited compensation worker still holds a capacity slot";
+
+  pool.Shutdown();
+}
+
+// A parked SHARED-mode single-thread worker with a zero reclaim time must still
+// serve tasks posted after a long idle period and must be woken by Shutdown.
+// (That a zero reclaim time no longer makes it poll is a CPU property, measured
+// with a separate probe rather than asserted here.)
+TEST(ThreadPoolTest, SharedSingleThreadWorkerWithZeroReclaimTimeStaysResponsive) {
+  ThreadPool pool(IdleTestParams(1, TimeDelta()));
+  scoped_refptr<SingleThreadTaskRunner> runner =
+      pool.CreateSingleThreadTaskRunner(TaskTraits(), SingleThreadTaskRunnerThreadMode::SHARED);
+  ASSERT_TRUE(runner);
+
+  WaitableEvent first(WaitableEvent::ResetPolicy::kManual);
+  runner->PostTask(FROM_HERE, [&first]() { first.Signal(); });
+  ASSERT_TRUE(first.TimedWait(std::chrono::seconds(5)));
+
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(300));
+
+  WaitableEvent second(WaitableEvent::ResetPolicy::kManual);
+  runner->PostTask(FROM_HERE, [&second]() { second.Signal(); });
+  EXPECT_TRUE(second.TimedWait(std::chrono::seconds(5))) << "parked shared worker was not woken by a new task";
+
+  const auto start = std::chrono::steady_clock::now();
+  pool.Shutdown();
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+  EXPECT_LT(elapsed.count(), 5000) << "Shutdown() did not wake the shared worker";
+}
+
+// The timeout must bound the final wait for worker threads.  A worker stuck
+// inside a task cannot be joined within the budget, so Shutdown() reports
+// failure instead of blocking; the follow-up Shutdown() then completes.
+TEST(ThreadPoolTest, ShutdownWithTimeoutReportsWorkersStillRunning) {
+  ThreadPool pool({2});
+  scoped_refptr<SequencedTaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  WaitableEvent entered(WaitableEvent::ResetPolicy::kManual);
+  WaitableEvent release(WaitableEvent::ResetPolicy::kManual);
+  // Default traits are CONTINUE_ON_SHUTDOWN, so shutdown does not wait for this
+  // task's body: only the worker join is affected by the timeout.
+  runner->PostTask(FROM_HERE, [&entered, &release]() {
+    entered.Signal();
+    release.Wait();
+  });
+  ASSERT_TRUE(entered.TimedWait(std::chrono::seconds(5)));
+
+  EXPECT_FALSE(pool.Shutdown(TimeDelta::FromMilliseconds(50)))
+      << "a worker stuck inside a task cannot be joined within the budget";
+
+  // Let the task finish.  The pool still owns the worker and finishes the join
+  // on the next shutdown call.
+  release.Signal();
+  EXPECT_TRUE(pool.Shutdown());
+  EXPECT_EQ(pool.worker_count(), 0u);
 }
 
 TEST(ThreadPoolTest, PostingFromRunningTaskStillExecutesFollowupTask) {
@@ -574,22 +694,37 @@ TEST(ThreadPoolTest, BlockShutdownTaskPhysicallyBlocksShutdownUntilFinished) {
         task_finished.store(true, std::memory_order_relaxed);
       }));
 
+  // Wait until the task is actually running before shutting down.  A
+  // BLOCK_SHUTDOWN task that is still queued is not counted by
+  // CompleteShutdown(), so racing the two would test scheduler timing rather
+  // than the contract under test ("shutdown waits for a running BLOCK_SHUTDOWN
+  // task").  See docs/TODO.md for that pre-existing gap.
+  ASSERT_TRUE(task_started.TimedWait(std::chrono::milliseconds(3000)));
+
   std::thread shutdown_thread([&pool, &shutdown_returned, &shutdown_done]() {
     (void)pool.Shutdown();
     shutdown_returned.store(true, std::memory_order_release);
     shutdown_done.Signal();
   });
 
-  ASSERT_TRUE(task_started.TimedWait(std::chrono::milliseconds(3000)));
+  // Join on every exit path: a bare std::thread destroyed while joinable would
+  // terminate the whole test process on an early ASSERT.
+  struct ThreadJoiner {
+    std::thread &thread;
+
+    ~ThreadJoiner() {
+      if (thread.joinable()) {
+        thread.join();
+      }
+    }
+  } joiner{shutdown_thread};
 
   PlatformThread::Sleep(TimeDelta::FromMilliseconds(120));
   EXPECT_FALSE(shutdown_returned.load(std::memory_order_acquire));
 
   task_can_finish.Signal();
 
-  ASSERT_TRUE(shutdown_done.TimedWait(std::chrono::milliseconds(3000)));
-  shutdown_thread.join();
-
+  EXPECT_TRUE(shutdown_done.TimedWait(std::chrono::milliseconds(3000)));
   EXPECT_TRUE(task_finished.load(std::memory_order_relaxed));
   EXPECT_TRUE(shutdown_returned.load(std::memory_order_acquire));
 }
@@ -627,21 +762,34 @@ TEST(ThreadPoolTest, ShutdownDropsQueuedNonBlockingTasksButKeepsBlockShutdownTas
   }
 
   std::atomic<bool> shutdown_returned{false};
+
+  // The blocking task must already be running before shutdown starts, otherwise
+  // there is nothing for shutdown to wait for (see the note in
+  // BlockShutdownTaskPhysicallyBlocksShutdownUntilFinished).
+  ASSERT_TRUE(block_task_started.TimedWait(std::chrono::milliseconds(3000)));
+
   std::thread shutdown_thread([&pool, &shutdown_returned, &shutdown_done]() {
     (void)pool.Shutdown();
     shutdown_returned.store(true, std::memory_order_release);
     shutdown_done.Signal();
   });
 
-  ASSERT_TRUE(block_task_started.TimedWait(std::chrono::milliseconds(3000)));
+  struct ThreadJoiner {
+    std::thread &thread;
+
+    ~ThreadJoiner() {
+      if (thread.joinable()) {
+        thread.join();
+      }
+    }
+  } joiner{shutdown_thread};
+
   PlatformThread::Sleep(TimeDelta::FromMilliseconds(120));
   EXPECT_FALSE(shutdown_returned.load(std::memory_order_acquire));
 
   block_task_can_finish.Signal();
 
-  ASSERT_TRUE(shutdown_done.TimedWait(std::chrono::milliseconds(3000)));
-  shutdown_thread.join();
-
+  EXPECT_TRUE(shutdown_done.TimedWait(std::chrono::milliseconds(3000)));
   EXPECT_EQ(block_executed.load(std::memory_order_relaxed), 1);
   EXPECT_EQ(continue_executed.load(std::memory_order_relaxed), 0);
 }

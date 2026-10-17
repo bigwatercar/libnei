@@ -85,6 +85,13 @@ public:
     return fn_ == nullptr;
   }
 
+  /// Invokes the callback.
+  ///
+  /// Running a null callback — either default-constructed, moved-from, or
+  /// already run — is a no-op that returns a default-constructed R, NOT an
+  /// error: re-running a consumed OnceCallback is explicitly allowed and
+  /// covered by tests (see TaskCallbackTest.OnceCallbackRunsAtMostOnce).
+  /// Use operator bool() / IsNull() to detect the null state.
   R Run(Args... args) {
     if (!fn_) {
       if constexpr (!std::is_void_v<R>)
@@ -181,6 +188,10 @@ public:
     return fn_ == nullptr;
   }
 
+  /// Invokes the callback.  See OnceCallback::Run(): a null callback is a
+  /// no-op returning a default-constructed R, not an error.  That matters for
+  /// optional callbacks (e.g. testing hooks) — test them with operator bool()
+  /// or IsNull() instead of relying on a null invocation being fatal.
   R Run(Args... args) const {
     if (!fn_) {
       if constexpr (!std::is_void_v<R>)
