@@ -1,0 +1,45 @@
+# libnei benchmark manifest — one bench per line, shared by the Windows (run_all_benches.ps1)
+# and POSIX (run_all_benches.sh) runners so both platforms measure the same set with the same
+# arguments and round counts.
+#
+# Format: name|exe|rounds|args
+#   name   : base name of the log file (logs/<name>.log) and the section title in report.md
+#   exe    : bench executable (the runner appends .exe on Windows)
+#   rounds : number of repetitions appended to the same log file
+#   args   : space separated, may be empty; {tmp} expands to a per-run scratch directory
+#            (used by the log benches, which write their output files there)
+#
+# Keep the multi-round entries first: they are the ones with a documented methodology
+# (mean over N rounds), and the single-round ones are only useful as smoke/trend signals.
+#
+# Lines starting with '#' and blank lines are ignored.
+
+# ---- Task scheduling (multi-round, documented methodology) ----
+task_thread_tracing_on|task_thread_bench|10|1000000 on
+task_thread_tracing_off|task_thread_bench|10|1000000 off
+task_threadpool|task_threadpool_bench|5|1000000 off
+task_threadpool_parallel|task_threadpool_parallel_bench|5|
+
+# ---- Log (multi-round, documented methodology) ----
+log_bench|log_bench|5|{tmp}
+log_bench_compare|log_bench_compare|5|{tmp}
+
+# ---- Single-run benches ----
+post_job|post_job_bench|1|
+flake_id|flake_id_bench|1|
+string_append|string_append_bench|1|
+callback|callback_bench|1|
+async_file|async_file_bench|1|
+pipe_stream|pipe_stream_bench|1|
+pipe_stream_cross_process|pipe_stream_cross_process_bench|1|
+tcp_loopback|tcp_loopback_bench|1|
+tcp_rtt|tcp_rtt_bench|1|
+tcp_throughput|tcp_throughput_bench|1|
+tcp_conn_stress|tcp_conn_stress_bench|1|
+tls_throughput|tls_throughput_bench|1|
+http_throughput|http_throughput_bench|1|20000
+http2_throughput_seq|http2_throughput_bench|1|10000 1
+http2_throughput_par8|http2_throughput_bench|1|10000 8
+http2_throughput_par64|http2_throughput_bench|1|10000 64
+parallel_runner|parallel_runner_bench|1|
+task_priority_perf|task_priority_perf_demo|1|

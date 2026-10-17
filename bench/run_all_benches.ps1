@@ -1,7 +1,12 @@
 <#
 .SYNOPSIS
-    Unified benchmark runner for all libnei benches.
+    Unified benchmark runner for all libnei benches (Windows).
     Saves raw results to timestamped log files under the output directory.
+
+.DESCRIPTION
+    The bench list lives in benches.tsv next to this script, shared with run_all_benches.sh,
+    so both platforms measure the same set with the same arguments and round counts.
+    Steps: run the benches -> write report.md -> print the log directory.
 
 .PARAMETER BenchBinDir
     Path to directory containing bench .exe files
@@ -11,8 +16,15 @@
     Root directory for log output. A `bench_<timestamp>` subdirectory
     will be created automatically.
 
+.PARAMETER Only
+    Optional bench name filter (from benches.tsv) for smoke runs,
+    e.g. -Only task_threadpool_parallel,flake_id
+
 .EXAMPLE
     .\run_all_benches.ps1 -BenchBinDir build\windows-vs2022-shared\bench\Release -LogOutputDir bench\results
+
+.EXAMPLE
+    .\run_all_benches.ps1 -BenchBinDir build\windows-vs2022-shared\bench\Release -LogOutputDir bench\results -Only tcp_loopback,tls_throughput
 #>
 
 [CmdletBinding()]
@@ -21,7 +33,11 @@ param(
     [string]$BenchBinDir,
 
     [Parameter(Mandatory = $true)]
-    [string]$LogOutputDir
+    [string]$LogOutputDir,
+
+    [string[]]$Only = @(),
+
+    [string]$Manifest = (Join-Path $PSScriptRoot "benches.tsv")
 )
 
 Set-StrictMode -Version Latest
@@ -75,69 +91,25 @@ function Invoke-BenchRound {
 }
 
 # ---------------------------------------------------------------------------
-# Benchmarks
+# Benchmarks (driven by benches.tsv, shared with run_all_benches.sh)
 # ---------------------------------------------------------------------------
-
-# ── Task benches (multi-round, documented methodology) ─────────────────────
-$taskThreadExe     = Join-Path $BenchBinDir "task_thread_bench.exe"
-$taskThreadpoolExe = Join-Path $BenchBinDir "task_threadpool_bench.exe"
-$taskTpParallelExe = Join-Path $BenchBinDir "task_threadpool_parallel_bench.exe"
-
-if (Test-Path $taskThreadExe) {
-    Invoke-BenchRound -Name "task_thread_tracing_on"  -Exe $taskThreadExe -ExeArgs @("1000000", "on")  -Rounds 10 -LogFileName "task_thread_tracing_on.log"
-    Invoke-BenchRound -Name "task_thread_tracing_off" -Exe $taskThreadExe -ExeArgs @("1000000", "off") -Rounds 10 -LogFileName "task_thread_tracing_off.log"
-} else { Write-Host "  [SKIP] task_thread_bench.exe not found" -ForegroundColor Yellow }
-
-if (Test-Path $taskThreadpoolExe) {
-    Invoke-BenchRound -Name "task_threadpool" -Exe $taskThreadpoolExe -ExeArgs @("1000000", "off") -Rounds 5
-} else { Write-Host "  [SKIP] task_threadpool_bench.exe not found" -ForegroundColor Yellow }
-
-if (Test-Path $taskTpParallelExe) {
-    Invoke-BenchRound -Name "task_threadpool_parallel" -Exe $taskTpParallelExe -ExeArgs @() -Rounds 5
-} else { Write-Host "  [SKIP] task_threadpool_parallel_bench.exe not found" -ForegroundColor Yellow }
-
-# ── Log benches (multi-run, documented methodology) ────────────────────────
-$logBenchExe   = Join-Path $BenchBinDir "log_bench.exe"
-$logCompareExe = Join-Path $BenchBinDir "log_bench_compare.exe"
-$logTempDir    = Join-Path $outDir "log_temp"
+$logTempDir = Join-Path $outDir "log_temp"
 New-Item -ItemType Directory -Force -Path $logTempDir | Out-Null
 
-if (Test-Path $logBenchExe) {
-    Invoke-BenchRound -Name "log_bench" -Exe $logBenchExe -ExeArgs @($logTempDir) -Rounds 5
-} else { Write-Host "  [SKIP] log_bench.exe not found" -ForegroundColor Yellow }
+$benches = Get-Content $Manifest | Where-Object { $_ -and $_.Trim() -ne "" -and -not $_.StartsWith("#") } | ForEach-Object {
+    $f = $_ -split '\|'
+    if ($f.Count -lt 4) { throw "Malformed manifest line (expected name|exe|rounds|args): $_" }
+    $argList = @($f[3].Trim() -split '\s+' | Where-Object { $_ -ne "" } | ForEach-Object { $_ -replace '\{tmp\}', $logTempDir })
+    [pscustomobject]@{ Name = $f[0].Trim(); Exe = $f[1].Trim(); Rounds = [int]$f[2].Trim(); Args = $argList }
+}
 
-if (Test-Path $logCompareExe) {
-    Invoke-BenchRound -Name "log_bench_compare" -Exe $logCompareExe -ExeArgs @($logTempDir) -Rounds 5
-} else { Write-Host "  [SKIP] log_bench_compare.exe not found" -ForegroundColor Yellow }
-
-# ── Single-run benches ─────────────────────────────────────────────────────
-$singleBenches = @(
-    @{Name="post_job";                   Exe="post_job_bench.exe";                   Args=@()},
-    @{Name="flake_id";                   Exe="flake_id_bench.exe";                   Args=@()},
-    @{Name="string_append";              Exe="string_append_bench.exe";              Args=@()},
-    @{Name="callback";                   Exe="callback_bench.exe";                   Args=@()},
-    @{Name="async_file";                 Exe="async_file_bench.exe";                 Args=@()},
-    @{Name="pipe_stream";                Exe="pipe_stream_bench.exe";                Args=@()},
-    @{Name="pipe_stream_cross_process";  Exe="pipe_stream_cross_process_bench.exe";  Args=@()},
-    @{Name="tcp_loopback";               Exe="tcp_loopback_bench.exe";               Args=@()},
-    @{Name="tcp_rtt";                    Exe="tcp_rtt_bench.exe";                    Args=@()},
-    @{Name="tcp_throughput";             Exe="tcp_throughput_bench.exe";             Args=@()},
-    @{Name="tcp_conn_stress";            Exe="tcp_conn_stress_bench.exe";            Args=@()},
-    @{Name="tls_throughput";             Exe="tls_throughput_bench.exe";             Args=@()},
-    @{Name="http_throughput";            Exe="http_throughput_bench.exe";            Args=@("20000")},
-    @{Name="http2_throughput_seq";       Exe="http2_throughput_bench.exe";           Args=@("10000","1")},
-    @{Name="http2_throughput_par8";      Exe="http2_throughput_bench.exe";           Args=@("10000","8")},
-    @{Name="http2_throughput_par64";     Exe="http2_throughput_bench.exe";           Args=@("10000","64")},
-    @{Name="parallel_runner";            Exe="parallel_runner_bench.exe";            Args=@()},
-    @{Name="task_priority_perf";         Exe="task_priority_perf_demo.exe";          Args=@()}
-)
-
-foreach ($b in $singleBenches) {
-    $exePath = Join-Path $BenchBinDir $b.Exe
+foreach ($b in $benches) {
+    if ($Only.Count -gt 0 -and $Only -notcontains $b.Name) { continue }
+    $exePath = Join-Path $BenchBinDir ($b.Exe + ".exe")
     if (Test-Path $exePath) {
-        Invoke-BenchRound -Name $b.Name -Exe $exePath -ExeArgs $b.Args -Rounds 1
+        Invoke-BenchRound -Name $b.Name -Exe $exePath -ExeArgs $b.Args -Rounds $b.Rounds
     } else {
-        Write-Host "  [SKIP] $($b.Exe) not found" -ForegroundColor Yellow
+        Write-Host "  [SKIP] $($b.Exe).exe not found" -ForegroundColor Yellow
     }
 }
 
@@ -238,7 +210,10 @@ foreach($s in @(
     @{f="callback.log";t="Callback"},@{f="async_file.log";t="AsyncFile"},@{f="pipe_stream.log";t="PipeStream"},
     @{f="pipe_stream_cross_process.log";t="PipeStream Cross-Process"},@{f="tcp_loopback.log";t="TCP Loopback"},
     @{f="tcp_rtt.log";t="TCP RTT"},@{f="tcp_throughput.log";t="TCP Throughput"},@{f="tcp_conn_stress.log";t="TCP Conn Stress"},
-    @{f="tls_throughput.log";t="TLS Throughput"},@{f="parallel_runner.log";t="Parallel Runner"},@{f="task_priority_perf.log";t="Task Priority Perf"}
+    @{f="tls_throughput.log";t="TLS Throughput"},@{f="http_throughput.log";t="HTTP/1.1 Throughput"},
+    @{f="http2_throughput_seq.log";t="HTTP/2 seq"},@{f="http2_throughput_par8.log";t="HTTP/2 par8"},
+    @{f="http2_throughput_par64.log";t="HTTP/2 par64"},@{f="parallel_runner.log";t="Parallel Runner"},
+    @{f="task_priority_perf.log";t="Task Priority Perf"}
 )){
     $fp=Join-Path $outDir $s.f
     if(Test-Path $fp){$null=$sb.AppendLine("### $($s.t)`n");$null=$sb.AppendLine('```');$null=$sb.AppendLine((single-block $fp).Trim());$null=$sb.AppendLine('```');$null=$sb.AppendLine("")}
