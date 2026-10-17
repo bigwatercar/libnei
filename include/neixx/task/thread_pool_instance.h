@@ -56,6 +56,13 @@ public:
   /// tasks are still in flight.
   static void ResetForTesting();
 
+  /// Monotonically increasing identifier, bumped every time a new instance is
+  /// created.  Caches that hold objects owned by the pool must key on this
+  /// instead of the instance address: a destroyed instance can be replaced at
+  /// the same address, and stale pool-owned runners still accept PostTask
+  /// without ever running anything.
+  static std::uint64_t GetInstanceId();
+
   /// Creates a sequenced TaskRunner on the global pool.
   scoped_refptr<SequencedTaskRunner> CreateSequencedTaskRunner(const TaskTraits &traits = TaskTraits());
 

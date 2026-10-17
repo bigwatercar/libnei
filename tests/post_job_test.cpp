@@ -86,14 +86,12 @@ bool RunRepeatedMultiWorkerJobs(uint64_t *total_done) {
 class PostJobTest : public ::testing::Test {
 protected:
   static void SetUpTestSuite() {
-    // Ensure a live pool for the whole suite.  GetJobRunner() caches static
-    // runners tied to the ThreadPoolInstance; ResetForTesting()/Shutdown()
-    // would leave those runners dangling (posts fail / UAF), so this suite
-    // must NOT tear the pool down between tests.  The Leaky singleton pool is
-    // drained at process exit by the global AtExitManager in test_main.cpp.
-    if (ThreadPoolInstance::Get() == nullptr) {
-      ThreadPoolInstance::CreateAndStartWithDefaultParams();
-    }
+    // Start from a known-good pool every run.  GetJobRunner() caches runners
+    // per ThreadPoolInstance and rebuilds when the instance changes, but a
+    // leftover shut-down shell (Shutdown() keeps the pointer alive) would still
+    // be reused here, so reset instead of only creating when null.
+    ThreadPoolInstance::ResetForTesting();
+    ThreadPoolInstance::CreateAndStartWithDefaultParams();
   }
 };
 
@@ -128,6 +126,62 @@ TEST_F(PostJobTest, MultiWorkerCompletesExactBudget) {
       16);
   h.Join();
   EXPECT_GE(done.load(std::memory_order_relaxed), kBudget);
+}
+
+// =============================================================================
+// Pool lifecycle
+// =============================================================================
+//
+// GetJobRunner() caches one ParallelTaskRunner per worker slot.  Those runners
+// belong to the ThreadPoolInstance that created them: after the instance is
+// retired (Shutdown() keeps the shell alive; ResetForTesting() replaces it) a
+// cached runner still ACCEPTS PostTask, but its queue is never drained again.
+// The job then never runs and Join() returns with zero work done -- which is
+// exactly how this surfaced: two PostJob tests failing with done == 0 once
+// another suite had recycled the pool.
+namespace {
+
+// Runs a bounded-budget job on the current pool and returns how many work items
+// completed.
+uint64_t RunBudgetedJob(uint64_t budget) {
+  std::atomic<uint64_t> done{0};
+  auto h = PostJob(
+      FROM_HERE,
+      TaskTraits(),
+      [&done, budget](JobDelegate *d) {
+        for (int n = 0; n < 64 && !d->ShouldYield(); ++n) {
+          if (done.fetch_add(1, std::memory_order_relaxed) >= budget - 1) {
+            break;
+          }
+        }
+      },
+      [&done, budget](size_t) -> size_t {
+        return done.load(std::memory_order_relaxed) >= budget ? 0 : static_cast<size_t>(4);
+      },
+      4);
+  h.Join();
+  return done.load(std::memory_order_relaxed);
+}
+
+} // namespace
+
+TEST(PostJobPoolLifecycleTest, JobsRunAfterThePoolIsRecreated) {
+  constexpr uint64_t kBudget = 100000;
+
+  ThreadPoolInstance::ResetForTesting();
+  ThreadPoolInstance::CreateAndStartWithDefaultParams();
+  // First job populates the runner cache for this pool instance.
+  EXPECT_GE(RunBudgetedJob(kBudget), kBudget);
+
+  // Retire the pool and stand up a new instance: the cached runners must not be
+  // reused, otherwise the next job never executes.
+  ThreadPoolInstance::ResetForTesting();
+  ThreadPoolInstance::CreateAndStartWithDefaultParams();
+  EXPECT_GE(RunBudgetedJob(kBudget), kBudget);
+
+  // Leave a live pool behind for the suites that follow.
+  ThreadPoolInstance::ResetForTesting();
+  ThreadPoolInstance::CreateAndStartWithDefaultParams();
 }
 
 } // namespace nei

@@ -1,5 +1,7 @@
 #include <neixx/task/thread_pool_instance.h>
 
+#include <atomic>
+#include <cstdint>
 #include <utility>
 
 #include <nei/debug/check.h>
@@ -10,6 +12,7 @@ namespace {
 
 ThreadPoolInstance *g_instance = nullptr;
 bool g_shutdown_registered = false;
+std::atomic<std::uint64_t> g_instance_id{0};
 
 } // namespace
 
@@ -29,10 +32,16 @@ ThreadPoolInstance *ThreadPoolInstance::Get() {
 }
 
 // static
+std::uint64_t ThreadPoolInstance::GetInstanceId() {
+  return g_instance_id.load(std::memory_order_acquire);
+}
+
+// static
 void ThreadPoolInstance::CreateAndStart(const InitParams &params) {
   CHECK_MSG(g_instance == nullptr, "ThreadPoolInstance::CreateAndStart() called twice.");
 
   g_instance = new ThreadPoolInstance(params);
+  g_instance_id.fetch_add(1, std::memory_order_acq_rel);
 
   // Register AtExit cleanup to guarantee ordered shutdown.
   // Registering FIRST ensures ThreadPoolInstance shuts down LAST (LIFO),
