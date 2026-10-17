@@ -86,6 +86,12 @@ public:
   // keep occupying a slot forever.
   void ReapExitedWorkers();
 
+  // Total number of workers created over this group's lifetime, including the
+  // ones that already exited and were reaped.  Testing hook: lets a test tell
+  // "no worker was spawned" apart from "a worker was spawned and immediately
+  // exited", which is invisible to worker_count().
+  std::size_t created_worker_count() const;
+
   // ---- Runtime spawning ----
 
   // Spawns a compensation worker (is_compensation=true).

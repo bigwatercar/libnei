@@ -164,6 +164,12 @@ public:
   /// compensation workers the pool has spawned over its lifetime.
   std::size_t worker_count() const;
 
+  /// Returns the total number of worker threads created over this pool's
+  /// lifetime, including the ones that already exited.  Testing hook: it
+  /// distinguishes "no worker was spawned" from "a worker was spawned and
+  /// immediately exited", which worker_count() cannot show.
+  std::size_t worker_created_count_for_testing() const;
+
   /// Registers a global observer for task execution events.
   /// The observer is called from worker threads and must be thread-safe.
   /// Pass nullptr to unregister. The observer must outlive all worker threads

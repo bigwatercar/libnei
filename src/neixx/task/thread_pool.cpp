@@ -843,7 +843,15 @@ internal::ThreadGroup::ThreadGroup(std::string name, std::size_t max_worker_coun
     , max_worker_count_(max_worker_count) {
 }
 
-internal::ThreadGroup::~ThreadGroup() = default;
+internal::ThreadGroup::~ThreadGroup() {
+  // Safety net: never destroy a handle whose thread is still running.  The
+  // thread references the worker object the handle owns, and that object in
+  // turn references pool state, so dropping the handle would free live memory.
+  // ThreadPool::Impl always runs a full Shutdown() first, which joins every
+  // worker; this only matters for a worker that slipped in while a shutdown was
+  // already in its join phase.
+  JoinAll();
+}
 
 void internal::ThreadGroup::StartWorkers(std::size_t count, const internal::ThreadGroup::WorkerFactory &factory) {
   for (std::size_t i = 0; i < count; ++i) {
@@ -930,6 +938,11 @@ std::size_t internal::ThreadGroup::worker_count() {
   ReapExitedWorkers();
   AutoLock guard(group_lock_);
   return handles_.size();
+}
+
+std::size_t internal::ThreadGroup::created_worker_count() const {
+  AutoLock guard(group_lock_);
+  return next_index_;
 }
 
 bool internal::ThreadGroup::SpawnCompensationWorker(const WorkerFactory &factory) {
@@ -1432,6 +1445,16 @@ public:
 
     if (!bounded) {
       thread_group_->JoinAll();
+      // A worker spawned while this shutdown was already joining (a blocking
+      // scope entered by a task that was still running) is not part of the set
+      // joined above.  Drain until the group is empty so no thread outlives the
+      // queues and task source released below.  Each pass joins at least the
+      // workers present when it started, so this converges; the bound only
+      // guards against a pathological spawn loop.
+      constexpr int kMaxDrainPasses = 8;
+      for (int pass = 0; pass < kMaxDrainPasses && thread_group_->worker_count() > 0; ++pass) {
+        thread_group_->JoinAll();
+      }
       shared_worker_threads_.clear();
       shared_workers_.clear();
       retired_queues_.clear();
@@ -1474,6 +1497,10 @@ public:
     return thread_group_->worker_count();
   }
 
+  std::size_t worker_created_count() const {
+    return thread_group_->created_worker_count();
+  }
+
   void OnWorkerBeganBlocking() {
     blocking_worker_count_.fetch_add(1, std::memory_order_relaxed);
     MaybeSpawnCompensationWorker();
@@ -1485,6 +1512,14 @@ public:
 
 private:
   void MaybeSpawnCompensationWorker() {
+    // Never grow the pool while shutting down.  Shutdown() takes the current
+    // handle set and joins it, so a worker spawned afterwards would not be part
+    // of that set: its thread would outlive the pool objects it references.
+    // Compensation for a task that is still running is unnecessary during
+    // shutdown anyway — nothing new is dispatched.
+    if (tracker_.HasShutdownStarted()) {
+      return;
+    }
     thread_group_->SpawnCompensationWorker([this](std::size_t idx, bool is_compensation) -> internal::ThreadHandle {
       return MakeWorker(idx, is_compensation);
     });
@@ -1604,6 +1639,10 @@ bool ThreadPool::Shutdown(TimeDelta timeout) {
 
 std::size_t ThreadPool::worker_count() const {
   return impl_->worker_count();
+}
+
+std::size_t ThreadPool::worker_created_count_for_testing() const {
+  return impl_->worker_created_count();
 }
 
 void ThreadPool::SetTaskObserver(TaskObserver *observer) {

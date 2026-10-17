@@ -342,9 +342,12 @@ TEST(ThreadPoolTest, ExitedCompensationWorkersReleaseTheirCapacitySlots) {
     ASSERT_TRUE(blocking_done.TimedWait(std::chrono::seconds(5))) << "round " << round;
   }
 
-  // Exited compensation workers must not accumulate in the group either.
+  // Exited compensation workers must not accumulate in the group either, while
+  // the lifetime creation counter shows they really were created.
   EXPECT_TRUE(WaitForWorkerCount(pool, kWorkers, std::chrono::seconds(5)))
       << "an exited compensation worker still holds a capacity slot";
+  EXPECT_GT(pool.worker_created_count_for_testing(), kWorkers)
+      << "no compensation worker was ever created, so the recycling above was not exercised";
 
   pool.Shutdown();
 }
@@ -400,6 +403,72 @@ TEST(ThreadPoolTest, ShutdownWithTimeoutReportsWorkersStillRunning) {
   // on the next shutdown call.
   release.Signal();
   EXPECT_TRUE(pool.Shutdown());
+  EXPECT_EQ(pool.worker_count(), 0u);
+}
+
+// While shutdown is joining the workers, a task that is still running may enter
+// a blocking scope.  Spawning a compensation worker then would add a worker that
+// shutdown has already passed over (it took the handle set before joining), so
+// that thread would outlive the queues and task source released by shutdown.
+// Once shutdown has taken the worker set, the group must stay empty.
+TEST(ThreadPoolTest, NoCompensationWorkerIsSpawnedDuringShutdown) {
+  constexpr std::size_t kWorkers = 1;
+  ThreadPool pool(IdleTestParams(kWorkers, TimeDelta::FromMilliseconds(50)));
+  // Plain traits on purpose: a MayBlock() task would make the pool ask for a
+  // compensation worker as soon as it starts, which is not what this test wants
+  // to observe.  The explicit ScopedBlockingCall below is the trigger.
+  scoped_refptr<SequencedTaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  WaitableEvent task_started(WaitableEvent::ResetPolicy::kManual);
+  WaitableEvent task_may_block(WaitableEvent::ResetPolicy::kManual);
+  WaitableEvent task_blocked(WaitableEvent::ResetPolicy::kManual);
+  WaitableEvent task_done(WaitableEvent::ResetPolicy::kManual);
+  // Default shutdown behavior is CONTINUE_ON_SHUTDOWN, so shutdown does not wait
+  // for this task's body to return; it waits in the join phase, which is exactly
+  // the window under test.
+  runner->PostTask(FROM_HERE, [&]() {
+    task_started.Signal();
+    task_may_block.Wait();
+    {
+      ScopedBlockingCall blocking; // Would ask the pool for a compensation worker.
+      task_blocked.Signal();
+      PlatformThread::Sleep(TimeDelta::FromMilliseconds(100));
+    }
+    task_done.Signal();
+  });
+  ASSERT_TRUE(task_started.TimedWait(std::chrono::seconds(5)));
+
+  std::thread shutdown_thread([&pool]() { (void)pool.Shutdown(); });
+
+  struct ThreadJoiner {
+    std::thread &thread;
+
+    ~ThreadJoiner() {
+      if (thread.joinable()) {
+        thread.join();
+      }
+    }
+  } joiner{shutdown_thread};
+
+  // Wait until shutdown has taken the worker set and is blocked joining the
+  // worker that is still inside our task.
+  ASSERT_TRUE(WaitForWorkerCount(pool, 0, std::chrono::seconds(5))) << "shutdown did not reach its join phase";
+  const std::size_t created_before = pool.worker_created_count_for_testing();
+  EXPECT_EQ(created_before, kWorkers);
+
+  // Now let the task enter its blocking scope while shutdown waits for it.  A
+  // compensation worker spawned here would exit immediately (the task source is
+  // already shut down), so worker_count() alone cannot tell it apart from "no
+  // worker was spawned" — the lifetime creation counter can.
+  task_may_block.Signal();
+  ASSERT_TRUE(task_blocked.TimedWait(std::chrono::seconds(5)));
+  EXPECT_EQ(pool.worker_created_count_for_testing(), created_before)
+      << "a compensation worker was spawned after shutdown took the worker set";
+  EXPECT_EQ(pool.worker_count(), 0u);
+
+  ASSERT_TRUE(task_done.TimedWait(std::chrono::seconds(5)));
+  shutdown_thread.join();
   EXPECT_EQ(pool.worker_count(), 0u);
 }
 
