@@ -1,3 +1,7 @@
 # Shell scripts must stay LF so they run under WSL bash (CRLF line endings
 # break bash: "$'\r': command not found").
 tools/*.sh text eol=lf
+bench/*.sh text eol=lf
+# The bench manifest is parsed line-wise by both the PowerShell and the bash
+# runner; keep it LF so the two platforms read byte-identical input.
+bench/*.tsv text eol=lf
