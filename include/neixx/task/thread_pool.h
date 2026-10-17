@@ -26,9 +26,15 @@ public:
   /// Pass to the ThreadPool constructor or to
   /// ThreadPoolInstance::CreateAndStart() for global-singleton initialization.
   struct InitParams {
-    /// Hard ceiling on the number of physical worker threads (including
-    /// compensation threads spawned when a worker calls ScopedBlockingCall).
+    /// Number of initial worker threads, i.e. the pool's baseline parallelism.
     /// 0 means derive from std::thread::hardware_concurrency().
+    ///
+    /// This is not the absolute thread ceiling: a worker that enters a
+    /// blocking scope (ScopedBlockingCall) makes the pool spawn a compensation
+    /// worker, and the total is bounded by twice this value (the pool's
+    /// blocking multiplier).  Dedicated SingleThreadTaskRunner workers are part
+    /// of the initial workers, so a pool configured with N workers cannot run
+    /// more than N dedicated runners concurrently.
     std::size_t max_num_workers = 0;
 
     /// Idle timeout used for worker parking decisions: it bounds how long a
@@ -38,6 +44,11 @@ public:
     /// workers never self-terminate — they run until Shutdown.  TimeDelta()
     /// (zero) means "wait indefinitely" (compensation workers are not
     /// reclaimed either).
+    ///
+    /// SHARED-mode SingleThreadTaskRunner workers (see
+    /// CreateSingleThreadTaskRunner) also never self-terminate, but they idle
+    /// by polling: this value is their poll interval, and a zero value makes
+    /// them poll continuously (they stay functional, at the cost of CPU).
     TimeDelta suggested_reclaim_time = TimeDelta::FromSeconds(30);
 
     /// Initial and post-task-restored OS-level scheduling priority for worker
@@ -117,17 +128,11 @@ public:
   void FlushForTesting();
 
   /// Shuts down the pool and waits for all workers to exit.
-  /// If timeout is positive, workers that have not exited within the deadline
-  /// are abandoned (returns false in that case).
   ///
-  /// WARNING: When Shutdown returns false (timeout), abandoned worker threads
-  /// may still hold raw pointers into pool-internal data structures.  The
-  /// caller MUST NOT destroy the ThreadPool or access any pool-owned state
-  /// until all abandoned threads have exited.  For production use, prefer
-  /// timeout=zero to wait indefinitely, or ensure worker tasks have bounded
-  /// execution time.
-  ///
-  /// A zero or negative timeout means wait indefinitely.
+  /// The timeout parameter is currently ignored: shutdown always blocks until
+  /// every worker has exited and returns true.  Abandoning workers on timeout
+  /// (Chromium's JoiningPolicy) is not implemented yet — see docs/TODO.md.
+  /// Callers must therefore ensure worker tasks have bounded execution time.
   bool Shutdown(TimeDelta timeout = TimeDelta());
 
   /// Chromium-aligned execution fence (ThreadPoolInstance::BeginFence/EndFence).
@@ -143,6 +148,9 @@ public:
   void BeginFence();
   void EndFence();
 
+  /// Returns the number of worker threads created so far, NOT the number that
+  /// are currently alive: worker handles are only released at Shutdown, so
+  /// compensation workers that self-terminated on idle are still counted.
   std::size_t worker_count() const;
 
   /// Registers a global observer for task execution events.
