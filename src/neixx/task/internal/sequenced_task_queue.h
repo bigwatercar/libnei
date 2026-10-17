@@ -70,6 +70,13 @@ public:
   bool HasDelayedWork() const;
   TimeTicks PeekNextDelayedRunTime() const;
 
+  // Number of BLOCK_SHUTDOWN tasks that are queued and runnable but have not
+  // been handed to a worker yet.  Delayed tasks whose deadline has not passed
+  // are NOT counted (they are not runnable), and neither are tasks already moved
+  // into a worker's batch.  Thread-safe; used by ThreadPool::Shutdown to let
+  // shutdown-blocking tasks run before the queues are torn down.
+  std::size_t GetPendingBlockShutdownTaskCount() const;
+
   // Consumer-side work query for single-consumer queues: ALSO considers
   // work_queue_ (the consumer's private drain buffer).  ONLY callable from
   // the consumer thread (or after the consumer has stopped) — any other

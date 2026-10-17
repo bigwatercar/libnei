@@ -97,6 +97,10 @@ public:
   void Shutdown();
   void CancelNonShutdownBlockingTasksLocked();
   bool is_shutdown() const;
+
+  /// Number of BLOCK_SHUTDOWN tasks that are queued and runnable but not yet
+  /// handed to a worker.  See SequencedTaskQueue::GetPendingBlockShutdownTaskCount.
+  std::size_t GetPendingBlockShutdownTaskCount() const;
   const SequenceToken &sequence_token() const;
   const TaskTraits &traits() const;
 

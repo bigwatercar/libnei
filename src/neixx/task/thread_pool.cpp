@@ -566,15 +566,24 @@ private:
         const TaskShutdownBehavior shutdown_behavior = task.traits.shutdown_behavior();
 
         if (!task.task) {
-          if (tracker_) {
-            tracker_->DidProcessTask(shutdown_behavior);
-          }
+          // No closure: nothing ran, so there is no BLOCK_SHUTDOWN in-flight
+          // interval to close (WillRunTask below was never called for it).
           internal::RecordParallelEmptyTaskSkipped();
           // A dequeued task is a completed task even when its closure is null;
           // keep the posted/completed balance used by FlushForTesting aligned.
 #if NEI_PARALLEL_DIAGNOSTICS
           queue->NotifyTaskCompleted();
 #endif
+          continue;
+        }
+
+        // Ask the tracker before running: this rejects SKIP_ON_SHUTDOWN tasks
+        // once shutdown has started and marks a BLOCK_SHUTDOWN task as in flight
+        // from here until DidProcessTask() below.  Skipping it here keeps the
+        // in-flight count balanced — without the matching increment a completed
+        // BLOCK_SHUTDOWN task used to push the count negative and
+        // CompleteShutdown() then waited for a zero that never came.
+        if (tracker_ && !tracker_->WillRunTask(shutdown_behavior)) {
           continue;
         }
 
@@ -1366,6 +1375,11 @@ public:
     std::vector<internal::PooledTaskQueue *> queues_snapshot;
     std::vector<std::unique_ptr<internal::PooledTaskQueue>> queues_to_shutdown;
 
+    // |timeout| bounds every blocking wait below (queued BLOCK_SHUTDOWN drain and
+    // the final worker join).  Zero/negative means wait indefinitely.
+    const bool bounded = timeout.is_positive();
+    const TimeTicks deadline = bounded ? TimeTicks::Now() + timeout : TimeTicks();
+
     tracker_.StartShutdown();
     // Wake any worker blocked in an execution-fence wait so it observes the
     // shutdown state and exits instead of hanging.
@@ -1386,6 +1400,13 @@ public:
       task_source_.ReEnqueueTaskQueue(queue);
       delayed_task_manager_.OnQueueUpdated(queue);
     }
+
+    // BLOCK_SHUTDOWN tasks that are merely queued must run too: without this
+    // wait they only ran if a worker happened to dequeue their queue before the
+    // task source was shut down below, which is a race (Chromium blocks shutdown
+    // from the moment such a task is posted until it completes).  Workers keep
+    // draining while we wait here.
+    (void)WaitForQueuedBlockShutdownTasks(queues_snapshot, deadline);
 
     // Wait for all in-flight BLOCK_SHUTDOWN tasks to complete.
     tracker_.CompleteShutdown();
@@ -1423,10 +1444,8 @@ public:
       }
     }
 
-    // From here on |timeout| bounds the waits: the deadline is shared by both
-    // worker families so the total wait stays within the caller's budget.
-    const bool bounded = timeout.is_positive();
-    const TimeTicks deadline = bounded ? TimeTicks::Now() + timeout : TimeTicks();
+    // The deadline computed at the top of this call is shared by both worker
+    // families, so the total wait stays within the caller's budget.
 
     // A shared worker that has not exited keeps referencing its SharedWorker
     // (|shared_|), so both containers are only cleared once every thread is
@@ -1511,6 +1530,44 @@ public:
   }
 
 private:
+  // Waits until no queue holds an unstarted BLOCK_SHUTDOWN task.  Returns false
+  // when |deadline| is set and expired first (the remaining tasks are then
+  // dropped when the queues are torn down — the caller asked for a bounded
+  // shutdown).  An unset |deadline| waits indefinitely, like Chromium, but logs
+  // a warning so a shutdown that cannot make progress is visible.
+  bool WaitForQueuedBlockShutdownTasks(const std::vector<internal::PooledTaskQueue *> &queues,
+                                       const TimeTicks &deadline) {
+    constexpr TimeDelta kPollInterval = TimeDelta::FromMilliseconds(1);
+    constexpr TimeDelta kWarnAfter = TimeDelta::FromSeconds(5);
+    const TimeTicks start = TimeTicks::Now();
+    bool warned = false;
+    for (;;) {
+      std::size_t pending = 0;
+      for (internal::PooledTaskQueue *queue : queues) {
+        pending += queue->GetPendingBlockShutdownTaskCount();
+      }
+      if (pending == 0) {
+        return true;
+      }
+      const TimeTicks now = TimeTicks::Now();
+      if (!deadline.is_null() && now >= deadline) {
+        NEI_LOG_C(g_nei_logger,
+                  NEI_L_WARN,
+                  "[ThreadPool] Shutdown deadline reached with %zu queued BLOCK_SHUTDOWN task(s); they are dropped",
+                  pending);
+        return false;
+      }
+      if (!warned && now - start >= kWarnAfter) {
+        NEI_LOG_C(g_nei_logger,
+                  NEI_L_WARN,
+                  "[ThreadPool] Shutdown is waiting for %zu queued BLOCK_SHUTDOWN task(s) to run",
+                  pending);
+        warned = true;
+      }
+      PlatformThread::Sleep(kPollInterval);
+    }
+  }
+
   void MaybeSpawnCompensationWorker() {
     // Never grow the pool while shutting down.  Shutdown() takes the current
     // handle set and joins it, so a worker spawned afterwards would not be part

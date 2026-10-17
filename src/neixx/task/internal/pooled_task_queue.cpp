@@ -127,6 +127,10 @@ public:
     seq_queue_.CancelNonShutdownBlockingTasksLocked();
   }
 
+  std::size_t GetPendingBlockShutdownTaskCount() const {
+    return seq_queue_.GetPendingBlockShutdownTaskCount();
+  }
+
   bool is_shutdown() const {
     return shut_down_.load(std::memory_order_acquire);
   }
@@ -360,6 +364,10 @@ void PooledTaskQueue::CancelNonShutdownBlockingTasksLocked() {
 
 bool PooledTaskQueue::is_shutdown() const {
   return impl_->is_shutdown();
+}
+
+std::size_t PooledTaskQueue::GetPendingBlockShutdownTaskCount() const {
+  return impl_->GetPendingBlockShutdownTaskCount();
 }
 
 const SequenceToken &PooledTaskQueue::sequence_token() const {

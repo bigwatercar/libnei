@@ -252,6 +252,22 @@ public:
     return !incoming_queue_.empty();
   }
 
+  std::size_t GetPendingBlockShutdownTaskCount() const {
+    AutoLock lock(lock_);
+    // incoming_queue_ only, for the same reason as HasImmediateWork(): a task in
+    // work_queue_ or in a worker's batch has already been handed off and will run
+    // to completion.  Delayed tasks that are not due yet live in
+    // delayed_incoming_queue_ and are deliberately excluded — waiting for a task
+    // whose deadline is in the future would block shutdown indefinitely.
+    std::size_t count = 0;
+    for (const Task &task : incoming_queue_) {
+      if (IsShutdownBlockingTask(task)) {
+        ++count;
+      }
+    }
+    return count;
+  }
+
   bool HasImmediateWorkOnConsumerSide() const {
     if (!single_consumer_) {
       return HasImmediateWork();
@@ -468,6 +484,10 @@ std::size_t SequencedTaskQueue::PromoteReadyDelayedTasks(const TimeTicks &now) {
 
 bool SequencedTaskQueue::HasImmediateWork() const {
   return impl_->HasImmediateWork();
+}
+
+std::size_t SequencedTaskQueue::GetPendingBlockShutdownTaskCount() const {
+  return impl_->GetPendingBlockShutdownTaskCount();
 }
 
 bool SequencedTaskQueue::HasImmediateWorkOnConsumerSide() const {

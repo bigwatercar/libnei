@@ -863,6 +863,61 @@ TEST(ThreadPoolTest, ShutdownDropsQueuedNonBlockingTasksButKeepsBlockShutdownTas
   EXPECT_EQ(continue_executed.load(std::memory_order_relaxed), 0);
 }
 
+// A BLOCK_SHUTDOWN task that is still queued (its worker is busy with an earlier
+// task) must still run: shutdown has to wait for it instead of shutting the task
+// source down and dropping it.  Chromium blocks shutdown from the moment such a
+// task is posted until the moment it completes.
+TEST(ThreadPoolTest, ShutdownRunsQueuedBlockShutdownTask) {
+  ThreadPool pool({1});
+  scoped_refptr<SequencedTaskRunner> runner = pool.CreateSequencedTaskRunner();
+  ASSERT_TRUE(runner);
+
+  // Keep the only worker busy so the BLOCK_SHUTDOWN task stays queued.
+  WaitableEvent blocker_started(WaitableEvent::ResetPolicy::kManual);
+  WaitableEvent blocker_may_finish(WaitableEvent::ResetPolicy::kManual);
+  runner->PostTask(FROM_HERE, [&blocker_started, &blocker_may_finish]() {
+    blocker_started.Signal();
+    blocker_may_finish.Wait();
+  });
+  ASSERT_TRUE(blocker_started.TimedWait(std::chrono::seconds(5)));
+
+  TaskTraits block_shutdown_traits;
+  block_shutdown_traits.set_shutdown_behavior(TaskShutdownBehavior::BLOCK_SHUTDOWN);
+  std::atomic<bool> block_task_ran{false};
+  ASSERT_TRUE(runner->PostTaskWithTraits(FROM_HERE, block_shutdown_traits, [&block_task_ran]() {
+    block_task_ran.store(true, std::memory_order_relaxed);
+  }));
+
+  std::atomic<bool> shutdown_returned{false};
+  std::thread shutdown_thread([&pool, &shutdown_returned]() {
+    (void)pool.Shutdown();
+    shutdown_returned.store(true, std::memory_order_release);
+  });
+
+  struct ThreadJoiner {
+    std::thread &thread;
+
+    ~ThreadJoiner() {
+      if (thread.joinable()) {
+        thread.join();
+      }
+    }
+  } joiner{shutdown_thread};
+
+  // Shutdown must not finish while the queued BLOCK_SHUTDOWN task has not run.
+  PlatformThread::Sleep(TimeDelta::FromMilliseconds(150));
+  EXPECT_FALSE(shutdown_returned.load(std::memory_order_acquire)) << "shutdown did not wait for the queued task";
+  EXPECT_FALSE(block_task_ran.load(std::memory_order_relaxed));
+
+  // Let the blocking task finish; the queued one must then run before shutdown
+  // returns.
+  blocker_may_finish.Signal();
+  shutdown_thread.join();
+  EXPECT_TRUE(block_task_ran.load(std::memory_order_relaxed))
+      << "a BLOCK_SHUTDOWN task that was still queued was dropped by shutdown";
+  EXPECT_TRUE(shutdown_returned.load(std::memory_order_acquire));
+}
+
 TEST(ThreadPoolTest, TaskObserverReceivesCallbacksWithPostedFrom) {
   struct TestObserver : TaskObserver {
     std::atomic<int> started{0};

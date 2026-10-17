@@ -131,18 +131,20 @@ public:
 
   /// Shuts down the pool and waits for its workers.
   ///
-  /// Tasks that must run to completion (shutdown behavior other than
-  /// CONTINUE_ON_SHUTDOWN) are always waited for; that wait is deliberately NOT
-  /// bounded by |timeout|, because abandoning such a task would let it touch
-  /// pool state after destruction.
+  /// BLOCK_SHUTDOWN tasks are given the chance to run to completion, including
+  /// those that are still queued when shutdown starts (that guarantee is what
+  /// Chromium provides).  A task that is already running is always waited for —
+  /// abandoning it would let it touch pool state after destruction.  With a
+  /// positive |timeout|, queued BLOCK_SHUTDOWN tasks that have not started when
+  /// the budget expires are dropped and a warning is logged.
   ///
-  /// |timeout| bounds the final phase — waiting for the worker threads to
-  /// return.  A zero or negative timeout waits indefinitely and always returns
-  /// true.  A positive timeout returns false if some worker was still running
-  /// when it expired; the pool stays shut down, those workers keep running, and
-  /// a later Shutdown() call (or destroying the pool, which calls Shutdown()
-  /// without a timeout) waits for them and then releases their resources.
-  /// Callers must not destroy the pool while Shutdown() has returned false.
+  /// |timeout| otherwise bounds the final phase — waiting for the worker threads
+  /// to return.  A zero or negative timeout waits indefinitely and always returns
+  /// true.  A positive timeout returns false if some blocking wait expired; the
+  /// pool stays shut down, the remaining workers keep running, and a later
+  /// Shutdown() call (or destroying the pool, which calls Shutdown() without a
+  /// timeout) waits for them and then releases their resources.  Callers must not
+  /// destroy the pool while Shutdown() has returned false.
   bool Shutdown(TimeDelta timeout = TimeDelta());
 
   /// Chromium-aligned execution fence (ThreadPoolInstance::BeginFence/EndFence).
