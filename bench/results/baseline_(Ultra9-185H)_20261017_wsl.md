@@ -7,7 +7,7 @@
 **运行方式**: `bench/run_all_benches.ps1` 依赖 Windows 命名（`.exe`、反斜杠 `Join-Path`），WSL 无法直接执行；
 本轮用**参数与轮数完全相同**的 bash 驱动跑同一批二进制（原始日志 `/tmp/wsl_bench_20261017_213227/`）。
 **对照基线**: `baseline_(Ultra9-185H)_20261014_wsl.md`（同机同配置）
-**最新一轮**: 见文末第 10 节（22:35 采集，`steady_clock` 修复后，以该节数值为准）
+**最新一轮**: 见文末第 11 节（22:48 采集，电源计划=性能，以该节数值为准）
 
 ---
 
@@ -221,3 +221,74 @@ TCP loopback 全量（1024 MB）：4 KB 927.9 / 8 KB 1708.4 / 16 KB 2750.2 / 32 
 | Flake ID（8 线程） | 199.9 M ids/s |
 | StringAppendF | 9.18 M ops/s |
 | OnceCallback / RepeatingCallback / BindOnce | 33.7 / 93.9 / 34.0 M/s |
+
+---
+
+## 11. 追加采集（22:48，电源计划切到「性能」）
+
+宿主电源方案改为「性能」后重跑（与同日 Windows 轮 `bench_20261017_224516` 同时段）。
+原始日志：`bench/results/bench_20261017_224839/`，负耗时 **0 处**。
+
+### 11.1 Task / ThreadPool（M/s）
+
+| Scenario | tracing ON | tracing OFF |
+|---|---:|---:|
+| Standard PostTask (fast-path) | 2.39 | 2.46 |
+| Delayed PostTask (non-fast-path) | 3.01 | 3.45 |
+| Multi-threaded PostTask (4 threads) | 2.54 | 2.86 |
+| BindOnce + Run (no queue) | 24.68 | 25.60 |
+| BindOnce construction | 31.43 | 33.60 |
+| Raw atomic loop（对照） | 117.60 | 118.43 |
+
+| ThreadPool Scenario | M/s |
+|---|---:|
+| SingleThread — dedicated-worker 外部投递 | 2.46 |
+| SingleThread — Delayed | 2.39 |
+| Parallel PostTask (single-thread post) | 2.91 |
+| Standard PostTask (external, global-heap) | 2.01 |
+| SingleThread — MT (4 threads) | 1.93 |
+| Multi-threaded PostTask (4 threads, sequenced) | 1.90 |
+| Delayed PostTask (non-fast-path) | 1.77 |
+| Parallel MT (4 threads) | 1.57 |
+| Parallel Worker-Repost (global-heap) | 0.300 |
+| Worker-Repost (local-queue fast-path) | 0.220 |
+
+`task_threadpool_parallel_bench`：Parallel PostTask 3.28；Parallel MT 1.52。
+
+> **注意**：WSL 的 ThreadPool 各项仍明显低于 Windows（2.0 vs 4.8 M/s），与 10-14 基线一致，
+> 属于 WSL2 futex 唤醒成本 + 调度器开销，不是本轮代码差异。
+
+### 11.2 Log（NEI，5 轮均值）
+
+| 分组 | μs/log | M logs/s |
+|---|---:|---:|
+| Memory 各变体 | 0.335–0.439 | 2.28–2.98 |
+| File 各变体 | 2.39–2.59 | 0.39–0.42 |
+
+### 11.3 File / Pipe / TCP / TLS / HTTP
+
+| 项目 | 结果 |
+|---|---|
+| AsyncFile | write 2113.5 MB/s @1 MB；read 5629.3 MB/s @64 KB |
+| PipeStream 进程内 | 64K 6157.3 / 256K 7221.8 MB/s |
+| PipeStream 跨进程 | P50 35.23 / P95 59.81 µs，26,716 msgs/s |
+| TCP loopback | 256K 6541.5 / 1024K 8110.1 MB/s |
+| TCP RTT（1000 连接） | avg 16.90 / p50 20.65 / p99 49.29 ms，0 失败 |
+| TCP Throughput / TLS | 528.0 / 116.1 MB/s |
+| TCP Conn Stress（1000） | 12,240.2 conn/s |
+| HTTP/1.1（20K req） | 13,839.9 req/s（avg 71.9 µs） |
+| HTTP/2 seq / par64 | 12,040.9 / **44,998.4** req/s |
+
+### 11.4 其他单轮
+
+| Bench | 结果 |
+|---|---|
+| PostJob 扩展（1/8/16 线程） | 211.9 / 1147.5 / 1353.4 M ops/s |
+| Flake ID（8 线程） | 205.6 M ids/s |
+
+### 11.5 结论
+
+电源计划对 WSL 的**长链套件末尾**影响有限（Raw atomic 117.6，与节能时的 120.4 基本持平），
+但 I/O 类单轮项普遍回升（TCP loopback 1 MB 9578 → 8110 持平、Pipe 256K 6963 → 7222、
+AsyncFile read 4117 → 5629）。与 Windows 侧一致的结论：**套件末尾的值受连续采集时长
+影响，跨版本对比必须用相同协议 + 多轮中位数**。

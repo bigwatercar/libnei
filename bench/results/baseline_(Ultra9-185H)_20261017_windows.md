@@ -6,7 +6,7 @@
 **采集条件**: 21:28–21:40，机器空闲（采样 CPU 6–9%），无后台高负载。
 **脚本**: `bench/run_all_benches.ps1`（原样，参数与轮数未改）→ 原始日志 `bench/results/bench_20261017_212830/`
 **对照基线**: `baseline_(Ultra9-185H)_20261014_windows.md`（同机、同构建配置、v0.9.1 `6031c9b`）
-**最新一轮**: 见文末第 11 节（22:16 采集，`steady_clock` 修复后，以该节数值为准）
+**最新一轮**: 见文末第 12 节（22:45 采集，电源计划=性能，以该节数值为准）
 
 > **先读第 8 节**：本轮做了 pre/post A/B 对照，结论是**本轮改动没有可测的吞吐影响**；
 > 下文与 10-14 的差异主要来自机器状态（单轮 bench 方差可达 2–4×）。
@@ -240,3 +240,81 @@ TCP loopback 全量（套内，1024 MB）：4 KB 181.2 / 8 KB 281.5 / 16 KB 741.
 | StringAppendF | 3.07 M ops/s |
 | OnceCallback / RepeatingCallback / BindOnce | 27.4 / 58.3 / 27.1 M/s |
 | Parallel Runner 原子递增 | 165.9 / 100.2 / 44.9 / 45.1 / 44.8 M/s（1→16 workers，竞争预期） |
+
+---
+
+## 12. 追加采集（22:45，电源计划切到「性能」）
+
+采集前将 Windows 电源方案从节能改为「性能」（`powercfg /getactivescheme` → GUID
+`65fd6aa6-ed11-46c9-afd7-87aa2b812c5f`），CPU 采样 12.7–14.9%。原始日志：
+`bench/results/bench_20261017_224516/`。
+
+### 12.1 对照组：套件内 vs 短暂连续跑
+
+| 测量方式 | Raw atomic loop（对照） | Standard PostTask |
+|---|---:|---:|
+| 套件内（10 轮 ×1M 连跑，本轮） | 118.07（ON）/ 117.23（OFF） | 5.00 / 4.04 |
+| 套件内（上一轮，节能计划） | 115.17 / 119.18 | 4.99 / 4.16 |
+| 单独连续3 次（本轮，性能计划） | 128.70 / 130.41 / 124.34 | 4.12 / 3.95 / 3.83 |
+| 10-14 基线（v0.9.1） | 131.7 / 132.5 | 5.37 / 4.30 |
+
+**结论**：差异的主因不是电源计划，而是**连续测量时长**——同一二进制在短暂 3 次
+连跑时能回到 128–130（≈10-14 基线），但在「10+10 轮 ×1M 任务」的长套件末尾只能
+到 117–118。即长链采集本身会积累频率/散热漂移，**跨版本对比必须用相同采集协议**。
+
+### 12.2 Task / ThreadPool（M/s）
+
+| Scenario | tracing ON | tracing OFF |
+|---|---:|---:|
+| Standard PostTask (fast-path) | 5.00 | 4.04 |
+| Delayed PostTask (non-fast-path) | 3.52 | 3.41 |
+| Multi-threaded PostTask (4 threads) | 2.31 | 2.32 |
+| BindOnce + Run (no queue) | 26.89 | 26.81 |
+| BindOnce construction | 37.23 | 35.25 |
+| Raw atomic loop（对照） | 118.07 | 117.23 |
+
+| ThreadPool Scenario | M/s |
+|---|---:|
+| Standard PostTask (external, global-heap) | 4.79 |
+| SingleThread — dedicated-worker 外部投递 | 4.45 |
+| Parallel PostTask (single-thread post) | 3.79 |
+| Delayed PostTask (non-fast-path) | 3.21 |
+| SingleThread — Delayed | 3.12 |
+| SingleThread — MT (4 threads) | 2.80 |
+| Multi-threaded PostTask (4 threads, sequenced) | 2.63 |
+| Parallel MT (4 threads) | 2.46 |
+| Parallel Worker-Repost (global-heap) | 0.611 |
+| Worker-Repost (local-queue fast-path) | 0.435 |
+
+### 12.3 Log（NEI，5 轮均值，μs/log）
+
+| Log Info | Warn | Error | Formatting | Info literal | Verbose | Verbose literal |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0.296 | 0.297 | 0.322 | 0.514 | 0.261 | 0.275 | 0.258 |
+
+### 12.4 File / Pipe / TCP / TLS / HTTP
+
+| 项目 | 结果 |
+|---|---|
+| AsyncFile | write 2621.7 MB/s @4 MB；read 4166.4 MB/s @4 MB |
+| PipeStream 进程内 | 64K 4537.3 / 256K 2152.8 MB/s（256K 本轮波动大） |
+| PipeStream 跨进程 | P50 15.40 / P95 22.00 µs，65,966 msgs/s |
+| TCP loopback | 256K 3727.1 / 1024K 2668.9 MB/s |
+| TCP RTT（1000 连接） | avg 10.56 / p50 16.38 / p99 16.91 ms，0 失败 |
+| TCP Throughput / TLS | 393.5 / 88.3 MB/s |
+| TCP Conn Stress（1000） | 1355.9 conn/s |
+| HTTP/1.1（20K req） | 20,515.6 req/s（avg 48.2 µs） |
+| HTTP/2 seq / par64 | 16,860.2 / 32,352.3 req/s（par64 本轮偏低，单轮波动） |
+
+### 12.5 其他单轮
+
+| Bench | 结果 |
+|---|---|
+| PostJob 扩展（1/8/16 线程） | 253.0 / 1014.4 / 1444.6 M ops/s |
+| Flake ID（8 线程） | 220.1 M ids/s |
+
+### 12.6 与 10-14 基线的关系
+
+电源计划调整后，本文件可比的项（Task 系列、ThreadPool、Log、HTTP/1.1）基本仍在 10-14
+基线的 0.85–1.05 倍区间内；差异主要集中在 I/O 单轮项（本轮 Pipe、TCP、TLS 单轮值
+波动较大）。仍建议：**多轮中位数 + 交替 A/B**，且两侧采集间隔不要相隔数小时。
