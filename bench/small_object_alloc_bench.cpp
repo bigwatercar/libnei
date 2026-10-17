@@ -32,7 +32,7 @@ using namespace nei;
 
 namespace {
 
-using Clock = std::chrono::high_resolution_clock;
+using Clock = std::chrono::steady_clock; // monotonic: high_resolution_clock is system_clock on libstdc++
 
 // Number of size-class buckets used by each workload; threads round-robin
 // through them so every bucket is exercised.

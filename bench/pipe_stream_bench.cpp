@@ -29,7 +29,7 @@
 
 namespace {
 
-using Clock = std::chrono::high_resolution_clock;
+using Clock = std::chrono::steady_clock; // monotonic: high_resolution_clock is system_clock on libstdc++
 
 constexpr std::size_t kDefaultTotalBytes = 64 * 1024 * 1024;
 constexpr std::size_t kReadBufferSize = 256 * 1024;

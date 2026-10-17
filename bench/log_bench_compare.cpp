@@ -257,12 +257,12 @@ NeiBenchResult time_nei_memory_ms(F &&f, int iters) {
   NeiConfigGuard guard;
   guard.set_primary(&sink);
   nei_log_reset_perf_stats_for_test();
-  const auto t0 = std::chrono::high_resolution_clock::now();
+  const auto t0 = std::chrono::steady_clock::now();
   for (int i = 0; i < iters; ++i) {
     f();
   }
   nei_log_flush();
-  const auto t1 = std::chrono::high_resolution_clock::now();
+  const auto t1 = std::chrono::steady_clock::now();
   NeiBenchResult result;
   result.micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
   (void)nei_log_get_perf_stats_for_test(&result.stats);
@@ -278,12 +278,12 @@ NeiBenchResult time_nei_memory_vlog_ms(F &&f, int iters) {
   NeiConfigGuard guard;
   guard.set_primary(&sink);
   nei_log_reset_perf_stats_for_test();
-  const auto t0 = std::chrono::high_resolution_clock::now();
+  const auto t0 = std::chrono::steady_clock::now();
   for (int i = 0; i < iters; ++i) {
     f();
   }
   nei_log_flush();
-  const auto t1 = std::chrono::high_resolution_clock::now();
+  const auto t1 = std::chrono::steady_clock::now();
   NeiBenchResult result;
   result.micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
   (void)nei_log_get_perf_stats_for_test(&result.stats);
@@ -303,12 +303,12 @@ NeiBenchResult time_nei_file_ms(F &&f, int iters, const char *path) {
     NeiConfigGuard guard;
     guard.set_primary(fs);
     nei_log_reset_perf_stats_for_test();
-    const auto t0 = std::chrono::high_resolution_clock::now();
+    const auto t0 = std::chrono::steady_clock::now();
     for (int i = 0; i < iters; ++i) {
       f();
     }
     nei_log_flush();
-    const auto t1 = std::chrono::high_resolution_clock::now();
+    const auto t1 = std::chrono::steady_clock::now();
     result.micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     (void)nei_log_get_perf_stats_for_test(&result.stats);
   }
@@ -339,13 +339,13 @@ NeiBenchResult time_nei_file_autoflush_ms(F &&f, int iters, const char *path) {
     const uint32_t saved_interval = nei_log_get_auto_flush_interval_ms();
     nei_log_set_auto_flush_interval_ms(1);
 
-    const auto t0 = std::chrono::high_resolution_clock::now();
+    const auto t0 = std::chrono::steady_clock::now();
     for (int i = 0; i < iters; ++i) {
       f();
     }
     /* One final flush to guarantee all data is on disk before we stop the clock. */
     nei_log_flush();
-    const auto t1 = std::chrono::high_resolution_clock::now();
+    const auto t1 = std::chrono::steady_clock::now();
 
     nei_log_set_auto_flush_interval_ms(saved_interval);
     result.micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
@@ -380,12 +380,12 @@ NeiBenchResult time_nei_file_strict_sync_ms(F &&f, int iters, const char *path) 
     const uint32_t saved_interval = nei_log_get_auto_flush_interval_ms();
     nei_log_set_auto_flush_interval_ms(1);
 
-    const auto t0 = std::chrono::high_resolution_clock::now();
+    const auto t0 = std::chrono::steady_clock::now();
     for (int i = 0; i < iters; ++i) {
       f();
     }
     nei_log_flush();
-    const auto t1 = std::chrono::high_resolution_clock::now();
+    const auto t1 = std::chrono::steady_clock::now();
 
     nei_log_set_auto_flush_interval_ms(saved_interval);
     result.micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
@@ -425,12 +425,12 @@ int64_t time_spdlog_memory_ms(F &&f, int iters) {
   auto sink = std::make_shared<counter_sink<std::mutex>>(&counter);
   auto logger = std::make_shared<spdlog::async_logger>(
       "nei_cmp", spdlog::sinks_init_list{sink}, spdlog::thread_pool(), spdlog::async_overflow_policy::block);
-  const auto t0 = std::chrono::high_resolution_clock::now();
+  const auto t0 = std::chrono::steady_clock::now();
   for (int i = 0; i < iters; ++i) {
     f(logger);
   }
   logger->flush();
-  const auto t1 = std::chrono::high_resolution_clock::now();
+  const auto t1 = std::chrono::steady_clock::now();
   const int64_t micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
   spdlog::shutdown();
   return micros;
@@ -443,12 +443,12 @@ int64_t time_spdlog_file_ms(F &&f, int iters, const std::string &path) {
   auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path, true);
   auto logger = std::make_shared<spdlog::async_logger>(
       "nei_cmp_file", spdlog::sinks_init_list{file_sink}, spdlog::thread_pool(), spdlog::async_overflow_policy::block);
-  const auto t0 = std::chrono::high_resolution_clock::now();
+  const auto t0 = std::chrono::steady_clock::now();
   for (int i = 0; i < iters; ++i) {
     f(logger);
   }
   logger->flush();
-  const auto t1 = std::chrono::high_resolution_clock::now();
+  const auto t1 = std::chrono::steady_clock::now();
   const int64_t micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
   spdlog::shutdown();
   return micros;
@@ -462,13 +462,13 @@ int64_t time_spdlog_file_sync_ms(F &&f, int iters, const std::string &path) {
   auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path, true);
   auto logger = std::make_shared<spdlog::async_logger>(
       "nei_cmp_sync", spdlog::sinks_init_list{sink}, spdlog::thread_pool(), spdlog::async_overflow_policy::block);
-  const auto t0 = std::chrono::high_resolution_clock::now();
+  const auto t0 = std::chrono::steady_clock::now();
   for (int i = 0; i < iters; ++i) {
     f(logger);
     logger->flush();
   }
   logger->flush();
-  const auto t1 = std::chrono::high_resolution_clock::now();
+  const auto t1 = std::chrono::steady_clock::now();
   const int64_t micros = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
   spdlog::shutdown();
   return micros;
@@ -482,13 +482,13 @@ int64_t time_spdlog_file_strict_sync_ms(F &&f, int iters, const std::string &pat
   (void)std::remove(path.c_str());
   auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path, true);
   auto logger = std::make_shared<spdlog::logger>("nei_cmp_sync_strict", spdlog::sinks_init_list{sink});
-  const auto t0 = std::chrono::high_resolution_clock::now();
+  const auto t0 = std::chrono::steady_clock::now();
   for (int i = 0; i < iters; ++i) {
     f(logger);
     logger->flush();
   }
   logger->flush();
-  const auto t1 = std::chrono::high_resolution_clock::now();
+  const auto t1 = std::chrono::steady_clock::now();
   return std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
 }
 

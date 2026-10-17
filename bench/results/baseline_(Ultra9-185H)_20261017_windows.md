@@ -6,6 +6,7 @@
 **采集条件**: 21:28–21:40，机器空闲（采样 CPU 6–9%），无后台高负载。
 **脚本**: `bench/run_all_benches.ps1`（原样，参数与轮数未改）→ 原始日志 `bench/results/bench_20261017_212830/`
 **对照基线**: `baseline_(Ultra9-185H)_20261014_windows.md`（同机、同构建配置、v0.9.1 `6031c9b`）
+**最新一轮**: 见文末第 11 节（22:16 采集，`steady_clock` 修复后，以该节数值为准）
 
 > **先读第 8 节**：本轮做了 pre/post A/B 对照，结论是**本轮改动没有可测的吞吐影响**；
 > 下文与 10-14 的差异主要来自机器状态（单轮 bench 方差可达 2–4×）。
@@ -165,3 +166,77 @@ TCP loopback 全量（套内，1024 MB）：4 KB 181.2 / 8 KB 281.5 / 16 KB 741.
    Raw atomic 只差 3%，说明不是整体降频，而是分支预测/亲和性/后台活动层面的波动。
 4. 与 10-14 相比唯一稳定偏低且值得下轮复看的是 HTTP/1.1（24.4k → 21k req/s，−14%），
    A/B 已排除本轮改动，若关心需与 v0.9.1 二进制在同一时段交替复测。
+
+---
+
+## 11. 追加采集（22:16–22:19，steady_clock 修复后）
+
+同日第二轮采集，作为本文件的最新数值。唯一代码改动：`bench/*.cpp` 的计时时钟由
+`std::chrono::high_resolution_clock`（libstdc++ 下等价于 `system_clock`，非单调）改为
+`std::chrono::steady_clock`；起因是首轮 WSL 采集出现 `Total time: -2469562 µs`（1M 次日志）
+的负样本，会直接污染均值。本轮 Windows / WSL 两侧日志中 `Total time`、`Average time per log`、
+`Logs per second` 的负值均为 **0**。
+
+原始日志：`bench/results/bench_20261017_221626/`
+
+### 11.1 Task scheduling（M/s，10 轮均值）
+
+| Scenario | tracing ON | tracing OFF |
+|---|---:|---:|
+| Standard PostTask (fast-path) | 4.99 | 4.16 |
+| Delayed PostTask (non-fast-path) | 3.36 | 3.51 |
+| Multi-threaded PostTask (4 threads) | 2.25 | 2.41 |
+| BindOnce + Run (no queue) | 24.21 | 27.02 |
+| BindOnce construction | 36.26 | 37.16 |
+| Raw atomic loop（对照，无库代码） | 115.17 | 119.18 |
+
+### 11.2 ThreadPool（M/s，5 轮均值）
+
+| Scenario | M/s |
+|---|---:|
+| Standard PostTask (external, global-heap) | 4.71 |
+| SingleThread — dedicated-worker 外部投递 | 4.60 |
+| Parallel PostTask (single-thread post) | 3.75 |
+| Delayed PostTask (non-fast-path) | 3.38 |
+| SingleThread — Delayed | 3.32 |
+| SingleThread — MT (4 threads) | 2.71 |
+| Multi-threaded PostTask (4 threads, sequenced) | 2.65 |
+| Parallel MT (4 threads) | 2.48 |
+| Parallel Worker-Repost (global-heap) | 0.626 |
+| Worker-Repost (local-queue fast-path) | 0.458 |
+
+`task_threadpool_parallel_bench`：Parallel PostTask 3.58；Parallel MT 2.37。
+
+### 11.3 Log（NEI，5 轮均值）
+
+| 场景 | μs/log | M logs/s |
+|---|---:|---:|
+| Log Info / Warn / Error | 0.30–0.32 | 3.20–3.38 |
+| Log with Formatting | 0.531 | 1.88 |
+| Log Info (literal) / Verbose (literal) | 0.29 | 3.42–3.45 |
+| Log Verbose | 0.319 | 3.19 |
+
+### 11.4 File / Pipe / TCP / TLS / HTTP
+
+| 项目 | 结果 |
+|---|---|
+| AsyncFile | write 2262.4 MB/s @256 KB；read 3329.0 MB/s @256 KB |
+| PipeStream 进程内 | 4K 379.4 / 16K 603.7 / 64K 2154.8 / 256K 2726.6 / 1M 2784.1 MB/s |
+| PipeStream 跨进程 | P50 15.60 / P95 21.10 µs，63,971 msgs/s |
+| TCP loopback（1024 MB） | 4K 243.0 / 16K 622.4 / 64K 2298.7 / 256K **3606.7** / 1024K 2363.5 MB/s |
+| TCP RTT（1000 连接） | avg 12.43 / p50 17.21 / p99 20.79 ms，0 失败 |
+| TCP Throughput（10 MB @ 64 KB） | 235.1 MB/s |
+| TCP Conn Stress（1000） | 1344.8 conn/s |
+| TLS Throughput（10 MB @ 64 KB） | 80.4 MB/s |
+| HTTP/1.1（20K req） | 19,417.6 req/s（avg 51.0 µs） |
+| HTTP/2 seq / par8 / par64 | 14,270.8 / 39,961.8 / **41,537.9** req/s |
+
+### 11.5 其他单轮
+
+| Bench | 结果 |
+|---|---|
+| PostJob 扩展（1/2/4/8/16 线程） | 229 / 457 / 913 / 1427 / 1401 M ops/s |
+| Flake ID（8 线程） | 230.6 M ids/s |
+| StringAppendF | 3.07 M ops/s |
+| OnceCallback / RepeatingCallback / BindOnce | 27.4 / 58.3 / 27.1 M/s |
+| Parallel Runner 原子递增 | 165.9 / 100.2 / 44.9 / 45.1 / 44.8 M/s（1→16 workers，竞争预期） |

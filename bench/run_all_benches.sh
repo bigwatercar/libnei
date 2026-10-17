@@ -140,10 +140,10 @@ log_table() {
   local file="$1"
   [ -f "$file" ] || return 0
   awk '
-    /^[A-Za-z][^:]*:$/ && !/Iterations|Total|Average|Logs|File|Runtime|Phase/ {
-      sc = $0; sub(/:$/, "", sc); next }
+    /^[A-Za-z].*:$/ && !/^(Iterations|Total|Average|Logs|Runtime|Phase|Output|Enqueue|E2E|Flush)/ {
+      sc = $0; sub(/:$/, "", sc); sub(/ \(File:.*\)$/, "", sc); next }
     /^ +E2E avg per log:/ { a[sc] += $5; na[sc]++; next }
-    /^ +E2E logs/sec:/ { l[sc] += $3; nl[sc]++; next }
+    /^ +E2E logs\/sec:/ { l[sc] += $3; nl[sc]++; next }
     END {
       for (k in na) {
         m = a[k] / na[k]; ml = l[k] / nl[k]

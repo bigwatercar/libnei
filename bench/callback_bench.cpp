@@ -27,7 +27,7 @@ using namespace nei;
 
 namespace {
 
-using Clock = std::chrono::high_resolution_clock;
+using Clock = std::chrono::steady_clock; // monotonic: high_resolution_clock is system_clock on libstdc++
 
 // ---------------------------------------------------------------------------
 // Large payload struct — exceeds 48-byte SBO to force heap allocation

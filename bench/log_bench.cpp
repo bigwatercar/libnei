@@ -138,15 +138,15 @@ void run_log_benchmark(const std::string &name, std::function<void()> log_func, 
   nei_log_flush();
   (void)nei_log_get_perf_stats_for_test(&stats_before);
 
-  auto start_enqueue = std::chrono::high_resolution_clock::now();
+  auto start_enqueue = std::chrono::steady_clock::now();
   for (int i = 0; i < iterations; ++i) {
     log_func();
   }
-  auto end_enqueue = std::chrono::high_resolution_clock::now();
+  auto end_enqueue = std::chrono::steady_clock::now();
 
-  auto start_flush = std::chrono::high_resolution_clock::now();
+  auto start_flush = std::chrono::steady_clock::now();
   nei_log_flush();
-  auto end_flush = std::chrono::high_resolution_clock::now();
+  auto end_flush = std::chrono::steady_clock::now();
 
   (void)nei_log_get_perf_stats_for_test(&stats_after);
 
@@ -226,15 +226,15 @@ void run_vlog_benchmark(const std::string &name, std::function<void()> log_func,
   nei_log_flush();
   (void)nei_log_get_perf_stats_for_test(&stats_before);
 
-  auto start_enqueue = std::chrono::high_resolution_clock::now();
+  auto start_enqueue = std::chrono::steady_clock::now();
   for (int i = 0; i < iterations; ++i) {
     log_func();
   }
-  auto end_enqueue = std::chrono::high_resolution_clock::now();
+  auto end_enqueue = std::chrono::steady_clock::now();
 
-  auto start_flush = std::chrono::high_resolution_clock::now();
+  auto start_flush = std::chrono::steady_clock::now();
   nei_log_flush();
-  auto end_flush = std::chrono::high_resolution_clock::now();
+  auto end_flush = std::chrono::steady_clock::now();
 
   (void)nei_log_get_perf_stats_for_test(&stats_after);
 
@@ -317,15 +317,15 @@ void run_file_log_benchmark(const std::string &name,
 
     nei_log_reset_perf_stats_for_test();
 
-    auto start_enqueue = std::chrono::high_resolution_clock::now();
+    auto start_enqueue = std::chrono::steady_clock::now();
     for (int i = 0; i < iterations; ++i) {
       log_func();
     }
-    auto end_enqueue = std::chrono::high_resolution_clock::now();
+    auto end_enqueue = std::chrono::steady_clock::now();
 
-    auto start_flush = std::chrono::high_resolution_clock::now();
+    auto start_flush = std::chrono::steady_clock::now();
     nei_log_flush();
-    auto end_flush = std::chrono::high_resolution_clock::now();
+    auto end_flush = std::chrono::steady_clock::now();
 
     (void)nei_log_get_perf_stats_for_test(&stats);
 
@@ -424,18 +424,18 @@ int main(int argc, char **argv) {
   BenchmarkConfigGuard guard;
   guard.set_primary_sink(&sink);
 
-  auto start = std::chrono::high_resolution_clock::now();
+  auto start = std::chrono::steady_clock::now();
   const int iterations = 1000000;
   nei_log_perf_stats_st verbose_stats = {};
   nei_log_reset_perf_stats_for_test();
   for (int i = 0; i < iterations; ++i) {
     nei_vlog(NEI_LOG_DEFAULT_CONFIG_HANDLE, 1, __FILE__, __LINE__, "benchmark", "verbose message %s", "verbose");
   }
-  auto enqueue_end = std::chrono::high_resolution_clock::now();
+  auto enqueue_end = std::chrono::steady_clock::now();
 
-  auto flush_start = std::chrono::high_resolution_clock::now();
+  auto flush_start = std::chrono::steady_clock::now();
   nei_log_flush();
-  auto end = std::chrono::high_resolution_clock::now();
+  auto end = std::chrono::steady_clock::now();
 
   (void)nei_log_get_perf_stats_for_test(&verbose_stats);
 

@@ -45,7 +45,7 @@ inline std::string PathToUTF8(const std::filesystem::path &p) {
 
 namespace {
 
-using Clock = std::chrono::high_resolution_clock;
+using Clock = std::chrono::steady_clock; // monotonic: high_resolution_clock is system_clock on libstdc++
 
 std::filesystem::path MakeTempPath() {
   const auto now = std::chrono::steady_clock::now().time_since_epoch();
