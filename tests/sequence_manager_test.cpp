@@ -349,6 +349,16 @@ TEST(SequenceManagerTest, ShutdownDuringConcurrentPostingDoesNotDeadlockOrCrash)
       }
     });
 
+    // Wait for the poster thread to actually start before shutting down.  A
+    // freshly created thread can be delayed well past the settle window when
+    // the machine is loaded (observed under ASAN full-suite runs that competed
+    // with a concurrent build), which made post_attempts == 0 and failed the
+    // assertion below for a reason unrelated to the code under test.
+    const auto start_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (post_attempts.load(std::memory_order_relaxed) == 0 && std::chrono::steady_clock::now() < start_deadline) {
+      std::this_thread::yield();
+    }
+
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
     manager.Shutdown();
 

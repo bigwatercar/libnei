@@ -102,6 +102,33 @@ protected:
     (void)drained.TimedWait(std::chrono::seconds(5));
   }
 
+  // Closes and destroys |server| on the IO thread, then waits until everything
+  // queued behind that call has run.
+  //
+  // Shutdown() (not Close()) is used on purpose: Close() fires the accept
+  // callback with success=false, which would trip the success assertions these
+  // tests already made.  Shutdown() cancels the pending accept silently, so the
+  // stored callback is destroyed together with the server and can never run
+  // after TestBody returns.
+  //
+  // Any test whose accept/read callbacks capture TestBody locals MUST call this
+  // before returning.  gtest runs TearDown only *after* TestBody returns, so a
+  // callback that fires afterwards would write into a destroyed stack frame
+  // (ASAN: stack-use-after-return).
+  void CloseServerOnIoThreadAndDrain(std::shared_ptr<TCPServerSocket> &server) {
+    if (!server) {
+      return;
+    }
+    WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+    const scoped_refptr<SingleThreadTaskRunner> runner = io_runner_;
+    io_runner_->PostTask(FROM_HERE, [&server, &done, runner]() {
+      server->Shutdown();
+      server.reset();
+      runner->PostTask(FROM_HERE, [&done]() { done.Signal(); });
+    });
+    (void)done.TimedWait(std::chrono::seconds(5));
+  }
+
   // Finds a free TCP port by binding to loopback:0, querying the assigned
   // port, then closing.  The port is immediately reusable.
   static uint16_t FindFreePort() {
@@ -199,9 +226,9 @@ TEST_F(TcpSocketTest, BasicHandshake) {
   EXPECT_TRUE(accepted.load());
   EXPECT_TRUE(connected.load());
 
-  // Break reference cycle: accept callback captures server shared_ptr,
-  // which would keep the Impl (and its WeakPtrFactory) alive past TearDown.
-  server->Shutdown();
+  // Close and destroy the server on the IO thread before returning: the accept
+  // callback captures TestBody locals, so it must not be able to fire later.
+  CloseServerOnIoThreadAndDrain(server);
 }
 
 // ===========================================================================
@@ -291,8 +318,7 @@ TEST_F(TcpSocketTest, AsyncStreamTransfer) {
   ASSERT_TRUE(transfer_done.TimedWait(std::chrono::seconds(5)));
   EXPECT_TRUE(data_match.load()) << "1 MB data should match byte-for-byte";
 
-  // Break reference cycle: accept callback captures server shared_ptr.
-  server->Shutdown();
+  CloseServerOnIoThreadAndDrain(server);
 }
 
 // ===========================================================================
@@ -412,6 +438,8 @@ TEST_F(TcpSocketTest, ExplicitShutdownWrite) {
 
   ASSERT_TRUE(eof_detected.TimedWait(std::chrono::seconds(5)));
   EXPECT_TRUE(server_saw_eof.load()) << "Server should detect EOF after client ShutdownWrite";
+
+  CloseServerOnIoThreadAndDrain(server);
 }
 
 // ===========================================================================
@@ -456,6 +484,8 @@ TEST_F(TcpSocketTest, OrphanedDestruction) {
   ASSERT_TRUE(drain.TimedWait(std::chrono::seconds(5)));
 
   SUCCEED() << "Client destroyed without Close/ShutdownWrite  --  no UAF, no leak";
+
+  CloseServerOnIoThreadAndDrain(server);
 }
 
 // ===========================================================================
@@ -565,6 +595,8 @@ TEST_F(TcpSocketTest, OrphanedBackgroundFlush) {
   EXPECT_TRUE(eof_received.load()) << "Server should detect EOF  --  orphaned Impl must send FIN";
   EXPECT_TRUE(all_data_received.load()) << "Server must receive all " << kTransferSize
                                         << " bytes with the correct pattern  --  orphan must flush data";
+
+  CloseServerOnIoThreadAndDrain(server);
 }
 
 // ===========================================================================
@@ -640,7 +672,8 @@ TEST_F(TcpSocketTest, MultiReactorRoundRobin) {
   ASSERT_TRUE(all_accepted.TimedWait(std::chrono::seconds(5)));
   EXPECT_EQ(accepted.load(), kNumConnections) << "All " << kNumConnections << " connections should be accepted";
 
-  // ---- tear down workers ----
+  // ---- tear down the server (on the IO thread, with a fence) then workers ----
+  CloseServerOnIoThreadAndDrain(server);
   for (auto &w : workers)
     w->Stop();
 }
@@ -659,34 +692,51 @@ TEST_F(TcpSocketTest, WriteChainNoStackOverflow) {
   ASSERT_NE(port, 0);
   constexpr int kChainLength = 1000;
 
-  WaitableEvent chain_done(WaitableEvent::ResetPolicy::kAutomatic, false);
-  std::atomic<int> max_depth{0};
-  std::atomic<int> write_count{0};
-  std::atomic<int> server_read_count{0};
+  // Cross-thread state lives on the heap and is captured by value.  The accept
+  // callback and the recursive read loop below outlive this test body (the loop
+  // stays armed until the peer closes), and gtest runs TearDown only *after*
+  // TestBody returns, so TestBody locals are not safe to capture here.  ASAN
+  // caught exactly that on |server_read_count| (stack-use-after-return).
+  struct ChainState {
+    WaitableEvent chain_done{WaitableEvent::ResetPolicy::kAutomatic, false};
+    WaitableEvent teardown{WaitableEvent::ResetPolicy::kAutomatic, false};
+    std::atomic<int> max_depth{0};
+    std::atomic<int> write_count{0};
+    std::atomic<int> server_read_count{0};
+    // Accepted socket, owned by the IO thread so the tail can close it.
+    std::shared_ptr<std::unique_ptr<TCPClientSocket>> accepted;
+  };
 
+  auto state = std::make_shared<ChainState>();
   auto server = std::make_shared<TCPServerSocket>();
 
-  io_runner_->PostTask(FROM_HERE, [&, this, port]() {
+  // Copied out of the fixture: callbacks must not reference |this|.
+  const scoped_refptr<SingleThreadTaskRunner> io_runner = io_runner_;
+
+  io_runner->PostTask(FROM_HERE, [state, server, io_runner, port, kChainLength]() {
     bool ok = server->Listen(IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
                              1,
-                             [&](bool success, std::unique_ptr<TCPClientSocket> accepted) mutable {
-                               ASSERT_TRUE(success);
+                             [state](bool success, std::unique_ptr<TCPClientSocket> accepted) {
+                               if (!success || !accepted) {
+                                 return;
+                               }
                                auto sock = std::make_shared<std::unique_ptr<TCPClientSocket>>(std::move(accepted));
+                               state->accepted = sock;
 
                                auto do_read = std::make_shared<std::function<void()>>();
                                TrackRecursion(do_read);
-                               *do_read = [&, sock, do_read]() {
+                               *do_read = [state, sock, do_read]() {
                                  auto buf = nei::MakeRefCounted<nei::IOBufferWithSize>(64);
-                                 (*sock)->ReadAsync(buf, 64, [&, do_read](bool s, std::size_t n) {
+                                 (*sock)->ReadAsync(buf, 64, [state, do_read](bool s, std::size_t n) {
                                    if (!s || n == 0)
                                      return;
-                                   server_read_count.fetch_add(1);
+                                   state->server_read_count.fetch_add(1);
                                    (*do_read)();
                                  });
                                };
                                (*do_read)();
                              },
-                             io_runner_,
+                             io_runner,
                              {});
     ASSERT_TRUE(ok);
 
@@ -697,23 +747,23 @@ TEST_F(TcpSocketTest, WriteChainNoStackOverflow) {
     auto do_write = std::make_shared<std::function<void()>>();
     TrackRecursion(do_write);
 
-    *do_write = [&, client, depth, remaining, do_write]() {
+    *do_write = [state, client, depth, remaining, do_write]() {
       int d = depth->fetch_add(1) + 1;
-      int prev = max_depth.load();
-      while (d > prev && !max_depth.compare_exchange_weak(prev, d)) {
+      int prev = state->max_depth.load();
+      while (d > prev && !state->max_depth.compare_exchange_weak(prev, d)) {
       }
 
       auto buf = nei::MakeRefCounted<nei::IOBufferWithSize>(1);
       buf->data()[0] = 'X';
-      client->WriteAsync(buf, 1, [&, depth, remaining, do_write, client](bool ok, std::size_t) {
+      client->WriteAsync(buf, 1, [state, depth, remaining, do_write, client](bool ok, std::size_t) {
         depth->fetch_sub(1);
         ASSERT_TRUE(ok);
-        write_count.fetch_add(1);
+        state->write_count.fetch_add(1);
         if (remaining->fetch_sub(1) > 1) {
           (*do_write)();
         } else {
           client->Close();
-          chain_done.Signal();
+          state->chain_done.Signal();
         }
       });
     };
@@ -725,16 +775,28 @@ TEST_F(TcpSocketTest, WriteChainNoStackOverflow) {
           ASSERT_TRUE(ok);
           (*do_write)();
         },
-        io_runner_);
+        io_runner);
   });
 
-  ASSERT_TRUE(chain_done.TimedWait(std::chrono::seconds(5)));
+  ASSERT_TRUE(state->chain_done.TimedWait(std::chrono::seconds(5)));
 
-  EXPECT_EQ(write_count.load(), kChainLength) << "All " << kChainLength << " writes must complete";
-  EXPECT_LE(max_depth.load(), 2) << "Max recursion depth should be ≤2 (async dispatch), "
-                                    "was "
-                                 << max_depth.load() << "  --  possible synchronous re-entrancy";
-  EXPECT_GT(server_read_count.load(), 0) << "Server should have read at least some data";
+  EXPECT_EQ(state->write_count.load(), kChainLength) << "All " << kChainLength << " writes must complete";
+  EXPECT_LE(state->max_depth.load(), 2) << "Max recursion depth should be ≤2 (async dispatch), "
+                                           "was "
+                                        << state->max_depth.load() << "  --  possible synchronous re-entrancy";
+  EXPECT_GT(state->server_read_count.load(), 0) << "Server should have read at least some data";
+
+  // Stop the read loop and destroy the server on the IO thread, then fence from
+  // inside that same task so nothing queued behind it can outlive this frame.
+  io_runner->PostTask(FROM_HERE, [state, server, io_runner]() {
+    if (state->accepted && *state->accepted) {
+      (*state->accepted)->Close();
+    }
+    state->accepted.reset();
+    server->Close();
+    io_runner->PostTask(FROM_HERE, [state]() { state->teardown.Signal(); });
+  });
+  ASSERT_TRUE(state->teardown.TimedWait(std::chrono::seconds(5)));
 }
 
 // ===========================================================================
@@ -831,6 +893,8 @@ TEST_F(TcpSocketTest, OrphanedWhileConnectInFlight) {
   });
 
   ASSERT_TRUE(orphan_done.TimedWait(std::chrono::seconds(5)));
+
+  CloseServerOnIoThreadAndDrain(server);
   SUCCEED();
 }
 
@@ -919,8 +983,7 @@ TEST_F(TcpSocketTest, ConnectAndListenWithIPv6Loopback) {
   EXPECT_TRUE(connected.load());
 
   // Break reference cycle: accept callback captures server shared_ptr.
-  if (server)
-    server->Shutdown();
+  CloseServerOnIoThreadAndDrain(server);
 }
 
 #if !defined(_WIN32)
@@ -936,52 +999,64 @@ TEST_F(TcpSocketTest, ServerDoesNotCrashUnderFdPressure) {
   const uint16_t port = FindFreePort();
   ASSERT_NE(port, 0);
 
-  WaitableEvent server_ready(WaitableEvent::ResetPolicy::kAutomatic, false);
-  std::atomic<int> accepted{0};
-  std::atomic<bool> server_fatal{false};
+  // Every value touched from another thread lives on the heap, captured by
+  // value.  Listen()'s accept callback is owned by |server| and can still run
+  // after this test body returns, because Close() posts the pending-accept
+  // failure callback as a *separate* task; capturing TestBody locals would be
+  // a stack-use-after-return (ASAN caught exactly that on |server_fatal|).
+  struct FdPressureState {
+    WaitableEvent server_ready{WaitableEvent::ResetPolicy::kAutomatic, false};
+    WaitableEvent all_done{WaitableEvent::ResetPolicy::kManual, false};
+    WaitableEvent teardown{WaitableEvent::ResetPolicy::kAutomatic, false};
+    std::atomic<int> accepted{0};
+    std::atomic<int> client_done{0};
+    std::atomic<bool> server_fatal{false};
+    std::vector<std::shared_ptr<TCPClientSocket>> clients;
+  };
 
+  auto state = std::make_shared<FdPressureState>();
   auto server = std::make_shared<TCPServerSocket>();
 
-  io_runner_->PostTask(FROM_HERE, [&]() {
+  // Copied out of the fixture: the accept callback must not reference |this|.
+  const scoped_refptr<SingleThreadTaskRunner> io_runner = io_runner_;
+
+  io_runner->PostTask(FROM_HERE, [state, server, io_runner, port]() {
     bool ok = server->Listen(IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
                              512,
-                             [&](bool success, std::unique_ptr<TCPClientSocket> client) {
+                             [state](bool success, std::unique_ptr<TCPClientSocket> client) {
                                if (success) {
-                                 accepted.fetch_add(1);
+                                 state->accepted.fetch_add(1);
                                  client->Close();
                                } else {
-                                 server_fatal.store(true);
+                                 state->server_fatal.store(true);
                                }
                              },
-                             io_runner_,
+                             io_runner,
                              {});
     if (!ok)
-      server_fatal.store(true);
-    server_ready.Signal();
+      state->server_fatal.store(true);
+    state->server_ready.Signal();
   });
 
-  server_ready.Wait();
+  state->server_ready.Wait();
 
   // Fire 200 clients in rapid succession to stress the accept loop.
   // WSL default ulimit is 1024, so 200 is well within safe range.
   const int kClients = 200;
-  WaitableEvent all_done(WaitableEvent::ResetPolicy::kManual, false);
-  std::atomic<int> client_done{0};
-  std::vector<std::shared_ptr<TCPClientSocket>> clients;
 
   for (int i = 0; i < kClients; ++i) {
     auto client = std::make_shared<TCPClientSocket>();
-    clients.push_back(client);
+    state->clients.push_back(client);
     client->Connect(
         IPEndPoint(IPAddress::FromIPv4(127, 0, 0, 1), port),
-        [&all_done, &client_done, kClients](bool /*ok*/) {
-          if (client_done.fetch_add(1) + 1 >= kClients)
-            all_done.Signal();
+        [state, kClients](bool /*ok*/) {
+          if (state->client_done.fetch_add(1) + 1 >= kClients)
+            state->all_done.Signal();
         },
-        io_runner_);
+        io_runner);
   }
 
-  ASSERT_TRUE(all_done.TimedWait(std::chrono::seconds(10)));
+  ASSERT_TRUE(state->all_done.TimedWait(std::chrono::seconds(10)));
 
   // Client Connect() callbacks complete as soon as the kernel queues the
   // connection in the listen backlog; the server-side accept processing
@@ -991,16 +1066,27 @@ TEST_F(TcpSocketTest, ServerDoesNotCrashUnderFdPressure) {
   // before a single accept callback has fired (WSL: accepted == 0 at
   // assertion time while all 200 clients already connected).
   const auto settle_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (accepted.load() < kClients - 5 && std::chrono::steady_clock::now() < settle_deadline) {
+  while (state->accepted.load() < kClients - 5 && std::chrono::steady_clock::now() < settle_deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 
-  int accepted_count = accepted.load();
+  int accepted_count = state->accepted.load();
   EXPECT_GE(accepted_count, kClients - 5) << "Server accepted " << accepted_count << " out of " << kClients
                                           << " clients.  Accept loop may be blocking or too slow.";
-  EXPECT_FALSE(server_fatal.load());
+  EXPECT_FALSE(state->server_fatal.load());
 
-  server->Close();
+  // Close and destroy the server ON the IO thread, then fence from inside that
+  // same task so the posted pending-accept callback runs before the fence.
+  // |state| stays alive through the callback and the fence task themselves, so
+  // a late callback can no longer touch a dead test frame.
+  io_runner->PostTask(FROM_HERE, [state, server, io_runner]() {
+    // |server| is a by-value capture (const here), so it is released when this
+    // task completes - which is on the IO thread, as required.
+    server->Close();
+    state->clients.clear();
+    io_runner->PostTask(FROM_HERE, [state]() { state->teardown.Signal(); });
+  });
+  ASSERT_TRUE(state->teardown.TimedWait(std::chrono::seconds(5)));
 }
 #endif // !_WIN32
 

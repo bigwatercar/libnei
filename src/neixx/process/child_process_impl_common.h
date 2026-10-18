@@ -56,10 +56,16 @@ public:
     }
 
     WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-    io_runner->PostTask(FROM_HERE, [&, this]() {
+    const bool posted = io_runner->PostTask(FROM_HERE, [&, this]() {
       launch_on_io();
       done.Signal();
     });
+    if (!posted) {
+      // The service task runner is shutting down, so the posted task will never
+      // run. Report the failure instead of waiting on a signal that never comes.
+      NotifyLaunchFailedOnCallerThread();
+      return false;
+    }
     done.Wait();
     return ok;
   }
@@ -84,10 +90,14 @@ public:
     }
 
     WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
-    io_runner->PostTask(FROM_HERE, [&, this]() {
+    const bool posted = io_runner->PostTask(FROM_HERE, [&, this]() {
       terminate_on_io();
       done.Signal();
     });
+    if (!posted) {
+      // See Launch(): never block on a task that cannot run anymore.
+      return false;
+    }
     done.Wait();
     return ok;
   }
