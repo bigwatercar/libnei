@@ -144,14 +144,17 @@
 
 ## 里程碑摘要（已完成）
 
-- **2026-10-18** — **`PlatformThreadTest.SleepShortDurationPrecision` 抖动误报消除**（Windows 全量
-  原本每轮偶发 1 次）。该用例对 5 次 `Sleep(1ms)` 取**平均值**与 8 ms 比较，单次被抢占的样本就能
-  把均值拉过界：CPU 满载复现到 `Average Sleep(1ms) took 14386 us` / `10492 us`，而每次 sleep
-  本身正常。改为对 10 次采样取**最小值** —— 抢占只会让 sleep 变长、永远不会让最小值变小，因此
-  对抖动免疫；而真实的定时器精度回退会让**每一次**都对齐到 tick（Windows ≈15.6 ms），最小值照样
-  超界，判据强度不变。同时把 `high_resolution_clock` 换成单调的 `steady_clock`。
-  验证：重负载（20 个忙等 + 4 个 WSL 空转）下 200 次重复 0 失败（修复前 100 次里 2 次失败）、
-  Windows Debug 全量 1064 通过 ×2、Release 全量 1058 通过、WSL Release 20 次与 ASAN 10 次重复均干净。
+- **2026-10-18** — **`PlatformThreadTest.SleepShortDurationPrecision` 抖动误报消除 + 短睡眠改用高分辨率定时器**
+  （Windows 全量原本每轮偶发 1 次）。第一阶段：该用例对 5 次 `Sleep(1ms)` 取**平均值**与 8 ms
+  比较，单次被抢占的样本就能把均值拉过界（满载复现 `Average Sleep(1ms) took 14386 us` / `10492 us`，
+  而每次 sleep 本身正常）；改为 10 次取**最小值**（抢占只会变长、不会让最小值变小），并把
+  `high_resolution_clock` 换成单调的 `steady_clock`。
+  第二阶段：全量下仍偶发失败，实测 `Fastest Sleep(1ms) took 14784 us` —— **最小值也接近一个 tick**，
+  说明问题不在采样而是**全局定时器分辨率在长跑中被系统调粗**（`timeBeginPeriod(1)` 只作用于全局，
+  且电源管理下可被回收）。根因修法：Windows 下 <10 ms 的睡眠改用**每线程高分辨率可等待定时器**
+  （`CreateWaitableTimerExW(..., CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, ...)`，Win10 1803+；
+  老系统回退普通定时器、再回退 `Sleep+自旋`），不再依赖全局分辨率。
+  验证：Windows Debug 全量 **1064 通过 ×2**、Release 全量 **1058 通过**；此前的重负载 200 次重复仍保持干净。
 
 - **2026-10-18** — **ChildProcess 流代理的 IO hop UAF（真实库缺陷）**。现象：WSL Release 下
   `ChildProcessTest`/`TcpSocketTest`/`SequenceManagerTest` 组合跑约 2/12 段错误，且崩在**别的**

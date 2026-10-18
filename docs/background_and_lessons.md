@@ -282,6 +282,12 @@
   正常），于是 Windows 全量每轮偶发 1 次。改取 10 次最小值后：抢占只会让单次变长、不会让最小值
   变小，而真实的定时器精度回退会让**每一次**都对齐到 tick（≈15.6ms），判据强度不变且对抖动免疫。
   计时一律用 `std::chrono::steady_clock`（`high_resolution_clock` 在 MSVC 下非单调，会出现负值）。
+  **但要记住最小值的局限**：它只能滤掉单次抖动，滤不掉「一整段窗口里分辨率就是粗的」——
+  同一用例随后仍偶发失败，实测最小值 14.8ms，最后定位到 `timeBeginPeriod(1)` 的全局分辨率在
+  长跑/电源管理下会被回收；正解是让被测代码**不依赖全局分辨率**（Windows 短睡眠改用每线程
+  `CreateWaitableTimerExW(..., CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, ...)`）。
+  **教训：先确认调用路径本身只受「频率/延迟」影响，还是受环境全局状态影响；后者必须改实现，
+  而不是继续调阈值。**
 - **flaky 已修（2026-10 收口，全平台全量零失败）**：`ClientOrphanDrainReadEOF`（server 析构 +
   I/O 线程 accept 回调碰已析构栈事件 → futex 挂死）；`ServerDoesNotCrashUnderFdPressure` /
   `WriteChainNoStackOverflow`（`7ca30ad`，回调捕 TestBody 栈 → ASAN stack-use-after-return，

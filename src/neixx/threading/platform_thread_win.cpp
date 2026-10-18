@@ -77,6 +77,59 @@ void EnableHighResTimer() {
   (void)enabled;
 }
 
+// Per-thread high-resolution waitable timer used for sub-tick sleeps.
+//
+// timeBeginPeriod(1) only lowers the *global* timer resolution, and Windows may
+// coarsen it again under power management: a long multithreaded run was seen
+// rounding every Sleep(1 ms) up to a ~15.6 ms tick even after timeBeginPeriod().
+// A high-resolution waitable timer belongs to this thread and is not affected by
+// the global resolution, so short sleeps stay accurate under load.
+class HighResolutionTimer {
+public:
+  HighResolutionTimer() {
+    // CREATE_WAITABLE_TIMER_HIGH_RESOLUTION = 0x00000002 (Win10 1803+).  Older
+    // systems reject the flag; fall back to a plain timer so we still avoid the
+    // broader ::Sleep() rounding.
+    timer_ = ::CreateWaitableTimerExW(nullptr, nullptr, kHighResolutionFlag, TIMER_ALL_ACCESS);
+    if (timer_ == nullptr) {
+      timer_ = ::CreateWaitableTimerExW(nullptr, nullptr, 0, TIMER_ALL_ACCESS);
+    }
+  }
+
+  ~HighResolutionTimer() {
+    if (timer_ != nullptr) {
+      ::CloseHandle(timer_);
+    }
+  }
+
+  HighResolutionTimer(const HighResolutionTimer &) = delete;
+  HighResolutionTimer &operator=(const HighResolutionTimer &) = delete;
+
+  // Relative wait; returns false when no timer could be created (caller then
+  // falls back to Sleep + spin).
+  bool WaitFor(int64_t duration_us) {
+    if (timer_ == nullptr) {
+      return false;
+    }
+    LARGE_INTEGER due;
+    // Negative value means relative; the unit is 100 ns.
+    due.QuadPart = -(duration_us * 10);
+    if (::SetWaitableTimer(timer_, &due, 0, nullptr, nullptr, FALSE) == 0) {
+      return false;
+    }
+    return ::WaitForSingleObject(timer_, INFINITE) == WAIT_OBJECT_0;
+  }
+
+private:
+  static constexpr DWORD kHighResolutionFlag = 0x00000002;
+  HANDLE timer_ = nullptr;
+};
+
+HighResolutionTimer &GetThreadTimer() {
+  thread_local HighResolutionTimer timer;
+  return timer;
+}
+
 } // namespace
 
 namespace nei {
@@ -105,10 +158,16 @@ void PlatformThread::Sleep(TimeDelta duration) {
     return;
   }
 
-  // For very short durations (< 10 ms), spin-wait for the remainder after
-  // a minimal ::Sleep(1) to avoid burning CPU unnecessarily while still
-  // bounding the worst-case scheduler overshoot.
+  // For very short durations (< 10 ms), prefer a high-resolution waitable
+  // timer: it is independent of the global timer resolution, so the sleep stays
+  // accurate even when Windows coarsens that resolution under load.
   if (duration_ms < 10) {
+    if (GetThreadTimer().WaitFor(duration.InMicroseconds())) {
+      return;
+    }
+
+    // Fallback (no timer available): spin-wait for the remainder after a
+    // minimal ::Sleep(1).
     LARGE_INTEGER freq;
     LARGE_INTEGER start;
     ::QueryPerformanceFrequency(&freq);
