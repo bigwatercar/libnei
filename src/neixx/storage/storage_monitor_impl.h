@@ -3,6 +3,7 @@
 #ifndef NEIXX_STORAGE_STORAGE_MONITOR_IMPL_H_
 #define NEIXX_STORAGE_STORAGE_MONITOR_IMPL_H_
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
@@ -76,7 +77,10 @@ private:
   void ApplySnapshot(std::vector<StorageInfo> next, bool notify);
 
   void StartAsyncScan();
-  void OnAsyncScanDone(std::vector<StorageInfo> result);
+  // |generation| identifies the scan that produced |result|; results from a
+  // superseded scan are dropped so a late worker cannot revert a newer
+  // snapshot (see Rescan()).
+  void OnAsyncScanDone(std::uint64_t generation, std::vector<StorageInfo> result);
   void RunEventHook();
   void DeliverEjectResult(std::shared_ptr<OnceCallback<void(EjectStatus)>> callback, EjectStatus status);
 
@@ -88,6 +92,9 @@ private:
 
   // Null when ThreadPoolInstance is not started; work then runs inline.
   scoped_refptr<SequencedTaskRunner> blocking_runner_;
+  // Monotonic id of the newest scan.  Bumped by every Rescan() and by every
+  // async scan start, so a result whose id is no longer current is stale.
+  std::uint64_t scan_generation_ = 0;
   bool scan_in_flight_ = false;
   bool scan_dirty_ = false;
 

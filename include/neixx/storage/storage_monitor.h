@@ -94,6 +94,14 @@ public:
     // trigger two: an immediate one and a delayed one on Windows).  Not run
     // by Rescan().
     RepeatingClosure on_event_rescan_for_testing;
+    // Testing: runs on the worker between the platform scan and the completion
+    // post, so a test can hold a scan result back while a newer Rescan() runs
+    // and verify that the stale result is discarded.
+    RepeatingClosure before_scan_completion_for_testing;
+    // Testing: runs on the monitor sequence after an async result was handled,
+    // whether it was applied or dropped as stale, so tests can wait for it
+    // instead of polling.
+    RepeatingClosure after_async_scan_done_for_testing;
   };
 
   explicit StorageMonitor(scoped_refptr<SingleThreadTaskRunner> task_runner);

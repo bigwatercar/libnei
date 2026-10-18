@@ -180,6 +180,10 @@ void StorageMonitor::Impl::Rescan() {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
   if (!started_)
     return;
+  // Invalidate any scan that is already running.  Its snapshot was taken from
+  // the mount table as it was *before* this call, so applying it later would
+  // revert this result and emit a reverse ATTACHED/DETACHED pair to observers.
+  ++scan_generation_;
   ApplySnapshot(PlatformScan(scan_config_), true);
 }
 
@@ -207,24 +211,46 @@ void StorageMonitor::Impl::OnPlatformEvent() {
 void StorageMonitor::Impl::StartAsyncScan() {
   scan_in_flight_ = true;
   scan_dirty_ = false;
-  blocking_runner_->PostTask(FROM_HERE, [alive = alive_, config = scan_config_, runner = task_runner_]() {
-    std::vector<StorageInfo> result = PlatformScan(config);
-    runner->PostTask(FROM_HERE, [alive, result = std::move(result)]() {
-      if (alive->impl != nullptr)
-        alive->impl->OnAsyncScanDone(result);
-    });
-  });
+  const std::uint64_t generation = ++scan_generation_;
+  // Copied so the worker never touches Impl (monitor-sequence only).
+  RepeatingClosure before_completion = options_.before_scan_completion_for_testing;
+  blocking_runner_->PostTask(
+      FROM_HERE, [alive = alive_, config = scan_config_, runner = task_runner_, generation, before_completion]() {
+        std::vector<StorageInfo> result = PlatformScan(config);
+        if (before_completion)
+          before_completion.Run();
+        runner->PostTask(FROM_HERE, [alive, generation, result = std::move(result)]() {
+          if (alive->impl != nullptr)
+            alive->impl->OnAsyncScanDone(generation, result);
+        });
+      });
 }
 
-void StorageMonitor::Impl::OnAsyncScanDone(std::vector<StorageInfo> result) {
+void StorageMonitor::Impl::OnAsyncScanDone(std::uint64_t generation, std::vector<StorageInfo> result) {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
   scan_in_flight_ = false;
-  if (started_) {
-    ApplySnapshot(std::move(result), true);
-    RunEventHook();
+  if (!started_) {
+    return;
+  }
+
+  RepeatingClosure after_done = options_.after_async_scan_done_for_testing;
+  if (generation != scan_generation_) {
+    // A newer Rescan() (or a newer scan) already published a fresher snapshot;
+    // this result predates it.  Drop it, but honor events that arrived while
+    // the stale scan was in flight.
     if (scan_dirty_)
       StartAsyncScan();
+    if (after_done)
+      after_done.Run();
+    return;
   }
+
+  ApplySnapshot(std::move(result), true);
+  RunEventHook();
+  if (scan_dirty_)
+    StartAsyncScan();
+  if (after_done)
+    after_done.Run();
 }
 
 void StorageMonitor::Impl::RunEventHook() {

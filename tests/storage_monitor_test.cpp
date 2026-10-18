@@ -163,6 +163,8 @@ protected:
 
   static constexpr const char *kRoot = "30 1 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw";
   static constexpr const char *kUsb = "36 30 8:17 / /media/usb\\040stick rw - vfat /dev/sdb1 rw";
+  // sdc1 (8:33) is the removable disk that has only a partition UUID.
+  static constexpr const char *kSdc = "38 30 8:33 / /media/usb2 rw - vfat /dev/sdc1 rw";
 
   scoped_refptr<SingleThreadTaskRunner> io_runner_;
   fs::path root_;
@@ -680,6 +682,66 @@ TEST_F(StorageMonitorAsyncTest, BurstOfEventsIsCoalescedAndConverges) {
     EXPECT_EQ(obs.attached.size(), 1u); // one notification despite 20 events
     EXPECT_LE(hook_count_.load(), 2);   // in-flight scan plus at most one follow-up
     EXPECT_EQ(monitor->GetAllAvailableStorages().size(), 2u);
+    monitor->RemoveObserver(&obs);
+    monitor.reset();
+  });
+}
+
+TEST_F(StorageMonitorAsyncTest, StaleScanDoesNotOverwriteNewerRescan) {
+  // The baseline table has the USB stick mounted.
+  SetMountInfo({kRoot, kUsb});
+
+  struct Gate {
+    WaitableEvent scan_paused{WaitableEvent::ResetPolicy::kAutomatic}; // worker reached the seam
+    WaitableEvent release{WaitableEvent::ResetPolicy::kAutomatic};     // test lets the worker go
+    WaitableEvent done{WaitableEvent::ResetPolicy::kAutomatic};        // late result handled
+  };
+
+  auto gate = std::make_shared<Gate>();
+
+  options_.before_scan_completion_for_testing = [gate]() {
+    gate->scan_paused.Signal();
+    (void)gate->release.TimedWait(std::chrono::seconds(5));
+  };
+  options_.after_async_scan_done_for_testing = [gate]() { gate->done.Signal(); };
+
+  std::unique_ptr<StorageMonitor> monitor;
+  RecordingObserver obs;
+  RunOnIO([&]() {
+    monitor = std::make_unique<StorageMonitor>(io_runner_, options_);
+    monitor->AddObserver(&obs);
+    ASSERT_TRUE(monitor->Start());
+    // Start an async scan; it reads the current table (sda1 + sdb1) and then
+    // parks in the seam, so from here on its snapshot is already stale.
+    monitor->SimulateChangeEventForTesting();
+  });
+  ASSERT_TRUE(gate->scan_paused.TimedWait(std::chrono::seconds(5)));
+
+  // While that result is held back, the application rescans after swapping the
+  // stick out for another one: sdb1 gone, sdc1 appears.
+  SetMountInfo({kRoot, kSdc});
+  RunOnIO([&]() { monitor->Rescan(); });
+  ASSERT_EQ(obs.order.size(), 2u) << "Rescan() must report the detach/attach pair";
+  EXPECT_EQ(obs.order[0], "D:uuid:ABCD-1234");
+  EXPECT_EQ(obs.order[1], "A:partuuid:99999999-8888-7777-6666-555555555555");
+
+  // Release the stale scan and wait for it to be handled.
+  gate->release.Signal();
+  ASSERT_TRUE(gate->done.TimedWait(std::chrono::seconds(5)));
+
+  RunOnIO([&]() {
+    // The stale snapshot must not be applied: no reverse events, state intact.
+    EXPECT_EQ(obs.order.size(), 2u) << "stale scan emitted reverse events: " << obs.order.back();
+    EXPECT_TRUE(obs.detached[0].device_id == "uuid:ABCD-1234");
+    auto all = monitor->GetAllAvailableStorages();
+    ASSERT_EQ(all.size(), 2u);
+    bool has_sdc = false;
+    for (const auto &info : all) {
+      EXPECT_NE(info.device_id, "uuid:ABCD-1234") << "stale scan reverted the snapshot";
+      if (info.device_id == "partuuid:99999999-8888-7777-6666-555555555555")
+        has_sdc = true;
+    }
+    EXPECT_TRUE(has_sdc);
     monitor->RemoveObserver(&obs);
     monitor.reset();
   });

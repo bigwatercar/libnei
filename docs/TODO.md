@@ -25,10 +25,17 @@
   `device/serial` 属性名需在真实 Linux 机器插 USB 盘确认。
 - **初次枚举在调用方序列同步执行** — 慢设备（休眠磁盘、机械盘）有阻塞调用方序列的风险；改成首次枚举也
   走 MayBlock 序列需要额外的“枚举完成前不派发事件”顺序保证，暂不动。
-- **`Rescan()` 可能被在途旧扫描结果覆盖** — 需要给扫描结果加代次号并丢弃过期结果。
+- **`Rescan()` 可能被在途旧扫描结果覆盖** — **已修（2026-10-18）**：每次 `Rescan()` 与每次异步
+  扫描起手都会递增 `scan_generation_`，`OnAsyncScanDone` 发现代次不是最新就丢弃该结果（仅保留
+  `scan_dirty_` 的后续重扫）。修复前该竞态会让旧快照回滚内部状态，并对观察者发出**反向**的
+  ATTACHED/DETACHED 事件。回归测试 `StorageMonitorAsyncTest.StaleScanDoesNotOverwriteNewerRescan`
+  （临时去掉代次判定即失败：`stale scan reverted the snapshot`）。
 - **无线程池时事件重扫阻塞监视器序列** — 没有 `ThreadPoolInstance` 时事件触发的元数据扫描内联执行，
   慢设备会卡住监视器序列（当前接受）。
-- **`Options::on_event_rescan_for_testing` 暴露在公开头** — 后续用 friend 声明或内部头替换。
+- **`Options` 里的测试钩子** — 现有 3 个：`on_event_rescan_for_testing`、
+  `before_scan_completion_for_testing`、`after_async_scan_done_for_testing`（后两个为 2026-10-18 加，
+  用于让"旧扫描结果 vs Rescan"的顺序可确定复现；它们必须在公共头里才能被测试跨 DLL 设置，
+  因为内部符号未导出）。后续可用 friend 声明或内部头 + 导出测试工厂替换。
 
 **有意不做**：Linux uevent（只报已挂载卷，挂载已由 mountinfo 覆盖，无收益）、网络盘（无场景，Windows
 查询可能卡死）。
