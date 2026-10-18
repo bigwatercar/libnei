@@ -207,7 +207,7 @@
   f_dbg 的 UAF）。
 - **单 IO 线程足够**：1000 连接下单 epoll/IOCP 高效；多 reactor 池化实测有害
   （调度/同步开销 > 派发收益），按需显式多实例即可。
-- **跨线程 hop 的「调用时快照 + 执行时使用」必须执行时重校验**（2026-10-18，库缺陷，`7553c26`）：
+- **跨线程 hop 的「调用时快照 + 执行时使用」必须执行时重校验**（2026-10-18，库缺陷，`11bcc35`）：
   `child_process_stream_proxy` 的 `ReadAsync()` 在调用线程快照目标流指针，hop 任务在 I/O 线程才
   `raw_target->ReadAsync(...)`；而宿主线程可能已先投递了 `ShutdownOnIoThread`（两者竞争同一队列
   顺序）→ 目标已释放则 UAF。修法不是「再判一次空指针」而是：把 target/closed 放进**引用计数令牌**
@@ -249,7 +249,7 @@
   （把 target 置空）**再** `core_.reset()` 销毁真管流。hop 任务靠这个顺序在执行时判定「绑定已
   失效 → 回调 `(false, 0)`」；顺序一改，析构时的在飞读就又会退化成 UAF。同理 `Bind()` 必须在
   任何用户 `ReadAsync` 之前完成。
-- **子进程在飞读与宿主析构的竞争**（`7553c26`）：读完成回调会在 I/O 线程重新发起下一次读
+- **子进程在飞读与宿主析构的竞争**（`11bcc35`）：读完成回调会在 I/O 线程重新发起下一次读
   （此时 `closed_` 仍为 false），而宿主线程同时析构 `ChildProcess`；两者 `PostTask` 到同一队列的
   顺序**无法保证**。所以关闭路径不能只靠「队列 FIFO 天然有序」，必须有执行时重校验。
 - **`Launch()`/`Terminate()` 必须检查 `PostTask` 返回值**：服务 runner 已停时投递会失败，
@@ -284,8 +284,8 @@
   计时一律用 `std::chrono::steady_clock`（`high_resolution_clock` 在 MSVC 下非单调，会出现负值）。
 - **flaky 已修（2026-10 收口，全平台全量零失败）**：`ClientOrphanDrainReadEOF`（server 析构 +
   I/O 线程 accept 回调碰已析构栈事件 → futex 挂死）；`ServerDoesNotCrashUnderFdPressure` /
-  `WriteChainNoStackOverflow`（`295783f`，回调捕 TestBody 栈 → ASAN stack-use-after-return，
-  同类用例已全量清理）；`PlatformThreadTest.SleepShortDurationPrecision`（`123ec8e`，均值断言
+  `WriteChainNoStackOverflow`（`7ca30ad`，回调捕 TestBody 栈 → ASAN stack-use-after-return，
+  同类用例已全量清理）；`PlatformThreadTest.SleepShortDurationPrecision`（`735552e`，均值断言
   → 最小值断言）；`ThreadPoolTest.DelayedTaskRunsWithoutImmediateKick`。
 - **新功能落地后必须重跑消毒器**——旧 ASAN/valgrind 基线不覆盖后续功能
   （HttpServerRequestHandle 教训：功能后补跑 ASAN 912、TSan 891、valgrind 定向）。

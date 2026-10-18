@@ -35,7 +35,7 @@
 
 ### 线程池既有语义缺口（2026-10-17 审查发现，均非近期修复引入）
 
-对照 Chromium `base/task/thread_pool/thread_group_impl.cc` 审查 `f0a4f8b` / `77f497d` / `581ced5`：三者都没有
+对照 Chromium `base/task/thread_pool/thread_group_impl.cc` 审查 `e04c382` / `403ea22` / `581ced5`：三者都没有
 破坏功能性语义。`suggested_reclaim_time` 的契约变更属实，但是**向 Chromium 对齐** —— Chromium 只在
 `is_excess_`（超出 `initial_max_tasks`）的 worker 上按该值回收，非 excess worker 用
 `GetSleepTimeout() = TimeDelta::Max()` 睡到无限，且它有 `EnsureEnoughWorkersLockRequired()` /
@@ -254,7 +254,7 @@
   失败回调在栈帧销毁后写入（ASAN `stack-use-after-return`）；改为 heap state + IO 线程
   fence，详见里程碑 2026-10-18。
 - 环境跳过：WSL 5 项 HostResolver DNS、Win 3 项 DNS/IPv6、TSan 2 项时序敏感。
-- **ChildProcess 迟读回调段错误（2026-10-18 发现并修复，`7553c26`）**：WSL Release 下用 filter
+- **ChildProcess 迟读回调段错误（2026-10-18 发现并修复，`11bcc35`）**：WSL Release 下用 filter
   `TcpSocketTest.*:SequenceManagerTest.*:ChildProcessTest.*` 循环跑 12 轮，未改动的基线就
   约 2/12 段错误、另有 ~1/12 次 `ChildProcessTest.LaunchWithStdinPipeEchoesToStdout`
   5 秒超时。gdb 回溯显示崩溃在 `IOThread` 的
@@ -265,7 +265,7 @@
   先 ResetBinding 再销毁真流，而 hop 与 shutdown 的 PostTask 顺序是竞争的），详见里程碑
   2026-10-18 的"ChildProcess 流代理的 IO hop UAF"条目；修复后定向 55 轮（RelWithDebInfo+ASAN）
   与 20 轮（Release）均干净。
-- **间歇 LSan 引用环泄漏（2026-10-18 发现并修复，`645967c`）**：WSL ASAN 全量报
+- **间歇 LSan 引用环泄漏（2026-10-18 发现并修复，`b35afe4`）**：WSL ASAN 全量报
   4880 B / 13 allocations，全部为 indirect、无 direct（引用环特征）。涉及 `IOThread` 的
   `MessagePumpForIOState`/`SequenceManager`/`SequencedTaskQueue` 以及
   `PipeStreamTest` 里 `ReadAsync` 回调捕获自身 `shared_ptr`
@@ -279,7 +279,7 @@
 - **测试隔离（v0.9.1 即存在，2026-10-14 确认）**：`PostJobTest.RepeatedMultiWorkerJoinNeverHangs` /
   `MultiWorkerCompletesExactBudget` 在全量运行（及 IOThread+CurrentSupport+FilePathWatcher+
   ThreadPool*+PostJob 的组合）下稳定失败（`total_done` 为 0），单独运行通过。
-  → **已修复（2026-10-17，`02fb133`）**：根因是 `PostJob` 的 8 个 `ParallelTaskRunner` 缓存在函数内
+  → **已修复（2026-10-17，`8db3ef6`）**：根因是 `PostJob` 的 8 个 `ParallelTaskRunner` 缓存在函数内
   静态变量里，只创建一次；`ThreadPoolInstance::Shutdown()`/`ResetForTesting()` 后缓存仍指向已退役的池，
   投递会被接受但队列永不排空 → `done == 0`。修法：缓存改按 `ThreadPoolInstance::GetInstanceId()`
   （每次 `CreateAndStart` 自增）失效重建；不能只比较指针，因为新实例可能落在同一地址（TSan 下实测
