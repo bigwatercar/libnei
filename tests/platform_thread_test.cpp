@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <future>
 #include <thread>
 
@@ -76,25 +78,33 @@ TEST(PlatformThreadTest, SleepAndYieldAreCallable) {
 // bound rather than being rounded up to the default ~15.6 ms timer tick.
 // This guards against catastrophic timer-resolution regression (e.g. missing
 // timeBeginPeriod call on Windows).
+//
+// The check uses the MINIMUM of several samples, not the average.  A busy
+// machine can only delay a sleep, never shorten it, so preemption cannot fail a
+// minimum-based check - whereas a single preempted sample used to drag the old
+// average-of-5 over the bound and made this test flake about once per full-suite
+// run (observed averages of 10.5 ms and 14.4 ms while every individual sleep was
+// 1-3 ms).  When the high-resolution timer is really missing, EVERY sample lands
+// on a timer tick (~15.6 ms on Windows), so the minimum is large and the test
+// still fails as intended.
 TEST(PlatformThreadTest, SleepShortDurationPrecision) {
-  constexpr int kIterations = 5;
-  // With the high-res timer active, Sleep(1ms) should complete in ~1-3 ms
-  // per call.  Without it, Windows rounds up to a full tick (~15.6 ms).
-  // A bound of 8 ms average is generous for CI jitter while still well
-  // below one default tick.
-  constexpr int64_t kMaxAvgUs = 8'000;
+  constexpr int kIterations = 10;
+  // With the high-res timer active one Sleep(1ms) lands in the 1-3 ms range;
+  // without it every call rounds up to a full tick (~15.6 ms).  8 ms sits well
+  // below one tick and well above the hi-res floor.
+  constexpr int64_t kMaxFastestUs = 8'000;
 
-  int64_t total_us = 0;
+  int64_t fastest_us = INT64_MAX;
   for (int i = 0; i < kIterations; ++i) {
-    const auto t0 = std::chrono::high_resolution_clock::now();
+    const auto t0 = std::chrono::steady_clock::now();
     nei::PlatformThread::Sleep(nei::TimeDelta::FromMilliseconds(1));
-    const auto t1 = std::chrono::high_resolution_clock::now();
-    total_us += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+    const auto t1 = std::chrono::steady_clock::now();
+    const int64_t elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+    fastest_us = std::min(fastest_us, elapsed_us);
   }
 
-  const int64_t avg_us = total_us / kIterations;
-  EXPECT_LT(avg_us, kMaxAvgUs) << "Average Sleep(1ms) took " << avg_us
-                               << " us  --  high-resolution timer may not be active.";
+  EXPECT_LT(fastest_us, kMaxFastestUs) << "Fastest Sleep(1ms) took " << fastest_us
+                                       << " us  --  high-resolution timer may not be active.";
 }
 
 TEST(PlatformThreadTest, SetCurrentThreadNameBestEffort) {
