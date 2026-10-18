@@ -65,20 +65,20 @@ void AsyncInputStreamProxy::Bind(AsyncInputStream *target, scoped_refptr<TaskRun
 
   io_task_runner_ = io_task_runner;
   target_task_runner_ = std::move(io_task_runner);
-  target_.store(target, std::memory_order_release);
+  binding_->target.store(target, std::memory_order_release);
 }
 
 void AsyncInputStreamProxy::ResetBinding() {
   // Precondition: called from the IO thread, after process exit signalled.
   // DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);  DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
-  target_.store(nullptr, std::memory_order_release);
+  binding_->target.store(nullptr, std::memory_order_release);
   io_task_runner_.reset();
   target_task_runner_.reset();
 }
 
 void AsyncInputStreamProxy::ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOReadCallback callback) {
   // Fast-path reject: proxy already closed or unbound.
-  if (closed_.load(std::memory_order_acquire)) {
+  if (binding_->closed.load(std::memory_order_acquire)) {
     if (callback) {
       callback(false, 0u);
     }
@@ -88,9 +88,10 @@ void AsyncInputStreamProxy::ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t b
   // Snapshot target and runners at call time.  All subsequent IO thread
   // access goes through captured values only - proxy members are NOT touched
   // from the IO thread.
-  AsyncInputStream *raw_target = target_.load(std::memory_order_acquire);
+  AsyncInputStream *raw_target = binding_->target.load(std::memory_order_acquire);
   scoped_refptr<TaskRunner> io_runner = io_task_runner_;
   scoped_refptr<TaskRunner> target_runner = target_task_runner_;
+  std::shared_ptr<InputStreamBinding> binding = binding_;
 
   if (raw_target == nullptr || io_runner.get() == nullptr) {
     if (callback) {
@@ -116,8 +117,31 @@ void AsyncInputStreamProxy::ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t b
   //   callback      - moved; ownership transferred through the two lambdas.
   io_runner->PostTask(
       FROM_HERE,
-      [raw_target, buf, buf_len, io_runner, target_runner, weak_self, callback = std::move(callback)]() mutable {
+      [raw_target,
+       buf,
+       buf_len,
+       io_runner,
+       target_runner,
+       binding,
+       weak_self,
+       callback = std::move(callback)]() mutable {
         // -- Step 2: IO thread ----------------------------------------------
+        // Re-validate the binding before touching the target stream.  This
+        // hop can be queued *behind* the ShutdownOnIoThread task: reads are
+        // re-issued from the read-completion callback on this same thread
+        // while the owner destroys the ChildProcess on another thread, and
+        // the two PostTask calls race.  ShutdownOnIoThread() calls
+        // ResetBinding() before it destroys the real streams, so a null (or
+        // replaced) target here means the stream is gone.  ASAN caught the
+        // old code calling into freed memory here (heap-use-after-free).
+        if (binding->closed.load(std::memory_order_acquire)
+            || binding->target.load(std::memory_order_acquire) != raw_target) {
+          if (callback) {
+            callback(false, 0u);
+          }
+          return;
+        }
+
         // Call the real pipe/file stream.  buf->data() is the DMA region.
         raw_target->ReadAsync(
             buf,
@@ -156,7 +180,7 @@ void AsyncInputStreamProxy::ReadAsync(scoped_refptr<IOBuffer> buf, std::size_t b
 }
 
 void AsyncInputStreamProxy::Close() {
-  if (closed_.exchange(true, std::memory_order_acq_rel)) {
+  if (binding_->closed.exchange(true, std::memory_order_acq_rel)) {
     return; // Already closed.
   }
 
@@ -172,8 +196,8 @@ void AsyncInputStreamProxy::Close() {
     return;
   }
 
-  AsyncInputStream *raw_target = target_.load(std::memory_order_acquire);
-  target_.store(nullptr, std::memory_order_release);
+  AsyncInputStream *raw_target = binding_->target.load(std::memory_order_acquire);
+  binding_->target.store(nullptr, std::memory_order_release);
 
   if (raw_target != nullptr) {
     io_runner->PostTask(FROM_HERE, [raw_target]() { raw_target->Close(); });
@@ -203,24 +227,24 @@ void AsyncOutputStreamProxy::Bind(AsyncOutputStream *target, scoped_refptr<TaskR
   DCHECK(runner.get() != nullptr);
 
   io_task_runner_ = std::move(runner);
-  target_.store(target, std::memory_order_release);
+  binding_->target.store(target, std::memory_order_release);
 }
 
 void AsyncOutputStreamProxy::ResetBinding() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(io_sequence_checker_);
-  target_.store(nullptr, std::memory_order_release);
+  binding_->target.store(nullptr, std::memory_order_release);
   io_task_runner_.reset();
 }
 
 void AsyncOutputStreamProxy::WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t buf_len, IOWriteCallback callback) {
-  if (closed_.load(std::memory_order_acquire)) {
+  if (binding_->closed.load(std::memory_order_acquire)) {
     if (callback) {
       callback(false, 0u);
     }
     return;
   }
 
-  AsyncOutputStream *raw_target = target_.load(std::memory_order_acquire);
+  AsyncOutputStream *raw_target = binding_->target.load(std::memory_order_acquire);
   scoped_refptr<TaskRunner> io_runner = io_task_runner_;
 
   if (raw_target == nullptr || io_runner.get() == nullptr) {
@@ -230,11 +254,17 @@ void AsyncOutputStreamProxy::WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t
     return;
   }
 
+  std::shared_ptr<OutputStreamBinding> binding = binding_;
+
   // Post to IO thread.  buf is captured by scoped_refptr so the storage
   // region buf->data()[0..buf_len) remains pinned for the OVERLAPPED write
   // or POSIX writev call inside the target stream.
-  io_runner->PostTask(FROM_HERE, [raw_target, buf, buf_len, callback = std::move(callback)]() mutable {
-    if (raw_target == nullptr) {
+  io_runner->PostTask(FROM_HERE, [raw_target, buf, buf_len, binding, callback = std::move(callback)]() mutable {
+    // Same re-validation as the read path: this hop can be queued behind
+    // ShutdownOnIoThread(), which resets the binding before destroying the
+    // real stream.
+    if (binding->closed.load(std::memory_order_acquire)
+        || binding->target.load(std::memory_order_acquire) != raw_target) {
       if (callback) {
         callback(false, 0u);
       }
@@ -245,13 +275,13 @@ void AsyncOutputStreamProxy::WriteAsync(scoped_refptr<IOBuffer> buf, std::size_t
 }
 
 void AsyncOutputStreamProxy::Close() {
-  if (closed_.exchange(true, std::memory_order_acq_rel)) {
+  if (binding_->closed.exchange(true, std::memory_order_acq_rel)) {
     return;
   }
 
   scoped_refptr<TaskRunner> io_runner = io_task_runner_;
-  AsyncOutputStream *raw_target = target_.load(std::memory_order_acquire);
-  target_.store(nullptr, std::memory_order_release);
+  AsyncOutputStream *raw_target = binding_->target.load(std::memory_order_acquire);
+  binding_->target.store(nullptr, std::memory_order_release);
 
   if (raw_target != nullptr && io_runner.get() != nullptr) {
     io_runner->PostTask(FROM_HERE, [raw_target]() { raw_target->Close(); });

@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
 #include <neixx/task/sequence_checker.h>
 #include <neixx/io/async_stream.h>
@@ -15,6 +16,27 @@
 
 namespace nei {
 namespace internal {
+
+// Refcounted binding state shared between a proxy and the IO-thread hop
+// closures it posts.
+//
+// Why this exists: ReadAsync()/WriteAsync() snapshot the target stream at call
+// time and use it later, on the IO thread.  The proxy object itself can be
+// destroyed in that window (ChildProcess destruction runs on the caller's
+// thread), so a hop must never dereference the proxy to re-validate.  Holding a
+// shared_ptr to this token keeps exactly the validation data alive, while the
+// token's pointer is only ever written on the IO thread (Bind/ResetBinding),
+// which is also the thread that reads it during a hop - so the ordering is
+// deterministic and no lock is needed.
+struct InputStreamBinding {
+  std::atomic<AsyncInputStream *> target{nullptr};
+  std::atomic<bool> closed{false};
+};
+
+struct OutputStreamBinding {
+  std::atomic<AsyncOutputStream *> target{nullptr};
+  std::atomic<bool> closed{false};
+};
 
 // ---------------------------------------------------------------------------
 // AsyncInputStreamProxy
@@ -41,9 +63,9 @@ namespace internal {
 //   user ReadAsync, and ResetBinding happens after process exit is signalled
 //   and no new ReadAsync calls will be issued).
 //
-//   target_ is stored as std::atomic<AsyncInputStream*> so the value captured
-//   in ReadAsync() lambdas is always a well-formed pointer snapshot even when
-//   ReadAsync() races with ResetBinding() on relaxed hardware.
+//   target_ is stored in a refcounted binding token (see InputStreamBinding)
+//   so a hop that runs after ResetBinding() can detect that the target stream
+//   is gone instead of calling into freed memory.
 // ---------------------------------------------------------------------------
 class AsyncInputStreamProxy final : public AsyncInputStream {
 public:
@@ -64,20 +86,16 @@ public:
   void Close() override;
 
 private:
-  // Pointer to the real IO stream.  Stored atomically so captures inside
-  // ReadAsync() observe either the old or new value atomically (no tear).
-  // Written only from the IO thread (Bind/ResetBinding/Close).
-  std::atomic<AsyncInputStream *> target_{nullptr};
+  // Target stream plus closed flag, shared with in-flight hop closures.
+  // Written only from the IO thread (Bind/ResetBinding/Close), except |closed|
+  // which Close() may also set from the owning thread.
+  std::shared_ptr<InputStreamBinding> binding_ = std::make_shared<InputStreamBinding>();
 
   // Both runners are set exactly once at Bind() and cleared at
   // ResetBinding().  Reads from ReadAsync() obey the init-before-use
   // contract enforced by the ChildProcess launch/exit sequence.
   scoped_refptr<TaskRunner> io_task_runner_;
   scoped_refptr<TaskRunner> target_task_runner_;
-
-  // Written from the IO thread (Close/ResetBinding); read from any thread in
-  // ReadAsync() to fast-path reject new reads after shutdown.
-  std::atomic<bool> closed_{false};
 
   // The factory is bound to the thread that constructs the proxy (IO thread).
   // operator bool() on a WeakPtr checks an atomic flag and is safe from any
@@ -109,9 +127,8 @@ public:
   void Close() override;
 
 private:
-  std::atomic<AsyncOutputStream *> target_{nullptr};
+  std::shared_ptr<OutputStreamBinding> binding_ = std::make_shared<OutputStreamBinding>();
   scoped_refptr<TaskRunner> io_task_runner_;
-  std::atomic<bool> closed_{false};
 
   DECLARE_SEQUENCE_CHECKER(io_sequence_checker_);
 };
