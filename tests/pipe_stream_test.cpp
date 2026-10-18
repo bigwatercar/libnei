@@ -229,6 +229,26 @@ protected:
     return CreateAsyncPipePair(read_h, write_h);
   }
 
+  // Closes and destroys |stream| on the IO thread, then waits until everything
+  // queued behind that call has run.
+  //
+  // Needed whenever a test returns with a read/write still armed: the pending
+  // callback lives inside the stream, so keeping the stream alive in a test
+  // local while the callback also captured it forms a reference cycle that LSan
+  // reports as an indirect leak (and lets the callback touch a dead test frame).
+  template <typename StreamT>
+  void CloseStreamOnIoThreadAndDrain(std::shared_ptr<StreamT> &stream) {
+    WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+    io_runner_->PostTask(FROM_HERE, [&stream, &done]() {
+      if (stream) {
+        stream->Close();
+        stream.reset();
+      }
+      done.Signal();
+    });
+    (void)done.TimedWait(std::chrono::seconds(5));
+  }
+
   scoped_refptr<SingleThreadTaskRunner> io_runner_;
 };
 
@@ -583,13 +603,20 @@ TEST_F(PipeStreamTest, RapidCancelAndRetryStateMachine) {
 
   WaitableEvent phase2_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   std::string received;
+  // Kept at test scope so the tail can close it on the IO thread.  The read
+  // callback below must NOT capture the stream itself: that forms
+  // stream -> callback -> shared_ptr<stream>, a reference cycle that LSan
+  // reports as an indirect leak when the test returns with the read still
+  // pending.
+  std::shared_ptr<PipeInputStream> stream2_keep;
 
   io_runner_->PostTask(FROM_HERE, [&, rh = std::move(h2_read)]() mutable {
     auto stream2 = std::make_shared<PipeInputStream>(io_runner_);
     ASSERT_TRUE(stream2->BindPlatformHandle(std::move(rh)));
+    stream2_keep = stream2;
 
     auto holder = AcquireIOBuf(kSmallBufSize);
-    stream2->ReadAsync(holder.buf, kSmallBufSize, [&received, &phase2_done, holder, stream2](bool ok, std::size_t n) {
+    stream2->ReadAsync(holder.buf, kSmallBufSize, [&received, &phase2_done, holder](bool ok, std::size_t n) {
       if (ok && n > 0)
         received.assign(reinterpret_cast<const char *>(holder.buf->data()), n);
       phase2_done.Signal();
@@ -607,6 +634,11 @@ TEST_F(PipeStreamTest, RapidCancelAndRetryStateMachine) {
   EXPECT_EQ(received, message) << "Second read after cancel/retry did not receive the correct "
                                   "data  --  state machine may have stale state from the first "
                                   "cancelled operation.";
+
+  // Close the phase-2 stream on its own thread and fence, so a read that was
+  // still pending cannot outlive this frame (and so the stream is destroyed
+  // while its WeakPtrFactory is still on the right sequence).
+  CloseStreamOnIoThreadAndDrain(stream2_keep);
 }
 
 // Same for the write path.
@@ -636,20 +668,26 @@ TEST_F(PipeStreamTest, RapidWriteCancelAndRetry) {
 
   WaitableEvent phase2_done(WaitableEvent::ResetPolicy::kAutomatic, false);
   std::atomic<bool> write_ok{false};
+  // Same reasoning as RapidCancelAndRetryStateMachine: no callback may capture
+  // the stream it belongs to, and the tail must close both on the IO thread.
+  std::shared_ptr<PipeInputStream> reader2_keep;
+  std::shared_ptr<PipeOutputStream> writer2_keep;
 
   io_runner_->PostTask(FROM_HERE, [&, rh = std::move(h2_read), wh = std::move(h2_write)]() mutable {
     auto reader2 = std::make_shared<PipeInputStream>(io_runner_);
     ASSERT_TRUE(reader2->BindPlatformHandle(std::move(rh)));
+    reader2_keep = reader2;
 
     auto read_holder = AcquireIOBuf(kSmallBufSize);
-    reader2->ReadAsync(read_holder.buf, kSmallBufSize, [read_holder, reader2](bool, std::size_t) {});
+    reader2->ReadAsync(read_holder.buf, kSmallBufSize, [read_holder](bool, std::size_t) {});
 
     auto stream2 = std::make_shared<PipeOutputStream>(io_runner_);
     ASSERT_TRUE(stream2->BindPlatformHandle(std::move(wh)));
+    writer2_keep = stream2;
 
     auto holder = AcquireIOBuf(kSmallBufSize);
     std::memcpy(holder.buf->data(), "OK", 2);
-    stream2->WriteAsync(holder.buf, 2u, [&write_ok, &phase2_done, holder, stream2](bool ok, std::size_t n) {
+    stream2->WriteAsync(holder.buf, 2u, [&write_ok, &phase2_done, holder](bool ok, std::size_t n) {
       write_ok.store(ok && n == 2);
       phase2_done.Signal();
     });
@@ -657,6 +695,9 @@ TEST_F(PipeStreamTest, RapidWriteCancelAndRetry) {
 
   ASSERT_TRUE(phase2_done.TimedWait(std::chrono::seconds(5)));
   EXPECT_TRUE(write_ok.load());
+
+  CloseStreamOnIoThreadAndDrain(reader2_keep);
+  CloseStreamOnIoThreadAndDrain(writer2_keep);
 }
 
 // ===========================================================================
