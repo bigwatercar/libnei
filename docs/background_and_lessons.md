@@ -175,13 +175,18 @@
 - **ExecutionFence / ThreadPool Pimpl** 已落地；可选遗留：`GetCurrentTaskImportance`
   继承、`CreateSequencedTaskRunnerForResource(path)`。
 - **Log TLS 缓存**必须 key by handle + config snapshot version（slot 运行期复用）。
-- **TaskRunner 持的是裸 queue 指针**：`SequencedTaskRunner::Impl` 指向 `SequenceManager` 拥有的
-  `SequencedTaskQueue`，而 `Thread::ThreadMain` 里的 `SequenceManager` 是**线程栈对象**——线程
-  退出（run loop 返回）后它连同队列一起销毁，此后任何 `runner->PostTask()` 都是 UAF。
-  2026-10-18 在 RelWithDebInfo+ASAN 下见过一次 `Thread::Stop()` 路径的队列 UAF（`PeekNextDelayedRunTime`
-  读到已释放队列，另一线程正在析构 `queues_`），其后 55 轮未再复现，但**设计风险仍在**：
-  线程退出后旧 runner 必须视为失效，不能缓存后跨线程复用。待更多证据后再收紧（候选：queue 改
-  refcounted，或 runner 持 WeakPtr + 失效判定）。
+- **TaskRunner 与 queue 的生命周期**（2026-10-19 已修复）：`SequencedTaskRunner::Impl` 原来持的是
+  `WeakPtr<SequencedTaskQueue>`（**不是**裸指针——旧记录写错了），而 `Thread::ThreadMain` 里的
+  `SequenceManager` 是**线程栈对象**，线程退出后它连同 `queues_` 一起销毁。`WeakPtr::get()` 只读失效
+  标记、**不保命**：poster 可以读到"非空"，然后与旧 `~SequenceManagerImpl` 释放队列的写操作竞态，落地
+  成 `PeekNextDelayedRunTime` 读到已释放队列的 UAF（2026-10-18 在 RelWithDebInfo+ASAN 下见过一次，
+  其后 55 轮未复现→典型 TOCTOU，靠复现率无法证明）。修复：`SequencedTaskQueue` 改
+  `RefCountedThreadSafe`，runner 持 `scoped_refptr` **强引用**；`SequenceManager::Shutdown()` 仍然把
+  队列转到 `shutdown_queues_` 再 `Shutdown()`（队列会比 manager 活得久，post 由 shut-down 检查拒绝，
+  不会碰已释放内存）。回归测试 `ThreadTest.StaleTaskRunnerSurvivesSequenceManagerTeardown`：
+  多线程持续 PostTask 的同时销毁 `Thread`，之后再 post 必须返回 false 且不崩、不泄漏。
+  推论：**"用 WeakPtr 做生命周期保护"是错误用法**——WeakPtr 只适合"取消/失效通知"，跨线程的
+  所有权问题必须用引用计数或显式所有权协议解决。
 
 ### IO / 网络
 
@@ -339,6 +344,8 @@ bench 统一清单与双平台 runner。
    ≥3.8M/s（nofix=4.08、当前=2.52），TSan/全量不回归。
 2. 句柄功能收尾已全部完成；可选：`GetCurrentTaskImportance` 继承、
    `CreateSequencedTaskRunnerForResource`。
-3. 质量：**已完成（2026-10-18）**——WSL ASAN 全量兜底、四类 flaky 收口、Known Flaky 表
-   归档，当前 Windows Debug 1064 / Release 1058 / WSL Release 1054 / WSL ASAN 1060 全零失败。
-   下一个待观测项：TaskRunner 持裸 queue 指针的潜在 UAF（见任务调度章节，暂无复现记录）。
+3. 质量：**已完成（2026-10-19）**——WSL ASAN 全量兜底、四类 flaky 收口、Known Flaky 表
+   归档，当前 Windows Debug 1065（9 skip）/ Windows Release 1059（9 skip）/ WSL Release 1058
+   （3 skip）/ WSL rel-asan 1058 全零失败、0 泄漏；TSan 目标用例 125 个 0 race。
+   TaskRunner/queue 生命周期问题已修复（queue 改 refcounted，runner 持强引用，见任务调度章节），
+   顺带把 HostResolver 的网络依赖 flaky 收掉（慢 NXDOMAIN 加预算、IPv6 探针改探真实传输）。

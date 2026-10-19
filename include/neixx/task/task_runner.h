@@ -162,10 +162,15 @@ public:
   static scoped_refptr<SequencedTaskRunner> Create(internal::PooledTaskQueue *task_queue,
                                                    const TaskTraits &traits = TaskTraits());
 
-  // Convenience factory accepting SequencedTaskQueue (SequenceManager path
-  // after the Chromium-aligned split).  Same semantics as Create(PooledTaskQueue*).
-  static scoped_refptr<SequencedTaskRunner> Create(internal::SequencedTaskQueue *task_queue,
-                                                   const TaskTraits &traits = TaskTraits());
+  // Internal factory for the SequenceManager path: takes a strong reference to
+  // the queue, so the runner keeps it alive even after the owning
+  // SequenceManager (and its thread) is gone.  A stale runner's PostTask() then
+  // fails cleanly instead of touching freed memory.  Only SequenceManager calls
+  // this -- named separately from Create() so that callers of the
+  // PooledTaskQueue overload do not need the sequenced queue's full definition.
+  static scoped_refptr<SequencedTaskRunner>
+  CreateForSequenceManager(scoped_refptr<internal::SequencedTaskQueue> task_queue,
+                           const TaskTraits &traits = TaskTraits());
 
   // Convenience factory for thread-pool sequenced runners.  Unlike
   // Create(), this variant does NOT bind to the calling thread.
@@ -237,10 +242,12 @@ public:
   static scoped_refptr<SingleThreadTaskRunner> Create(internal::PooledTaskQueue *task_queue,
                                                       const TaskTraits &traits = TaskTraits());
 
-  // Same as Create(PooledTaskQueue*) but accepts SequencedTaskQueue for the
-  // SequenceManager path after the Chromium-aligned split.
-  static scoped_refptr<SingleThreadTaskRunner> Create(internal::SequencedTaskQueue *task_queue,
-                                                      const TaskTraits &traits = TaskTraits());
+  // Same as CreateForSequenceManager() but for SingleThreadTaskRunner: the
+  // returned runner requires same-thread execution and holds a strong
+  // reference to the queue.
+  static scoped_refptr<SingleThreadTaskRunner>
+  CreateForSequenceManager(scoped_refptr<internal::SequencedTaskQueue> task_queue,
+                           const TaskTraits &traits = TaskTraits());
 
   // Creates a pool-backed SingleThreadTaskRunner.  Unlike Create(), this
   // variant does NOT bind to the calling thread.  BelongsToCurrentThread()

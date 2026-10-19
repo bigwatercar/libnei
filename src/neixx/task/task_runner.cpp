@@ -80,13 +80,16 @@ bool PushTaskToQueue(WeakPtr<internal::PooledTaskQueue> &task_queue,
 
 // Same as PushTaskToQueue but works with SequencedTaskQueue (SequenceManager
 // path after the Chromium-aligned split).
-bool PushTaskToSequencedQueue(WeakPtr<internal::SequencedTaskQueue> &seq_queue,
+bool PushTaskToSequencedQueue(const scoped_refptr<internal::SequencedTaskQueue> &seq_queue,
                               const Location &from_here,
                               const TaskTraits &traits,
                               OnceClosure task,
                               TimeDelta delay,
                               const char *trace_category) {
   TRACE_EVENT0(trace_category, "PostTask");
+  // The runner holds a strong reference, so the queue cannot be destroyed
+  // while this call runs, even if the SequenceManager was torn down on another
+  // thread; a shut-down queue simply rejects the push.
   internal::SequencedTaskQueue *queue = seq_queue.get();
   if (queue == nullptr) {
     internal::RecordWeakPtrExpiredPost();
@@ -182,9 +185,10 @@ bool PushPooledTaskToQueue(internal::PooledTaskQueue *queue,
 // SequencedTaskRunner::Impl
 // =============================================================================
 //
-// Holds a WeakPtr to either a PooledTaskQueue (ThreadPool path) or a
-// SequencedTaskQueue (SequenceManager path).  Uses a tagged union to
-// avoid vtable overhead on the PostTask hot path.
+// Holds a WeakPtr to a PooledTaskQueue (ThreadPool path) or a strong reference
+// to a SequencedTaskQueue (SequenceManager path).  The sequenced path needs
+// ownership because the pool/manager lifetime is independent of the runner:
+// posting through an outlived runner must not touch a destroyed queue.
 struct SequencedTaskRunner::Impl {
   enum class QueueKind : std::uint8_t { kTaskQueue, kSequencedTaskQueue };
 
@@ -192,7 +196,7 @@ struct SequencedTaskRunner::Impl {
 
   union {
     WeakPtr<internal::PooledTaskQueue> task_queue;
-    WeakPtr<internal::SequencedTaskQueue> seq_queue;
+    scoped_refptr<internal::SequencedTaskQueue> seq_queue;
   };
 
   std::thread::id bound_thread_id;
@@ -205,17 +209,17 @@ struct SequencedTaskRunner::Impl {
   }
 
   // ---- SequencedTaskQueue constructor ----
-  Impl(WeakPtr<internal::SequencedTaskQueue> queue, const TaskTraits & /*traits*/)
+  Impl(scoped_refptr<internal::SequencedTaskQueue> queue, const TaskTraits & /*traits*/)
       : kind(QueueKind::kSequencedTaskQueue)
       , bound_thread_id(std::this_thread::get_id()) {
-    new (&seq_queue) WeakPtr<internal::SequencedTaskQueue>(std::move(queue));
+    new (&seq_queue) scoped_refptr<internal::SequencedTaskQueue>(std::move(queue));
   }
 
   ~Impl() {
     if (kind == QueueKind::kTaskQueue) {
       task_queue.~WeakPtr<internal::PooledTaskQueue>();
     } else {
-      seq_queue.~WeakPtr<internal::SequencedTaskQueue>();
+      seq_queue.~scoped_refptr<internal::SequencedTaskQueue>();
     }
   }
 
@@ -263,12 +267,13 @@ scoped_refptr<SequencedTaskRunner> SequencedTaskRunner::Create(internal::PooledT
 }
 
 // static
-scoped_refptr<SequencedTaskRunner> SequencedTaskRunner::Create(internal::SequencedTaskQueue *task_queue,
-                                                               const TaskTraits &traits) {
+scoped_refptr<SequencedTaskRunner>
+SequencedTaskRunner::CreateForSequenceManager(scoped_refptr<internal::SequencedTaskQueue> task_queue,
+                                              const TaskTraits &traits) {
   if (task_queue == nullptr) {
     return nullptr;
   }
-  auto impl = std::make_unique<Impl>(task_queue->GetWeakPtr(), traits);
+  auto impl = std::make_unique<Impl>(std::move(task_queue), traits);
   return scoped_refptr<SequencedTaskRunner>(new SequencedTaskRunner(std::move(impl), traits));
 }
 
@@ -323,12 +328,13 @@ scoped_refptr<SingleThreadTaskRunner> SingleThreadTaskRunner::Create(internal::P
 }
 
 // static
-scoped_refptr<SingleThreadTaskRunner> SingleThreadTaskRunner::Create(internal::SequencedTaskQueue *task_queue,
-                                                                     const TaskTraits &traits) {
+scoped_refptr<SingleThreadTaskRunner>
+SingleThreadTaskRunner::CreateForSequenceManager(scoped_refptr<internal::SequencedTaskQueue> task_queue,
+                                                 const TaskTraits &traits) {
   if (task_queue == nullptr) {
     return nullptr;
   }
-  auto impl = std::make_unique<SequencedTaskRunner::Impl>(task_queue->GetWeakPtr(), traits);
+  auto impl = std::make_unique<SequencedTaskRunner::Impl>(std::move(task_queue), traits);
   return scoped_refptr<SingleThreadTaskRunner>(new SingleThreadTaskRunner(std::move(impl), traits));
 }
 

@@ -9,6 +9,7 @@
 
 #include <nei/build/compiler_specific.h>
 #include <neixx/common/time.h>
+#include <neixx/memory/ref_counted.h>
 #include <neixx/memory/weak_ptr.h>
 #include "task.h"
 #include <neixx/task/sequence_token.h>
@@ -36,9 +37,16 @@ using OnTaskEnqueuedCallback = std::function<void(TaskShutdownBehavior)>;
 // - Delayed tasks live in a separate min-heap; PromoteReadyDelayedTasks()
 //   moves expired delayed tasks into the immediate FIFO.
 //
-class SequencedTaskQueue final {
+// Refcounted on purpose: a TaskRunner keeps its queue alive instead of
+// holding a WeakPtr.  WeakPtr::get() only reads an invalidation flag, so a
+// poster could observe a "live" queue and then race the SequenceManager's
+// teardown that frees it -- a latent use-after-free in the Thread::Stop()
+// path.  With a strong reference the queue cannot die under a PostTask, and
+// Shutdown() already rejects posts made after the manager stopped.
+class SequencedTaskQueue final : public RefCountedThreadSafe<SequencedTaskQueue> {
 public:
   explicit SequencedTaskQueue(const TaskTraits &traits = TaskTraits());
+  // Public because PooledTaskQueue embeds one by value; do not delete directly.
   ~SequencedTaskQueue();
 
   SequencedTaskQueue(const SequencedTaskQueue &) = delete;

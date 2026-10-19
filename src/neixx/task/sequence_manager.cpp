@@ -167,15 +167,15 @@ public:
   // Shared queue-construction helper used by both CreateTaskRunnerLocked and
   // CreateDefaultTaskRunnerLocked.  Builds a TaskQueue wired to this
   // SequenceManager (post callback, selector registration, queue view) and
-  // returns the raw queue pointer (owned by queues_).  Callers wrap it in the
-  // runner type they need.  Must be called under lock_.  Returns nullptr if
-  // the manager is shut down.
-  internal::SequencedTaskQueue *CreateTaskQueueLocked(const TaskTraits &traits, TaskPriority priority) {
+  // returns it.  Callers wrap it in the runner type they need, which takes a
+  // strong reference so the queue outlives this manager.  Must be called under
+  // lock_.  Returns nullptr if the manager is shut down.
+  scoped_refptr<internal::SequencedTaskQueue> CreateTaskQueueLocked(const TaskTraits &traits, TaskPriority priority) {
     if (is_shutdown_) {
       return nullptr;
     }
 
-    std::unique_ptr<internal::SequencedTaskQueue> queue = std::make_unique<internal::SequencedTaskQueue>(traits);
+    scoped_refptr<internal::SequencedTaskQueue> queue = MakeRefCounted<internal::SequencedTaskQueue>(traits);
     internal::SequencedTaskQueue *raw_queue = queue.get();
     // SequenceManager is the single consumer of its own queues, so the
     // IncomingTaskQueue-style swap fast path is safe (and fast).
@@ -212,14 +212,14 @@ public:
   }
 
   scoped_refptr<SequencedTaskRunner> CreateTaskRunnerLocked(const TaskTraits &traits) {
-    return SequencedTaskRunner::Create(CreateTaskQueueLocked(traits, traits.priority()), traits);
+    return SequencedTaskRunner::CreateForSequenceManager(CreateTaskQueueLocked(traits, traits.priority()), traits);
   }
 
   // Creates the default task runner as a SingleThreadTaskRunner because
   // the SequenceManager is always driven by a single dedicated thread.
   scoped_refptr<SingleThreadTaskRunner> CreateDefaultTaskRunnerLocked() {
-    return SingleThreadTaskRunner::Create(CreateTaskQueueLocked(TaskTraits(), TaskPriority::USER_VISIBLE),
-                                          TaskTraits());
+    return SingleThreadTaskRunner::CreateForSequenceManager(
+        CreateTaskQueueLocked(TaskTraits(), TaskPriority::USER_VISIBLE), TaskTraits());
   }
 
   void Run(MessagePump::Delegate *delegate) {
@@ -259,9 +259,11 @@ public:
       is_shutdown_ = true;
       default_task_runner_ = nullptr;
 
-      // Keep queue objects alive after shutdown to avoid a use-after-free race:
-      // concurrent PostTask callers may have already observed a raw queue
-      // pointer from WeakPtr::get() before invalidation completes.
+      // Move the queues aside instead of dropping them: each queue is now
+      // refcounted and its runners may still hold references, so they stay
+      // valid until both the manager and every runner release them.  Keeping
+      // our own references in shutdown_queues_ means a queue is never freed
+      // from inside Shutdown() while a poster is mid-PushImmediateTask.
       shutdown_queues_.swap(queues_);
       queues_to_shutdown.reserve(shutdown_queues_.size());
       for (const auto &queue : shutdown_queues_) {
@@ -497,18 +499,18 @@ private:
     }
   }
 
-  // Registers a queue with the manager: transfers ownership into queues_,
-  // registers it with the selector, and rebuilds the lock-free queue view.
+  // Registers a queue with the manager: keeps a reference in queues_, registers it
+  // with the selector, and rebuilds the lock-free queue view.
   // These three operations are an indivisible invariant -- never split them.
-  // Returns the raw queue pointer (owned by queues_).  Must be called under
-  // lock_.
-  internal::SequencedTaskQueue *RegisterQueueLocked(std::unique_ptr<internal::SequencedTaskQueue> queue,
-                                                    TaskPriority priority) {
+  // Returns the queue (still owned jointly with the caller's reference).  Must be
+  // called under lock_.
+  scoped_refptr<internal::SequencedTaskQueue> RegisterQueueLocked(scoped_refptr<internal::SequencedTaskQueue> queue,
+                                                                  TaskPriority priority) {
     internal::SequencedTaskQueue *raw = queue.get();
     queues_.push_back(std::move(queue));
     selector_.AddQueue(raw, priority);
     RebuildQueueViewLocked();
-    return raw;
+    return scoped_refptr<internal::SequencedTaskQueue>(raw);
   }
 
   void RebuildQueueViewLocked() {
@@ -530,8 +532,8 @@ private:
   SequenceManager *owner_;
   mutable Lock lock_;
   scoped_refptr<PumpWakeUp> wake_up_;
-  std::vector<std::unique_ptr<internal::SequencedTaskQueue>> queues_;
-  std::vector<std::unique_ptr<internal::SequencedTaskQueue>> shutdown_queues_;
+  std::vector<scoped_refptr<internal::SequencedTaskQueue>> queues_;
+  std::vector<scoped_refptr<internal::SequencedTaskQueue>> shutdown_queues_;
   // Snapshot of raw queue pointers for lock-free read access from
   // DoDelayedWork.  Rebuilt under lock_ when queues are added/removed.
   //

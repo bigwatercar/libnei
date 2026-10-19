@@ -1,6 +1,6 @@
 # libnei — TODO & Roadmap
 
-**Updated**: 2026-10-17
+**Updated**: 2026-10-19
 
 > 已完成的详细实现记录已归档至仓库记忆（`/memories/repo/`）与 `bench/results/`；
 > 本文档只保留**未完成任务**与**里程碑摘要**，避免重复堆积。
@@ -143,6 +143,26 @@
 ---
 
 ## 里程碑摘要（已完成）
+
+- **2026-10-19** — **TaskRunner 与 queue 生命周期（弱引用 → 引用计数）**。`SequencedTaskRunner::Impl`
+  原来持 `WeakPtr<SequencedTaskQueue>`，而 `SequenceManager` 是线程栈对象；`WeakPtr::get()` 只读
+  失效标记、不保命，poster 可读到“非空”后与 `~SequenceManagerImpl` 释放队列竞态（2026-10-18 在
+  RelWithDebInfo+ASAN 下见过一次 `PeekNextDelayedRunTime` 读到已释放队列，之后 55 轮不复现）。
+  修法：`SequencedTaskQueue` 改 `RefCountedThreadSafe`，manager 的 `queues_`/`shutdown_queues_` 与
+  runner 都持 `scoped_refptr`（`CreateForSequenceManager()` 专门给 manager 用，避免 public
+  `Create()` 重载让无关 TU 需要完整类型）；shut-down 后 post 由队列自身检查拒绝。
+  回归用例：`ThreadTest.StaleTaskRunnerSurvivesSequenceManagerTeardown`（4 线程持续 PostTask
+  与 `Thread` 销毁并发，之后 post 必须返回 false、不崩、不泄漏）。
+  验证：Windows Debug 1065 / Windows Release 1059 / WSL Release 1058 / WSL rel-asan 1058（0 泄漏），
+  TSan 目标 125 用例 0 race。
+
+- **2026-10-19** — **HostResolver 测试的网络依赖 flaky 收口**（影响全量可信度）。`ResolveInvalidHost`
+  依赖 NXDOMAIN 尽快返回，实际本机 DNS 转发对 `.invalid` 要 ~12 s，10 s 预算必超时；它超时后还会
+  留下在飞查询，偶发带出 LSan 报“68583 B / 55 allocs 泄漏”。改为该用例单独给 30 s 预算（它只为
+  “不崩不挂”兜底）。另外 `CustomDnsServerIPv6*` 原来的探针用系统解析器查 AAAA，证明不了
+  “有 IPv6 路由”，于是无 IPv6 出口时会真跑并瞬间失败；改为用**测试实际使用的 IPv6 字面量 DNS 服务器**
+  做探针（`HasIPv6DNSConnectivity(server)`），并为 `ResolveIPv6Only` 保留独立的
+  `HasIPv6AddressResolution()`。结果：三平台全零失败，IPv6 用例正常 skip。
 
 - **2026-10-18** — **`PlatformThreadTest.SleepShortDurationPrecision` 抖动误报消除 + 短睡眠改用高分辨率定时器**
   （Windows 全量原本每轮偶发 1 次）。第一阶段：该用例对 5 次 `Sleep(1ms)` 取**平均值**与 8 ms
