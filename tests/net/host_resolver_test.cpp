@@ -44,8 +44,13 @@ protected:
   }
 
   // Helper: resolve and block until callback fires, return the result.
-  // Uses a WaitableEvent to synchronize.
-  AddressList ResolveAndWait(const std::string &host, HostResolver *resolver = nullptr) {
+  // Uses a WaitableEvent to synchronize.  `timeout` is the caller's budget:
+  // most lookups answer in milliseconds, but a NXDOMAIN for a non-existent TLD
+  // can take >10 s behind a forwarding resolver, so callers that expect a
+  // negative answer pass a larger budget instead of looking like a hang.
+  AddressList ResolveAndWait(const std::string &host,
+                             HostResolver *resolver = nullptr,
+                             std::chrono::seconds timeout = std::chrono::seconds(10)) {
     std::unique_ptr<HostResolver> local_resolver;
     if (!resolver) {
       local_resolver = std::make_unique<HostResolver>();
@@ -63,7 +68,7 @@ protected:
         },
         test_runner_);
 
-    EXPECT_TRUE(done.TimedWait(std::chrono::seconds(10))) << "DNS resolution timed out for host: " << host;
+    EXPECT_TRUE(done.TimedWait(timeout)) << "DNS resolution timed out for host: " << host;
     return result;
   }
 
@@ -106,12 +111,40 @@ protected:
     return has_dns.load(std::memory_order_acquire);
   }
 
-  // Check if IPv6 DNS works.  On WSL, IPv6 sockets may exist (so
-  // HasIPv6Connectivity returns true) but actual IPv6 DNS may not
-  // function, causing false-positive failures.
-  static bool HasIPv6DNSConnectivity() {
+  // Checks whether AAAA (IPv6 address) lookups work through the system DNS
+  // configuration.  Says nothing about IPv6 *transport*, so it is only used by
+  // tests that resolve IPv6 addresses over the system resolver.
+  static bool HasIPv6AddressResolution() {
     HostResolverOptions opts;
     opts.address_family = AF_INET6;
+    HostResolver resolver(opts);
+    WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
+    std::atomic<bool> has_ipv6{false};
+
+    Thread probe_thread("dns6-probe");
+    probe_thread.Start();
+    resolver.Resolve(
+        "one.one.one.one",
+        [&done, &has_ipv6](const AddressList &addrs) {
+          has_ipv6.store(!addrs.empty(), std::memory_order_release);
+          done.Signal();
+        },
+        probe_thread.GetTaskRunner());
+
+    done.TimedWait(std::chrono::seconds(5));
+    probe_thread.Stop();
+    return has_ipv6.load(std::memory_order_acquire);
+  }
+
+  // Checks whether IPv6 DNS actually works: an IPv6 listener socket can exist
+  // (so HasIPv6Connectivity() returns true) while there is no IPv6 *route* to
+  // the public resolvers, which used to let the IPv6 custom-server tests run
+  // and fail instantly instead of skipping.  Probes the same literal server the
+  // tests use, so "probe passed" means "the test below can work".
+  static bool HasIPv6DNSConnectivity(const std::string &ipv6_dns_server) {
+    HostResolverOptions opts;
+    opts.address_family = AF_INET6;
+    opts.dns_servers = {ipv6_dns_server};
     HostResolver resolver(opts);
     WaitableEvent done(WaitableEvent::ResetPolicy::kAutomatic, false);
     std::atomic<bool> has_ipv6{false};
@@ -154,8 +187,11 @@ TEST_F(HostResolverTest, ResolveEmptyHost) {
 TEST_F(HostResolverTest, ResolveInvalidHost) {
   // Non-existent domain should return empty result.
   // On some networks (captive portals, certain DNS forwarders) the resolver
-  // may return a redirect IP instead of NXDOMAIN — tolerate that.
-  AddressList result = ResolveAndWait("this-domain-does-not-exist-12345.invalid.");
+  // may return a redirect IP instead of NXDOMAIN — tolerate that.  The
+  // negative answer can also be slow (observed ~12 s behind a forwarding
+  // resolver), hence the enlarged budget: this test is about not crashing /
+  // not hanging, so a slow-but-finite NXDOMAIN must not look like a failure.
+  AddressList result = ResolveAndWait("this-domain-does-not-exist-12345.invalid.", nullptr, std::chrono::seconds(30));
   // No hard assertion on result content; primary goal is no crash/timeout.
   (void)result;
   SUCCEED();
@@ -221,8 +257,8 @@ TEST_F(HostResolverTest, ResolveIPv6Only) {
   if (!HasFunctionalDNS()) {
     GTEST_SKIP() << "No functional DNS available";
   }
-  if (!HasIPv6DNSConnectivity()) {
-    GTEST_SKIP() << "No IPv6 DNS connectivity";
+  if (!HasIPv6AddressResolution()) {
+    GTEST_SKIP() << "No IPv6 address resolution";
   }
 
   HostResolverOptions opts;
@@ -282,7 +318,7 @@ TEST_F(HostResolverTest, CustomDnsServerIPv6Cloudflare) {
   if (!HasFunctionalDNS()) {
     GTEST_SKIP() << "No functional DNS available";
   }
-  if (!HasIPv6DNSConnectivity()) {
+  if (!HasIPv6DNSConnectivity("2606:4700:4700::1111")) {
     GTEST_SKIP() << "No IPv6 DNS connectivity";
   }
 
@@ -298,7 +334,7 @@ TEST_F(HostResolverTest, CustomDnsServerIPv6Google) {
   if (!HasFunctionalDNS()) {
     GTEST_SKIP() << "No functional DNS available";
   }
-  if (!HasIPv6DNSConnectivity()) {
+  if (!HasIPv6DNSConnectivity("2001:4860:4860::8888")) {
     GTEST_SKIP() << "No IPv6 DNS connectivity";
   }
 
@@ -324,9 +360,10 @@ TEST_F(HostResolverTest, CustomDnsServerMixedV4V6) {
   if (!HasFunctionalDNS()) {
     GTEST_SKIP() << "No functional DNS available";
   }
-  if (!HasIPv6DNSConnectivity()) {
-    GTEST_SKIP() << "No IPv6 DNS connectivity";
-  }
+  // The IPv4 server in the list still serves the query when IPv6 has no route,
+  // so the IPv6 transport probe is informational only here.
+  const bool has_ipv6_dns = HasIPv6DNSConnectivity("2001:4860:4860::8888");
+  (void)has_ipv6_dns;
 
   HostResolverOptions opts;
   opts.dns_servers = {"223.5.5.5", "2001:4860:4860::8888"};
