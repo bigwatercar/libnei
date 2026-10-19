@@ -315,9 +315,24 @@ TEST(SequenceManagerTest, MultiQueueBurstDoesNotStarveAnyQueue) {
     });
   }
 
+  // Watchdog instead of an unbounded join(): under heavy instrumentation (TSan)
+  // or a saturated machine the pump can be starved past any reasonable delay,
+  // and the old `run_thread.join()` turned that into an indefinite hang with no
+  // output (observed once with loadavg 0.00 stuck in futex_do_wait while a
+  // Windows full-suite run competed for the CPU).  Bound the wait, force the
+  // pump out of Run() if it never finished, then fail with the shortfall.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (remaining.load(std::memory_order_acquire) != 0 && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  const int unfinished = remaining.load(std::memory_order_acquire);
+  if (unfinished != 0) {
+    // Must not block: this is the only way out of a stalled run loop.
+    manager.Quit();
+  }
   run_thread.join();
 
-  ASSERT_EQ(remaining.load(), 0);
+  ASSERT_EQ(unfinished, 0) << "watchdog fired: " << unfinished << " of " << (kTasksPerQueue * 2) << " tasks never ran";
   ASSERT_GE(execution_order.size(), kWindow);
   const auto window_end = execution_order.begin() + static_cast<std::ptrdiff_t>(kWindow);
   EXPECT_NE(std::find(execution_order.begin(), window_end, 'A'), window_end);
