@@ -70,9 +70,11 @@ enum class EjectStatus {
 //
 // Blocking work: change events trigger a rescan on a MayBlock sequence of
 // the global ThreadPoolInstance (overlapping events are coalesced), so a
-// stalled drive cannot block the monitor's runner.  If ThreadPoolInstance is
-// not started, rescans and ejects run inline on the monitor's runner.  The
-// initial enumeration in Start() is always synchronous.
+// stalled drive cannot block the monitor's runner.  Options::blocking_runner
+// replaces that sequence, and if there is neither a pool nor a supplied runner
+// rescans and ejects run inline on the monitor's runner.  The initial
+// enumeration runs on the monitor's runner unless
+// Options::enumerate_on_start_async is set, which needs a blocking sequence.
 //
 // Thread-safety: every method, including the destructor, must be called on
 // the sequence of the TaskRunner passed to the constructor, and that runner
@@ -90,6 +92,24 @@ public:
     bool watch_changes = true;
     // Windows only: skip CM_Register_Notification and use the Win7 window path.
     bool use_legacy_window_notifications = false;
+    // Sequence used for blocking work (mount-table/sysfs scans, ejects).
+    // Defaults to a MayBlock sequence of the global ThreadPoolInstance.  Supply
+    // your own to keep scans off both the monitor sequence and the shared pool,
+    // or to keep them off the monitor sequence when no pool is running.  When
+    // null and no pool is running, blocking work happens inline on the monitor
+    // sequence.
+    scoped_refptr<SequencedTaskRunner> blocking_runner;
+    // When true, Start() registers for change events and enumerates on the
+    // blocking sequence instead of scanning inline, so a slow device (a
+    // spun-down disk) cannot block the caller's sequence.  Requires a blocking
+    // sequence (pooled or supplied above); ignored when none is available.
+    // Until the first snapshot lands GetAllAvailableStorages() is empty and
+    // observers hear nothing; on_initial_enumeration_done reports completion.
+    bool enumerate_on_start_async = false;
+    // Runs on the monitor sequence once the initial snapshot has been published
+    // (synchronous mode: from inside Start()).  Not run if enumeration fails.
+    // Repeating rather than Once so Options stays copyable.
+    RepeatingClosure on_initial_enumeration_done;
     // Run after each event-driven rescan has been applied (one event may
     // trigger two: an immediate one and a delayed one on Windows).  Not run
     // by Rescan().
@@ -113,9 +133,12 @@ public:
   StorageMonitor(StorageMonitor &&) = delete;
   StorageMonitor &operator=(StorageMonitor &&) = delete;
 
-  // Performs the initial enumeration synchronously (no observer callbacks for
-  // volumes that already exist) and begins watching for changes.  Returns
-  // false if the platform is unsupported or the watch could not be set up.
+  // Performs the initial enumeration and begins watching for changes.  By
+  // default the enumeration is synchronous and observer callbacks are NOT run
+  // for volumes that already exist; with enumerate_on_start_async it happens on
+  // the blocking sequence instead and Start() returns before the snapshot
+  // exists.  Returns false if the platform is unsupported or the watch could
+  // not be set up.
   bool Start();
 
   // Stops watching.  Known volumes are kept until the next Start().

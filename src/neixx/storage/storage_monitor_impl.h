@@ -72,10 +72,27 @@ private:
   // Returns kOk and fills |location| when it is mounted and removable.
   static EjectStatus ResolveEjectTarget(const std::string &device_id, const ScanConfig &config, std::string *location);
 
+  // Resolve + eject, touching no Impl state: used by the blocking sequence and
+  // as the inline fallback when that sequence is unavailable.
+  static EjectStatus RunEject(const std::string &device_id, const ScanConfig &config);
+
+  // Caller-supplied blocking sequence, else one from the global thread pool.
+  // Null when neither exists; blocking work then runs inline.
+  scoped_refptr<SequencedTaskRunner> ResolveBlockingRunner() const;
+
+  // Publishes a snapshot.  The first one after Start() describes volumes that
+  // already existed, so it is applied silently and fires the
+  // on_initial_enumeration_done hook; |notify| governs later snapshots.
+  void PublishSnapshot(std::vector<StorageInfo> next, bool notify);
+  void RunInitialEnumerationDoneHook();
+
   // Replaces the known set; when |notify| is true, reports removable volumes
   // whose device_id or mount point changed.
   void ApplySnapshot(std::vector<StorageInfo> next, bool notify);
 
+  // Posts a scan to the blocking sequence; falls back to an inline scan when
+  // that sequence rejects the task (e.g. the pool was shut down), so the
+  // monitor cannot wedge with scan_in_flight_ stuck true.
   void StartAsyncScan();
   // |generation| identifies the scan that produced |result|; results from a
   // superseded scan are dropped so a late worker cannot revert a newer
@@ -89,6 +106,8 @@ private:
   const ScanConfig scan_config_;
   const std::shared_ptr<Alive> alive_;
   bool started_ = false;
+  // True until the first snapshot after Start() has been published.
+  bool initial_snapshot_pending_ = false;
 
   // Null when ThreadPoolInstance is not started; work then runs inline.
   scoped_refptr<SequencedTaskRunner> blocking_runner_;

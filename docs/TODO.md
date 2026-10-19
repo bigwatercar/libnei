@@ -23,19 +23,30 @@
   逻辑单测，无实机（Win8+ 的 `CM_Register_Notification` 路径已真机插拔验证）；Linux `device_id` 的
   `wwid:`/`serial:` 分级回退只由伪 sysfs 单测覆盖优先级逻辑，`/sys/block/<disk>/device/wwid` 与
   `device/serial` 属性名需在真实 Linux 机器插 USB 盘确认。
-- **初次枚举在调用方序列同步执行** — 慢设备（休眠磁盘、机械盘）有阻塞调用方序列的风险；改成首次枚举也
-  走 MayBlock 序列需要额外的“枚举完成前不派发事件”顺序保证，暂不动。
+- **初次枚举在调用方序列同步执行** — **已提供可选异步路径（2026-10-19）**：默认仍同步（契约不变：
+  `Start()` 返回时快照已就绪）；新增 `Options::enumerate_on_start_async`，打开后 `Start()` 只注册变化
+  监听、枚举交给 blocking 序列，完成时以“静默”方式发布首个快照（既有卷不算新插入）并由新增的
+  `Options::on_initial_enumeration_done`（在监视器序列上）通知；异步期间 `GetAllAvailableStorages()`
+  为空。注意它需要可用 blocking 序列（线程池或 `Options::blocking_runner`），否则自动回落同步。
+- **无线程池时事件重扫阻塞监视器序列** — **已修（2026-10-19）**：`Options::blocking_runner` 允许调用方
+  自带 MayBlock 序列，没有 `ThreadPoolInstance` 也能把扫描放到自己的线程；两者都没有时才内联执行
+  （仍是文档化的退化行为）。同时补了两个健壮性缺口：① blocking 序列拒收任务（线程池已关闭／自带
+  序列已停）时，扫描**内联兜底**，而不是让 `scan_in_flight_` 永远为真、后续事件全被丢弃；② `EjectDevice`
+  同样在投递失败时内联执行（回调仍经监视器序列 bounce，不会在 `EjectDevice()` 内同步跑）。
+  回归测试 `CallerSuppliedBlockingRunnerRescansOffTheMonitorSequence`、
+  `DeadBlockingRunnerFallsBackToInlineScan`、`AsyncInitialEnumerationPublishesWithoutNotifying`。
 - **`Rescan()` 可能被在途旧扫描结果覆盖** — **已修（2026-10-18）**：每次 `Rescan()` 与每次异步
   扫描起手都会递增 `scan_generation_`，`OnAsyncScanDone` 发现代次不是最新就丢弃该结果（仅保留
   `scan_dirty_` 的后续重扫）。修复前该竞态会让旧快照回滚内部状态，并对观察者发出**反向**的
   ATTACHED/DETACHED 事件。回归测试 `StorageMonitorAsyncTest.StaleScanDoesNotOverwriteNewerRescan`
   （临时去掉代次判定即失败：`stale scan reverted the snapshot`）。
-- **无线程池时事件重扫阻塞监视器序列** — 没有 `ThreadPoolInstance` 时事件触发的元数据扫描内联执行，
-  慢设备会卡住监视器序列（当前接受）。
 - **`Options` 里的测试钩子** — 现有 3 个：`on_event_rescan_for_testing`、
   `before_scan_completion_for_testing`、`after_async_scan_done_for_testing`（后两个为 2026-10-18 加，
   用于让"旧扫描结果 vs Rescan"的顺序可确定复现；它们必须在公共头里才能被测试跨 DLL 设置，
-  因为内部符号未导出）。后续可用 friend 声明或内部头 + 导出测试工厂替换。
+  因为内部符号未导出）。**评估结论（2026-10-19）：暂不动**——把它们搬到内部头需要一个导出的测试
+  工厂/桥接符号，之前试过内部 `storage_monitor_test_hooks.h` + 全局访问器，结果在 Windows 共享库下
+  落成未定义引用 + 重复槽位（同一 `Options` 结构体内外两套符号），代价高于收益。真要做的正解是给
+  `StorageMonitor` 加一个 `NEI_API` 的测试访问器类（friend + 导出静态方法），届时一并处理 3 个钩子。
 
 **有意不做**：Linux uevent（只报已挂载卷，挂载已由 mountinfo 覆盖，无收益）、网络盘（无场景，Windows
 查询可能卡死）。

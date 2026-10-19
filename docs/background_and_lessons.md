@@ -330,6 +330,16 @@
 Windows CM_Notify/WM_DEVICECHANGE 双路径、`EjectDevice`）、HttpClientPool idle 探活、
 bench 统一清单与双平台 runner。
 
+**StorageMonitor 的阻塞工作契约（2026-10-19 补齐）**：所有会阻塞的活（mountinfo/sysfs 扫描、
+eject）都必须有明确的执行序列，不能"默认就在监视器序列上跑"：
+`Options::blocking_runner`（调用方自带）> 全局 `ThreadPoolInstance` 的 MayBlock 序列 > 内联兜底。
+三条规则值得记住：① **首个快照永远静默发布**——它描述的是"本来就存在"的卷，通知出去就是一堆假的
+ATTACHED；`PublishSnapshot()` 把这个判断收敛到一处，同步枚举/异步枚举/`Rescan()` 抢跑三种路径都走它。
+② **投递失败必须内联兜底**：`PostTask()` 返回 false（池已关、自带序列已停）时若不处理，
+`scan_in_flight_` 会永久为真，之后所有事件都被当成"在飞"折叠丢弃——监视器静默失效，比阻塞更糟。
+③ **环境探针/测试钩子要能区分"探测的那条路径"**：例如 IPv6 DNS 探针必须探真实 IPv6 传输，否则
+skip/fail 会随网络摆动（见测试章节）。
+
 **未完成/候选**（详见 docs/TODO.md）：
 - P3：TaskQueueSelector cache-line 布局、PipeStream direct dispatch、CMake 检测审查。
 - HTTP 功能补全：中间件；HttpClient 自动跟随重定向（组件已就绪）。

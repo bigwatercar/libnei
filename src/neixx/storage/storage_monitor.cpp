@@ -113,16 +113,36 @@ bool StorageMonitor::Impl::Start() {
   if (started_)
     return true;
 
+  blocking_runner_ = ResolveBlockingRunner();
+  // Whichever path produces the first snapshot, it describes volumes that were
+  // already there, so PublishSnapshot() applies it silently.
+  initial_snapshot_pending_ = true;
+
+  if (options_.enumerate_on_start_async && blocking_runner_ != nullptr) {
+    // Watch first: a change during the asynchronous enumeration then arrives as
+    // an event and collapses into a follow-up scan instead of being lost.
+    if (!PlatformStart()) {
+      storages_.clear();
+      initial_snapshot_pending_ = false;
+      blocking_runner_ = nullptr;
+      return false;
+    }
+    started_ = true;
+    StartAsyncScan();
+    return true;
+  }
+
   // Enumerate before watching so a change in between is caught by the first
   // event rather than lost.
-  ApplySnapshot(PlatformScan(scan_config_), false);
+  std::vector<StorageInfo> initial = PlatformScan(scan_config_);
   if (!PlatformStart()) {
     storages_.clear();
+    initial_snapshot_pending_ = false;
+    blocking_runner_ = nullptr;
     return false;
   }
-  if (ThreadPoolInstance *pool = ThreadPoolInstance::Get())
-    blocking_runner_ = pool->CreateSequencedTaskRunner(TaskTraits(MayBlock()));
   started_ = true;
+  PublishSnapshot(std::move(initial), false);
   return true;
 }
 
@@ -133,6 +153,18 @@ void StorageMonitor::Impl::Stop() {
   PlatformStop();
   started_ = false;
   scan_dirty_ = false;
+  initial_snapshot_pending_ = false;
+  // Re-resolved on the next Start(); dropping it here means a stopped monitor
+  // does not keep a reference to a pool runner or to a caller's sequence.
+  blocking_runner_ = nullptr;
+}
+
+scoped_refptr<SequencedTaskRunner> StorageMonitor::Impl::ResolveBlockingRunner() const {
+  if (options_.blocking_runner != nullptr)
+    return options_.blocking_runner;
+  if (ThreadPoolInstance *pool = ThreadPoolInstance::Get())
+    return pool->CreateSequencedTaskRunner(TaskTraits(MayBlock()));
+  return nullptr;
 }
 
 void StorageMonitor::Impl::AddObserver(RemovableStorageObserver *observer) {
@@ -184,7 +216,7 @@ void StorageMonitor::Impl::Rescan() {
   // the mount table as it was *before* this call, so applying it later would
   // revert this result and emit a reverse ATTACHED/DETACHED pair to observers.
   ++scan_generation_;
-  ApplySnapshot(PlatformScan(scan_config_), true);
+  PublishSnapshot(PlatformScan(scan_config_), true);
 }
 
 void StorageMonitor::Impl::OnFileCanWriteWithoutBlocking(NativeIOHandle) {
@@ -214,16 +246,32 @@ void StorageMonitor::Impl::StartAsyncScan() {
   const std::uint64_t generation = ++scan_generation_;
   // Copied so the worker never touches Impl (monitor-sequence only).
   RepeatingClosure before_completion = options_.before_scan_completion_for_testing;
-  blocking_runner_->PostTask(
-      FROM_HERE, [alive = alive_, config = scan_config_, runner = task_runner_, generation, before_completion]() {
-        std::vector<StorageInfo> result = PlatformScan(config);
-        if (before_completion)
-          before_completion.Run();
-        runner->PostTask(FROM_HERE, [alive, generation, result = std::move(result)]() {
-          if (alive->impl != nullptr)
-            alive->impl->OnAsyncScanDone(generation, result);
-        });
-      });
+  const bool posted =
+      blocking_runner_ != nullptr
+      && blocking_runner_->PostTask(
+          FROM_HERE, [alive = alive_, config = scan_config_, runner = task_runner_, generation, before_completion]() {
+            std::vector<StorageInfo> result = PlatformScan(config);
+            if (before_completion)
+              before_completion.Run();
+            runner->PostTask(FROM_HERE, [alive, generation, result = std::move(result)]() {
+              if (alive->impl != nullptr)
+                alive->impl->OnAsyncScanDone(generation, result);
+            });
+          });
+  if (posted)
+    return;
+
+  // The blocking sequence is gone (e.g. the pool was shut down).  Scan inline
+  // instead of leaving scan_in_flight_ stuck, which would stop every later
+  // event from triggering a rescan.
+  scan_in_flight_ = false;
+  PublishSnapshot(PlatformScan(scan_config_), true);
+  RunEventHook();
+  if (scan_dirty_) {
+    scan_dirty_ = false;
+    if (blocking_runner_ != nullptr)
+      StartAsyncScan();
+  }
 }
 
 void StorageMonitor::Impl::OnAsyncScanDone(std::uint64_t generation, std::vector<StorageInfo> result) {
@@ -245,7 +293,7 @@ void StorageMonitor::Impl::OnAsyncScanDone(std::uint64_t generation, std::vector
     return;
   }
 
-  ApplySnapshot(std::move(result), true);
+  PublishSnapshot(std::move(result), true);
   RunEventHook();
   if (scan_dirty_)
     StartAsyncScan();
@@ -258,31 +306,45 @@ void StorageMonitor::Impl::RunEventHook() {
     options_.on_event_rescan_for_testing.Run();
 }
 
+void StorageMonitor::Impl::RunInitialEnumerationDoneHook() {
+  if (options_.on_initial_enumeration_done)
+    options_.on_initial_enumeration_done.Run();
+}
+
+void StorageMonitor::Impl::PublishSnapshot(std::vector<StorageInfo> next, bool notify) {
+  if (initial_snapshot_pending_) {
+    initial_snapshot_pending_ = false;
+    // Volumes that were already present are not new: never notify for the very
+    // first snapshot, whichever path produced it.
+    ApplySnapshot(std::move(next), false);
+    RunInitialEnumerationDoneHook();
+    return;
+  }
+  ApplySnapshot(std::move(next), notify);
+}
+
 void StorageMonitor::Impl::EjectDevice(const std::string &device_id, OnceCallback<void(EjectStatus)> callback) {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
   // Shared so the posted closures stay copyable.
   auto cb = std::make_shared<OnceCallback<void(EjectStatus)>>(std::move(callback));
   const ScanConfig config = scan_config_;
 
-  if (blocking_runner_ == nullptr) {
-    std::string location;
-    EjectStatus status = ResolveEjectTarget(device_id, config, &location);
-    if (status == EjectStatus::kOk)
-      status = PlatformEject(location);
-    DeliverEjectResult(std::move(cb), status);
+  const bool posted =
+      blocking_runner_ != nullptr
+      && blocking_runner_->PostTask(FROM_HERE, [alive = alive_, cb, device_id, config, runner = task_runner_]() {
+           const EjectStatus status = RunEject(device_id, config);
+           runner->PostTask(FROM_HERE, [alive, cb, status]() {
+             if (alive->impl != nullptr)
+               alive->impl->DeliverEjectResult(cb, status);
+           });
+         });
+  if (posted)
     return;
-  }
 
-  blocking_runner_->PostTask(FROM_HERE, [alive = alive_, cb, device_id, config, runner = task_runner_]() {
-    std::string location;
-    EjectStatus status = ResolveEjectTarget(device_id, config, &location);
-    if (status == EjectStatus::kOk)
-      status = PlatformEject(location);
-    runner->PostTask(FROM_HERE, [alive, cb, status]() {
-      if (alive->impl != nullptr)
-        alive->impl->DeliverEjectResult(cb, status);
-    });
-  });
+  // No blocking sequence, or it is gone (pool shut down): eject inline.  The
+  // callback still bounces through the runner in DeliverEjectResult(), so it is
+  // never run from inside EjectDevice().
+  DeliverEjectResult(std::move(cb), RunEject(device_id, config));
 }
 
 // The cached snapshot may be stale: the volume could have been unmounted, or
@@ -301,6 +363,14 @@ EjectStatus StorageMonitor::Impl::ResolveEjectTarget(const std::string &device_i
     return EjectStatus::kOk;
   }
   return EjectStatus::kNoSuchDevice;
+}
+
+EjectStatus StorageMonitor::Impl::RunEject(const std::string &device_id, const ScanConfig &config) {
+  std::string location;
+  EjectStatus status = ResolveEjectTarget(device_id, config, &location);
+  if (status == EjectStatus::kOk)
+    status = PlatformEject(location);
+  return status;
 }
 
 // Always bounces through the runner so the callback is never run inline.
