@@ -19,8 +19,9 @@
    spdlog 同场景由 0.32 → 7.28 μs；strict sync flush 由 0.75–0.81 μs 跳到 **611–625 μs**。
    两侧同步变化 → 是 WSL 虚拟盘/写缓存状态（实例刚重启），**这两组数值不可与 10-17 直接对比**，
    但同一轮内 NEI vs spdlog 的相对比较仍然有效。
-3. TCP/HTTP 全面好于 10-17（loopback 1 MB +18.7%、throughput +50%、HTTP/1.1 +13%），与 Windows 侧
-   同日出现的 TCP 下降方向相反 → 进一步说明是宿主网络栈状态，而非库代码。
+3. TCP/HTTP 全面好于 10-17（loopback 1 MB +18.7%、throughput +50%、HTTP/1.1 +13%）。Windows 同日
+   套内 TCP 反而下降 —— 事后查明是**宿主开着 VPN**：退出 VPN 后 Windows `tcp_loopback` 256 KB
+   1978 → 3164 MB/s、`tcp_throughput` 125.5 → 519.5 MB/s（见 Windows 基线第 6 节）。因此与库代码无关。
 
 ---
 
@@ -154,7 +155,7 @@ TCP loopback 全量（1024 MB）：4 KB 836.1 / 8 KB 1580.5 / 16 KB 2838.0 / 32 
 1. WSL 侧单轮项方差比 Windows 更大，跨版本对比请用多轮中位数；本文件的单轮项只用于同机纵向观察。
 2. **本轮 WSL 文件系统状态异常**（file sink 慢 10×、strict flush 慢 800×），这两组只能同轮内比较，
    下轮需在实例稳定运行一段时间后复核。
-3. 与 Windows 同日的方向差异（Windows TCP ↓、WSL TCP ↑）说明网络相关单轮项受宿主/虚拟网卡状态主导；
+3. 与 Windows 同日的 TCP 差异已查明为宿主 VPN：退出 VPN 后 Windows 恢复（256 KB 1978→3164 MB/s）。
    需要精确版本对比时请用交替 A/B（Windows 侧已有现成流程，见 Windows 基线第 8 节）。
 4. `tcp_conn_stress` 的服务端 accept 计数在 WSL 上偏低（543/1000），建议单独复核（bench 计数口径
    或 accept 折叠逻辑），不影响本轮基线结论。
